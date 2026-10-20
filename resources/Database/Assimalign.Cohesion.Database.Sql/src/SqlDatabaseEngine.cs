@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -464,7 +465,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
-    /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    /// <exception cref="DatabaseException">A database with the same name already exists, or an incomplete file set cannot be safely completed.</exception>
     public new async ValueTask<SqlDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (SqlDatabase)await base.CreateDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
 
@@ -477,13 +478,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentNullException"><paramref name="defaultCollation"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was created.</exception>
-    /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
+    /// <exception cref="DatabaseException">A database with the same name already exists, or an incomplete file set cannot be safely completed.</exception>
     /// <remarks>
     /// Both overloads go through the base's creation lifecycle, including its diagnostics.
     /// This overload checks the name and null collation first, then disposal and cancellation,
     /// in the same order as the overload without a collation.
-    /// An interrupted empty creation is completed. A default collation already committed by
-    /// that creation is preserved; otherwise <paramref name="defaultCollation"/> is adopted.
+    /// An interrupted empty creation is completed with <paramref name="defaultCollation"/>,
+    /// including a retry after the initial namespace was committed.
     /// </remarks>
     public async ValueTask<SqlDatabase> CreateDatabaseAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
@@ -509,14 +510,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, or breaks the database-name rule (1 to 128 ASCII letters, digits, <c>_</c>, <c>-</c> and <c>.</c>; no leading, trailing or doubled dot; no Windows device name).</exception>
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
-    /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
+    /// <exception cref="DatabaseNotFoundException">The database does not exist, or a pre-header creation must be retried through <c>CreateDatabaseAsync</c>.</exception>
     /// <exception cref="SqlDataStorageFormatException">A file set of the database, or its data-storage format, was refused.</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
     /// the close still running waits for it to end first.
-    /// An interrupted creation with empty data and only creation metadata is completed before
-    /// publication. Unmarked catalogs containing user metadata retain the format refusal.
+    /// An interrupted creation with its durable claim, initial empty data and only creation
+    /// metadata is completed before publication. Pre-header files require a create retry.
+    /// Unmarked catalogs containing user metadata retain the format refusal.
     /// </remarks>
     public new async ValueTask<SqlDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (SqlDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
@@ -577,7 +579,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             ThrowIfDisposed();
             if (_databases.ContainsKey(name))
             {
-                throw new DatabaseException($"A database with name '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
             }
 
             if (_strategy.StorageExists(name, catalog: false))
@@ -603,11 +605,18 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var catalog = SqlCatalog.Open(catalogStorage, defaultCollation);
                 var database = new SqlDatabase(name, this, storage, catalogStorage, catalog, recover: false);
+                // Finish the claim before publication. A durable data checkpoint also fences
+                // a stale directory entry if the claim deletion itself is interrupted.
+                storage.Checkpoint();
+                _strategy.CompleteCreation(name);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
-            catch
+            catch (Exception failure)
             {
+                // An unpublished create must not checkpoint itself during failure cleanup.
+                storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted, ErrorMessages.CreationInterrupted, failure);
+                catalogStorage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, ErrorMessages.CreationInterrupted, failure);
                 try
                 {
                     storage.Dispose();
@@ -671,26 +680,70 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             // the snapshot is published.
             try
             {
-                // Only a data set with no allocated user pages can meet a new catalog.
-                // Existing catalogs still pass the format gate before the data set opens.
-                if (missingCatalog)
+                bool creationPending = _strategy.IsCreationPending(name);
+                var catalogProbe = _strategy.ProbeStorage(name, catalog: true);
+                var dataProbe = _strategy.ProbeStorage(name, catalog: false);
+                if (dataProbe is { Length: >= 8192, HasSidecars: false } || catalogProbe is { Length: >= 8192, HasSidecars: false })
                 {
-                    storage = _strategy.OpenStorage(name, catalog: false, cancellationToken);
-                    if (!SqlDatabase.IsEmptyDataStorage(storage))
+                    throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.CreationSidecarMissing, name), "COHSQLC001");
+                }
+                bool shortData = dataProbe is { Length: < 8192 };
+                bool shortCatalog = catalogProbe is { Length: < 8192 };
+                bool restartData = shortData && dataProbe!.IsPreHeader && missingCatalog
+                    && (catalogProbe is null || catalogProbe.IsPreHeader);
+                if (shortData && !restartData)
+                {
+                    throw RefuseIncompleteCreation(name);
+                }
+                if (shortCatalog && !catalogProbe!.IsPreHeader) { throw RefuseIncompleteCreation(name); }
+                if (restartData || shortCatalog)
+                {
+                    if (!restartData && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
                     {
-                        throw new SqlDataStorageFormatException(
-                            $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
-                            "its creation was interrupted, or it was written before the catalog had its own file set. " +
-                            "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
-                            "create it again (on-disk format upgrades are tracked by assimalign/cohesion#1152).");
+                        throw RefuseIncompleteCreation(name);
                     }
-                    ConfigureStorage(storage, name, catalog: false);
+                    if (!creating)
+                    {
+                        // Build's ordinary open-or-create handles the same precise absence signal.
+                        var refusal = RefuseIncompleteCreation(name);
+                        throw new DatabaseNotFoundException(refusal.Message, refusal);
+                    }
+                    if (restartData) { storage = _strategy.RestartStorage(name, catalog: false); }
+                    catalogStorage = shortCatalog
+                        ? _strategy.RestartStorage(name, catalog: true)
+                        : _strategy.CreateStorage(name, catalog: true);
+                }
+                else if (missingCatalog)
+                {
+                    if (!creationPending || !IsEmptyDataProbe(name, dataProbe))
+                    {
+                        throw RefuseMissingCatalog(name);
+                    }
                     catalogStorage = _strategy.CreateStorage(name, catalog: true);
                 }
                 else
                 {
                     try
                     {
+                        // Small catalogs can be interrupted creates. Inspect an isolated image
+                        // before opening either original set with write access.
+                        if (catalogProbe is { IsSmall: true })
+                        {
+                            using var probeStorage = catalogProbe.Open();
+                            var probeCatalog = OpenCatalog(name, probeStorage);
+                            if (SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog)
+                                && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
+                            {
+                                SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
+                            }
+                            if (!SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog))
+                            {
+                                SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
+                                if (creating) { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name)); }
+                                SqlSchemaProvisioner.ValidateRecordedFormats(probeCatalog);
+                            }
+                        }
                         catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);
                     }
                     catch (StorageFormatException exception)
@@ -699,32 +752,21 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     }
                 }
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
-                SqlCatalog catalog;
-                try
-                {
-                    catalog = SqlCatalog.Open(catalogStorage);
-                }
-                catch (SqlCatalogException)
-                {
-                    // Older catalog shapes can fail decoding before Load reaches their
-                    // format marker. Preserve the existing actionable format refusal,
-                    // without decoding old objects or mistaking current-format damage
-                    // for a database written by another engine.
-                    if (ReadFormatVersionAfterCatalogFailure(catalogStorage) is { } version)
-                    {
-                        SqlDatabase.ThrowIfFormatIsNotCurrent(name, version);
-                    }
-                    throw;
-                }
-                bool interrupted = SqlDatabase.IsInterruptedCreation(catalogStorage, catalog);
+                SqlCatalog catalog = OpenCatalog(name, catalogStorage);
+                bool interrupted = SqlCatalogCreation.IsCreationOnly(catalogStorage, catalog);
                 if (!interrupted)
                 {
                     SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
                     if (creating)
                     {
-                        throw new DatabaseException($"A database with name '{name}' already exists.");
+                        throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
                     }
                     SqlSchemaProvisioner.ValidateRecordedFormats(catalog);
+                }
+
+                if (interrupted && storage is null && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
+                {
+                    SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
                 }
 
                 try
@@ -745,7 +787,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     {
                         SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
                     }
-                    if (missingCatalog || catalog.DdlGeneration == 0)
+                    if (creating || missingCatalog || catalog.DdlGeneration == 0 || FindDeclaration(name) is not null)
                     {
                         catalog = SqlCatalog.Open(catalogStorage, defaultCollation ?? FindDeclaration(name)?.Collation ?? Collation.Binary);
                     }
@@ -763,6 +805,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 {
                     database.Dispose();
                     throw;
+                }
+                if (_strategy.IsCreationPending(name))
+                {
+                    storage.Checkpoint();
+                    _strategy.CompleteCreation(name);
                 }
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
@@ -785,6 +832,51 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             }
         }
     }
+
+    private static SqlCatalog OpenCatalog(string name, SqlStorage catalogStorage)
+    {
+        try
+        {
+            return SqlCatalog.Open(catalogStorage);
+        }
+        catch (SqlCatalogException)
+        {
+            // Older catalog shapes can fail decoding before Load reaches their
+            // format marker. Preserve the existing actionable format refusal,
+            // without decoding old objects or mistaking current-format damage
+            // for a database written by another engine.
+            if (ReadFormatVersionAfterCatalogFailure(catalogStorage) is { } version)
+            {
+                SqlDatabase.ThrowIfFormatIsNotCurrent(name, version);
+            }
+            throw;
+        }
+    }
+
+    private static bool IsEmptyDataProbe(string name, SqlStorageProbe? probe)
+    {
+        if (probe is null || !probe.HasSidecars || !probe.IsSmall || probe.IsPreHeader
+            || probe.JournalLength != 0 || probe.BackupLength != 0) { return false; }
+        try
+        {
+            using var storage = probe.Open();
+            return probe.HasInitialHeader && SqlDatabase.IsEmptyDataStorage(storage);
+        }
+        catch (StorageFormatException exception)
+        {
+            throw RefuseStorageFormat(name, "data", name, exception);
+        }
+        catch (StorageException exception) when (exception is StorageIOException or StorageCorruptionException)
+        {
+            return false;
+        }
+    }
+
+    private static SqlDataStorageFormatException RefuseIncompleteCreation(string name)
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationHeaderMissing, name), "COHSQLC001");
+
+    private static SqlDataStorageFormatException RefuseMissingCatalog(string name)
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationCatalogMissing, name), "COHSQLC001");
 
     // The format marker's tuple has remained (kind, version), using kind 4 before
     // format 4 and the downgrade-fenced kind 8 thereafter. Read that stable metadata

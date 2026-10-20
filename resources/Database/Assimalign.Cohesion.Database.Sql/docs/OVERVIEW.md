@@ -96,7 +96,7 @@ shared storage, with DDL flowing through the relational catalog
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in catalog format 25. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in catalog format 26. A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -190,3 +190,7 @@ and text execution; a foreign-model request fails compilation. `SqlQueryRequest`
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+An interrupted create is adopted only with its durable sql.create claim and initial empty
+data storage. Pre-header files can be restarted through CreateDatabaseAsync or declared
+application Build. Missing sidecars and ambiguous lost catalogs are preserved and refused.

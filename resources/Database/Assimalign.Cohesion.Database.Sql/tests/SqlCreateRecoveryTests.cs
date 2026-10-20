@@ -35,7 +35,8 @@ public sealed class SqlCreateRecoveryTests
         var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Message.ShouldContain("drop the database (DropDatabaseAsync)", Case.Sensitive);
+        if (catalogExists) { refusal.Message.ShouldContain("drop the database (DropDatabaseAsync)", Case.Sensitive); }
+        else { refusal.Message.ShouldContain("restore the complete database", Case.Sensitive); }
         if (catalogExists)
         {
             using var catalogStorage = crashed.OpenStorage("sales", catalog: true);
@@ -156,14 +157,145 @@ public sealed class SqlCreateRecoveryTests
         database.Catalog.Tables.ShouldHaveSingleItem().Name.ShouldBe("orders");
     }
 
-    private static async Task<CrashCaptureSqlStorageStrategy> CaptureCreationAsync(int step)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Interrupted create: a retry after dbo uses the requested collation (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateDatabaseAsync_AfterDbo_ShouldApplyRequestedCollation(bool initiallyInsensitive)
+    {
+        // Arrange
+        var image = await CaptureCreationAsync(3, initiallyInsensitive ? Collation.CaseInsensitive : Collation.Binary);
+        await using var engine = SqlDatabaseEngine.Create("collation-retry", new() { StorageStrategy = image });
+        var requested = initiallyInsensitive ? Collation.Binary : Collation.CaseInsensitive;
+
+        // Act
+        var database = await engine.CreateDatabaseAsync("sales", requested, CancellationToken.None);
+
+        // Assert
+        database.Catalog.DefaultCollation.ShouldBe(requested);
+        database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Interrupted create: repeated collation retries remain recoverable (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateDatabaseAsync_RepeatedCollationInterruptions_ShouldUseLatestRequestedOptions(bool initiallyInsensitive)
+    {
+        // Arrange: each option change committed, but creation still has not stamped its marker.
+        var initial = initiallyInsensitive ? Collation.CaseInsensitive : Collation.Binary;
+        var requested = initiallyInsensitive ? Collation.Binary : Collation.CaseInsensitive;
+        var image = await CaptureCreationAsync(3, initial);
+        CrashCaptureSqlStorageStrategy interrupted;
+        using (var catalogStorage = image.OpenStorage("sales", catalog: true))
+        {
+            SqlCatalog.Open(catalogStorage, requested);
+            SqlCatalog.Open(catalogStorage, initial);
+            interrupted = image.CaptureDurableImages();
+        }
+        await using var engine = SqlDatabaseEngine.Create("collation-retries", new() { StorageStrategy = interrupted });
+
+        // Act
+        var database = await engine.CreateDatabaseAsync("sales", requested, CancellationToken.None);
+
+        // Assert
+        database.Catalog.DefaultCollation.ShouldBe(requested);
+        database.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
+        interrupted.IsCreationPending("sales").ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Interrupted create: pre-header files recover only through create or application Build (#1158)")]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(8191, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(8191, true)]
+    public async Task CreateDatabaseAsync_PreHeaderFiles_ShouldRestartWithoutUncodedIoFailure(int length, bool catalog)
+    {
+        // Arrange
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-preheader", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root, "sales");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            if (catalog)
+            {
+                // Take the actual data-create crash image, before close checkpoints it.
+                var image = new CrashCaptureSqlStorageStrategy();
+                using var data = image.CreateStorage("sales", catalog: false);
+                var bytes = image.GetDurableImage("sales");
+                File.WriteAllBytes(Path.Combine(directory, "sql.dat"), bytes.Data);
+                File.WriteAllBytes(Path.Combine(directory, "sql.log"), bytes.Journal);
+                File.WriteAllBytes(Path.Combine(directory, "sql.bak"), bytes.Backup);
+                File.WriteAllText(Path.Combine(directory, "sql.create"), "COHSQLCREATE1\n");
+            }
+            string partial = Path.Combine(directory, catalog ? "catalog.dat" : "sql.dat");
+            File.WriteAllBytes(partial, new byte[length]);
+            await using var engine = SqlDatabaseEngine.Create("preheader", new() { RootPath = root });
+
+            // Act
+            var refusal = await Should.ThrowAsync<DatabaseNotFoundException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            File.ReadAllBytes(partial).Length.ShouldBe(length);
+            var database = await engine.CreateDatabaseAsync("sales", Collation.CaseInsensitive, CancellationToken.None);
+
+            // Assert
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+            refusal.Message.ShouldContain("CreateDatabaseAsync", Case.Sensitive);
+            database.Catalog.DefaultCollation.ShouldBe(Collation.CaseInsensitive);
+            database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Missing catalog: acknowledged empty-table DDL is never mistaken for creation (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_MissingCatalogAfterEmptyTableCommit_ShouldRefuseUnchangedFiles(bool staleClaim)
+    {
+        // Arrange: DDL can commit while every user data page is still empty.
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-empty-ddl", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root, "sales");
+        try
+        {
+            var images = new System.Collections.Generic.Dictionary<string, byte[]>();
+            await using (var creator = SqlDatabaseEngine.Create("ddl", new() { RootPath = root }))
+            {
+                var database = await creator.CreateDatabaseAsync("sales", CancellationToken.None);
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                var result = await session.ExecuteAsync("CREATE TABLE acknowledged(id INT)", cancellationToken: CancellationToken.None);
+                result.Status.ShouldBe(Assimalign.Cohesion.Database.Execution.DatabaseResultStatus.Success);
+                foreach (string extension in new[] { "dat", "log", "bak" })
+                {
+                    string path = Path.Combine(directory, "sql." + extension);
+                    using var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var copy = new MemoryStream();
+                    source.CopyTo(copy);
+                    images[path] = copy.ToArray();
+                }
+            }
+            foreach (var image in images) { File.WriteAllBytes(image.Key, image.Value); }
+            foreach (string extension in new[] { "dat", "log", "bak" }) { File.Delete(Path.Combine(directory, "catalog." + extension)); }
+            if (staleClaim) { File.WriteAllText(Path.Combine(directory, "sql.create"), "COHSQLCREATE1\n"); }
+            await using var engine = SqlDatabaseEngine.Create("refuse-ddl", new() { RootPath = root });
+
+            // Act
+            var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+            // Assert
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+            File.Exists(Path.Combine(directory, "catalog.dat")).ShouldBeFalse();
+            foreach (var image in images) { File.ReadAllBytes(image.Key).ShouldBe(image.Value); }
+        }
+        finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
+    private static async Task<CrashCaptureSqlStorageStrategy> CaptureCreationAsync(int step, Collation? collation = null)
     {
         var strategy = new CrashCaptureSqlStorageStrategy();
         using var data = strategy.CreateStorage("sales", catalog: false);
         if (step == 0) { return strategy.CaptureDurableImages(); }
         using var catalogStorage = strategy.CreateStorage("sales", catalog: true);
         if (step == 1) { return strategy.CaptureDurableImages(); }
-        var catalog = SqlCatalog.Open(catalogStorage, Collation.CaseInsensitive);
+        var catalog = SqlCatalog.Open(catalogStorage, collation ?? Collation.CaseInsensitive);
         if (step >= 3)
         {
             await catalog.CreateSchemaAsync(new SqlCatalogNamespace("dbo"), CancellationToken.None);

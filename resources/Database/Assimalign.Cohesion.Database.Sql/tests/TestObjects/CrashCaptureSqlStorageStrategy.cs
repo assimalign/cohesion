@@ -237,6 +237,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
                 Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing),
                 Backup: new GatedStream(writeThrough: true, changed, writing));
             _live[key] = streams;
+            if (!catalog) { _images[CreationKey(databaseName)] = (System.Text.Encoding.UTF8.GetBytes(CreationSignature), [], []); }
             var storage = SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
                 new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), GetLabel(databaseName, catalog), _durability);
@@ -284,6 +285,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     {
         lock (_sync)
         {
+            _images.Remove(CreationKey(databaseName));
             foreach (bool catalog in new[] { false, true })
             {
                 _live.Remove(Key(databaseName, catalog));
@@ -301,6 +303,41 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             return _live.ContainsKey(key) || _images.ContainsKey(key);
         }
     }
+
+    internal override SqlStorageProbe? ProbeStorage(string databaseName, bool catalog)
+    {
+        if (!StorageExists(databaseName, catalog)) { return null; }
+        var image = GetDurableImage(databaseName, catalog);
+        return new SqlStorageProbe(image.Data.LongLength, image.Data, image.Journal, image.Backup);
+    }
+
+    internal override SqlStorage RestartStorage(string databaseName, bool catalog)
+    {
+        lock (_sync)
+        {
+            _images.Remove(Key(databaseName, catalog));
+            _live.Remove(Key(databaseName, catalog));
+            if (!catalog) { _images.Remove(CreationKey(databaseName)); }
+            return CreateStorage(databaseName, catalog);
+        }
+    }
+
+    internal override bool IsCreationPending(string databaseName)
+    {
+        lock (_sync) { return _images.ContainsKey(CreationKey(databaseName)); }
+    }
+
+    internal override void CompleteCreation(string databaseName)
+    {
+        lock (_sync)
+        {
+            _images.Remove(CreationKey(databaseName));
+            _recorder?.Add(CaptureImagesLocked());
+        }
+    }
+
+    private static string CreationKey(string databaseName)
+        => DatabaseFileNames.GetStorageName(databaseName) + "/" + CreationFileName;
 
     // A file set's key: the database's lower-case storage name and the set, as the file-based
     // strategy finds it in the database's directory (#1392).

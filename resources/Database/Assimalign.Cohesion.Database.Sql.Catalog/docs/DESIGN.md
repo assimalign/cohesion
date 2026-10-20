@@ -84,7 +84,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 25 requires the complete table extension 6 record,
+after the existing constraints. Current format 26 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -164,7 +164,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 25 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -176,7 +176,7 @@ compiled SqlCatalogSchemaState. Kind 15 stores strict source-generated JSON with
 and OwningSchema. Namespaces join the atomic SqlCatalogSnapshot, so empty namespaces persist
 and appear in SCHEMATA without inferring them from tables. CreateSchemaAsync and DropSchemaAsync
 are instance operations, with declared-script publication overloads and an S: identity. Opening
-the catalog seeds nothing and commits nothing; SqlDatabase.StampNewCatalog alone seeds dbo.
+the catalog seeds nothing and commits nothing; SQL creation completion seeds dbo before its final format marker.
 
 DROP SCHEMA CASCADE serializes its complete mutation under the publication lock in one storage
 transaction: namespace/table/index removal, incoming external-FK replacement, identity-counter
@@ -712,3 +712,12 @@ binds against its retained tables, views and SQL definitions after later drops.
 Historical image entries are weak and stay alive with their retained captures;
 ordinary view reads use a DDL-generation fast path. No snapshot generation API or
 friend grant was added for this purpose.
+
+## Interrupted creation (#1158)
+
+The internal stateless SqlCatalogCreation predicate owns the creation-only record kinds and
+initial counter constraints. SQL compiles it through the existing catalog shared-source link,
+so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
+Creation commits collation, dbo and the format marker in that order. Completion changes no
+catalog record layout. Record-space format 26 additionally requires the SQL engine's durable
+sql.create claim when adopting an interrupted file set; an empty data scan alone is no proof.

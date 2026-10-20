@@ -311,31 +311,6 @@ public sealed class SqlDatabase : DatabaseInstance
         CompleteCreation(_catalog);
     }
 
-    // Admit only records creation itself can commit before its marker: collation,
-    // the initial counter, and dbo. An explicit format-1 marker is not an interruption.
-    internal static bool IsInterruptedCreation(SqlStorage storage, SqlCatalog catalog)
-    {
-        if (catalog.RecordSpaceFormatVersion != 1 || catalog.Namespaces.Any(schema => schema.Name != SqlNamespaces.DefaultName))
-        {
-            return false;
-        }
-        using var iterator = storage.GetUnitIterator();
-        while (iterator.MoveNext())
-        {
-            var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
-            int kind = reader.ReadInt32();
-            if (kind == 2)
-            {
-                if (reader.ReadInt64() != 1 || reader.ReadInt64() > 2) { return false; }
-            }
-            else if (kind is not (7 or 15))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
     internal static void CompleteCreation(SqlCatalog catalog)
     {
         if (catalog.Namespaces.Count == 0)

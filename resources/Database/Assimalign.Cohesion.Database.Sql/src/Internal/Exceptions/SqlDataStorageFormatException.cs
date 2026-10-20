@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
@@ -31,4 +33,6 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
         : base(message, inner)
     {
     }
+    internal SqlDataStorageFormatException(string message, string code)
+        : base(message, [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]) { }
 }

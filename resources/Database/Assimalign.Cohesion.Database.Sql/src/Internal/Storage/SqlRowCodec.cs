@@ -52,7 +52,7 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 26 fences completion of interrupted empty creations (#1158);
+    /// the catalog: 26 requires the durable sql.create claim for interrupted initialization (#1158);
     /// 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted SQL (#1111);
     /// 24 admits explicit NULL placement in persisted view query text (#1112);
     /// 23 adds persisted read-only views (#1124);

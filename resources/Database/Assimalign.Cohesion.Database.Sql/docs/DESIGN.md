@@ -2163,7 +2163,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 25 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2830,19 +2830,35 @@ project reference or InternalsVisibleTo change is required.
   upgrade path either, #1152). A format-5 table record (extension version 2)
   still loads, so that the gate below, not a decode error, refuses the database.
   Creation commits the optional default collation, then dbo, then the format marker.
-  Format 26 records the interrupted-creation completion contract (#1158), without an
-  upgrade path. Create and open complete a marker-free catalog only when it contains
-  creation metadata (the initial object-id counter, optional collation and dbo only),
-  and the data set has no allocated user pages. An empty data set without a catalog
-  is completed the same way. A committed collation is preserved; an empty catalog
-  adopts the create call's or engine declaration's collation. This is also the path
-  used during DatabaseApplication Build and by the add-database control-plane command.
+  Format 26 (#1158) adds the transient sql.create file: exactly UTF-8 COHSQLCREATE1 followed
+  by LF, durably flushed after the data file is claimed and before its first header write.
+  The claim must exist for a complete data header to qualify as interrupted creation. Without
+  it, a lost catalog is indistinguishable from acknowledged catalog-only DDL: data pages and
+  even the data journal can still be empty. Completion checkpoints data, then removes the claim
+  before publishing the database. The checkpoint also fences a stale claim directory entry
+  after a crash. This is a real file-set contract change; format 25 is refused, with no upgrade.
+  Create and open complete a marker-free catalog only when the catalog-owned internal
+  shared predicate admits creation metadata (the initial object-id counter, optional collation
+  and dbo only), and a read-only probe proves the data set is still empty. The probe reads at
+  most the initial two data pages and runs any necessary WAL recovery on isolated copies.
+  Its header must retain the initial page count, generation and zero LSN/sequence floors;
+  later checkpoints cannot be mistaken for creation. Its journal and backup must still be empty:
+  lifecycle WAL must not be discarded. The durable claim, rather than an empty page scan,
+  distinguishes initialization from a lost catalog after acknowledged empty-table DDL. Missing journals/backups are refused
+  before write access with COHSQLC001, preserving acknowledged commits and partial drops.
+  A sub-header data file with no catalog content, or a sub-header catalog beside initial empty
+  data, is restartable only with empty journal and backup images. Plain open refuses this
+  unfinished claim with COHSQLC001 and names CreateDatabaseAsync as the remedy; create
+  and declared application Build restart it with the requested collation. A retried create
+  applies its requested collation to every proven interrupted create, including after dbo;
+  plain open keeps a committed collation or uses the declaration's collation, then Binary.
+  Drop explicitly deletes sql.dat, then other *.dat files, before recursive directory removal.
   No user data is upgraded. Tables or other user metadata without a marker retain
   the existing format-1 refusal and remedy. An explicit old marker is always refused.
   **The format gate reads an existing catalog alone.** An unsupported marker is
   refused before the data set opens, preserving its files for the engine that wrote
-  them. Proving an interrupted creation empty requires opening its data set; a
-  populated data set without a catalog is refused without creating a replacement.
+  them. A populated data set without a catalog, or beside creation-only metadata, is
+  refused by the read-only probe before any data file is opened for write.
   The catalog file set itself gets only what opening any storage does.
   Cleanly closed, it is left byte-identical, because a storage closed with
   nothing written through it writes nothing (Storage DESIGN.md). Crashed, it

@@ -96,4 +96,15 @@ internal abstract class SqlStorageStrategy
     /// <param name="catalog">True for the catalog set; false for the data set.</param>
     /// <returns><c>true</c> if the file set exists; otherwise <c>false</c>.</returns>
     public abstract bool StorageExists(string databaseName, bool catalog);
+    // A strategy without a read-only probe cannot prove an incomplete create safe to adopt.
+    internal virtual SqlStorageProbe? ProbeStorage(string databaseName, bool catalog) => null;
+
+    internal virtual SqlStorage RestartStorage(string databaseName, bool catalog)
+        => throw new System.InvalidOperationException(ErrorMessages.CreationRestartUnavailable);
+    internal const string CreationFileName = "sql.create";
+    internal const string CreationSignature = "COHSQLCREATE1\n";
+
+    internal virtual bool IsCreationPending(string databaseName) => false;
+
+    internal virtual void CompleteCreation(string databaseName) { }
 }

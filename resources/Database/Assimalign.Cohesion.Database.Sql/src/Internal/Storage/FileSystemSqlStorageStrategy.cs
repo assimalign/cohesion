@@ -1,5 +1,6 @@
 using System.Threading;
 using System.IO;
+using System.Text;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -31,13 +32,16 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
     /// <inheritdoc />
     public override SqlStorage CreateStorage(string databaseName, bool catalog)
+        => CreateStorage(databaseName, catalog, restarting: false);
+
+    private SqlStorage CreateStorage(string databaseName, bool catalog, bool restarting)
     {
         var directory = DatabaseFileNames.GetDirectory(_rootPath, databaseName);
 
         // The data set comes first and claims the database's directory. One already there is the
         // database, or, without the data file, what an interrupted create or drop left, which a
         // drop deletes; a create takes over neither, so a stale catalog set never meets new data.
-        if (!catalog && Directory.Exists(directory))
+        if (!catalog && !restarting && Directory.Exists(directory))
         {
             throw new DatabaseException(File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data)
                 ? $"Storage for database '{databaseName}' already exists."
@@ -56,6 +60,7 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
             journalStream = StorageStream.FromFile(files.Journal, FileMode.CreateNew, FileShare.Read);
             backupStream = StorageStream.FromFile(files.Backup, FileMode.CreateNew, FileShare.Read);
 
+            if (!catalog) { ClaimCreation(databaseName); }
             return SqlStorage.Create(dataStream, journalStream, backupStream, GetLabel(databaseName, catalog), _durability);
         }
         catch
@@ -77,14 +82,19 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
             throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
         }
 
+        if (!File.Exists(files.Journal) || !File.Exists(files.Backup))
+        {
+            throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.CreationSidecarMissing, databaseName), "COHSQLC001");
+        }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
         StorageStream? journalStream = null;
         StorageStream? backupStream = null;
         try
         {
-            journalStream = StorageStream.FromFile(files.Journal, FileMode.OpenOrCreate, FileShare.Read);
-            backupStream = StorageStream.FromFile(files.Backup, FileMode.OpenOrCreate, FileShare.Read);
+            journalStream = StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
+            backupStream = StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
 
             // Defer the open-time checkpoint: the engine's transaction coordinator
             // analyzes the recovered journal before checkpoint truncates its records.
@@ -106,6 +116,9 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
         if (Directory.Exists(directory))
         {
+            // The primary data file is the database identity; delete it before either sidecar.
+            File.Delete(DatabaseFileNames.GetFiles(directory, DataFileSet).Data);
+            foreach (string dataFile in Directory.EnumerateFiles(directory, "*.dat")) { File.Delete(dataFile); }
             Directory.Delete(directory, recursive: true);
         }
     }
@@ -113,4 +126,83 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     /// <inheritdoc />
     public override bool StorageExists(string databaseName, bool catalog)
         => File.Exists(DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog)).Data);
+    internal override SqlStorageProbe? ProbeStorage(string databaseName, bool catalog)
+    {
+        var files = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog));
+        long journalLength = File.Exists(files.Journal) ? new FileInfo(files.Journal).Length : 0;
+        long backupLength = File.Exists(files.Backup) ? new FileInfo(files.Backup).Length : 0;
+        if (!File.Exists(files.Data))
+        {
+            if (!File.Exists(files.Journal) && !File.Exists(files.Backup)) { return null; }
+            return new SqlStorageProbe(-1, [], [], []) { JournalLength = journalLength, BackupLength = backupLength };
+        }
+        using var data = new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read);
+        bool hasSidecars = File.Exists(files.Journal) && File.Exists(files.Backup);
+        if (data.Length > 2L * Assimalign.Cohesion.Database.Storage.Units.Page.Size)
+        {
+            return new SqlStorageProbe(data.Length, [], [], [], hasSidecars);
+        }
+        byte[] bytes = new byte[(int)data.Length];
+        data.ReadExactly(bytes);
+        return new SqlStorageProbe(data.Length, bytes, [], [], hasSidecars)
+        {
+            JournalLength = journalLength,
+            BackupLength = backupLength,
+            // Recovery writes only the private data copy. Journal analysis streams the original
+            // through a read-only handle, so a long WAL does not become a second heap image.
+            OpenReadOnly = () => OpenProbe(bytes, files.Journal, files.Backup),
+        };
+    }
+
+    private static SqlStorage OpenProbe(byte[] data, string journalPath, string backupPath)
+    {
+        var copy = new MemoryStream();
+        copy.Write(data);
+        copy.Position = 0;
+        Stream? journal = null;
+        Stream? backup = null;
+        try
+        {
+            journal = new SqlProbeStream(journalPath);
+            backup = new SqlProbeStream(backupPath);
+            return SqlStorage.Open(copy, journal, backup, checkpointOnOpen: false);
+        }
+        catch
+        {
+            copy.Dispose();
+            journal?.Dispose();
+            backup?.Dispose();
+            throw;
+        }
+    }
+
+    internal override SqlStorage RestartStorage(string databaseName, bool catalog)
+    {
+        var files = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog));
+        // The engine has proved this set contains no header or committed content.
+        if (!catalog) { File.Delete(CreationPath(databaseName)); }
+        File.Delete(files.Data);
+        File.Delete(files.Journal);
+        File.Delete(files.Backup);
+        return CreateStorage(databaseName, catalog, restarting: true);
+    }
+    internal override bool IsCreationPending(string databaseName)
+    {
+        string path = CreationPath(databaseName);
+        return File.Exists(path) && new FileInfo(path).Length == CreationSignature.Length
+            && File.ReadAllText(path, Encoding.UTF8) == CreationSignature;
+    }
+
+    private void ClaimCreation(string databaseName)
+    {
+        if (IsCreationPending(databaseName)) { return; }
+        using var claim = new FileStream(CreationPath(databaseName), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        claim.Write(Encoding.UTF8.GetBytes(CreationSignature));
+        claim.Flush(flushToDisk: true);
+    }
+
+    internal override void CompleteCreation(string databaseName) => File.Delete(CreationPath(databaseName));
+
+    private string CreationPath(string databaseName)
+        => Path.Combine(DatabaseFileNames.GetDirectory(_rootPath, databaseName), CreationFileName);
 }

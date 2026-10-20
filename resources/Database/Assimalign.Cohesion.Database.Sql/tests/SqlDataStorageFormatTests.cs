@@ -138,6 +138,26 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Refused catalog: a torn journal tail is preserved by the read-only format probe (#1158)")]
+    public async Task Open_OlderCatalogWithTornJournalTail_ShouldRefuseWithoutTruncatingFiles()
+    {
+        // Arrange
+        await CreateDatabaseAsync(formatVersion: 7);
+        using (var journal = new FileStream(Path.Combine(_rootPath, TestDatabase, "catalog.log"), FileMode.Append, FileAccess.Write))
+        {
+            journal.Write([1, 2, 3]);
+        }
+        var before = Snapshot();
+        await using var engine = CreateEngine();
+
+        // Act
+        var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(() => engine.OpenDatabaseAsync(TestDatabase, CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Message.ShouldContain("uses data-storage format 7", Case.Sensitive);
+        AssertUnchanged(before);
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a pre-generation counter reaches the format gate and leaves files untouched (B2)")]
     public async Task Open_FormatSevenCounterWithoutGeneration_ShouldUseExistingFormatGate()
     {
@@ -270,33 +290,69 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         await creator.CreateDatabaseAsync(TestDatabase, CancellationToken.None);
         recording.Dispose();
 
-        // Assert: every image with a complete storage header recovers into a usable database.
-        int accepted = 0;
-        int completedWithoutCatalog = 0;
+        // Assert: every point is exercised through create, open and application Build.
+        int preHeader = 0;
         for (int point = 0; point < recording.Count; point++)
         {
-            var image = recording.Open(point);
-            if (!image.StorageExists(TestDatabase, catalog: false)) { continue; }
-            bool missingCatalog = !image.StorageExists(TestDatabase, catalog: true);
-            await using var reopened = SqlDatabaseEngine.Create("creation-image", new() { StorageStrategy = image });
-            SqlDatabase database;
-            try { database = await reopened.OpenDatabaseAsync(TestDatabase, CancellationToken.None); }
-            catch (StorageIOException failure)
+            for (int route = 0; route < 3; route++)
             {
-                // The recorder also includes the file's creation before its header write.
-                failure.Message.ShouldContain("less than its 8192-byte header page", Case.Sensitive);
-                continue;
+                var image = recording.Open(point);
+                bool incompleteHeader = image.ProbeStorage(TestDatabase, catalog: false)?.IsPreHeader == true
+                    || image.ProbeStorage(TestDatabase, catalog: true)?.IsPreHeader == true;
+                if (incompleteHeader) { preHeader++; }
+                if (route == 2)
+                {
+                    var builder = Assimalign.Cohesion.Database.Hosting.DatabaseApplication.CreateBuilder();
+                    builder.AddSql("creation-build", sql =>
+                    {
+                        sql.Options.StorageStrategy = image;
+                        sql.AddDatabase(TestDatabase);
+                    });
+                    await using var application = builder.Build(CancellationToken.None);
+                    var engine = application.Context.GetEngine("creation-build").ShouldBeOfType<SqlDatabaseEngine>();
+                    engine.TryGetDatabase(TestDatabase, out SqlDatabase? built).ShouldBeTrue();
+                    built!.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
+                    built.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Build crash point {point}");
+                    await using var builtSession = await built.CreateSessionAsync(CancellationToken.None);
+                    (await builtSession.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+                    (await builtSession.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+                    (await IdsAsync(builtSession, "SELECT id FROM t", 0)).ShouldBe([1]);
+                    continue;
+                }
+                await using var reopened = SqlDatabaseEngine.Create("creation-image", new() { StorageStrategy = image });
+                SqlDatabase database;
+                if (route == 0)
+                {
+                    try { database = await reopened.CreateDatabaseAsync(TestDatabase, CancellationToken.None); }
+                    catch (DatabaseException failure)
+                    {
+                        failure.Message.ShouldContain("already exists", Case.Sensitive);
+                        database = await reopened.OpenDatabaseAsync(TestDatabase, CancellationToken.None);
+                    }
+                }
+                else
+                {
+                    try { database = await reopened.OpenDatabaseAsync(TestDatabase, CancellationToken.None); }
+                    catch (DatabaseNotFoundException failure)
+                    {
+                        if (incompleteHeader)
+                        {
+                            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+                            failure.Message.ShouldContain("CreateDatabaseAsync", Case.Sensitive);
+                        }
+                        database = await reopened.CreateDatabaseAsync(TestDatabase, CancellationToken.None);
+                    }
+                }
+                database.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
+                database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Crash point {point}, route {route}");
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                (await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+                (await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+                (await IdsAsync(session, "SELECT id FROM t", 0)).ShouldBe([1]);
             }
-            database.Catalog.RecordSpaceFormatVersion.ShouldBe(26);
-            database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo", $"Crash point {point}");
-            await using var session = await database.CreateSessionAsync(CancellationToken.None);
-            (await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
-            accepted++;
-            if (missingCatalog) { completedWithoutCatalog++; }
         }
         recording.Count.ShouldBeGreaterThan(1);
-        accepted.ShouldBeGreaterThan(0);
-        completedWithoutCatalog.ShouldBeGreaterThan(0);
+        preHeader.ShouldBeGreaterThanOrEqualTo(6);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a format-4 database with key-ordered index pages is refused by the gate, its files untouched (#1194)")]
@@ -402,6 +458,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         refusal.Message.ShouldContain($"Database '{TestDatabase}' has no catalog storage");
         refusal.Message.ShouldContain("#1152");
         File.Exists(Path.Combine(_rootPath, TestDatabase, "catalog.dat")).ShouldBeFalse();
+        AssertUnchanged(before);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: a crashed older database is refused without opening its data files and keeps its journals (#1099)")]
