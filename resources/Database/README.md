@@ -114,6 +114,23 @@ with an internal wire parser, and Blob has no execute member.
 
 Each model owns its engine, catalog, storage and future model-specific security in one project. Public Catalog and Storage types keep their namespaces in `src/Catalog/` and `src/Storage/`; internals live in `src/Internal/Catalog/` and `src/Internal/Storage/`. The code dependency direction remains engine → Catalog → Storage → shared kernel, enforced by a Roslyn architecture test in each model suite. `.Language` (where implemented), `.Protocol`, `.Client`, SQL `.Schema` and optional `.Tcp` remain separate projects. (The empty `.Replication` satellites and the shared `Database.Replication` and `Database.Governance` placeholders were deleted with #1257; replication returns as its own design when it is built.)
 
+`src/Internal/Engine/Storage/` holds engine persistence composition: storage strategies,
+catalog-aware glue, and engine row/entry codecs. These types may use Catalog and engine types.
+Transaction record-space adapters and their physical location-packing helpers belong to the
+Storage layer (`src/Internal/Storage/`, or nested inside a public Storage type), since they bind
+physical records to the shared transaction kernel without engine dependencies. The architecture
+test enforces both adapter and strategy placement across all five implemented models. This
+refines the original fold's folder map without changing namespaces or public members.
+
+The guard also checks each referenced type's containing assembly. Storage permits only the
+shared `Database.Storage`, `Database.Transactions`, `Database.Indexing` assemblies
+plus the BCL from the actual `Microsoft.NETCore.App` reference pack. Graph Storage also permits
+`Database.Types` for index keys, historically reached through Indexing. Catalog permits those plus
+the area root and `Database.Types`. Protocol, Language, Schema and Connections remain disallowed. The allowlists were seeded from
+the retired Storage/Catalog project references at `a64426436` and checked against current symbol
+usages. Engine code has no external-assembly restriction. Cache has no component source, so its
+architecture test is deferred until implementation.
+
 | Model | Root project | Notes |
 |---|---|---|
 | SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its model builder verbs and a reference to Sql.Protocol for the protocol family; declared dialect in `Sql.Language`; includes its Catalog and Storage components |

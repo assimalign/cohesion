@@ -4,7 +4,7 @@
 
 The empty Cache Catalog and Storage projects are retired. Cache has no Security satellite and remains deferred. Future public Catalog and Storage types belong under src/Catalog and src/Storage; internal component types belong under src/Internal/Catalog and src/Internal/Storage and declare Assimalign.Cohesion.Database.CacheDb.Internal.
 
-The dependency direction remains engine → Catalog → Storage → shared kernel. Storage-folder types must reference neither Catalog-folder nor engine types; Catalog-folder types must reference no engine types. The build exports the actual compiler inputs, and this model's architecture test recompiles them with Roslyn and checks resolved type/member symbols by their declaring source folders, including partial and generated types. Build-generated resource accessors and assembly metadata are shared infrastructure, outside the three layers. Cache currently has no component types, so its guard protects future implementation. No new shipped-assembly visibility grant, wire or disk format, diagnostic code, or behavior is introduced.
+The future dependency direction is engine → Catalog → Storage → shared kernel. Cache currently has only a Class1 placeholder, so the architecture test and compiler-input export are removed: a successful check would enforce no component boundary. Restore both when Cache gains implementation, using the implemented models' folder and external-assembly rules in the area README. Build-generated resource accessors and assembly metadata are shared infrastructure, outside the three layers. No shipped-assembly visibility grant, wire or disk format, diagnostic code, or behavior is introduced.
 
 
 Cache is deferred behind the Key-Value engine and currently has no implemented
