@@ -79,7 +79,7 @@ Idle server-side evictions remain discoverable at next use; rent-time pings are
 future work.
 
 A failed dial is a `DatabaseClientException` too (owner decision 39 of 2026-10-07).
-The internal `DatabaseConnection.OpenAsync` dials through the connection factory and
+The internal `DatabaseConnector.OpenAsync` dials through the connection factory and
 catches its failure: a refused or unreachable endpoint (`SocketException`), an
 `IOException`, a TLS handshake failure (`AuthenticationException` from the TLS layer),
 a connect timeout. It throws `DatabaseClientException` with
@@ -144,6 +144,11 @@ keeping the original exception: Npgsql replaces a transport's cancellation with 
 it found after the caller canceled, while this client keeps each as the inner
 exception.
 
+A lease serializes exchange admission and disposal under its own lock. It releases that lock
+before cancellation callbacks, frame I/O or pool return; return joins the admitted exchange
+before the connector can enter another lease. Cancellation callback failures cannot skip the
+join or release of the pool slot. No pool lock is acquired under the lease lock.
+
 Only one exchange may use a connection at a time. An overlapping exchange is rejected
 before it writes any frames. Disposing a connection cancels and joins its current
 operation before returning the rental, so an active exchange cannot enter the idle
@@ -152,8 +157,8 @@ pool. Disposal and failure release each rental exactly once.
 `DatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
 reset its application-level session state. It marks the connection unusable before
 cancelling/joining any active exchange and disposing the rental, so the pool closes
-its transport instead of reusing the session. This is non-cancellable and idempotent
-on the current rental. It makes no claim about whether the server completed an
+its transport instead of reusing the session. This is non-cancellable; a disposed lease
+refuses abort. It makes no claim about whether the server completed an
 unacknowledged command; transaction outcome and reconciliation remain model concerns.
 
 ## Streaming exchange and ownership
@@ -173,7 +178,7 @@ to streaming frame I/O; materialized SQL and Key-Value exchanges retain their
 existing transport exception behavior, and caller stream exceptions are unchanged.
 
 There are two deliberate ownership forms. `DatabaseConnection.ExecuteStreamingAsync`
-uses a caller-owned rental and preserves that rental after verified completion and
+retains the caller-owned lease and preserves that rental after verified completion and
 stream disposal, allowing another operation on the same typed connection. A failed
 or abandoned transfer invalidates and returns that rental immediately.
 `DatabaseClient.ExecuteStreamingAsync` rents on the caller's behalf; its returned
@@ -261,7 +266,7 @@ a failed release's.
 Counters, created on the first enable command: `current-connections` (a connection that opened, +1
 in `OpenAsync`, −1 in its first `CloseAsync` behind an `Interlocked.Exchange` flag, because
 `_isClosed` is checked and set without synchronization), `current-rented-connections` (+1 when
-`MarkRented` turns a connection rented, −1 when `DisposeAsync` returns it), `connections-opened-per-second`
+a new lease is created, −1 when `DisposeAsync` ends that lease), `connections-opened-per-second`
 and `total-connection-failures` (failed opens). The backing fields are updated whether or not anyone
 listens, so a tool that attaches late reads exact values. Timestamps are taken only while a listener
 takes the source (the pool wait only under `Pool`).
@@ -344,7 +349,7 @@ The client core has no public interface left and no `Abstractions/` folder
 - **No generic virtual method.** `DatabaseConnection.ExecuteAsync<TResult>` was a generic
   interface call, which NativeAOT never devirtualizes; it is a non-virtual generic method on the
   sealed connection (rule 5).
-- **`DatabaseConnection.OpenAsync` is internal.** The client opens every connection before its
+- **`DatabaseConnector.OpenAsync` is internal.** The client opens every connection before its
   first rental, and nothing else called it. Public, it reopened a broken connection by dialing a
   second transport over the first without releasing it.
 - **The streaming extension is folded in** (plan §5.2). `DatabaseClient.ExecuteStreamingAsync` is
@@ -356,14 +361,13 @@ The client core has no public interface left and no `Abstractions/` folder
   instead, as these tests do. An exchange passes its family to the base constructor, overrides
   `ExecuteCoreAsync` (or `OpenCoreAsync` and `CopyToCoreAsync`), and calls
   `MarkResponseComplete()` where it used to set `IsResponseComplete`.
-- **A returned `DatabaseConnection` is not a lease (known limit).** The pool hands out the same
-  instance on every rental of its session, and its rented flag is per instance, so a reference
-  kept after `DisposeAsync` reaches the next caller's rental once the pool rents it again: its
-  calls run on that rental and a second dispose returns it. `ObjectDisposedException` fires only
-  between the return and the next rent. The four model connections wrap the rental with their
-  own disposed flag (the Sql and Key-Value ones since the P5 review), so their callers are safe;
-  a direct caller of `RentAsync` drops the reference when it disposes. A per-rental lease or
-  generation token is a design change left to P8 (plan §12).
+- **Each returned `DatabaseConnection` is a lease (#1313).** The idle pool holds internal
+  `DatabaseConnector` instances with their transport, frame reader/writer, handshake agreement
+  and health. Every rent creates a new public lease with its own final disposed flag and active
+  exchange state. A stale lease rejects operations, abort and metadata access, reports
+  `IsOpen == false`, and repeated disposal awaits its original return without touching the
+  connector. Reuse is observed by the server session id or the `ConnectionRented.reused` event,
+  never by public object identity. This lands independently of P8 (#1264).
 - **Dial failures are wrapped (resolved).** The P5 review found that `RentAsync` wrapped
   handshake failures in `DatabaseClientException` while a transport dial failure (a
   `SocketException` from `TcpConnectionFactory`) reached the caller unchanged, through each

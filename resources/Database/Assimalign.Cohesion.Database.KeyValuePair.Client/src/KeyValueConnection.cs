@@ -38,19 +38,22 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 public sealed class KeyValueConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
+    // Operation diagnostics may finish after disposal has returned the shared lease.
+    private readonly string _database;
     private readonly KeyValueClientObserver? _observer;
     private int _disposed;
 
     internal KeyValueConnection(DatabaseConnection connection, KeyValueClientObserver? observer)
     {
         _connection = connection;
+        _database = connection.Database;
         _observer = observer;
     }
 
     /// <summary>
     /// Gets the database this connection is bound to.
     /// </summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>
     /// Gets a value indicating whether the connection is open and usable. A

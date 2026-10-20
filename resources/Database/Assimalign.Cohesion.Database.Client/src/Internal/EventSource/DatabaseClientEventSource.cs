@@ -97,7 +97,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="connection">The connection.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the open started.</param>
     [NonEvent]
-    public void ConnectionOpened(DatabaseConnection connection, long startTimestamp)
+    public void ConnectionOpened(DatabaseConnector connection, long startTimestamp)
     {
         Interlocked.Increment(ref _currentConnections);
         Interlocked.Increment(ref _totalConnectionsOpened);
@@ -119,7 +119,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="exception">The failure the open throws.</param>
     /// <param name="startTimestamp">The timestamp <see cref="GetTimestamp"/> returned when the open started.</param>
     [NonEvent]
-    public void ConnectionOpenFailed(DatabaseConnection connection, DatabaseClientException exception, long startTimestamp)
+    public void ConnectionOpenFailed(DatabaseConnector connection, DatabaseClientException exception, long startTimestamp)
     {
         Interlocked.Increment(ref _totalConnectionFailures);
 
@@ -139,7 +139,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// </summary>
     /// <param name="connection">The connection.</param>
     [NonEvent]
-    public void ConnectionClosed(DatabaseConnection connection)
+    public void ConnectionClosed(DatabaseConnector connection)
     {
         Interlocked.Decrement(ref _currentConnections);
 
@@ -155,7 +155,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="connection">The connection.</param>
     /// <param name="exception">The failure that broke it.</param>
     [NonEvent]
-    public void ConnectionBroken(DatabaseConnection connection, DatabaseClientException exception)
+    public void ConnectionBroken(DatabaseConnector connection, DatabaseClientException exception)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
@@ -185,7 +185,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="waitStartTimestamp">The timestamp <see cref="GetPoolTimestamp"/> returned before the wait for a pool slot.</param>
     /// <param name="waitEndTimestamp">The timestamp taken when the slot was acquired; zero when the first was.</param>
     [NonEvent]
-    public void ConnectionRented(DatabaseConnection connection, bool reused, long waitStartTimestamp, long waitEndTimestamp)
+    public void ConnectionRented(DatabaseConnector connection, bool reused, long waitStartTimestamp, long waitEndTimestamp)
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Pool))
         {
@@ -202,7 +202,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="connection">The returned connection.</param>
     /// <param name="pooled">True when the connection went back to the idle pool; false when it closed.</param>
     [NonEvent]
-    public void ConnectionReturned(DatabaseConnection connection, bool pooled)
+    public void ConnectionReturned(DatabaseConnector connection, bool pooled)
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Pool))
         {
@@ -220,7 +220,7 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <param name="connection">The connection.</param>
     /// <param name="exception">The coded failure.</param>
     [NonEvent]
-    public void ExchangeFailed(DatabaseConnection connection, DatabaseClientException exception)
+    public void ExchangeFailed(DatabaseConnector connection, DatabaseClientException exception)
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
@@ -231,14 +231,14 @@ internal sealed class DatabaseClientEventSource : EventSource
     /// <summary>
     /// Writes a download whose broken rental could not be returned after the download failed.
     /// </summary>
-    /// <param name="connection">The download's connection.</param>
+    /// <param name="database">The download's database, captured before releasing its lease.</param>
     /// <param name="exception">The failure of the return.</param>
     [NonEvent]
-    public void DownloadReleaseFailed(DatabaseConnection connection, Exception exception)
+    public void DownloadReleaseFailed(string database, Exception exception)
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            DownloadReleaseFailed(connection.Database, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
+            DownloadReleaseFailed(database, exception.GetType().FullName ?? exception.GetType().Name, exception.Message);
         }
     }
 

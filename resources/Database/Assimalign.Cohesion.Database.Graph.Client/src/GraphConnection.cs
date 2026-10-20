@@ -27,15 +27,18 @@ public sealed class GraphConnection : IAsyncDisposable
     private const string QueryPathsOperation = "QueryPaths";
 
     private readonly DatabaseConnection _connection;
+    // Diagnostics finish after a failed stream has returned its shared lease.
+    private readonly string _database;
     private int _disposed;
 
     internal GraphConnection(DatabaseConnection connection)
     {
         _connection = connection;
+        _database = connection.Database;
     }
 
     /// <summary>Gets the database selected during the handshake.</summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>Gets whether the connection is open and available for use.</summary>
     public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;

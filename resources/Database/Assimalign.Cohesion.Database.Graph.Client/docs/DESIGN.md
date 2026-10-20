@@ -154,6 +154,10 @@ retain the streaming lifetime rules below. No frame or codec change is needed on
 
 ## Path lifetime
 
+The typed connection captures its immutable database name when it receives the shared lease
+(#1313). Diagnostics can finish after streaming cleanup returns that lease, whose members then
+refuse access. The cached name preserves diagnostics without reaching a disposed rental.
+
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and
 validates the initial Path or PathsComplete frame. A terminal ParseFailure or ExecutionFailure
 before any path frame is retained as the rejected statement's error, and CopyToCoreAsync completes

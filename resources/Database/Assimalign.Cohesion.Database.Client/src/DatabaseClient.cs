@@ -31,7 +31,7 @@ public sealed class DatabaseClient : IAsyncDisposable
 {
     private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly ProtocolMessageFamily _family;
-    private readonly ConcurrentStack<DatabaseConnection> _idle = new();
+    private readonly ConcurrentStack<DatabaseConnector> _idle = new();
     private readonly SemaphoreSlim _slots;
     private bool _isDisposed;
 
@@ -95,7 +95,7 @@ public sealed class DatabaseClient : IAsyncDisposable
     /// under its size limit. Waits when the pool is exhausted.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation, including the wait for a free slot.</param>
-    /// <returns>An open connection; dispose it to return it to the pool.</returns>
+    /// <returns>A new lease over an open authenticated session; dispose it to return the session to the pool. The lease remains disposed even if the session is rented again.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the client, or an object its connection factory needs, is disposed.</exception>
     /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> cancels the wait for a slot, the dial or the handshake; a dial failure the transport reports after the cancellation is its inner exception.</exception>
     /// <exception cref="DatabaseClientException">Thrown when the dial fails, with <see cref="ProtocolErrorCode.ConnectionFailure"/>, the endpoint in the message and the transport's exception (for example a <see cref="System.Net.Sockets.SocketException"/>, a TLS handshake failure or a connect timeout) as the inner exception; when the transport breaks during the handshake (the peer resets or closes the connection), with <see cref="ProtocolErrorCode.Internal"/> and the transport's exception, if any, as the inner exception; or when the server rejects the handshake, with the server's wire code, or breaks the protocol, with <see cref="ProtocolErrorCode.ProtocolViolation"/>.</exception>
@@ -113,19 +113,19 @@ public sealed class DatabaseClient : IAsyncDisposable
         {
             // Prefer an idle, still-healthy connection — this is the session
             // reuse the pool exists for.
-            while (_idle.TryPop(out DatabaseConnection? idle))
+            while (_idle.TryPop(out DatabaseConnector? idle))
             {
                 if (idle.IsOpen)
                 {
-                    idle.MarkRented();
+                    var rental = new DatabaseConnection(this, idle);
                     DatabaseClientEventSource.Log.ConnectionRented(idle, reused: true, waitStartTimestamp, waitEndTimestamp);
-                    return idle;
+                    return rental;
                 }
 
                 await idle.CloseAsync().ConfigureAwait(false);
             }
 
-            var connection = new DatabaseConnection(this, _connectionFactory, Settings, _family);
+            var connection = new DatabaseConnector(_connectionFactory, Settings, _family);
 
             try
             {
@@ -137,9 +137,9 @@ public sealed class DatabaseClient : IAsyncDisposable
                 throw;
             }
 
-            connection.MarkRented();
+            var lease = new DatabaseConnection(this, connection);
             DatabaseClientEventSource.Log.ConnectionRented(connection, reused: false, waitStartTimestamp, waitEndTimestamp);
-            return connection;
+            return lease;
         }
         catch
         {
@@ -182,7 +182,7 @@ public sealed class DatabaseClient : IAsyncDisposable
     /// Accepts a connection back from a rent: healthy connections go to the idle
     /// stack with their session intact; broken ones close. Always frees the slot.
     /// </summary>
-    internal async ValueTask ReturnAsync(DatabaseConnection connection)
+    internal async ValueTask ReturnAsync(DatabaseConnector connection)
     {
         try
         {
@@ -226,7 +226,7 @@ public sealed class DatabaseClient : IAsyncDisposable
 
         _isDisposed = true;
 
-        while (_idle.TryPop(out DatabaseConnection? idle))
+        while (_idle.TryPop(out DatabaseConnector? idle))
         {
             await idle.CloseAsync().ConfigureAwait(false);
         }

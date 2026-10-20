@@ -146,6 +146,10 @@ failure over InMemory and TCP (#1135).
 
 ## Failures and pooling
 
+The typed connection captures its immutable database name when it receives the shared lease
+(#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
+refuse access. The cached name keeps diagnostics independent of the returned rental.
+
 A statement or serialization failure ends the response with one terminal model `Failure` (72),
 including after partial rows or documents, with no `Complete` after it. The client discards all
 accumulated results and throws the typed error; the authenticated session remains reusable. Failure
