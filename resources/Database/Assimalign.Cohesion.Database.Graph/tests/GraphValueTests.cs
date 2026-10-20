@@ -117,13 +117,13 @@ public sealed class GraphValueTests
         foreach (object ages in new object[] { new object?[] { 17L, 42L }, new List<long> { 17, 42 } })
         {
             var parameters = new Dictionary<string, object?> { ["ages"] = ages };
-            (await Rows(session, "MATCH (a:Person) WHERE a.age IN $ages RETURN a.name", parameters)).Select(row => row[0]).ShouldBe(["Alice", "Bob"]);
+            (await Rows(session, "MATCH (a:Person) WHERE a.age IN $ages RETURN a.name", parameters)).Select(row => row[0]).ShouldBe(["Alice", "Bob"], ignoreOrder: true);
         }
         var values = new Dictionary<string, object?> { ["l"] = new List<long> { 9 }, ["m"] = new Dictionary<string, object?> { ["k"] = 8 }, ["d"] = 0.1m, ["f"] = 0.1d };
         (await Rows(session, "RETURN $l[0], $m.k, [$d] = [$f], CASE $d WHEN $f THEN 1 ELSE 2 END, NULLIF($d,$f)", values))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 9L, 8, false, 2L, 0.1m });
         (await Rows(session, "MATCH (a:Person) OPTIONAL MATCH (a)->(b) RETURN COALESCE(b,a).name"))
-            .Select(row => row[0]).ShouldBe(["Alice", "Bob"]);
+            .Select(row => row[0]).ShouldBe(["Alice", "Bob"], ignoreOrder: true);
         (await Rows(session, "MATCH (a:Person {name:'Alice'}) RETURN COALESCE(a.absent,a.name), NULLIF(a.age,42), (a).name, a['name']"))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { "Alice", null, "Alice", "Alice" });
         var memberError = await Should.ThrowAsync<DatabaseException>(async () =>

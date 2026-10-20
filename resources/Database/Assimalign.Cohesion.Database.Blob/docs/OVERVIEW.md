@@ -99,8 +99,8 @@ commit rolls back, preserving the previous object. A connection loss after commi
 acknowledgement leaves the caller uncertain whether publication succeeded. Verify properties
 before retrying when that distinction matters.
 
-Dependencies are Connections, the Database root, Database.Protocol, Blob.Storage, Blob.Catalog,
-Database.Storage, and Database.Transactions. The implementation targets .NET 10, Preview C#, and NativeAOT without
+Dependencies are Connections, the Database root, Blob.Protocol, Database.Protocol,
+Database.Storage, and Database.Transactions. Catalog and Storage are components in this assembly. The implementation targets .NET 10, Preview C#, and NativeAOT without
 reflection or Microsoft.Extensions packages. It references no concrete transport. Transport
 construction belongs to the composition root; security policy beyond the supplied authenticator,
 replication, hosting integration, and compiled-schema provisioning remain outside this package.
@@ -130,11 +130,11 @@ and inherits no unsupported query-language operation.
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Blob.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Blob`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Blob catalog
 
-`Assimalign.Cohesion.Database.Blob.Catalog` persists the containers and blob metadata of
+The `src/Catalog/` component persists the containers and blob metadata of
 one logical database through the sealed `BlobCatalog`, which `BlobCatalog.Open` returns; its
 record and codec are internal. It depends on the Database root for the ownership vocabulary, Blob.Storage
 for record access, and the shared Storage and Transactions kernels for durability and MVCC.
@@ -158,11 +158,11 @@ See [DESIGN.md](DESIGN.md) for the directory, format, and recovery rules.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Blob.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Blob`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Blob storage
 
-`Assimalign.Cohesion.Database.Blob.Storage` supplies chunk streams and the record
+The `src/Storage/` component supplies chunk streams and the record
 adapter used by the Blob engine and catalog. It references the shared
 `Database.Storage` and `Database.Transactions` packages. Pages, page checksums,
 free-space tracking, journal framing, physical recovery, locks, snapshots, and

@@ -45,9 +45,9 @@ The model's [command specification](../../Assimalign.Cohesion.Database.KeyValueP
 defines command grammar and operation result shapes. Payload layouts are unchanged; see
 [coded command failures](#coded-command-failures-1105) for negotiation and error text.
 
-The model assembly reference supplies codecs; this client does not construct an
-engine or parse commands. The transitive closure is an accepted packaging
-consequence. A separate model protocol assembly can be considered later.
+`Database.KeyValuePair.Protocol` supplies the codecs independently of the engine.
+The client references that contract assembly and shared client infrastructure;
+its dependency closure contains no engine, catalog or storage implementation.
 
 Keys and values remain byte-oriented and use `DatabaseValueCodec` binary
 components. Typed serialization belongs to consumers; public client entry/range

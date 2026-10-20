@@ -312,8 +312,8 @@ public sealed class GqlOptionalMatchTests
         plan.MatchClauses[0].Paths[0].Anchor.Property.ShouldBeNull();
         if (pattern.StartsWith("(a)", StringComparison.Ordinal))
         { plan.MatchClauses[1].Paths[0].Anchor.Property.ShouldBeNull(); }
-        rows.Select(row => row[0]).ShouldBe(new object?[] { "Alice", "Bob", "Isolated" });
-        rows.Select(row => row[1]).ShouldBe(new object?[] { "Bob", null, null });
+        rows.Select(row => (row[0], row[1]))
+            .ShouldBe(new (object?, object?)[] { ("Alice", "Bob"), ("Bob", null), ("Isolated", null) }, ignoreOrder: true);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: a bound relationship supplies adjacent endpoints before scans or seeks")]
@@ -345,7 +345,7 @@ public sealed class GqlOptionalMatchTests
         anchor.NodeIndex.ShouldBe(position);
         anchor.Property.ShouldBeNull();
         expansions.ShouldBeLessThanOrEqualTo(15);
-        rows.Select(row => string.Join(",", row)).ShouldBe(expected.Split(';'));
+        rows.Select(row => string.Join(",", row)).ShouldBe(expected.Split(';'), ignoreOrder: true);
     }
 
     // Measure each input separately so a regression reports its full candidate count, even when

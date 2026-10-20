@@ -237,7 +237,7 @@ The sample executes every scalar category and verifies code-point LENGTH and Int
 both InMemory and TCP (#1137), alongside the existing advertised-clause checks.
 
 Documents.Client is inventoried and built in the Database workflow, but remains NuGet-only like
-Graph.Client. Documents.Security remains deferred. Transactions, remote database administration,
+Graph.Client. Model-specific Documents security remains deferred within the engine. Transactions, remote database administration,
 replication and model-specific security policies are outside this wire slice. OQL INSERT, UPSERT, UPDATE and DELETE
 return their affected counts through the existing completion field. Wire negotiation remains
 the shared protocol's responsibility, with no model-specific version exchange. The startup version

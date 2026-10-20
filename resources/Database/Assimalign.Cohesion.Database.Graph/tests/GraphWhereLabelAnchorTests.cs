@@ -42,7 +42,7 @@ public sealed class GraphWhereLabelAnchorTests
 
         // Assert
         budget.Consumed.ShouldBe(10);
-        rows.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Select(value => (object?)(long)value));
+        rows.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Select(value => (object?)(long)value), ignoreOrder: true);
         var scan = description.Single(row => Equals(row[2], "LabelScan"));
         scan[3].ShouldBe("Keep");
         scan[5].ShouldBe("node=0; property=; value=NULL");
@@ -143,7 +143,7 @@ public sealed class GraphWhereLabelAnchorTests
         // Assert
         var scan = description.Single(row => row[2] is "NodeScan" or "LabelScan");
         scan[3].ShouldBe(label);
-        rows.Select(row => row[0]).ShouldBe(reference.Select(row => row[0]));
+        rows.Select(row => row[0]).ShouldBe(reference.Select(row => row[0]), ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - WHERE labels: clause scope, relationship kinds and bound anchors stay distinct (#1245)")]

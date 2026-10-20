@@ -367,7 +367,7 @@ public sealed class GraphClientWireTests
         var result = await connection.QueryAsync(query, cancellationToken: harness.Token);
 
         // Assert
-        expected.ShouldBe(["Alice", "Bob"]);
-        result.Select(row => (string)row[0]!).ShouldBe(expected);
+        expected.ShouldBe(["Alice", "Bob"], ignoreOrder: true);
+        result.Select(row => (string)row[0]!).ShouldBe(expected, ignoreOrder: true);
     }
 }

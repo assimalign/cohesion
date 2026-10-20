@@ -121,11 +121,11 @@ on `DatabaseSession`.
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Documents.Catalog
+### Catalog: Documents catalog component
 
-`Assimalign.Cohesion.Database.Documents.Catalog` supplies the sealed `DocumentCatalog`, over the
+The `src/Catalog/` component supplies the sealed `DocumentCatalog`, over the
 same `DocumentStorage` file set as document content. It stores collection
 ownership, versioned document identities/content references, and secondary index definitions.
 Its B+Trees come from `Database.Indexing`, and every data/index mutation joins the caller's
@@ -151,11 +151,11 @@ the format and the precise path/scalar semantics.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Documents.Storage
+### Storage: Documents storage component
 
-`Assimalign.Cohesion.Database.Documents.Storage` stores immutable UTF-8 JSON content as chunk
+The `src/Storage/` component stores immutable UTF-8 JSON content as chunk
 chains over `Database.Storage`. `Database.Transactions` supplies the shared logical coordinator,
 version stamps, undo ledger, and recovery classification. The package has no dependency on the
 document engine, Hosting, ApplicationModel, or a serializer that discovers runtime types.

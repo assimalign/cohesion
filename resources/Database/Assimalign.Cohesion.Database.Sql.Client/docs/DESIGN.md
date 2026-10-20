@@ -184,9 +184,9 @@ Database.Client, which references no model package.
 `DatabaseClientResult` and `DatabaseClientColumn` moved to this package's
 namespace. Typed SQL APIs and protocol 2.0 wire behavior are unchanged.
 
-The model reference supplies codecs without parsing SQL or inspecting plans.
-Its transitive assembly closure is an accepted packaging consequence; a dedicated
-model protocol assembly can be a future refinement. The model's
+`Database.Sql.Protocol` supplies codecs without parsing SQL or inspecting plans.
+Both engine and client consume that contract assembly independently; the client's
+dependency closure contains no SQL engine, catalog or storage implementation. The model's
 [design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md) defines wire ownership.
 
 ## Typed literal wire values (#1110)

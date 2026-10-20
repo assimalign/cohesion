@@ -294,7 +294,7 @@ public sealed class GraphParameterTests
         // Assert
         (await RowsAsync(session, "MATCH (a:Typed) RETURN a.k")).Single()[0].ShouldBeOfType<int>().ShouldBe(42);
         (await RowsAsync(session, "MATCH (a:N) WHERE a.k = $p RETURN a.k", new Dictionary<string, object?> { ["p"] = 42m }))
-            .Select(row => row[0]).ShouldBe(new object?[] { 42m, 42L });
+            .Select(row => row[0]).ShouldBe(new object?[] { 42m, 42L }, ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Parameters: EXPLAIN binds values and leaves mutation metadata unchanged")]

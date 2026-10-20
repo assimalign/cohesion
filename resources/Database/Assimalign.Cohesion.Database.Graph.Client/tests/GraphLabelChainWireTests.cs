@@ -57,13 +57,13 @@ public sealed class GraphLabelChainWireTests
         colons.ShouldBe(1);
         ampersands.ShouldBe(1);
         any.Columns.Select(column => column.Name).ShouldBe(["name"]);
-        any.Select(row => (string?)row[0]).ShouldBe(["all", "one", "colons", "ampersands"]);
-        every.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
-        colonMatch.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
-        labeledEvery.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
+        any.Select(row => (string?)row[0]).ShouldBe(["all", "one", "colons", "ampersands"], ignoreOrder: true);
+        every.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
+        colonMatch.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
+        labeledEvery.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
         labeled.ShouldHaveSingleItem()[0].ShouldBe("x");
-        predicates.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
-        edges.Select(row => (string?)row[0]).ShouldBe(types.Select(type => type.ToLowerInvariant()));
+        predicates.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
+        edges.Select(row => (string?)row[0]).ShouldBe(types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
         connection.IsOpen.ShouldBeTrue();
     }
 

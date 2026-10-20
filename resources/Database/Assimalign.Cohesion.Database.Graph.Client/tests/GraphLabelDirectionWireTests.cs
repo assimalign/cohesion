@@ -39,9 +39,9 @@ public sealed class GraphLabelDirectionWireTests
 
         // Assert
         nodes.Columns.Select(column => column.Name).ShouldBe(["name"]);
-        nodes.Select(row => (string?)row[0]).ShouldBe(["a", "b", "ab"]);
+        nodes.Select(row => (string?)row[0]).ShouldBe(["a", "b", "ab"], ignoreOrder: true);
         edges.Columns.Select(column => column.Name).ShouldBe(["source", "target"]);
-        edges.Select(row => $"{row[0]}>{row[1]}").ShouldBe(["a>b", "b>c"]);
+        edges.Select(row => $"{row[0]}>{row[1]}").ShouldBe(["a>b", "b>c"], ignoreOrder: true);
         labeled.ShouldHaveSingleItem()[0].ShouldBe("c");
     }
 
@@ -72,8 +72,9 @@ public sealed class GraphLabelDirectionWireTests
 
         // Assert: one path per traversal, and the relationship keeps Alice -> Bob in both.
         paths.Count.ShouldBe(2);
-        paths[0].Nodes.Select(node => node.Id).ShouldBe([alice.Id, bob.Id]);
-        paths[1].Nodes.Select(node => node.Id).ShouldBe([bob.Id, alice.Id]);
+        paths.ShouldAllBe(path => path.Nodes.Count == 2);
+        paths.Select(path => (path.Nodes[0].Id, path.Nodes[1].Id))
+            .ShouldBe([(alice.Id, bob.Id), (bob.Id, alice.Id)], ignoreOrder: true);
         foreach (var path in paths)
         {
             var relationship = path.Relationships.ShouldHaveSingleItem();

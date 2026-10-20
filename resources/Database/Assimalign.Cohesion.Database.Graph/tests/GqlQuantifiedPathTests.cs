@@ -33,8 +33,8 @@ public sealed class GqlQuantifiedPathTests
         // Act
         var rows = await Rows(session, "MATCH (a:V {name:'A'})" + segment + "(b) RETURN a.name,b.name");
         // Assert
-        rows.Select(row => row[1]).ShouldBe(new object?[] { "B", "C", "D" });
-        (await Rows(session, "MATCH (a:V {name:'A'})-[:T {w:1}]->{1,3}(b) RETURN b.name")).Select(row => row[0]).ShouldBe(new object?[] { "B", "C" });
+        rows.Select(row => row[1]).ShouldBe(new object?[] { "B", "C", "D" }, ignoreOrder: true);
+        (await Rows(session, "MATCH (a:V {name:'A'})-[:T {w:1}]->{1,3}(b) RETURN b.name")).Select(row => row[0]).ShouldBe(new object?[] { "B", "C" }, ignoreOrder: true);
         (await Rows(session, "MATCH (a:V {name:'A'}) ((x:V {k:1})-[:T {w:1}]->(y:V {k:1})){2} (b) RETURN b.name"))
             .ShouldHaveSingleItem()[0].ShouldBe("C");
     }
@@ -72,7 +72,7 @@ public sealed class GqlQuantifiedPathTests
         foreach (string quantifier in new[] { "+", "{1,8}", "*" })
         {
             var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH p = (a:Cycle {name:'A'})-[:T]->" + quantifier + "(b) RETURN p"));
-            paths.Paths.Select(path => path.Relationships.Count).ShouldBe(quantifier == "*" ? new[] { 0, 1, 2, 3 } : new[] { 1, 2, 3 });
+            paths.Paths.Select(path => path.Relationships.Count).ShouldBe(quantifier == "*" ? new[] { 0, 1, 2, 3 } : new[] { 1, 2, 3 }, ignoreOrder: true);
             foreach (var path in paths.Paths) { path.Relationships.Select(edge => edge.Id).Distinct().Count().ShouldBe(path.Relationships.Count); }
         }
         (await Rows(session, "MATCH (a:Loop)-[:T]->+(b) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
@@ -81,7 +81,7 @@ public sealed class GqlQuantifiedPathTests
         (await Rows(session, "MATCH (a:Cycle {name:'A'})-[:T]->(b)-[:T]->+(c) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(2L);
         (await Rows(session, "MATCH (a:Cycle {name:'A'})-[:T]->{1,3}(a) RETURN a.name")).ShouldHaveSingleItem()[0].ShouldBe("A");
         var diamond = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH p = (a:Diamond {name:'P'})-[:T]->{2}(b:Diamond {name:'Z'}) RETURN p"));
-        diamond.Paths.Select(path => path.Nodes[1].Properties["name"]).ShouldBe(new object?[] { "Q", "R" });
+        diamond.Paths.Select(path => path.Nodes[1].Properties["name"]).ShouldBe(new object?[] { "Q", "R" }, ignoreOrder: true);
         // Per-path uniqueness deliberately permits reuse by another comma-separated path.
         (await Rows(session, "MATCH (a:Loop)-[:T]->+(b),(c:Loop)-[:T]->+(d) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
@@ -96,7 +96,7 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync(chain);
         // Act / Assert
         (await Rows(session, "MATCH (a:V {name:'A'})-[:T]->{,}(b) RETURN b.name"))
-            .Select(row => row[0]).ShouldBe(new object?[] { "A", "B", "C", "D" });
+            .Select(row => row[0]).ShouldBe(new object?[] { "A", "B", "C", "D" }, ignoreOrder: true);
         var star = (await Rows(session, "MATCH (a:V {name:'A'}) ((x)-[r:T]->(y)){2} (b) RETURN *")).ShouldHaveSingleItem();
         star.Length.ShouldBe(5);
         star[1].ShouldBeOfType<object?[]>().Select(value => value.ShouldBeOfType<GraphNode>().Properties["name"]).ShouldBe(new object?[] { "A", "B" });
@@ -114,7 +114,7 @@ public sealed class GqlQuantifiedPathTests
         (await Rows(session, "MATCH (a:V {name:'A'})-[r:T]->{3}(b) RETURN r[0].w,r[-1].w"))
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 1L, 2L });
         (await Rows(session, "MATCH (a:V {name:'A'}) ((x)-[:T]->(y)){2} (b) WITH x FOR n IN x MATCH (n) RETURN n.name"))
-            .Select(row => row[0]).ShouldBe(new object?[] { "A", "B" });
+            .Select(row => row[0]).ShouldBe(new object?[] { "A", "B" }, ignoreOrder: true);
         (await session.ExecuteAsync("MATCH (a:V {name:'A'})-[r:T]->{2}(b) WITH r UNWIND r AS e DELETE e")).AffectedCount.ShouldBe(2);
     }
 
@@ -190,7 +190,7 @@ public sealed class GqlQuantifiedPathTests
         (await Rows(session, "MATCH (a) ((x:V {name:'A'})-[:T]->(y)){0,1} (b) RETURN count(*)"))
             .ShouldHaveSingleItem()[0].ShouldBe(5L);
         (await Rows(session, "MATCH (b:V {name:'C'}) WITH b MATCH (a)-[:T]->{1,3}(b) RETURN a.name"))
-            .Select(row => row[0]).ShouldBe(new object?[] { "B", "A" });
+            .Select(row => row[0]).ShouldBe(new object?[] { "B", "A" }, ignoreOrder: true);
         (await Rows(session, "OPTIONAL MATCH (b:Missing) MATCH (a)-[:T]->{0,2}(b) RETURN count(*)"))
             .ShouldHaveSingleItem()[0].ShouldBe(0L);
         (await Rows(session, "MATCH (a)-[:T {w:c.k}]->{2}(b), (c:V {name:'C'}) RETURN a.name,b.name")).ShouldHaveSingleItem().ShouldBe(new object?[] { "A", "C" });
@@ -313,7 +313,7 @@ public sealed class GqlQuantifiedPathTests
         // Act
         var rows = await Rows(session, "MATCH (a:V {name:'" + start + "'})" + segment + "(b) RETURN b.name");
         // Assert
-        rows.Select(row => row[0]).ShouldBe(expected.Split(',').Cast<object?>());
+        rows.Select(row => row[0]).ShouldBe(expected.Split(',').Cast<object?>(), ignoreOrder: true);
         var paths = await PathKeys(session, "MATCH p = (a:V {name:'" + start + "'})" + segment + "(b) RETURN p");
         paths.Length.ShouldBe(3);
     }

@@ -91,7 +91,7 @@ public sealed class GqlFixedChainOrderTests
                     });
                     // Assert
                     actual.Error.ShouldBe(expected.Error, source + "; anchor=" + anchor);
-                    actual.Paths.ShouldBe(expected.Paths, source + "; anchor=" + anchor);
+                    actual.Paths.ShouldBe(expected.Paths, ignoreOrder: true, customMessage: source + "; anchor=" + anchor);
                     comparisons++;
                     if (expected.Error is null) { successes++; } else { failures++; }
                 }

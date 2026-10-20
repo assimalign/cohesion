@@ -36,11 +36,11 @@ public sealed class GraphAggregateTests
         row[4].ShouldBeOfType<long>().ShouldBe(89L);
         row[5].ShouldBeOfType<double>().ShouldBe(89d / 3, 1e-12);
         row[6].ShouldBe(17L); row[7].ShouldBe(42L);
-        row[8].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false });
+        row[8].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false }, ignoreOrder: true);
         var distinct = (await Rows(session, "MATCH (a:Person), (b:Person) RETURN sum(DISTINCT a.age), avg(DISTINCT a.age), min(DISTINCT a.age), max(DISTINCT a.age), collect_list(DISTINCT a.active)"))
             .ShouldHaveSingleItem();
         distinct.Take(4).ShouldBe(new object?[] { 89L, 89d / 3, 17L, 42L });
-        distinct[4].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false });
+        distinct[4].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { true, false }, ignoreOrder: true);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Aggregates: empty input has one ungrouped row and no keyed groups")]

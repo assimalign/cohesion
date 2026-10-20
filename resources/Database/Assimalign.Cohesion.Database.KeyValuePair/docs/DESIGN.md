@@ -1098,9 +1098,9 @@ all files and restore the complete backup, since a lost journal may hold acknowl
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.KeyValuePair.Catalog — Design
+### Catalog: KeyValuePair catalog design
 
 #### Catalog: Design intent
 
@@ -1200,31 +1200,31 @@ Tuple-codec encode/decode only; no reflection, no serialization frameworks.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.KeyValuePair.Storage — Design
+### Storage: KeyValuePair storage design
 
 #### Storage: Design intent
 
-The thinnest possible model-storage satellite: it types a storage file set as
+A thin model-storage component: it types a storage file set as
 `StorageModel.KeyValue` and exposes the kernel's protected record surface under
 entry-flavored names (`InsertEntry`/`ReadEntry`/`UpdateEntry`/`DeleteEntry`). The
 key-value model deliberately brings **no model-specific physical layout** — the
 generality bet of the second model is that the shared substrate (slotted pages,
 per-owner record chains, WAL v2, recovery) serves an ordered key-value store
-as-is, and this project is where that bet is visibly small.
+as-is, and this component is where that bet is visibly small.
 
 #### Storage: Why-this-not-that
 
 - **A `Storage` subclass, not a wrapper.** `SqlStorage` set the family shape: the
-  kernel's record operations are `protected`, and the model satellite is the
+  kernel's record operations are `protected`, and the model component is the
   sanctioned way to expose the subset a model composes. A wrapper would duplicate
   the surface; a public kernel record API would invite models to bypass their
   engines.
 - **No entry codec here.** The record byte layout (16-byte version-stamp header +
   key/value tuple) is engine policy, tied to the engine's MVCC composition — it
   lives with the version store and executor in `Database.KeyValuePair`, exactly
-  where `SqlRowCodec` lives in `Database.Sql`. This satellite stays byte-agnostic.
+  where `SqlRowCodec` lives in `Database.Sql`. This component stays byte-agnostic.
 - **Owner-chain inserts are the primary insert path.** The engine keys every entry
   record by its key-space object id so the key space owns its pages (the #911
   per-object chain design). The shared-space overload exists for the catalog file

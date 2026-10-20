@@ -269,6 +269,10 @@ after uncommitted detach/insertion page write-back, without disposal. Restart mu
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
 
+The Database solution includes `Graph.RecoveryFixture` so solution builds keep the fixture in
+the selected configuration. The Graph test build copies that configuration's outputs beside the
+test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
+
 ### Failed statements in explicit transactions (#1188)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
@@ -835,6 +839,8 @@ Aggregate syntax adds no catalog data or on-disk format; no catalog version chan
 
 Queries without ORDER BY have no guaranteed row order. Choosing a later-position anchor can
 change their result row order, even though each matched path retains its source-ordered elements.
+Tests compare unordered results with multiplicity preserved, including complete row tuples when
+columns are related; tests that assert a row sequence specify ORDER BY explicitly.
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
 projected values, including a projected entity under any alias. Structural expression matching
@@ -1867,7 +1873,7 @@ and 1 MiB bounds include the notice. See [wire policy](../../Assimalign.Cohesion
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Graph catalog design
 
@@ -1884,12 +1890,13 @@ record operations and on the shared transaction kernel; it does not reference th
 Graph.Storage owns physical node-property B+Trees, while catalog index records supply names
 and object discovery. The engine coordinates both through the same logical transaction.
 
-The dependency diagram repeats these reference directions.
+Catalog and Storage live within `Database.Graph`; the diagram shows their internal
+dependency direction and references to shared kernel packages.
 
 ```mermaid
 flowchart LR
-    Engine["Graph engine"] --> Catalog["Graph.Catalog"]
-    Catalog --> Store["Graph.Storage"]
+    Engine["Graph engine component"] --> Catalog["Graph Catalog component"]
+    Catalog --> Store["Graph Storage component"]
     Catalog --> Tx["Database.Transactions"]
     Catalog --> Root["Database root ownership"]
     Store --> Kernel["Database.Storage"]
@@ -1988,7 +1995,7 @@ the corresponding physical store change; publishing only one side is not an engi
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Graph storage design
 
@@ -2004,7 +2011,7 @@ kernel's durable transaction-sequence namespace, so rollback and restart do not 
 an identity.
 
 The Graph root owns query planning, label/type validation and session scoping.
-Graph.Catalog owns schema metadata. This package owns physical graph records and their
+The Catalog component owns schema metadata. The Storage component owns physical graph records and their
 indexes. The dependency arrows point to the shared Storage, Transactions and Indexing
 packages; no model-specific paging, journal, lock manager or B+Tree is implemented here.
 
