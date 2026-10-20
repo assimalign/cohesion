@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Runtime.ExceptionServices;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -44,11 +47,20 @@ internal sealed class CheckpointProbe : EventListener
     private long _unfinishedAtTrigger;
     private bool _inPass;
     private bool _inPassAtTrigger;
+    private readonly bool _countStorageTransactionExceptions;
+    private long _storageTransactionExceptions;
 
-    internal CheckpointProbe(string database, string engine)
+    internal CheckpointProbe(string database, string engine, bool countStorageTransactionExceptions = false)
     {
         _database = database;
         _worker = engine + "/checkpoint";
+        _countStorageTransactionExceptions = countStorageTransactionExceptions;
+        if (_countStorageTransactionExceptions)
+        {
+            // Test-only, process-wide first-chance count: it includes caught busy-storage
+            // refusals, which happen before CheckpointStart and have no storage event.
+            AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+        }
         // Explicitly select the existing providers by name after the engine initialized them.
         // Listen only to checkpoint keywords, not every row/version/lock event in the workload.
         foreach (var source in EventSource.GetSources().Where(source => source.Name is storageSource or transactionSource or workerSource))
@@ -87,7 +99,28 @@ internal sealed class CheckpointProbe : EventListener
         {
             return new(_watch.Elapsed, _writes, _checkpoints, _deferred, _bracketOpen, _offline,
                 _failures, _eventErrors, _peak, _triggers, _maxWritesBeforeCheckpoint,
-                _maxTriggerDelay, _maxDeferredDelay, _checkpointsBySecond.ToArray(), _largestCycle, _passes, _unfinished);
+                _maxTriggerDelay, _maxDeferredDelay, _checkpointsBySecond.ToArray(), _largestCycle, _passes, _unfinished,
+                _countStorageTransactionExceptions ? _storageTransactionExceptions : null);
+        }
+    }
+
+    public override void Dispose()
+    {
+        if (_countStorageTransactionExceptions)
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
+        }
+        base.Dispose();
+    }
+
+    private void OnFirstChanceException(object? sender, FirstChanceExceptionEventArgs data)
+    {
+        if (data.Exception is StorageTransactionException)
+        {
+            lock (_sync)
+            {
+                _storageTransactionExceptions++;
+            }
         }
     }
 
@@ -197,13 +230,14 @@ internal sealed class CheckpointProbe : EventListener
     internal sealed record Snapshot(TimeSpan Elapsed, long Writes, long Checkpoints, long Deferred,
         long BracketOpen, long Offline, long Failures, long EventErrors, long Peak, long Triggers,
         long MaxWritesBeforeCheckpoint, double MaxTriggerDelay, double MaxDeferredDelay, long[] CheckpointsBySecond,
-        Cycle? LargestCycle, long WorkerPasses, long WorkerUnfinished)
+        Cycle? LargestCycle, long WorkerPasses, long WorkerUnfinished, long? StorageTransactionExceptions)
     {
         internal string Describe(long size)
             => $"{Writes} commits; {Checkpoints} checkpoints in {Elapsed.TotalSeconds:F2}s " +
                 $"({Checkpoints / Elapsed.TotalSeconds:F2}/s; buckets [{string.Join(",", CheckpointsBySecond)}]); " +
                 $"peak >= {Peak} bytes ({(double)Peak / size:F2} triggers); triggers={Triggers}, deferred={Deferred}, " +
-                $"BracketOpen={BracketOpen}, offline={Offline}, failures={Failures}, eventErrors={EventErrors}; " +
+                $"BracketOpen={BracketOpen}, StorageTransactionException(process)={StorageTransactionExceptions?.ToString() ?? "not counted"}, " +
+                $"offline={Offline}, failures={Failures}, eventErrors={EventErrors}; " +
                 $"max trigger-to-start={MaxTriggerDelay:F2}ms/{MaxWritesBeforeCheckpoint} commits, " +
                 $"max defer-to-start={MaxDeferredDelay:F2}ms; worker passes={WorkerPasses}, unfinished={WorkerUnfinished}; largest cycle={LargestCycle}";
     }

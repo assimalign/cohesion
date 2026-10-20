@@ -51,6 +51,15 @@ all open databases. It attempts every database close even if one fails. Synchron
 commit modes both wait for durable commit; grouped commits use the engine's flush signal and
 the kernel's bounded self-help window.
 
+The shared checkpoint worker rechecks due work when it collects a deferred lane (#1283),
+closing a consumed-wake retry gap without imposing a journal bound. The four-writer growth
+measurement is opt-in (`COHESION_DB_PROBES=1`); deterministic lane and outside-bracket controls
+remain in default CI. It reports existing `BracketOpen` skips and test-only process-wide
+first-chance `StorageTransactionException` counts. Affinity is enforced for the Windows process
+only: Linux affinity is per-thread, so no workload CPU limit is claimed there. Blob chunk and
+metadata writes use the coordinator's apply gate; the observed 544 MB growth remains unattributed
+and #1283 remains open.
+
 A worker failure never ends a worker (#1268). Each worker catches per database: a failed
 checkpoint, page write-back or group flush of one database is reported
 (`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next

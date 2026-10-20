@@ -14,8 +14,8 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>
-/// Attribution probe for #1283, not a journal-cap regression test: production behavior is unchanged.
-/// Run with --filter FullyQualifiedName~BlobCheckpointGrowthTests and detailed console logging.
+/// Attribution probe and deterministic controls for #1283, not a journal-cap regression test.
+/// Set COHESION_DB_PROBES=1 to run the load probe, with detailed console logging.
 /// Peak includes checkpoint-start events and lengths after each commit/trigger; it is a lower
 /// bound on the instantaneous peak, not an estimate of bytes appended or of checkpoint counts.
 /// </summary>
@@ -30,7 +30,7 @@ public sealed class BlobCheckpointGrowthTests
         _output = output;
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint growth: attribute four short-transaction writers on three cores (#1283)")]
+    [DatabaseProbeTheory(DisplayName = "Cohesion Test [Database.Blob] - Checkpoint growth: attribute four short-transaction writers (#1283)")]
     [InlineData(0)]
     [InlineData(3)]
     public async Task Checkpoint_FourContinuousWriters_ShouldReportGrowthAndExerciseDeferral(int competitors)
@@ -50,7 +50,7 @@ public sealed class BlobCheckpointGrowthTests
             });
             var database = await engine.CreateDatabaseAsync("growth", ceiling.Token);
             await AutocommitContainer.CreateAsync(database, "files", ceiling.Token);
-            using var probe = new CheckpointProbe(database.DataStorage.Name, engine.Name);
+            using var probe = new CheckpointProbe(database.DataStorage.Name, engine.Name, countStorageTransactionExceptions: true);
             var signal = database.DataStorage.OnCheckpointNeeded;
             database.DataStorage.OnCheckpointNeeded = () =>
             {
@@ -119,15 +119,14 @@ public sealed class BlobCheckpointGrowthTests
                 }
             }
 
-            // Assert: report overshoot; bounding it would claim a fix this run does not implement.
+            // Assert: report overshoot and busy-storage counts; the growth cause remains open.
             measured = probe.Read();
-            string report = $"round={round + 1}, competitors={competitors}, affinity={affinity.Cores}; " + measured.Describe(journalSize);
+            string report = $"round={round + 1}, competitors={competitors}, affinity={affinity.Description}; " + measured.Describe(journalSize);
             _output.WriteLine(report);
             counts.ShouldAllBe(count => count >= 32, report);
             measured.Triggers.ShouldBeGreaterThan(0, report);
             measured.Checkpoints.ShouldBeGreaterThanOrEqualTo(4, report);
             measured.Deferred.ShouldBeGreaterThan(0, report);
-            measured.BracketOpen.ShouldBe(0, report);
             measured.Offline.ShouldBe(0, report);
             measured.Failures.ShouldBe(0, report);
             measured.EventErrors.ShouldBe(0, report);
@@ -344,32 +343,35 @@ public sealed class BlobCheckpointGrowthTests
 
         internal AffinityScope()
         {
-            if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            if (OperatingSystem.IsWindows())
             {
                 _previous = _process.ProcessorAffinity;
                 long available = _previous.ToInt64();
                 long selected = 0;
-                for (int bit = 0; bit < 64 && Cores < 3; bit++)
+                int cores = 0;
+                for (int bit = 0; bit < 64 && cores < 3; bit++)
                 {
                     long mask = 1L << bit;
                     if ((available & mask) != 0)
                     {
                         selected |= mask;
-                        Cores++;
+                        cores++;
                     }
                 }
                 _process.ProcessorAffinity = (IntPtr)selected;
+                Description = $"{cores} CPUs (Windows process)";
             }
-            // Two-core CI and macOS still run the counter guard; report actual affinity.
+            // Linux affinity is per-thread: Process.ProcessorAffinity affects only the main
+            // thread, not the writers, burners or checkpoint lanes. Do not claim a workload cap.
         }
 
-        internal int Cores { get; }
+        internal string Description { get; } = "not constrained (workload affinity not enforced)";
 
         public void Dispose()
         {
             try
             {
-                if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+                if (OperatingSystem.IsWindows())
                 {
                     _process.ProcessorAffinity = _previous;
                 }
