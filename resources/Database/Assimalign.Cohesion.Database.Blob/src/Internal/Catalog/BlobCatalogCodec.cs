@@ -4,7 +4,9 @@ using System.Text;
 
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Blob.Catalog.Internal;
+using Assimalign.Cohesion.Database.Blob.Catalog;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal static class BlobCatalogCodec
 {

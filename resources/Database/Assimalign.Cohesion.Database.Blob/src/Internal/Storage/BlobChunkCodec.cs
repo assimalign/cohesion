@@ -4,7 +4,9 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Blob.Storage.Internal;
+using Assimalign.Cohesion.Database.Blob.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal static class BlobChunkCodec
 {

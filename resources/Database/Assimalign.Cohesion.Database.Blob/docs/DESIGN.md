@@ -1,5 +1,12 @@
 # Blob engine design
 
+## Model component boundaries
+
+Catalog, Storage and the empty Security satellite projects are consolidated into Assimalign.Cohesion.Database.Blob. Public Catalog and Storage types keep their existing namespaces and live under src/Catalog and src/Storage; their assembly identity is now Assimalign.Cohesion.Database.Blob. Internal component types live under src/Internal/Catalog and src/Internal/Storage and declare Assimalign.Cohesion.Database.Blob.Internal.
+
+The dependency direction remains engine → Catalog → Storage → shared kernel. Storage-folder types must reference neither Catalog-folder nor engine types; Catalog-folder types must reference no engine types. The build exports the actual compiler inputs, and this model's architecture test recompiles them with Roslyn and checks resolved type/member symbols by their declaring source folders, including partial and generated types. Build-generated resource accessors and assembly metadata are shared infrastructure, outside the three layers. No new shipped-assembly visibility grant, wire or disk format, diagnostic code, or behavior is introduced.
+
+
 ## String comparison and collation (#1025)
 
 Blob remains ordinal-only. Container and blob names, equality, sorted listings,
@@ -27,19 +34,19 @@ flowchart LR
     Blob --> Protocol["Database.Protocol"]
     SharedClient --> Protocol
     Blob --> Connections["Connections"]
-    Blob --> Catalog["Database.Blob.Catalog"]
-    Blob --> Storage["Database.Blob.Storage"]
+    Blob --> Catalog["Blob Catalog component"]
+    Blob --> Storage["Blob Storage component"]
     Blob --> Transactions["Database.Transactions"]
 ```
 
-| Package | Responsibility |
+| Component or package | Responsibility |
 | --- | --- |
 | `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication, Blob wire family and server |
 | `Assimalign.Cohesion.Database.Blob.Client` | Typed streaming operations over shared connection exchanges |
 | `Assimalign.Cohesion.Connections` | Generic connection and listener contracts; no concrete transport |
 | `Assimalign.Cohesion.Database.Protocol` | Shared framing, handshake, versioning, errors and family-bound channels |
-| `Assimalign.Cohesion.Database.Blob.Catalog` | Metadata versions, directory and ordered listings |
-| `Assimalign.Cohesion.Database.Blob.Storage` | Stream adapters and chunk encoding |
+| `Catalog/` in Database.Blob | Metadata versions, directory and ordered listings |
+| `Storage/` in Database.Blob | Stream adapters and chunk encoding |
 | `Assimalign.Cohesion.Database.Transactions` | MVCC contexts, coordinator, locks and version ledger |
 | `Assimalign.Cohesion.Database.Storage` | Shared page pool, allocator, WAL, CRC and physical recovery |
 
@@ -226,8 +233,8 @@ flowchart TD
 ```
 
 The authoritative byte layouts are documented in
-[Blob.Storage DESIGN](../../Assimalign.Cohesion.Database.Blob.Storage/docs/DESIGN.md) and
-[Blob.Catalog DESIGN](../../Assimalign.Cohesion.Database.Blob.Catalog/docs/DESIGN.md).
+[Blob.Storage DESIGN](DESIGN.md#storage-component) and
+[Blob.Catalog DESIGN](DESIGN.md#catalog-component).
 Both use kernel slotted pages and a 16-byte prefix: little-endian UInt64 writer at offset 0
 and UInt64 deleter at offset 8. The record kind at offset 16 distinguishes container metadata
 (1), blob metadata (2), and chunks (3). Metadata uses owner-zero pages; content uses nonzero
@@ -1132,3 +1139,283 @@ Blob metadata already uses its own strict, length-bounded reader; content remain
 ## Shared startup negotiation (#1105)
 
 The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Blob request/result payloads remain unchanged.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.Blob.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Blob catalog design
+
+The catalog keeps container definitions and blob properties as first-class versioned records.
+It shares one Blob.Storage file set and one TransactionCoordinator with the content chains.
+This gives metadata and content a single commit decision, including after a crash. There is
+no independent catalog transaction and no separate catalog journal.
+
+The family dependencies are shown below; each arrow means a project references another project.
+
+```mermaid
+flowchart LR
+    Catalog["Blob.Catalog"] --> Root["Database root"]
+    Catalog --> BlobStorage["Blob.Storage"]
+    Catalog --> Transactions["Database.Transactions"]
+    Catalog --> Storage["Database.Storage"]
+```
+
+| Package | Role |
+| --- | --- |
+| `Assimalign.Cohesion.Database.Blob.Catalog` | Metadata format, directory, snapshot selection |
+| `Assimalign.Cohesion.Database.Blob.Storage` | Metadata record access and chunk storage |
+| `Assimalign.Cohesion.Database.Transactions` | Shared coordinator, snapshots, undo and purge ledger |
+| `Assimalign.Cohesion.Database.Storage` | Pages, page CRC, storage brackets and journal |
+| `Assimalign.Cohesion.Database` | Shared object ownership vocabulary |
+
+`BlobCatalog.Open` returns the sealed `BlobCatalog`, which has a private constructor; its record
+and codec are internal. The former `IBlobCatalog` interface, `BlobCatalog` static factory and
+internal `DefaultBlobCatalog` collapsed into it (concrete-types plan, phase 4, #1260); the members
+and their argument checks are the implementation's, unchanged. Public metadata records are
+immutable values.
+
+#### Catalog: Directory and visibility
+
+At open, the catalog scans only owner-zero metadata pages into a directory from ordinal
+container names and `(container identity, blob name)` pairs to version locations. Chunk pages
+have nonzero owners. Listing consults this directory and rereads candidate metadata through
+Blob.Storage; it never scans chunk content. Each reread takes the kernel page path, including
+CRC validation. Candidate writer stamps and logical identities must still match, so reclaimed
+slots or pages cannot make stale directory entries address a different record.
+Lookups discard reclaimed references and remove directory keys whose final reference has been
+reclaimed. Listing performs the same cleanup across the selected metadata names. A reference is
+reclaimed when `Storage.TryReadRecord` with owner zero says so: its slot was deleted or reverted,
+its metadata page was freed by the purge, or the page was reallocated to a chunk chain or as an
+index node. A page that fails its CRC or cannot be read throws instead (#1342). Before #1342 the
+reread caught only the slot exceptions, so a reference into a freed metadata page failed the
+lookup with "Page N is not allocated" (250 versions of one blob's metadata and a purge pass).
+Live malformed records raise a catalog error; a checksum-valid but malformed record is not
+treated as missing.
+
+Writers acquire model locks in the engine before reaching the catalog. A save tombstones the
+snapshot-visible old metadata record and inserts the new version in one coordinator physical
+statement bracket. The shared ledger records both changes. The new directory entry is published
+only after that bracket succeeds. Snapshot selection admits the writer and excludes visible
+deleters. Rollback clears old tombstones and removes newly created records; directory lookups
+observe those physical changes directly. Snapshot-safe purge later reclaims obsolete records.
+
+Open-time recovery scrubs uncommitted stamps before loading the directory. Metadata that
+references an unfinished chain is therefore absent after restart. The catalog keeps references
+to the storage and the coordinator but does not own them; the engine that opens it disposes them.
+This assembly contains
+no local pager, journal, transaction manager, or model-lock implementation.
+
+#### Catalog: Metadata disk format, version 1
+
+Every record is one slotted-page record in the owner-zero record space. Multibyte numeric
+values use little endian. Offsets are zero based. All records begin with the shared 16-byte
+`RecordVersionStamp`: unsigned 64-bit writer sequence at offset 0, unsigned 64-bit deleter
+sequence at offset 8; zero deleter means no tombstone. Offset 16 is the one-byte record kind
+(`1` container, `2` blob); offset 17 is the one-byte format version (`1`).
+
+Strings consist of a signed 32-bit UTF-8 byte length followed by exactly that many bytes;
+`-1` represents null. UTF-8 is strict. Names must be non-null and contain a non-whitespace
+character. Identities occupy 16 bytes in .NET `Guid.ToByteArray()` ordering: the first 4, 2,
+and 2 byte components are little endian, followed by the final 8 bytes in display order.
+Identities cannot be empty. All fields below occur sequentially starting at offset 18.
+
+| Container field | Encoding |
+| --- | --- |
+| Container identity | 16-byte GUID |
+| Name | Non-null string |
+| Owner | One byte: `0` Adhoc, `1` Schema |
+| Owning schema | Nullable string; required and nonempty for Schema ownership |
+
+| Blob field | Encoding |
+| --- | --- |
+| Container identity | 16-byte GUID |
+| Name | Non-null string |
+| Content length | Signed 64-bit nonnegative byte count |
+| Content type | Nullable string |
+| Entity tag | Unsigned 64-bit value |
+| Created time | Signed 64-bit UTC ticks since 0001-01-01, then signed 16-bit offset minutes |
+| Modified time | Same 10-byte encoding as created time |
+| Content checksum | Unsigned 32-bit CRC-32 |
+| Head location | Unsigned 64-bit packed chunk record reference, as defined by Blob.Storage |
+
+A head of zero is valid exactly when content length is zero. There is no trailing padding or
+extension area. Unknown versions, kinds, invalid ownership, truncated fields, or trailing bytes
+raise `BlobCatalogException`. Kernel corruption and I/O errors remain kernel errors and are
+never interpreted as absent metadata. Individual metadata records must fit one kernel page;
+the content they reference has no corresponding one-page limit.
+
+The [Blob.Storage design](DESIGN.md#storage-component)
+defines location packing and the separate chunk record format. The Blob engine preserves the
+original created time across replacements and enforces `DROP CONTAINER` ownership restrictions.
+The catalog intentionally has no provisioning, hosting, wire protocol, or security policy.
+
+#### Catalog: Verification and compatibility
+
+Co-located Shouldly tests cover ordinal prefix/container isolation, complete metadata and
+ownership round trips, old snapshots, logical rollback, purge, and restart from live copies of
+the data and journal before disposal. The restart case retains committed metadata and removes
+an uncommitted replacement and unpublished name. Unsupported disk versions and malformed
+live metadata records are rejected.
+Serialization uses explicit BCL primitives with no reflection or generated runtime code.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.Blob.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Blob storage design
+
+#### Storage: Shared kernel composition
+
+`BlobStorage` derives from the shared `Storage` implementation. It adds record
+encoding and bounded content streams; it does not implement another allocator,
+page cache, journal, lock manager, or recovery system. `BlobTransactionRecordSpace`
+implements the existing `TransactionRecordSpace` seam for the coordinator's
+`RecordSpaceVersionStore`. All catalog records and chunk records begin with the
+same 16-byte writer/deleter prefix.
+
+These references explain the package boundary.
+
+```mermaid
+flowchart LR
+    Blob["Database.Blob"] --> BS["Database.Blob.Storage"]
+    Cat["Database.Blob.Catalog"] --> BS
+    BS --> S["Database.Storage"]
+    BS --> T["Database.Transactions"]
+    T --> S
+```
+
+The engine and catalog reference Blob storage. Blob storage references shared
+Storage and Transactions, and Transactions references Storage. The feature has
+no Hosting, ApplicationModel, or wire-client reference.
+
+#### Storage: File and record format
+
+A database has the kernel's data, journal, and backup streams. Data pages are
+8192 bytes, with the unchanged 96-byte kernel page header and four-byte slotted
+record directory entries. Kernel page CRC covers every persisted page, including
+the chunk header and content. Blob adds no separate physical file header.
+
+Catalog records occupy owner-zero data pages. Every chunk page carries one
+content owner, `1UL << 63` (`BlobStorage.ContentOwner`), which separates payload
+pages from metadata. All transactions share it. The kernel fills only an owner's
+current write page, so the former owner per creating transaction gave every
+upload a fresh page: a 2 KiB blob took a whole 8 KiB page, 1.012 pages per
+upload. With the shared owner three such chunks fill a page, as PostgreSQL's
+per-relation insert target packs tuples (`src/backend/access/heap/hio.c:571-596`,
+`RelationGetBufferForTuple`). Owner IDs are locality hints, never content
+identity or visibility proofs: visibility is per record, and every chunk bracket
+runs under the coordinator's apply gate. A full 8,064-byte chunk still takes a
+page alone; the partly filled page it passes over is not revisited until the
+kernel tracks partial free space (Database.Storage DESIGN.md, "Per-owner record
+chains"). A file written with per-transaction owners needs no migration: its
+chunks stay readable, and its pages simply take no new chunks.
+
+Every integer in a chunk record is unsigned little-endian unless stated otherwise.
+The chunk format is version 1:
+
+| Record byte offset | Size | Meaning |
+| --- | --- | --- |
+| 0 | 8 | Writer transaction sequence |
+| 8 | 8 | Deleter sequence, zero when not tombstoned |
+| 16 | 1 | Record kind: `3` for a chunk (`1` and `2` belong to catalog records) |
+| 17 | 1 | Chunk format version: `1` |
+| 18 | 2 | Payload byte count, between 1 and 8064 |
+| 20 | 8 | Next chunk's packed location, zero at the end |
+| 28 | Payload byte count | Content bytes |
+
+A packed location contains the page number in its high 48 bits and the zero-based
+slot in its low 16 bits. Data pages start at page 1, so zero is an unambiguous null
+location. The maximum record is 8092 bytes: 8064 content bytes and the 28-byte
+chunk header. There is no padding inside a record. No empty chunk is emitted.
+Empty content is represented by a zero head, zero length, and zero CRC-32.
+
+The catalog stores the head, signed nonnegative 64-bit total length, and IEEE
+CRC-32. The CRC uses reflected polynomial `0xEDB88320`, initial register
+`0xFFFFFFFF`, and final complement; ASCII `123456789` yields `0xCBF43926`.
+The checksum describes content bytes only, in chain order. A read checks page
+CRC through the kernel, validates each chunk's kind/version/length/link, and
+checks the complete content checksum when it reaches the catalog length. Early
+termination, an extra link after the declared length, a cycle, or a checksum
+mismatch is corruption. Closing a partially consumed download does not claim
+that the unread suffix's aggregate checksum was checked.
+
+The head references the first chunk; every nonfinal chunk references the next.
+
+```mermaid
+flowchart TD
+    Meta["Catalog metadata: head, length, CRC-32"] --> A["Chunk: stamp, next, content"]
+    A --> B["Chunk: stamp, next, content"]
+    B --> C["Final chunk: stamp, zero next, content"]
+```
+
+#### Storage: Upload and publication
+
+An upload retains one 8064-byte content buffer, the head and tail locations, a
+length counter, and an incremental CRC register. Filling or flushing the buffer
+creates a chunk through `TransactionCoordinator.ApplyStatementAsync`. In that
+same bounded physical bracket it patches the preceding unpublished chunk's next
+pointer. The version ledger records the new chunk under the caller's logical
+transaction. No whole-object byte array or list of chunk payloads is retained.
+
+Disposal flushes the final buffer and invokes the engine's completion callback.
+That callback publishes the metadata head and commits an automatic transaction;
+an explicit session transaction retains publication until its own commit. The
+old chain remains untouched for readers. `Flush` alone never publishes metadata.
+The kernel's logical commit record makes all preceding physical brackets durable.
+A write/flush error, a publication failure or lifetime cancellation poisons the
+stream and invokes the abort callback once, with the exception the stream then
+throws to its caller, so an engine can record what aborted an explicit
+transaction (#1225). Disposing a poisoned stream cannot publish it.
+
+Read and write streams are sequential and do not support seeking or concurrent
+operations on one stream. Metadata publication, overwrite locking, and session
+lifetime checks belong to the engine. A read stream's caller retains its logical
+snapshot until stream disposal, including across a concurrent overwrite/delete.
+
+#### Storage: Deletion and bounded recovery
+
+`TombstoneContentAsync` marks each old chunk in a separate physical bracket under
+the deleting logical context. The catalog tombstone shares that logical context,
+so rollback restores both. Committed tombstones are reclaimed only after every
+snapshot that could see their content has closed. The shared `DeleteRecord`
+returns an empty page to the free-space map at physical commit; rollback restores
+the page and its owner membership. A page holds chunks of several uploads, so it
+is reclaimed only with the last of them. Reused pages can belong to another upload.
+
+The version store batches undo, pruning, and recovery scrub at 64 mutations per
+physical bracket so their retained pre-images cannot grow to object size (since #1253 a
+bracket also spills pre-images past a budget to the journal, Storage DESIGN.md "The memory
+bound of pre-images"). Journal recovery streams page records and retains only transaction
+identities, the last applying LSN per page and a bounded page cache. Live ledger entries and page directories still use
+memory proportional to chunk count, approximately one entry per 8 KB; payload
+memory is bounded independently of the object length.
+
+On reopen, physical kernel recovery runs first with checkpoint deferred. The
+coordinator then scrubs chunks and metadata stamped by uncommitted writers,
+including uploads whose physical chunk brackets had committed before the crash.
+The final recovery checkpoint occurs only after that classification and scrub.
+No partially written chain gains a visible metadata head.
+
+#### Storage: Verification and scope
+
+The co-located suite exercises chunk boundaries, CRC, cancellation, snapshot
+retention, page reuse, and a crash image containing committed and abandoned
+chains. The in-memory crash-image test uses an ordinary journal flush before
+cloning serialized bytes: its MemoryStreams provide no durable-flush contract.
+It verifies recovery replay and abandoned-chunk cleanup rather than physical
+persistence. The engine's executable fixture additionally round-trips a file-backed
+object larger than a constrained managed heap and reopens its files. The code
+uses static calls and BCL types, with no reflection or `Microsoft.Extensions.*`.
+Container ownership, listing, security, transport, and schema provisioning are
+outside this package.
+
+
+## Public assembly identity changes
+
+The following public types move from their Catalog or Storage assembly into Assimalign.Cohesion.Database.Blob. Their namespaces, members, diagnostic codes and serialized representations are unchanged. Public members whose signatures expose these types also reference their new assembly identity. Consumers must replace satellite project/package/assembly references with the model reference and recompile; assembly-qualified type names change. No type forwarding or compatibility assembly is supplied. Empty Security (and Cache Catalog/Storage) projects had no public types.
+
+- From `Assimalign.Cohesion.Database.Blob.Catalog`: `Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog`, `Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalogEntry`, `Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalogException`, `Assimalign.Cohesion.Database.Blob.Catalog.BlobContainerMetadata`.
+- From `Assimalign.Cohesion.Database.Blob.Storage`: `Assimalign.Cohesion.Database.Blob.Storage.BlobContentReference`, `Assimalign.Cohesion.Database.Blob.Storage.BlobStorage`.

@@ -1,6 +1,8 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Blob.Storage.Internal;
+using Assimalign.Cohesion.Database.Blob.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal static class BlobContentChecksum
 {

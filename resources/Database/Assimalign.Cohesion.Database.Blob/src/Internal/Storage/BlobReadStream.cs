@@ -4,7 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Blob.Storage.Internal;
+using Assimalign.Cohesion.Database.Blob.Storage;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal sealed class BlobReadStream : Stream
 {

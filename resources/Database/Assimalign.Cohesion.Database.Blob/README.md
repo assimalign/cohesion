@@ -1,4 +1,9 @@
-# Assimalign.Cohesion.Database.Blob.Storage
+# Assimalign.Cohesion.Database.Blob
+
+
+## Storage component
+
+## Assimalign.Cohesion.Database.Blob.Storage
 
 Chunked Blob streams on the shared page, journal, and transaction kernel.
 

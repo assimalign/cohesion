@@ -1,4 +1,6 @@
-namespace Assimalign.Cohesion.Database.Blob.Catalog.Internal;
+using Assimalign.Cohesion.Database.Blob.Catalog;
+
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 /// <summary>
 /// One persisted catalog record of the metadata owner: exactly one of a container or a blob.
