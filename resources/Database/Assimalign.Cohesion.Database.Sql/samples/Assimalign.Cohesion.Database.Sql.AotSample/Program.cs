@@ -264,7 +264,7 @@ internal static class Program
         CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
         CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
-            "SELECT RPAD('á', 1024, 'á') COLLATE invariant LIKE RPAD('%a', 256, '%a') || 'b' FROM customers WHERE Id = 1")), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "COHSQLE040");
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -441,7 +441,7 @@ internal static class Program
         CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
         CheckFailure("over the wire: invariant LIKE work limit", await FailureAsync(() => RowsAsync(connection,
-            "SELECT RPAD('á', 1024, 'á') COLLATE invariant LIKE RPAD('%a', 256, '%a') || 'b' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);

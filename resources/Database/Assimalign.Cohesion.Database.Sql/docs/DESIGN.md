@@ -5770,18 +5770,21 @@ marks. Binary and simple case-insensitive matching use last-`%` backtracking wit
 constant search state; simple folding preserves one scalar per original scalar.
 Accent-insensitive literal probes compare normalized spans and stop once a prefix
 can no longer match. Invariant literals use CompareInfo.IsSuffix for terminal
-suffixes, IsPrefix with match lengths for anchors and IndexOf with match lengths
-for middle runs. Independent scalar ends without ignorables use constant-state
+suffixes before analyzing the input boundaries, including combining and ignored
+scalars ahead of an independent terminal literal. IsPrefix supplies candidate ends
+for anchors and IndexOf supplies candidate starts for middle runs. Independent scalar ends without ignorables use constant-state
 last-% backtracking; combining sequences and contextual scripts (including Thai/Lao
 reordering and contractions) retain exhaustive scalar probes (like_match.c:289-311).
-Ignored scalars retain all candidate ends. Explicit continuations avoid recursion;
+ASCII letter/digit literals prune impossible isolated prefixes and
+skip ignored runs when the complete-input search misses a match at a combining
+boundary. Ignored scalars retain all candidate ends on the general path. Explicit continuations avoid recursion;
 visited suffixes keep one boundary inline per token and expand to at most one bit
 per token/input boundary when another start arrives. Invariant search charges every transition and boundary probe, plus both
 UTF-16 comparison/search lengths, to a per-match budget of
 64 × (input UTF-16 length + 1) × (raw pattern UTF-16 length + 1), with checked
 64-bit arithmetic. Successful prefix/middle searches charge through the match;
-failed substring searches charge the full offered span, while independent prefix
-failures charge the literal extent. Ordinary anchors therefore stay
+Failed searches before boundary analysis charge the full offered span; known
+independent prefix failures charge the literal extent. Ordinary anchors therefore stay
 linear in input length, leaving the polynomial budget as a backstop. Each zero-initialized
 32-bit visited-state word also costs one unit, charged before allocating its row;
 many literal tokens therefore cannot bypass the budget through state initialization.

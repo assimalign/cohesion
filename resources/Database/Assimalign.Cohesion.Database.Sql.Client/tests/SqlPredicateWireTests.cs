@@ -74,7 +74,7 @@ public sealed class SqlPredicateWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         // Act
         var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
-            "SELECT RPAD('á', 1024, 'á') COLLATE invariant LIKE RPAD('%a', 256, '%a') || 'b' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
@@ -99,8 +99,8 @@ public sealed class SqlPredicateWireTests
         // Act: disconnect only after the row-time matcher entered. Keep it held until
         // the server lifetime token is canceled, so transport notification cannot race refusal.
         var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
-        command.Parameters.Add("input", new string('́', 1024));
-        command.Parameters.Add("pattern", "%b%");
+        command.Parameters.Add("input", string.Concat(Enumerable.Repeat("เก", 512)));
+        command.Parameters.Add("pattern", string.Concat(Enumerable.Repeat("%เก", 32)) + "ข");
         var query = Task.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);
         try
         {

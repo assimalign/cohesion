@@ -17,6 +17,7 @@ internal sealed class SqlLikePattern
     private readonly int _sourceLength;
     private readonly bool _requiresBoundaryProbing;
     private readonly bool _hasIgnorables;
+    private readonly bool _asciiLetterOrDigitLiterals = true;
     private readonly Collation? _normalizedFor;
     private readonly string?[]? _normalizedTokens;
 
@@ -28,6 +29,7 @@ internal sealed class SqlLikePattern
             if (literal is null) { continue; }
             for (int position = 0; position < literal.Length; position += ScalarLength(literal, position))
             {
+                if (!char.IsAsciiLetterOrDigit(literal[position])) { _asciiLetterOrDigitLiterals = false; }
                 if (MayBeIgnorable(literal, position)) { _hasIgnorables = true; }
                 if (NeedsBoundaryProbing(literal, position)) { _requiresBoundaryProbing = true; }
             }
@@ -121,6 +123,8 @@ internal sealed class SqlLikePattern
         int[]? firstBoundaries = null;
         bool probeBoundaries = _requiresBoundaryProbing;
         bool hasIgnorables = _hasIgnorables;
+        string? simpleLiteral = null;
+        bool contains = false;
         try
         {
             if (collation.IsIndexBacked && !ReferenceEquals(collation, Collation.Binary))
@@ -154,6 +158,51 @@ internal sealed class SqlLikePattern
             {
                 // Preserve Collation's explicit refusal under invariant globalization.
                 collation.Compare(string.Empty, string.Empty);
+                // A terminal independent literal only needs the complete suffix.
+                // Earlier text cannot affect its starting boundary supplied by %.
+                // Keep this ahead of input analysis, including for combining text
+                // and ignored scalars (PostgreSQL like_match.c:272-286).
+                if (_tokens.Length == 2 && _tokens[0] is null &&
+                    _tokens[1] is { Length: > 0 } terminal && !_requiresBoundaryProbing)
+                {
+                    Charge(ref work, Math.Max(1L, (long)input.Length + terminal.Length) + 1, limit, collation, cancellationToken);
+                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), terminal, CompareOptions.None);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return suffix;
+                }
+                // A missing independent final suffix rules out every arrival at
+                // that literal, before wildcard retries can repeat the same search.
+                if (_tokens.Length > 1 && !_requiresBoundaryProbing && _tokens[^1] is { Length: > 0 } tail)
+                {
+                    Charge(ref work, Math.Max(1L, (long)input.Length + tail.Length) + 1, limit, collation, cancellationToken);
+                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), tail, CompareOptions.None);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!suffix) { return false; }
+                }
+                // Ordinary single-run ASCII predicates search first. A failed
+                // search only needs boundary probing when the input has context.
+                if (_asciiLetterOrDigitLiterals)
+                {
+                    var compare = CultureInfo.InvariantCulture.CompareInfo;
+                    if (_tokens.Length == 2 && _tokens[0] is { Length: > 0 } prefix && _tokens[1] is null)
+                    {
+                        bool found = compare.IsPrefix(input.AsSpan(), prefix, CompareOptions.None, out int matchLength);
+                        Charge(ref work, Math.Max(1L, (long)(found ? matchLength : input.Length) + prefix.Length) + 1, limit, collation, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (found) { return true; }
+                        simpleLiteral = prefix;
+                    }
+                    else if (_tokens.Length == 3 && _tokens[0] is null &&
+                        _tokens[1] is { Length: > 0 } middle && _tokens[2] is null)
+                    {
+                        int found = compare.IndexOf(input.AsSpan(), middle, CompareOptions.None, out int matchLength);
+                        Charge(ref work, Math.Max(1L, (long)(found < 0 ? input.Length : found + matchLength) + middle.Length) + 1, limit, collation, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (found >= 0) { return true; }
+                        simpleLiteral = middle;
+                        contains = true;
+                    }
+                }
                 // Search APIs see surrounding collation elements. Combining text and
                 // scripts with contextual ordering retain exhaustive scalar probing;
                 // independent scripts can use match lengths from collation searches.
@@ -164,6 +213,11 @@ internal sealed class SqlLikePattern
                     hasIgnorables |= MayBeIgnorable(input, position);
                     probeBoundaries = NeedsBoundaryProbing(input, position);
                 }
+            }
+
+            if (simpleLiteral is not null)
+            {
+                return probeBoundaries && MatchAsciiLiteral(input, simpleLiteral, contains, cancellationToken, limit, ref work);
             }
 
             if (!collation.IsIndexBacked && !probeBoundaries && !hasIgnorables && _tokens.Length > 1)
@@ -218,7 +272,7 @@ internal sealed class SqlLikePattern
                 if (raw is null)
                 {
                     if (index + 1 == _tokens.Length) { return true; }
-                    if (!collation.IsIndexBacked && !probeBoundaries && _tokens[index + 1] is { Length: > 0 } anchor)
+                    if (!collation.IsIndexBacked && (!probeBoundaries || index + 2 == _tokens.Length && !_requiresBoundaryProbing) && _tokens[index + 1] is { Length: > 0 } anchor)
                     {
                         var remaining = input.AsSpan(start);
                         var compare = CultureInfo.InvariantCulture.CompareInfo;
@@ -273,6 +327,11 @@ internal sealed class SqlLikePattern
                     // The deterministic transform only appends. Compare the complete run
                     // once, then find original boundaries at its normalized end offset.
                     int firstEnd = start;
+                    bool wordLiteral = !collation.IsIndexBacked && (_asciiLetterOrDigitLiterals || IsAsciiWord(token));
+                    if (wordLiteral && probeBoundaries && state.End < 0)
+                    {
+                        if (!TryMatchAsciiPrefix(input, start, token, cancellationToken, limit, ref work, out firstEnd)) { continue; }
+                    }
                     if (!collation.IsIndexBacked && !probeBoundaries)
                     {
                         var compare = CultureInfo.InvariantCulture.CompareInfo;
@@ -305,12 +364,17 @@ internal sealed class SqlLikePattern
                             if (length > token.Length) { break; }
                             equal = length == token.Length;
                         }
-                        else if (!probeBoundaries)
+                        else if (!probeBoundaries || wordLiteral)
                         {
                             // IsPrefix supplies the first candidate end. Only ignored
                             // scalars can extend it without changing equality.
                             int previous = end > 1 && char.IsLowSurrogate(input[end - 1]) && char.IsHighSurrogate(input[end - 2]) ? end - 2 : end - 1;
-                            equal = end == firstEnd || CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(previous, end - previous), ReadOnlySpan<char>.Empty, CompareOptions.None) == 0;
+                            equal = end == firstEnd;
+                            if (!equal)
+                            {
+                                Charge(ref work, end - previous, limit, collation, cancellationToken);
+                                equal = CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(previous, end - previous), ReadOnlySpan<char>.Empty, CompareOptions.None) == 0;
+                            }
                             if (!equal) { break; }
                         }
                         else
@@ -329,7 +393,7 @@ internal sealed class SqlLikePattern
                             // An earlier arrival at this suffix already queued its ignored
                             // extensions. Coalesce those continuations as well as suffixes,
                             // so an ignored run cannot be enumerated once per raw start.
-                            if ((collation.IsIndexBacked || !probeBoundaries) && (firstVisited[index + 1] == end ||
+                            if ((collation.IsIndexBacked || !probeBoundaries || wordLiteral) && (firstVisited[index + 1] == end ||
                                 visited[index + 1] is { } suffixes &&
                                 (suffixes[end >> 5] & (1u << (end & 31))) != 0)) { break; }
                             if (end < input.Length)
@@ -480,6 +544,69 @@ internal sealed class SqlLikePattern
             position = retry;
             index = star + 1;
         }
+    }
+
+    // ASCII letters and digits have no combining weights or reordered elements.
+    // Once an isolated source prefix stops being a prefix of that literal, later
+    // scalars cannot repair it. Ignored runs do not change a failed comparison,
+    // so skip them rather than comparing the complete run at every boundary.
+    private static bool MatchAsciiLiteral(string input, string literal, bool contains,
+        CancellationToken cancellationToken, long limit, ref long work)
+    {
+        if (!contains) { return TryMatchAsciiPrefix(input, 0, literal, cancellationToken, limit, ref work, out _); }
+        int start = 0;
+        while (true)
+        {
+            start = SkipIgnored(input, start, cancellationToken, limit, ref work);
+            if (start == input.Length) { return false; }
+            if (TryMatchAsciiPrefix(input, start, literal, cancellationToken, limit, ref work, out _)) { return true; }
+            start += ScalarLength(input, start);
+        }
+    }
+
+    private static bool TryMatchAsciiPrefix(string input, int start, string literal,
+        CancellationToken cancellationToken, long limit, ref long work, out int end)
+    {
+        var compare = CultureInfo.InvariantCulture.CompareInfo;
+        end = SkipIgnored(input, start, cancellationToken, limit, ref work);
+        if (end == input.Length) { return false; }
+        end += ScalarLength(input, end);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var prefix = input.AsSpan(start, end - start);
+            Charge(ref work, (long)prefix.Length + literal.Length + 1, limit, Collation.Invariant, cancellationToken);
+            if (compare.Compare(prefix, literal, CompareOptions.None) == 0) { return true; }
+            Charge(ref work, (long)prefix.Length + literal.Length, limit, Collation.Invariant, cancellationToken);
+            if (!compare.IsPrefix(literal, prefix, CompareOptions.None, out _)) { return false; }
+            int next = SkipIgnored(input, end, cancellationToken, limit, ref work);
+            if (next == input.Length) { return false; }
+            end = next + ScalarLength(input, next);
+        }
+    }
+
+    private static bool IsAsciiWord(string literal)
+    {
+        foreach (char character in literal)
+        {
+            if (!char.IsAsciiLetterOrDigit(character)) { return false; }
+        }
+        return true;
+    }
+
+    private static int SkipIgnored(string input, int start, CancellationToken cancellationToken, long limit, ref long work)
+    {
+        var compare = CultureInfo.InvariantCulture.CompareInfo;
+        int steps = 0;
+        while (start < input.Length)
+        {
+            if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            int length = ScalarLength(input, start);
+            Charge(ref work, length + 1, limit, Collation.Invariant, cancellationToken);
+            if (compare.Compare(input.AsSpan(start, length), ReadOnlySpan<char>.Empty, CompareOptions.None) != 0) { break; }
+            start += length;
+        }
+        return start;
     }
 
     private static bool MayBeIgnorable(string text, int position)

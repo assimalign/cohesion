@@ -2213,13 +2213,16 @@ change an escape into a wildcard or erase it. All four collations support scalar
 escapes and scalar `_`; CHAR left operands keep their stored padding while CHAR
 patterns use their text conversion. Invariant literals use collation-aware suffix,
 prefix and middle searches with match lengths where scalar ends are independent.
-Combining sequences and contextual scripts retain exhaustive original scalar
+An independent terminal literal after `%` checks the suffix directly, including
+when the preceding text contains combining or ignored scalars.
+Single-run ASCII letter/digit predicates also check isolated prefixes when a search
+misses at a combining boundary. Other combining/contextual literals retain exhaustive scalar
 boundaries, including reordered Thai/Lao prefixes (like_match.c:289-311).
 Invariant matching has a work budget of 64 × (input UTF-16 length + 1) × (raw pattern
 UTF-16 length + 1), computed with checked 64-bit arithmetic. Each search transition and boundary probe costs one unit; each
 linguistic comparison/search additionally costs the sum of its span lengths (at least
 one unit); successful anchors charge only through the matched prefix, and an independent
-prefix failure charges the literal extent. Each zero-initialized 32-bit visited-state word costs one unit, charged
+prefix failure after boundary analysis charges the literal extent. Each zero-initialized 32-bit visited-state word costs one unit, charged
 before allocation. Exhaustion raises located COHSQLE040 as an ExecutionFailure and leaves
 the connection usable; LIKE and NOT LIKE both fail rather than returning an estimate.
 This is a deliberate resource limit on linguistic matching (#1166). Other collations

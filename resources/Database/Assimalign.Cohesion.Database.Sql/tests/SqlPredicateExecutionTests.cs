@@ -443,9 +443,9 @@ public sealed class SqlPredicateExecutionTests
     public void Match_LinguisticFailure_ShouldRefuseWithinWorkBudget(int length)
     {
         // Arrange
-        const int wildcards = 128;
-        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None);
-        string input = string.Concat(Enumerable.Repeat("á", length / 2));
+        const int wildcards = 32;
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%เก", wildcards)) + "ข", "!", CancellationToken.None);
+        string input = string.Concat(Enumerable.Repeat("เก", length / 2));
         long work = 0;
         // Act
         var error = Should.Throw<DatabaseException>(() => pattern.Match(input, Collation.Invariant, CancellationToken.None, out work));
@@ -453,7 +453,7 @@ public sealed class SqlPredicateExecutionTests
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
         work.ShouldBeGreaterThan(0);
         work.ShouldBeLessThanOrEqualTo(pattern.WorkLimit(length));
-        pattern.WorkLimit(length).ShouldBe(64L * (length + 1) * (2 * wildcards + 2));
+        pattern.WorkLimit(length).ShouldBe(64L * (length + 1) * (3 * wildcards + 2));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures have deterministic search and allocation bounds")]
@@ -639,13 +639,28 @@ public sealed class SqlPredicateExecutionTests
             ("abc%", new string('中', length), false),
             ("%a", new string('\0', length - 1) + "a", true),
             ("%a", "a" + new string('\u00ad', length - 1), true),
+            ("%a", new string('́', length - 1) + "a", true),
+            ("%a", new string('́', length), false),
+            ("%a", new string('a', length - 1) + "́", false),
+            ("%a", "a" + new string('\u034f', length - 1), true),
+            ("%@example.com", new string('́', length - 12) + "@example.com", true),
+            ("%é", new string('x', length - 2) + "é", true),
+            ("%abc%", new string('́', length - 3) + "abc", true),
+            ("%abc%", new string('́', length), false),
+            ("%abc%", "abc" + new string('́', length - 3), true),
+            ("abc%", new string('́', length), false),
+            ("abc%", "abc" + new string('́', length - 3), true),
+            ("abc%", new string('\u034f', length - 3) + "abc", true),
+            ("a%b", "a" + new string('́', length - 2) + "b", true),
+            ("a%b", "z" + new string('́', length - 2) + "b", false),
+            ("a%b", "a" + new string('\u034f', length - 2) + "c", false),
         ];
         // Act / Assert
         foreach (var (text, input, expected) in cases)
         {
             var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
             pattern.Match(input, Collation.Invariant, CancellationToken.None, out long work).ShouldBe(expected);
-            work.ShouldBeLessThanOrEqualTo((text == "%a_bc" ? 16L : 4L) * (length + text.Length + 1));
+            work.ShouldBeLessThanOrEqualTo((text == "%a_bc" || input.Contains('́') || input.Contains('\u034f') ? 16L : 4L) * (length + text.Length + 1));
         }
     }
 
