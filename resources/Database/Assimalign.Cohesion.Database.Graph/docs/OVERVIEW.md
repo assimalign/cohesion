@@ -82,3 +82,63 @@ use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactio
 on `DatabaseSession`.
 
 GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over an eagerly materialized binding table. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.Graph.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Graph catalog
+
+`Assimalign.Cohesion.Database.Graph.Catalog` provides durable discovery and definition metadata
+for one logical graph database. It records node labels, relationship types, property keys, and
+named node-property indexes. Labels and relationship types carry `DatabaseObjectOwner` and
+an optional owning schema.
+
+Open the catalog with `GraphCatalog.Open(storage, coordinator)` after the shared coordinator
+has analyzed and scrubbed recovery. Reads take a `TransactionSnapshot`; writes take an active
+`TransactionContext` and join that transaction without committing it. The engine holds the
+definition lock and coordinates changes to graph data and physical indexes.
+
+An initial definition can be marked schema-owned to exercise ownership enforcement.
+Subsequent alteration, drop, property change, or index change throws
+`DatabaseObjectLockedException` naming the definition, schema, and operation. Compiled graph
+schema provisioning remains a separate feature.
+
+The implementation depends on the Database root for ownership contracts, Graph.Storage for
+the file-set facade, and the shared Storage, Transactions, and Types packages. It has no
+reference to the Graph engine, Hosting, or ApplicationModel. Physical B+Trees and their
+maintenance belong to Graph.Storage. See [DESIGN.md](DESIGN.md) for the binary format,
+MVCC behavior, and division of responsibilities.
+
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.Graph.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Graph.Storage
+
+`Assimalign.Cohesion.Database.Graph.Storage` stores property-graph nodes, relationships,
+endpoint adjacency and secondary node-property indexes. Filtered incident reads seek by
+node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
+compatible, and uses explicit binary codecs without reflection.
+
+`GraphStorage` owns the data, journal and backup streams and delegates page allocation,
+checksums and physical recovery to `Database.Storage`. Construct a `TransactionCoordinator`
+from its `WriteAheadJournal` and `Records`, then use `GraphStore.Open` to obtain the sealed
+`GraphStore`. Every mutation takes the caller's `TransactionContext` and leaves commit
+or rollback to that caller. Reads take an immutable `TransactionSnapshot`.
+
+The store exposes creation, MVCC replacement through `UpdateNodeAsync` and `UpdateRelationshipAsync`, lookup, restricted or cascading deletion, incident-edge
+lookup, and exact node-property index creation/search/drop/listing. An incident-edge lookup is
+a B+Tree range seek and does not scan every relationship. Property index searches return
+scalar-verified candidates in identity order. The graph root maps storage DTO identities
+to the frozen `GraphNodeId` and `GraphRelationshipId` contracts and plans traversals.
+
+Dependencies are `Database.Storage`, `Database.Transactions` and `Database.Indexing`.
+There is no dependency on the Graph root, its catalog, Hosting or ApplicationModel.
+Owner-zero pages remain available to `Graph.Catalog` through the low-level record seam.
+
+See [DESIGN.md](DESIGN.md) for the binary format, adjacency costs, numeric index
+semantics, transaction lifecycle, recovery sequence and current limits.

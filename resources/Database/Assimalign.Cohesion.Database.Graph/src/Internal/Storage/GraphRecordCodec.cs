@@ -10,7 +10,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Graph.Storage.Internal;
+using Assimalign.Cohesion.Database.Graph.Storage;
+
+namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphRecordCodec
 {

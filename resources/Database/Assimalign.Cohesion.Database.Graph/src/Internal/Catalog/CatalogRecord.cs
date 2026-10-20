@@ -1,6 +1,8 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Graph.Catalog.Internal;
+using Assimalign.Cohesion.Database.Graph.Catalog;
+
+namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>
 /// One persisted catalog definition: exactly one of a label, a relationship type, a property key or
