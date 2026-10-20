@@ -198,7 +198,8 @@ extra inventory pass, semaphore, timer or async wrapper. A paired allocation tes
 real public check and that same core against a real SQL engine, taking the minimum of three
 warmed 100-call rounds and requiring zero added bytes in Debug and Release. The transition
 tests pause a real deferred CHECK, race health polls for at least 150 ms and 32 completed calls,
-assert exact payloads and no event 0, reenter from a listener, then test completion, failure
+assert exact payloads and no event 0, reenter from a listener, capture the gated database before
+releasing the worker (an open after failure schedules another attempt), then test completion, failure
 and offline/reopen transitions. Review coverage also checks disposal, empty and late cancellation,
 exception identity, same-name replacements, reentrant batches and overlapping observations.
 An identical public-path probe against archived `95d3a7d56` covers empty, healthy and offline

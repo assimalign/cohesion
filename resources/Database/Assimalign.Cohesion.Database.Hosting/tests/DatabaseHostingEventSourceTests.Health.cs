@@ -91,9 +91,10 @@ public sealed partial class DatabaseHostingEventSourceTests
                 var degraded = Event(recorder, 16, "HealthDegraded", _healthPayload);
                 degraded.Level.ShouldBe(EventLevel.Warning);
                 degraded.Payload!.Skip(1).ShouldBe(["sql", "health", "Provisioning", "", "AddConstraint", "items", 1, 1, 1L, 3L]);
-                release.Set();
                 var sqlEngine = (SqlDatabaseEngine)application.Context.Engines.Single();
                 var database = await sqlEngine.OpenDatabaseAsync("health", timeout.Token);
+                // Capture the gated instance before failure can make an open schedule a retry.
+                release.Set();
                 while (fail ? sqlEngine.OfflineDatabases.Count == 0 : database.Provisioning is not null)
                 {
                     await Task.Delay(1, timeout.Token);
