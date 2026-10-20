@@ -4,7 +4,9 @@ using System.Globalization;
 using System.Text;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentCatalogCodec
 {

@@ -1,4 +1,6 @@
-namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>
 /// One persisted catalog record of the metadata owner: exactly one of a collection, a document or

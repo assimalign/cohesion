@@ -96,7 +96,7 @@ explicit-transaction state machine and their checks, so the typed members need n
 The engine references the Documents Language, Catalog, and Storage packages and
 the shared Database root. [DESIGN.md](DESIGN.md) describes transaction ownership,
 OQL semantics, and limits. The [language design](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md)
-defines the supported grammar; the [storage design](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md)
+defines the supported grammar; the [storage design](DESIGN.md#storage-component)
 defines the on-disk format. ApplicationModel and compiled-schema provisioning
 remain outside this composition change.
 
@@ -112,3 +112,61 @@ and text execution; a foreign-model request fails compilation. `DocumentQueryReq
 `Statement` and optional `Parameters` over the memberless `DatabaseRequest` root. Results
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.Documents.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Documents.Catalog
+
+`Assimalign.Cohesion.Database.Documents.Catalog` supplies the sealed `DocumentCatalog`, over the
+same `DocumentStorage` file set as document content. It stores collection
+ownership, versioned document identities/content references, and secondary index definitions.
+Its B+Trees come from `Database.Indexing`, and every data/index mutation joins the caller's
+`TransactionContext` through `TransactionCoordinator`.
+
+`DocumentCatalog.Open(storage, coordinator)` opens the metadata directory and persisted physical
+trees. `DocumentCatalog.EnsureIndexFormat(storage)` checks, before the coordinator's recovery
+scrub and without writing, that every persisted tree is in the B-tree page format this engine
+reads, and throws `IndexFormatException` (`COHDBI001`) when one is not (#1194). Read methods
+accept an explicit visibility snapshot. Mutation methods neither begin nor
+commit the caller's transaction. The engine takes the logical database's exclusive writer lock,
+rejects write conflicts and stale index definitions, and enforces schema ownership before calling
+the catalog.
+
+`CreateIndexAsync` builds a scalar-path index immediately. `SaveDocumentAsync` and
+`DeleteDocumentAsync` maintain every visible index alongside metadata writes; queries do not
+rebuild indexes. The Documents engine reaches index creation and deletion through planned OQL
+`CREATE INDEX` and `DROP INDEX` statements; these catalog methods remain lower-level transactional
+composition seams. `SearchIndexAsync` performs a B+Tree equality or range seek and resolves only
+snapshot-visible document versions, ordered by ordinal identity. See [DESIGN.md](DESIGN.md) for
+the format and the precise path/scalar semantics.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.Documents.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Documents.Storage
+
+`Assimalign.Cohesion.Database.Documents.Storage` stores immutable UTF-8 JSON content as chunk
+chains over `Database.Storage`. `Database.Transactions` supplies the shared logical coordinator,
+version stamps, undo ledger, and recovery classification. The package has no dependency on the
+document engine, Hosting, ApplicationModel, or a serializer that discovers runtime types.
+
+Create a file set with `DocumentStorage.Create`; construct a `TransactionCoordinator` using
+`WriteAheadJournal` and `Records`. `WriteContentAsync` validates a document, writes its chunks in
+the supplied transaction, and returns a `DocumentContentReference`. Publish that reference through
+Documents.Catalog before committing. `ReadContent` validates integrity and returns the original
+bytes. JSON objects, arrays, and scalar roots are supported, including mixed document shapes.
+
+The streaming chunk helpers follow the Blob storage precedent. They transport bytes and require
+their caller to validate document syntax before publication; the engine uses the validated memory
+helper. Documents are currently materialized for query evaluation and limited to `Int32.MaxValue`
+content bytes. This is a format/implementation boundary rather than an eager allocation promise.
+
+The original `InsertDocument`, `ReadDocument`, `UpdateDocument`, and `DeleteDocument` methods are
+retained low-level, unstamped record helpers for existing consumers. They are not the engine's
+document write path and must not be mixed into engine-owned file sets. See [DESIGN.md](DESIGN.md)
+for the exact format, compatibility policy, and recovery order.

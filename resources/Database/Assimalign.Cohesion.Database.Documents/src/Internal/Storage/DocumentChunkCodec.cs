@@ -4,7 +4,9 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Storage.Internal;
+using Assimalign.Cohesion.Database.Documents.Storage;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentChunkCodec
 {

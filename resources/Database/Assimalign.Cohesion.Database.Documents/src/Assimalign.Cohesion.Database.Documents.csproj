@@ -9,7 +9,11 @@
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Storage" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Catalog" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
 </Project>

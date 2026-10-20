@@ -7,7 +7,9 @@ using System.Text.Json;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+
+namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static class DocumentIndexKeys
 {

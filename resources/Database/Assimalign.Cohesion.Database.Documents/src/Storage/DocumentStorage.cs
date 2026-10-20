@@ -1,6 +1,6 @@
 using System;
 
-using Assimalign.Cohesion.Database.Documents.Storage.Internal;
+using Assimalign.Cohesion.Database.Documents.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Storage;
 

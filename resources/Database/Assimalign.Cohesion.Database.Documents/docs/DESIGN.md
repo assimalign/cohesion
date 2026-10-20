@@ -1,5 +1,14 @@
 # Documents engine design
 
+## Model component boundaries
+
+Catalog, Storage and the empty Security satellite projects are consolidated into Assimalign.Cohesion.Database.Documents. Public Catalog and Storage types keep their existing namespaces and live under src/Catalog and src/Storage; their assembly identity is now Assimalign.Cohesion.Database.Documents. Internal component types live under src/Internal/Catalog and src/Internal/Storage and declare Assimalign.Cohesion.Database.Documents.Internal.
+
+Engine-owned storage strategies, row/entry codecs and catalog-aware persistence glue remain in src/Internal/Engine/Storage; those types are engine code rather than the independent Storage component.
+
+The dependency direction remains engine → Catalog → Storage → shared kernel. Storage-folder types must reference neither Catalog-folder nor engine types; Catalog-folder types must reference no engine types. The build exports the actual compiler inputs, and this model's architecture test recompiles them with Roslyn and checks resolved type/member symbols by their declaring source folders, including partial and generated types. Build-generated resource accessors and assembly metadata are shared infrastructure, outside the three layers. No new shipped-assembly visibility grant, wire or disk format, diagnostic code, or behavior is introduced.
+
+
 ## Request parameters (#1102)
 
 The session copies the caller map once per execution with Execution's stateless shared
@@ -50,16 +59,16 @@ flowchart TD
     Execute --> Result["Query rows or DDL command result"]
 ```
 
-| Assembly | Responsibility |
+| Component or assembly | Responsibility |
 | --- | --- |
 | `Database.Documents` | Engine, bound sessions, CRUD, OQL query/index-DDL plans and execution, document protocol family, builder extension |
 | `Database.Documents.Language` | Profile, parser, AST, stable diagnostic locations |
-| `Database.Documents.Catalog` | Versioned collection/document/index metadata and transactional index maintenance |
-| `Database.Documents.Storage` | Explicit JSON validation, stamped metadata/chunk records, kernel record-space adapter |
+| `Catalog/` in Database.Documents | Versioned collection/document/index metadata and transactional index maintenance |
+| `Storage/` in Database.Documents | Explicit JSON validation, stamped metadata/chunk records, kernel record-space adapter |
 | `Database` and child roots | Shared contracts, transaction coordinator, lock manager, WAL, pages, B+Tree |
 
-The engine references the three model packages and the Database root. The catalog
-references Documents storage and shared indexing/transactions, never this engine.
+The engine references the model language package and the Database root. Its Catalog component
+uses Documents Storage and shared indexing/transactions, never engine types.
 There are no Hosting or ApplicationModel references.
 
 ## Sessions and authority
@@ -875,7 +884,7 @@ only on a non-leading path scans. Equality-prefix and trailing-range seeks use p
 EXPLAIN names the index and prints all equality and range components. Single-path descriptions
 retain their existing inclusive/exclusive scalar-bound spelling. The executor reapplies
 the full predicate to candidates, preserving mixed-shape semantics. See the
-[catalog design](../../Assimalign.Cohesion.Database.Documents.Catalog/docs/DESIGN.md)
+[catalog design](DESIGN.md#catalog-component)
 for composite key collation, NULL/MISSING rules, uniqueness arbitration, visibility and restart recovery. META expressions are
 not document paths: META(alias).id comparisons stay residual filters over a scan or a content
 index chosen by another conjunct. T1 has no key-lookup access path.
@@ -1006,7 +1015,7 @@ gaps. Delete/reinsert and restart never reuse an old version.
 
 Nested objects, arrays, and scalar roots are accepted. JSON validation and exact
 byte-preservation rules are specified in the
-[storage format](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md).
+[storage format](DESIGN.md#storage-component).
 Adding/removing fields and changing a scalar's type are supported complete-document
 replacements. They need no compiled schema migration and update indexes in the
 same transaction. The new shape can change predicate membership and projection
@@ -1711,3 +1720,380 @@ conversion overflow outside expression evaluation. No message embeds its code.
 ## Shared startup negotiation (#1105)
 
 The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. Documents keeps the existing structured Failure frame (#190/#1103); no second diagnostics frame is needed.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.Documents.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Document catalog design
+
+#### Catalog: Family and responsibilities
+
+Documents.Catalog depends on the Database root for ownership vocabulary, Documents.Storage for
+record/content access, Database.Transactions for MVCC and statement brackets, Database.Indexing
+for B+Trees, and Database.Types for scalar key encoding. The engine depends on this package and
+owns sessions, OQL planning/execution, lock acquisition, ownership enforcement, and
+commit/rollback. There is no Hosting or ApplicationModel dependency and no compiled-schema
+provisioning.
+
+The dependency diagram shows the same reference direction as the prose.
+
+```mermaid
+flowchart LR
+    Cat["Documents.Catalog"] --> Root["Database"]
+    Cat --> Doc["Documents.Storage"]
+    Cat --> Tx["Database.Transactions"]
+    Cat --> Tree["Database.Indexing"]
+    Cat --> Types["Database.Types"]
+```
+
+`DocumentCatalog.Open` returns the sealed `DocumentCatalog`, which has a private constructor; its
+record and codecs are internal. The former `IDocumentCatalog` interface, `DocumentCatalog` static
+factory and internal `DefaultDocumentCatalog` collapsed into it (concrete-types plan, phase 4,
+#1260), and its index members (`CreateIndexAsync`, `DeleteIndexAsync`, `SearchIndexAsync`) now
+check their reference arguments themselves. Public metadata records are immutable values.
+
+#### Catalog: Snapshot directory and ownership
+
+Opening scans only owner-zero metadata pages, building directories keyed by ordinal collection
+name, `(collectionId, documentId)`, and `(collectionId, indexName)`. Directories retain physical
+version references. Every lookup rereads record stamps and identity: rollback, purge, and slot
+reuse cannot silently stale the directory. Each reread is `Storage.TryReadRecord` with owner
+zero, which reports a reclaimed location (a deleted or reverted slot, a metadata page the purge
+freed, a page reallocated to a content chain or as an index node) without reading it; that
+reference, and one whose identity changed, is dropped from the directory. CRC and I/O failures
+propagate. Until #1342 the lookup caught only the slot exceptions, so once the purge freed a
+metadata page every lookup that reached one of its references failed with "Page N is not
+allocated": 250 versions of one document and a purge pass were enough. Reads choose the newest visible writer whose
+deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
+page allocation, or B+Tree scan order.
+
+`SearchIndexAsync` fetches the catalog record behind each visible index entry the same way:
+`TryReadRecord` with owner zero skips an entry whose record was reclaimed beneath it, the
+collection and stamp checks reject a slot that now holds another record, and a page that fails
+its checksum or cannot be read fails the search. Until #1342 the search read the record without
+the reclamation check, so an entry over a deleted slot failed the search with "Cannot read a
+deleted slot", and one over a freed page with "Page N is not allocated", instead of being skipped.
+
+Collections carry `DatabaseObjectOwner` plus an optional owning schema. `Schema` requires a
+nonempty schema name. The engine creates live-session collections as `Adhoc` and rejects
+`DROP COLLECTION`, OQL `CREATE INDEX`, and OQL `DROP INDEX` against a schema-owned collection with
+`DatabaseObjectLockedException`, naming the collection, schema, and requested operation. Catalog
+metadata can be directly marked for enforcement tests; this is not a compiled-schema deployment
+facility.
+
+The caller holds appropriate shared-kernel locks and checks latest committed metadata before a
+write. In particular, a transaction whose snapshot predates a changed index definition must be
+rejected for mutation: maintaining its obsolete index set would miss newly committed indexes.
+The engine performs this check. Catalog methods are lower-level composition seams, like Blob's
+catalog, and do not acquire model locks themselves.
+
+#### Catalog: Record format, per-kind versions
+
+Every record starts with UInt64 writer at offset 0, UInt64 deleter at 8, byte kind at 16, byte
+format version at 17. All integers are little-endian. Strings are Int32 UTF-8 byte length followed
+by those bytes; length -1 means null where explicitly allowed. Strings use strict UTF-8. GUIDs
+are the 16 bytes produced by `Guid.ToByteArray()` (the .NET mixed-endian layout). These choices
+are explicit so a reader in another language can decode the format without .NET serialization.
+
+The fields below appear consecutively beginning at offset 18. No trailing fields are accepted.
+
+| Kind | Owner pages | Payload fields, in order |
+| --- | --- | --- |
+| 1 collection | 0 | GUID collection identity; string name; byte owner; nullable string owning schema |
+| 2 document | 0 | GUID collection identity; string document identity; UInt64 version; UInt64 head; Int64 byte length; UInt32 IEEE CRC-32 |
+| 4 index definition (v2) | 0 | GUID collection identity; string index name; Int32 path count (1..32); ordered path strings; byte unique flag (0 or 1); UInt64 physical generation identity |
+| 5 physical registration (v2) | 1 | UInt64 physical generation identity; Int64 root page; string index name; byte unique flag (0 or 1) |
+
+Kinds 1 and 2 remain v1. Every index uses v2, including single-path nonunique indexes.
+V1 index records are refused before the recovery scrub writes anything, with found/supported
+versions and a recreate remedy. There is no upgrade path or legacy reader. The preceding v1 index reader
+refuses v2 physical registrations at its pre-scrub fence. Engines predating that fence must
+never open these files, as the compatibility section below records.
+Key-path lists are immutable and compare by value, including catalog conflict checks.
+A default `DocumentIndexMetadata` reports an empty leading `Path` and can be formatted safely.
+
+Kind 3 content chunks use the format in
+[Documents.Storage](DESIGN.md#storage-component).
+Collection IDs cannot be empty, names cannot be blank, document versions start at 1, content
+heads cannot be zero, and document lengths must be positive and fit in an Int32. Owner is the
+underlying `DatabaseObjectOwner` byte (`Adhoc = 0`, `Schema = 1`). Unknown kinds, versions, invalid
+references, duplicate physical generations, and malformed payloads fail closed.
+
+Catalog metadata records fit one slotted-page record. Identity/name/path sizes are consequently
+bounded by `SlottedPage.MaxRecordSize`; very long metadata is rejected by the shared storage
+layer. Document content has its separate multi-page chunk mechanism.
+
+#### Catalog: Index definition and key semantics
+
+Index definitions are lower-level catalog mutations, not a second public engine entry point. The
+Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
+plans, and the plan executor invokes this package under the statement's `TransactionContext`
+after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
+members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
+
+Each index has 1..32 ordered case-sensitive paths and an immutable UNIQUE flag. The cap
+matches PostgreSQL `src/include/pg_config_manual.h:79` (INDEX_MAX_KEYS). Paths retain the
+lossless dotted/bracket-string encoding: `customer.address.zip`, `items[0].price`, and
+`['root.name']`. Wildcards, expansion, expression keys and sort directions are outside T1.
+The single-path catalog overload remains a convenience for a nonunique definition; it writes v2.
+
+A document gets one entry when the leading path is not MISSING. Absent members, incompatible
+shapes, navigation through NULL and out-of-range subscripts yield MISSING; reading a NULL
+member itself yields NULL, matching the evaluator. Trailing MISSING and explicit NULL are
+distinct encoded components. No document-identity suffix is needed.
+
+Every component starts with one Documents-owned byte: 0 MISSING, 1 NULL, 2 FALSE, 3 TRUE,
+4 number, 5 string, 6 array, 7 object. The first four and the last two have no payload.
+Arrays and objects each use a lossy tag; the executor always reapplies the full predicate.
+Number payloads use `DatabaseKeyWriter.AppendDecimal`, so 1 and 1.00 are equal. String
+payloads use `AppendBinary` over UTF-16BE code units, including surrogates, preserving ordinal
+OQL order. Each scalar payload includes the shared writer's type byte and terminator/escaping.
+Concatenation preserves MISSING &lt; NULL &lt; FALSE &lt; TRUE &lt; number &lt; string &lt; array &lt; object.
+The complete key must fit the shared 1024-byte limit; oversize fails before publication.
+
+The latest-state uniqueness snapshot is created only when a changed UNIQUE key needs a probe.
+UNIQUE checks are immediate, under the caller's database writer lock, before the physical
+statement bracket. A latest-state snapshot includes the caller's own earlier writes and
+excludes committed contexts from its in-flight set, including during the interval between
+writer-lock release and coordinator untracking. A cursor
+probes equal keys while excluding the document's own previous entry. Build detects duplicate
+encoded keys before creating any tree or registration. Keys containing NULL or MISSING never
+conflict (PostgreSQL's NULLS DISTINCT default, `doc/src/sgml/ref/create_index.sgml:340-347`),
+including trailing NULL/MISSING. This differs from Cohesion SQL's equal-NULL index policy.
+Arrays and objects in an indexed UNIQUE key fail with COHDOC021 naming the index and path.
+Duplicate writes/builds raise COHDOC020 (SQLSTATE 23505, PostgreSQL
+`src/backend/utils/errcodes.txt:239`), naming the collection and index without echoing key data.
+Both use the public `DocumentConstraintViolationException : DatabaseException` owned by this
+catalog package. The physical B+Trees deliberately stay nonunique: the catalog implements
+NULLS DISTINCT and arbitration. Kind 4 and kind 5 retain the UNIQUE flag across restart.
+An immediate multi-row key swap fails, and the engine's transaction boundary undoes the statement.
+
+`SearchIndexAsync` accepts leading scalar equality values plus lower/upper bounds on the
+next component. It uses SQL's prefix-successor ranges (`resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Execution/SqlPlanExecutor.cs:1407-1490`):
+equality is [P, successor(P)); an exclusive lower uses successor(P+v), and an inclusive
+upper uses successor(P+v) exclusively. A successor increments the last non-FF byte and
+truncates after it. Every component tag is below FF, so every nonempty prefix has a successor.
+These bounds include trailing components, unlike an inclusive [P,P] range. The planner uses
+one range component and retains all other conjuncts as residual filters, matching PostgreSQL
+`doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
+
+Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
+and deleter stamps through the existing index API. Create builds the tree immediately while the
+caller holds the logical database's exclusive writer lock, preserving each visible source
+document's writer stamp. The new index definition is invisible to snapshots predating its
+creation; those snapshots use scans.
+
+#### Catalog: Mutation, rollback, and recovery
+
+Saving a document prepares old and new composite keys and checks unique constraints, then one shared physical statement bracket
+tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
+entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
+through splits since #1159, so registrations change only when a tree is created). Deletion
+tombstones metadata and keys in one
+bracket. The surrounding logical transaction also owns all chunk writes/tombstones. The catalog
+publishes its in-memory reference only after the physical bracket succeeds. The shared version
+ledger records record and index mutations, so logical rollback erases the writer's keys and
+restores old tombstones. The caller aborts the logical operation after failure.
+
+Physical tree generations use reserved storage sequences and are never reused. Root registrations
+carry writer/deleter zero because they describe current physical topology, including nodes holding
+uncommitted versions. Root splits rewrite the root page in place, and a tree's creation and its
+registration share one physical bracket. A failure reattaches the manager from physically
+restored registrations. Undo adapters resolve the current
+tree instead of holding a stale manager object. Current B+Tree erase/purge removes leaf entries
+without merging nodes or collapsing roots, so undo does not change the persisted root.
+
+Dropping an index tombstones its definition and keeps the physical tree for readers with older
+snapshots. Recreating the name allocates a new physical generation. Tree reclamation for dropped
+or rolled-back definitions is deferred; the shared index manager has no tree-page vacuum yet.
+This costs disk space, but never rebuilds a live index or exposes a dropped definition.
+
+Recovery order is physical storage redo, coordinator `AnalyzeAndScrub` over stamped records,
+catalog open (including physical registrations), `RecoverIndexesAsync` using the same abandoned
+writer set, and finally coordinator `CompleteRecovery`. Root registrations survive logical scrub
+so every tree can be scrubbed before the journal's proof is checkpointed away. No query-time
+repair or lazy index rebuild is used. Tests exercise split roots, committed and abandoned updates,
+logical rollback, snapshot-pinned versions, mixed shapes, and a serialized restart image.
+The DELETE restart cases open the recovered `by_rank` B-tree directly under the latest snapshot:
+the committed-deleted key has no live entry, while an abandoned deletion restores exactly one.
+They also retain a live control key, bypassing `SearchIndexAsync`'s catalog-record filtering.
+The restart test uses an ordinary journal flush before cloning its memory streams;
+it verifies recovery and index scrub without claiming physical durable-flush support.
+
+#### Catalog: Compatibility and error model
+
+Adding/removing fields, changing scalar type, or replacing an object with an array is supported
+without schema migration. Each change creates a new version and updates every affected index.
+On-disk record-layout changes require a new format version with no migration or legacy reader;
+unknown versions are rejected.
+
+The index trees' pages are not catalog records: `Database.Indexing` owns their B-tree page
+format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
+root page when the catalog attaches it. Opening the catalog happens after the coordinator's
+recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
+reading only metadata kind/version headers, the registration records (which carry no MVCC stamps,
+so the scrub does not change them), and each root page. `Open` decodes metadata payloads once,
+after recovery; the fence does not allocate decoded collections, documents or path lists.
+The Documents engine calls it before recovery and refuses a database
+whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
+the `IndexFormatException` as its inner exception. A cleanly closed database is left
+byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
+undo, and keeps its journal for the engine that wrote it. There is no upgrade path (owner decision
+of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page
+format nor anything this catalog changed, so they cannot detect a database this engine wrote and
+must not open one (owner review of #1194). Former raw, unstamped DocumentStorage stub files are unsupported
+as engine databases. Catalog format failures, including truncated physical registrations at the pre-scrub fence, raise
+`DocumentCatalogException`; shared storage
+corruption remains a storage exception. Invalid JSON/numeric-domain input is rejected by the
+validated storage write helper before publication. Public package APIs require no reflection,
+dynamic code generation, or Microsoft.Extensions dependencies.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.Documents.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Document storage design
+
+#### Storage: Composition and lifecycle
+
+Documents.Storage depends on Database.Storage for pages, checksums, file headers, journaling,
+write-back, and physical recovery, and on Database.Transactions for logical transactions and
+record-version bookkeeping. It duplicates none of those mechanisms. The engine supplies one
+coordinator for one storage instance. Catalog metadata and content occupy the same file set.
+
+The dependency direction is shown below; both arrows mean references.
+
+```mermaid
+flowchart LR
+    Doc["Documents.Storage"] --> Storage["Database.Storage"]
+    Doc --> Tx["Database.Transactions"]
+```
+
+`Create` initializes a shared-kernel file set with model `Document`. The engine opens with
+`checkpointOnOpen: false`, constructs the coordinator, calls `AnalyzeAndScrub`, opens the catalog
+and scrubs its indexes, and only then calls `CompleteRecovery`. Checkpointing earlier would discard
+the commit evidence needed to distinguish abandoned logical writes. Engine disposal aborts active
+logical contexts before durably flushing storage. Storage owns the passed streams.
+
+#### Storage: Serialization rules, version 1
+
+Content is exactly one UTF-8 JSON value, without a BOM, comments, or trailing commas. Objects,
+arrays, strings, booleans, JSON null, and numbers are accepted at the root or nested. Maximum
+nesting depth is 128. Object field names are ordinal and case-sensitive; duplicate names in any
+object are rejected, including names that become equal after JSON escape decoding. Object field
+order, array order, whitespace, string escape spelling, and numeric spelling round-trip byte for
+byte. Unicode escapes use the BCL JSON reader's validation and decoding semantics.
+
+Numbers must be exactly representable by `System.Decimal`. Validation first parses a decimal,
+then compares normalized signed significands and base-10 exponents against the original token.
+Rounding and underflow are rejected: for example, `1e-100` and excess nonzero fractional precision
+are unsupported. Numerically equal spellings such as `1`, `1.0`, and `1e0` remain byte-distinct
+content but compare equally in OQL and indexes. Signed zero compares equal to zero. NaN and
+infinity are not JSON and are rejected. Timestamps and binary content have no implicit type;
+applications may encode them as ordinary strings or arrays.
+
+Validation occurs before any chunk write in `WriteContentAsync`. A malformed write creates no
+chunks. `ReadContent` verifies the length, chain topology, complete checksum, and JSON rules. It
+returns an independent byte array; changing it cannot mutate storage. The implementation uses
+`JsonDocument` and explicit scalar handling; it does not use reflection, runtime activation,
+`JsonSerializer` type discovery, or dynamic code generation.
+
+#### Storage: Physical record envelope
+
+All integers in record envelopes are little-endian. Offsets below are relative to the start of a
+slotted-page record, not the physical page. Shared page headers, CRCs, slot directories, journaling,
+and allocation are specified by Database.Storage. The writer/deleter prefix follows
+[Database.Transactions](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md).
+
+| Offset | Bytes | Meaning |
+| --- | --- | --- |
+| 0 | 8 | Logical writer sequence, UInt64 |
+| 8 | 8 | Logical deleter sequence, UInt64; zero means not tombstoned |
+| 16 | 1 | Record kind: 1 collection, 2 document metadata, 3 content chunk, 4 index definition, 5 physical tree registration |
+| 17 | 1 | Record-format version, currently 1 |
+
+Collection, document, and index-definition metadata use owner-zero pages and the formats in
+[Documents.Catalog](DESIGN.md#catalog-component).
+Physical tree registrations use owner-one pages, writer/deleter zero, and physical statement
+atomicity; logical metadata controls whether a tree is queryable.
+
+#### Storage: Chunk-chain format
+
+Kind 3 contains this complete header followed by raw JSON bytes:
+
+| Offset | Bytes | Meaning |
+| --- | --- | --- |
+| 0 | 18 | Common stamped envelope above; kind 3, version 1 |
+| 18 | 2 | Payload length, UInt16 |
+| 20 | 8 | Packed next chunk location, UInt64; zero marks the final chunk |
+| 28 | payload length | Consecutive slice of the original UTF-8 content |
+
+Payload capacity is `SlottedPage.MaxRecordSize - 28` (8,064 bytes with the current kernel page
+layout). A packed location stores the page in its high 48 bits and slot in its low 16 bits:
+`(pageId << 16) | slotIndex`. Zero cannot identify a content record.
+
+Every chunk page carries one content owner, `1UL << 63` (`DocumentStorage.ContentOwner`), which
+keeps streaming content out of the owner-zero catalog and owner-one tree-registration scans. All
+transactions share it. The kernel fills only an owner's current write page, so the former owner
+per writer, `writerSequence | (1UL << 63)`, gave every transaction a fresh page: a 180-byte
+document took a whole 8 KiB page, 1.009 pages per auto-commit put, and one six-second pace test on
+a fast CI runner grew an in-memory data file past 2 GiB. With the shared owner, about 38 such
+documents fill a page. PostgreSQL keeps its insert target per relation for the same reason: it
+tries the cached target block, then the free-space map, then the last page "to avoid
+one-tuple-per-page syndrome" (`src/backend/access/heap/hio.c:571-596`,
+`RelationGetBufferForTuple`). Visibility needs no page of its own: it is per record, through the
+writer and deleter stamps, and every chunk bracket runs under the coordinator's apply gate. A page
+holds chunks of many transactions, so it returns to the free-space map only when the last of them
+is undone or purged. A full 8,064-byte chunk still takes a page alone, and the partly filled page it
+passes over is not revisited until the kernel tracks partial free space (Database.Storage
+DESIGN.md, "Per-owner record chains"). A file written with per-writer owners needs no migration:
+owner tags only group pages, so its chunks stay readable and its pages simply take no new chunks.
+
+The catalog stores the first location, total byte length, and IEEE CRC-32 over all content bytes.
+CRC-32 uses polynomial `0xedb88320`, initial state `0xffffffff`, and final bitwise complement.
+Every chunk payload must fit the advertised remaining length. Only the chunk exhausting that
+length may have a zero next pointer; a truncated chain, unexpected continuation, or checksum
+disagreement is corruption. A valid JSON document is nonempty, so its reference always has a
+nonzero head and positive length, at most `Int32.MaxValue`. Streaming primitives can represent an
+empty byte chain, but catalog publication rejects it as a document.
+
+A write buffers one chunk, inserts it in a shared physical statement bracket, and links the
+previous tail in that same bracket. All chunks and the later metadata version carry the same
+logical writer. They remain invisible until the transaction commits. Replacing/deleting content
+tombstones every old chunk through `TransactionContext`; snapshot readers retain the old chain
+until the shared purge bound allows reclamation. The shared version ledger removes all created
+chunks and clears old tombstones on rollback. A crash uses the shared recovery scrub instead of
+an in-memory undo ledger. Tests flush the journal ordinarily and clone serialized memory-stream
+bytes before disposal to prove committed chunks survive and abandoned chunks disappear,
+including chains larger than 128 pages. These recovery images test replay and scrub;
+MemoryStream supplies no durable-flush contract or physical-persistence guarantee.
+
+#### Storage: Compatibility and limits
+
+Adding, removing, or reordering object fields is supported without provisioning or migration.
+Changing a field between scalar types, object, array, and null is supported and produces a new
+document version. Documents within one collection may have unrelated shapes. Index maintenance
+removes the old scalar key and inserts the new scalar key in the same transaction. There is no
+implicit scalar conversion: a number becoming a string changes its query/index type.
+
+Changing the on-disk envelope, field ordering, scalar domain, or checksum requires a new format
+version and an explicit reader/writer compatibility design. Unknown versions fail closed; there
+is no automatic format migration. Files produced by the former unstamped `DocumentStorage` stub
+are not supported as engine file sets. Its retained low-level record APIs remain separately usable
+and do not validate or stamp data. They are intentionally excluded from engine composition.
+
+Compiled-schema provisioning, compression, binary-JSON field-offset tables, encryption,
+replication, and a wire streaming protocol are outside this package's scope.
+
+
+## Public assembly identity changes
+
+The following public types move from their Catalog or Storage assembly into Assimalign.Cohesion.Database.Documents. Their namespaces, members, diagnostic codes and serialized representations are unchanged. Public members whose signatures expose these types also reference their new assembly identity. Consumers must replace satellite project/package/assembly references with the model reference and recompile; assembly-qualified type names change. No type forwarding or compatibility assembly is supplied. Empty Security (and Cache Catalog/Storage) projects had no public types.
+
+- From `Assimalign.Cohesion.Database.Documents.Catalog`: `Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog`, `Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalogEntry`, `Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalogException`, `Assimalign.Cohesion.Database.Documents.Catalog.DocumentCollectionMetadata`, `Assimalign.Cohesion.Database.Documents.Catalog.DocumentConstraintViolationException`, `Assimalign.Cohesion.Database.Documents.Catalog.DocumentIndexMetadata`.
+- From `Assimalign.Cohesion.Database.Documents.Storage`: `Assimalign.Cohesion.Database.Documents.Storage.DocumentContentReference`, `Assimalign.Cohesion.Database.Documents.Storage.DocumentStorage`.
+
+Identical resource keys `IndexPathCount` are stored once with their unchanged values.
