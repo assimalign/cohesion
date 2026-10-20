@@ -254,8 +254,17 @@ internal static class Program
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
+        Check("in process: ordinary invariant LIKE anchors", await RowsAsync(session,
+            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
+            "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +
+            "(RPAD('a', 199988, 'a') || '@example.com') COLLATE invariant LIKE '%@example.com', " +
+            "('abc' || RPAD('z', 199997, 'z')) COLLATE invariant LIKE 'abc%', " +
+            "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
+            "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1"), [[true, true, true, true, false, true]]);
         CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
+        CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "COHSQLE040");
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -422,8 +431,17 @@ internal static class Program
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
+        Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,
+            "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
+            "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +
+            "(RPAD('a', 199988, 'a') || '@example.com') COLLATE invariant LIKE '%@example.com', " +
+            "('abc' || RPAD('z', 199997, 'z')) COLLATE invariant LIKE 'abc%', " +
+            "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
+            "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1", timeout.Token), [[true, true, true, true, false, true]]);
         CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
             "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
+        CheckFailure("over the wire: invariant LIKE work limit", await FailureAsync(() => RowsAsync(connection,
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);

@@ -5753,7 +5753,7 @@ COHDBP001 with exact retained/omitted counts; the original Error category/messag
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
-## Predicate execution (#1111)
+## Predicate execution (#1111, #1166)
 
 Dedicated E1 distinct and Boolean-test nodes avoid binary null propagation and seek
 extraction. The distinct predicate uses the existing comparer, collation and CHAR
@@ -5774,14 +5774,58 @@ a scalar-to-normalized-offset map preserves boundaries across expansions and ign
 marks. Binary and simple case-insensitive matching use last-`%` backtracking with
 constant search state; simple folding preserves one scalar per original scalar.
 Accent-insensitive literal probes compare normalized spans and stop once a prefix
-can no longer match. Linguistic probes compare spans at every original scalar
-boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
-test cannot safely prune these comparisons. Explicit continuations avoid recursion;
-visited suffixes use at most one bit per token/input boundary, allocated by token
-as reached. Every path observes statement cancellation. Runtime distinct, truth-test
+can no longer match. Invariant literals use CompareInfo.IsSuffix for terminal
+suffixes before analyzing the input boundaries, including combining and ignored
+scalars ahead of an independent terminal literal. IsPrefix supplies candidate ends
+for anchors and IndexOf supplies candidate starts for middle runs. Independent scalar ends without ignorables use constant-state
+last-% backtracking; combining sequences and contextual scripts (including Thai/Lao
+reordering and contractions) retain exhaustive scalar probes (like_match.c:289-311).
+ASCII letter/digit literals prune impossible isolated prefixes and
+skip ignored runs when the complete-input search misses a match at a combining
+boundary. Ignored scalars retain all candidate ends on the general path. Explicit continuations avoid recursion;
+visited suffixes keep one boundary inline per token and expand to at most one bit
+per token/input boundary when another start arrives. Invariant search charges every transition and boundary probe, plus both
+UTF-16 comparison/search lengths, to a per-match budget of
+64 × (input UTF-16 length + 1) × (raw pattern UTF-16 length + 1), with checked
+64-bit arithmetic. Successful prefix/middle searches charge through the match;
+Failed searches before boundary analysis charge the full offered span; known
+independent prefix failures charge the literal extent. Ordinary anchors therefore stay
+linear in input length, leaving the polynomial budget as a backstop. Each zero-initialized
+32-bit visited-state word also costs one unit, charged before allocating its row;
+many literal tokens therefore cannot bypass the budget through state initialization.
+Exhaustion raises located
+COHSQLE040; it never returns a guessed Boolean. This bounds comparison work even when
+a single probe scans a long equal prefix, while preserving reordered and ignorable
+scalar semantics for admitted matches (#1166). Cancellation wins over budget refusal.
+The planner marks LIKE-bearing plans during its existing expression walk, including
+CTEs and subqueries; cached view bodies retain the flag, never a token. The executor
+passes the current statement token to their row evaluator, and persisted CHECKs carry
+the same flag, aggregated once on SqlBoundTable. DEFAULT and SQL-function evaluation already forward the current token.
+Plans without LIKE or application code retain the allocation-free shared evaluator.
+Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.
+
+The #1394 resource regressions use 2,048 `%a` fragments and count search transitions
+and compared UTF-16 units instead of elapsed time. Index-backed search is bounded by
+O(input × pattern); invariant search must refuse within its charged budget. Minimum
+allocation across three rounds pins zero bytes for binary matching and size bounds
+for normalization and visited bits. Literal probes use spans; no suffix string is
+copied during backtracking. The existing small-stack regression covers the iterative
+matcher independently of expression-tree stack guards.
+Accent-insensitive matching maps each normalized end offset to its first original
+scalar boundary and coalesces already reached literal-end continuations. This avoids
+repeatedly scanning an ignored prefix or enumerating an ignored tail for every raw
+start. Wildcards still consume original scalars, and an exhaustive small-input oracle
+pins expansion, decomposition and ignorable-mark behavior.
+The final literal compares the complete remaining span once (PostgreSQL
+`src/backend/utils/adt/like_match.c:272-286`), preserving long exact linguistic
+matches within the work budget. Scalar-offset and first-boundary arrays rent from
+ArrayPool and return in a finally block, including on cancellation or refusal.
+The test hook is captured per evaluator and supplied to Match, leaving cached
+patterns immutable. A single delegate check remains at match entry; there is no
+mutable test-hook field on the shared pattern.
 
 
 ## Catalog component

@@ -350,7 +350,6 @@ public sealed class SqlPredicateExecutionTests
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: long backtracking observes cancellation without recursion")]
     [InlineData("binary")]
-    [InlineData("invariant")]
     public void Match_LongPattern_ShouldObserveCancellation(string name)
     {
         // Arrange
@@ -426,7 +425,6 @@ public sealed class SqlPredicateExecutionTests
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive nonmatching collation paths cancel within a bound")]
     [InlineData("case_insensitive")]
     [InlineData("case_accent_insensitive")]
-    [InlineData("invariant")]
     public void Match_RepeatedWildcardFailure_ShouldCancelCleanly(string name)
     {
         // Arrange
@@ -434,36 +432,337 @@ public sealed class SqlPredicateExecutionTests
         // repeated suffix exploration; the separate resource test must finish uncancelled.
         var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", 128)) + new string('a', 100_000) + "b", "!", CancellationToken.None);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         // Act / Assert
         Should.Throw<OperationCanceledException>(() => pattern.Match(new string('a', 200_000), Collation.FromName(name), cancellation.Token));
-        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures finish within time and allocation bounds without cancellation")]
-    [InlineData("binary", 200_000, 128, 64 * 1024, 2)]
-    [InlineData("case_insensitive", 200_000, 128, 24 * 1024 * 1024, 2)]
-    [InlineData("case_accent_insensitive", 200_000, 128, 64 * 1024 * 1024, 10)]
-    [InlineData("invariant", 256, 16, 128 * 1024, 5)]
-    public void Match_RepeatedWildcardFailure_ShouldCompleteWithinResourceBounds(string name, int length, int wildcards, long allocationLimit, int seconds)
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: a pathological invariant pattern stops at a polynomial work budget")]
+    [InlineData(256)]
+    [InlineData(512)]
+    [InlineData(1024)]
+    public void Match_LinguisticFailure_ShouldRefuseWithinWorkBudget(int length)
+    {
+        // Arrange
+        const int wildcards = 32;
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%เก", wildcards)) + "ข", "!", CancellationToken.None);
+        string input = string.Concat(Enumerable.Repeat("เก", length / 2));
+        long work = 0;
+        // Act
+        var error = Should.Throw<DatabaseException>(() => pattern.Match(input, Collation.Invariant, CancellationToken.None, out work));
+        // Assert: comparison lengths as well as transitions consume the same finite budget.
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
+        work.ShouldBeGreaterThan(0);
+        work.ShouldBeLessThanOrEqualTo(pattern.WorkLimit(length));
+        pattern.WorkLimit(length).ShouldBe(64L * (length + 1) * (3 * wildcards + 2));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: repetitive failures have deterministic search and allocation bounds")]
+    [InlineData("binary", 200_000, 128, 64 * 1024)]
+    [InlineData("case_insensitive", 200_000, 128, 24 * 1024 * 1024)]
+    [InlineData("case_accent_insensitive", 200_000, 128, 64 * 1024 * 1024)]
+    public void Match_RepeatedWildcardFailure_ShouldCompleteWithinResourceBounds(string name, int length, int wildcards, long allocationLimit)
     {
         // Arrange
         var collation = Collation.FromName(name);
-        // Total matching allocations include the collation's per-scalar normalization.
         var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None).Normalize(collation);
         string input = new('a', length);
         pattern.Match("aa", collation, CancellationToken.None).ShouldBeFalse();
-        var elapsed = new System.Diagnostics.Stopwatch();
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long allocated = long.MaxValue, work = 0;
+        // Act: the minimum of three rounds excludes one-time runtime initialization.
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool matched = pattern.Match(input, collation, CancellationToken.None, out work);
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+            matched.ShouldBeFalse();
+        }
+        // Assert
+        work.ShouldBeLessThanOrEqualTo(16L * (length + 1) * (wildcards + 1));
+        allocated.ShouldBeLessThan(allocationLimit);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: thousands of wildcards retain bounded work and allocation (#1394)")]
+    [InlineData("binary", 0)]
+    [InlineData("case_insensitive", 1024 * 1024)]
+    [InlineData("case_accent_insensitive", 8 * 1024 * 1024)]
+    [InlineData("invariant", 4 * 1024 * 1024)]
+    public void Match_ThousandsOfWildcards_ShouldBoundWorkAndAllocation(string name, long allocationLimit)
+    {
+        // Arrange: tokenization and fixed-pattern normalization stay outside the match.
+        const int length = 8192, wildcards = 2048;
+        var collation = Collation.FromName(name);
+        var pattern = SqlLikePattern.Compile(string.Concat(Enumerable.Repeat("%a", wildcards)) + "b", "!", CancellationToken.None).Normalize(collation);
+        string input = new('a', length);
+        pattern.Match("aa", collation, CancellationToken.None).ShouldBeFalse();
+        long allocated = long.MaxValue, work = 0;
         // Act
-        elapsed.Start();
-        bool matched = pattern.Match(input, collation, CancellationToken.None);
-        elapsed.Stop();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool matched = false;
+            string? code = null;
+            try { matched = pattern.Match(input, collation, CancellationToken.None, out work); }
+            catch (SqlPlanningException exception) { code = exception.Diagnostics[0].Code; }
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
+            matched.ShouldBeFalse();
+            code.ShouldBeNull();
+        }
+        // Assert: ordinal matching allocates nothing; normalization and the visited-bit
+        // matrix have size budgets, independent of the number of backtracking steps.
+        work.ShouldBeLessThanOrEqualTo(collation.IsIndexBacked
+            ? 16L * (length + 1) * (wildcards + 1) : pattern.WorkLimit(length));
+        allocated.ShouldBeLessThanOrEqualTo(allocationLimit);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ignored scalar runs have linear literal boundary work (#1394)")]
+    [InlineData("%a", true)]
+    [InlineData("%a", false)]
+    [InlineData("%́%c", true)]
+    [InlineData("%́%c", false)]
+    public void Match_IgnoredScalarRun_ShouldCoalesceLiteralBoundaries(string text, bool leading)
+    {
+        // Arrange
+        const int length = 200_000;
+        string marks = new('́', length);
+        string input = leading ? marks + "ab" : "a" + marks + "b";
+        var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None).Normalize(Collation.CaseAccentInsensitive);
+        // Act
+        bool matched = pattern.Match(input, Collation.CaseAccentInsensitive, CancellationToken.None, out long work);
         // Assert
         matched.ShouldBeFalse();
-        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(seconds));
-        allocated.ShouldBeLessThan(allocationLimit);
+        work.ShouldBeLessThanOrEqualTo(16L * (input.Length + 1) * (text.Length + 1));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - LIKE: coalesced accent boundaries agree with an exhaustive scalar oracle (#1394)")]
+    public void Match_AccentBoundaries_ShouldRetainAllLiteralEnds()
+    {
+        // Arrange: short BMP scalars keep this deliberately exhaustive oracle small.
+        string?[][] patterns = [[null, "a"], [null, "́", null, "b"], [null, "a", ""], ["́", null, "a"], [null, "ß", ""], [null, "가"], [null, "", "́", null, "b"]];
+        string[] scalars = ["a", "b", "́", "ß", "가", "ᄀ", "ᅡ"];
+        var inputs = new List<string> { "" };
+        for (int depth = 0, first = 0; depth < 3; depth++)
+        {
+            int last = inputs.Count;
+            for (int index = first; index < last; index++)
+            { foreach (string scalar in scalars) { inputs.Add(inputs[index] + scalar); } }
+            first = last;
+        }
+        int comparisons = 0;
+        // Act / Assert
+        foreach (var tokens in patterns)
+        {
+            string text = string.Concat(tokens.Select(token => token is null ? "%" : token.Length == 0 ? "_" : token));
+            var compiled = SqlLikePattern.Compile(text, "!", CancellationToken.None).Normalize(Collation.CaseAccentInsensitive);
+            foreach (string input in inputs)
+            {
+                compiled.Match(input, Collation.CaseAccentInsensitive, CancellationToken.None).ShouldBe(MatchSlow(0, 0), text + ": " + input);
+                comparisons++;
+
+                bool MatchSlow(int token, int start)
+                {
+                    if (token == tokens.Length) { return start == input.Length; }
+                    if (tokens[token] is "") { return start < input.Length && MatchSlow(token + 1, start + 1); }
+                    for (int end = start; end <= input.Length; end++)
+                    {
+                        if ((tokens[token] is null || Collation.CaseAccentInsensitive.Compare(input[start..end], tokens[token]!) == 0) && MatchSlow(token + 1, end)) { return true; }
+                    }
+                    return false;
+                }
+            }
+        }
+        comparisons.ShouldBe(2800);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ordinary invariant patterns succeed through 200000 characters")]
+    [InlineData(128)]
+    [InlineData(1024)]
+    [InlineData(65536)]
+    [InlineData(200000)]
+    public async Task Execute_CommonInvariantPatterns_ShouldSucceedAtOrdinarySizesAsync(int length)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string a = $"RPAD('a', {length}, 'a')";
+        string middle = $"RPAD('z', {length - 3}, 'z') || 'abc'";
+        string email = $"RPAD('a', {length - 12}, 'a') || '@example.com'";
+        string prefix = $"'abc' || RPAD('z', {length - 3}, 'z')";
+        string[] expressions =
+        [
+            $"{a} COLLATE invariant LIKE '%a'",
+            $"({middle}) COLLATE invariant LIKE '%abc%'",
+            $"({email}) COLLATE invariant LIKE '%@example.com'",
+            $"({prefix}) COLLATE invariant LIKE 'abc%'",
+            $"{a} COLLATE invariant LIKE 'abc%'",
+            $"{a} COLLATE invariant NOT LIKE '%b'",
+            $"{a} COLLATE invariant NOT LIKE '%a'",
+            $"{a} COLLATE invariant LIKE '%abc%'",
+        ];
+        object?[] expected = [true, true, true, true, false, true, false, false];
+        string projections = string.Join(", ", expressions.Select((expression, index) => expression + " AS c" + index));
+        string checkedValue = length <= 1024 ? "s" : $"RPAD(s, {length}, 'x')";
+        await ExecuteAsync(session, $"CREATE TABLE checked_common (s TEXT CHECK ({checkedValue} COLLATE invariant LIKE '%x%'))");
+        await ExecuteAsync(session, "CREATE VIEW common_view AS SELECT " + projections + oneRow);
+        // Act / Assert: direct expressions, cached view expressions and a stored CHECK.
+        (await RowsAsync(session, "SELECT " + projections + oneRow)).ShouldHaveSingleItem().ShouldBe(expected);
+        (await RowsAsync(session, "SELECT * FROM common_view")).ShouldHaveSingleItem().ShouldBe(expected);
+        // Physical rows have an 8092-byte limit. Small values use the original
+        // column CHECK; large CHECK inputs are constructed from a stored seed.
+        string storedValue = length <= 1024 ? $"RPAD('x', {length}, 'x')" : "'x'";
+        await ExecuteAsync(session, $"INSERT INTO checked_common VALUES ({storedValue})");
+        (await RowsAsync(session, $"SELECT LENGTH({checkedValue}) FROM checked_common")).ShouldHaveSingleItem()[0].ShouldBe((long)length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: ordinary invariant searches have linear work")]
+    [InlineData(128)]
+    [InlineData(1024)]
+    [InlineData(65536)]
+    [InlineData(200000)]
+    public void Match_CommonInvariantPatterns_ShouldUseLinearWork(int length)
+    {
+        // Arrange
+        (string Text, string Input, bool Expected)[] cases =
+        [
+            ("%a", new string('a', length), true),
+            ("%abc%", new string('z', length - 3) + "abc", true),
+            ("%@example.com", new string('a', length - 12) + "@example.com", true),
+            ("abc%", "abc" + new string('a', length - 3), true),
+            ("abc%", new string('z', length), false),
+            ("%abc%", new string('a', length), false),
+            ("%b", new string('a', length), false),
+            ("%a_bc", new string('a', length - 2) + "bc", true),
+            ("%a", new string('é', length - 1) + "a", true),
+            ("%abc%", new string('中', length - 3) + "abc", true),
+            ("%@example.com", new string('é', length - 12) + "@example.com", true),
+            ("abc%", "abc" + new string('é', length - 3), true),
+            ("abc%", new string('中', length), false),
+            ("%a", new string('\0', length - 1) + "a", true),
+            ("%a", "a" + new string('\u00ad', length - 1), true),
+            ("%a", new string('́', length - 1) + "a", true),
+            ("%a", new string('́', length), false),
+            ("%a", new string('a', length - 1) + "́", false),
+            ("%a", "a" + new string('\u034f', length - 1), true),
+            ("%@example.com", new string('́', length - 12) + "@example.com", true),
+            ("%é", new string('x', length - 2) + "é", true),
+            ("%abc%", new string('́', length - 3) + "abc", true),
+            ("%abc%", new string('́', length), false),
+            ("%abc%", "abc" + new string('́', length - 3), true),
+            ("abc%", new string('́', length), false),
+            ("abc%", "abc" + new string('́', length - 3), true),
+            ("abc%", new string('\u034f', length - 3) + "abc", true),
+            ("a%b", "a" + new string('́', length - 2) + "b", true),
+            ("a%b", "z" + new string('́', length - 2) + "b", false),
+            ("a%b", "a" + new string('\u034f', length - 2) + "c", false),
+        ];
+        // Act / Assert
+        foreach (var (text, input, expected) in cases)
+        {
+            var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
+            pattern.Match(input, Collation.Invariant, CancellationToken.None, out long work).ShouldBe(expected);
+            work.ShouldBeLessThanOrEqualTo((text == "%a_bc" || input.Contains('́') || input.Contains('\u034f') ? 16L : 4L) * (length + text.Length + 1));
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant anchors preserve ignored scalar ends")]
+    [InlineData("a\0", "%a", true)]
+    [InlineData("\0a\0", "%a", true)]
+    [InlineData("\0a\0", "%a_", true)]
+    [InlineData("a\0b", "a_b", true)]
+    [InlineData("\0a", "\0_a", true)]
+    [InlineData("", "%\0", true)]
+    [InlineData("a\u0001b", "a_", true)]
+    [InlineData("a\u0640b", "a_", true)]
+    [InlineData("a\u07fab", "a_", true)]
+    [InlineData("a\u0824b", "a%", true)]
+    [InlineData("a\u0828b", "a_b", true)]
+    public void Match_InvariantAnchors_ShouldPreserveIgnorableScalars(string input, string text, bool expected)
+    {
+        // Arrange
+        var pattern = SqlLikePattern.Compile(text, "!", CancellationToken.None);
+        // Act / Assert
+        pattern.Match(input, Collation.Invariant, CancellationToken.None).ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - LIKE: a long invariant terminal literal compares its complete suffix once (#1394)")]
+    public void Match_LongLinguisticLiteral_ShouldStayWithinLinearWork()
+    {
+        // Arrange
+        string input = new('a', 200_000);
+        var pattern = SqlLikePattern.Compile(input, "!", CancellationToken.None);
+        // Act
+        bool matched = pattern.Match(input, Collation.Invariant, CancellationToken.None, out long work);
+        // Assert
+        matched.ShouldBeTrue();
+        work.ShouldBeLessThanOrEqualTo(3L * input.Length);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: plans retain cancellation only when they contain LIKE")]
+    [InlineData("SELECT s COLLATE invariant LIKE '%b' FROM slow", true)]
+    [InlineData("SELECT s FROM slow WHERE s COLLATE invariant LIKE '%b'", true)]
+    [InlineData("SELECT CASE WHEN s LIKE '%b' THEN 1 ELSE 0 END FROM slow", true)]
+    [InlineData("WITH x AS (SELECT s LIKE '%b' AS matched FROM slow) SELECT matched FROM x", true)]
+    [InlineData("SELECT s FROM slow WHERE EXISTS (SELECT s FROM slow child WHERE child.s LIKE '%b')", true)]
+    [InlineData("SELECT s FROM slow", false)]
+    public async Task Plan_LikeExpressions_ShouldRetainCancellationFlagAsync(string sql, bool expected)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT)");
+        // Act
+        var plan = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
+        // Assert
+        plan.ContainsLike.ShouldBe(expected);
+        database.Definitions.Functions.RunsApplicationCode.ShouldBeFalse();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: cancellation at row-time match entry uses the current statement token")]
+    [InlineData("SELECT matched FROM slow_view", true)]
+    [InlineData("INSERT INTO checked_values VALUES (2, 'aaa')", false)]
+    [InlineData("UPDATE checked_values SET s = 'aaa' WHERE id = 1", false)]
+    public async Task ExecuteAsync_OneRowLike_ShouldObserveStatementCancellationAsync(string sql, bool view)
+    {
+        // Arrange: cached patterns are bound with no cancellation token. An evaluator
+        // hook cancels at Match entry, after operand evaluation, without
+        // registering application code or racing a faster work-budget refusal.
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string literal = new string('a', 1000) + "b";
+        await ExecuteAsync(session, "CREATE TABLE slow (s TEXT)");
+        await ExecuteAsync(session, "INSERT INTO slow VALUES ('a')");
+        await ExecuteAsync(session, "CREATE VIEW slow_view AS SELECT RPAD('a', 500000, 'a') COLLATE invariant LIKE '%" + literal + "' AS matched FROM slow");
+        await ExecuteAsync(session, "CREATE TABLE checked_values (id INT, s TEXT CHECK (s COLLATE invariant LIKE '%" + literal + "'))");
+        await ExecuteAsync(session, "INSERT INTO checked_values VALUES (1, '" + literal + "')");
+        SqlBoundLike like;
+        if (view)
+        {
+            var outer = new SqlPlanner(database.Catalog, null, database.Definitions.Functions).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+            var child = outer.Bindings[0].Source.Derived!.Query.ShouldBeOfType<SqlSelectPlan>();
+            like = child.Projections[0].Value.ShouldBeOfType<SqlBoundLike>();
+        }
+        else
+        {
+            database.Catalog.TryGetTable("dbo", "checked_values", out var table).ShouldBeTrue();
+            like = database.Definitions.Get(table!).Checks[0].Bound.ShouldBeOfType<SqlBoundLike>();
+        }
+        like.Compiled.ShouldNotBeNull();
+        using var cancellation = new CancellationTokenSource();
+        int entered = 0;
+        SqlExpressionEvaluator.BeforeLikeMatch = () => { entered++; cancellation.Cancel(); };
+        database.Definitions.Functions.RunsApplicationCode.ShouldBeFalse();
+        // Act
+        try
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () => await session.ExecuteAsync(sql, cancellationToken: cancellation.Token));
+        }
+        finally { SqlExpressionEvaluator.BeforeLikeMatch = null; }
+        // Assert: the matcher was reached, cancellation escaped, and writes rolled back.
+        entered.ShouldBe(1);
+        if (view) { session.LastStatementMetrics!.RecordsExamined.ShouldBe(1); }
+        (await RowsAsync(session, "SELECT id FROM checked_values")).ShouldHaveSingleItem()[0].ShouldBe(1);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LIKE: invariant literals probe past reordered Thai and Lao prefixes")]

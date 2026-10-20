@@ -38,6 +38,7 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
     private SqlExpressionEvaluator? _scopelessEvaluator;
+    private bool _containsLike;
 
     /// <summary>Initializes a planner for one statement.</summary>
     /// <param name="catalog">The database's catalog.</param>
@@ -90,7 +91,9 @@ internal sealed partial class SqlPlanner
         {
             var referenced = FindReferencedCommonTables(expression);
             _commonTableState = referenced is null ? null : new CommonTableState(referenced);
-            return PlanCore(expression);
+            var plan = PlanCore(expression);
+            plan.ContainsLike = _containsLike;
+            return plan;
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
         {
