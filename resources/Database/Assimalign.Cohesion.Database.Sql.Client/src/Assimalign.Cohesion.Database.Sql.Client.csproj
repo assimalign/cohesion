@@ -9,10 +9,10 @@
 		SQL (the server owns that), so it does NOT reference Sql.Language.
 	-->
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 	</ItemGroup>

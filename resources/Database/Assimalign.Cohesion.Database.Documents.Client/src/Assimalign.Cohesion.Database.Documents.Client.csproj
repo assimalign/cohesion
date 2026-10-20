@@ -3,10 +3,10 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Documents.Client</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Execution" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />

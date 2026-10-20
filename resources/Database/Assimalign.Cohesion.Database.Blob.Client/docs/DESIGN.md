@@ -1,5 +1,9 @@
 # Blob client design
 
+## Contract-only dependencies
+
+Direct references are Database.Client, Blob.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
+
 ## Client exception ownership
 
 `BlobClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
@@ -17,7 +21,7 @@ The dependency arrows below point from each consuming package to its dependency.
 ```mermaid
 flowchart LR
     Client["Database.Blob.Client"] --> Shared["Database.Client"]
-    Client --> Blob["Database.Blob"]
+    Client --> Blob["Database.Blob.Protocol"]
     Client --> Connections["Connections abstractions"]
     Client --> Protocol["Database.Protocol"]
     Shared --> Protocol
@@ -28,7 +32,7 @@ flowchart LR
 | --- | --- |
 | `Assimalign.Cohesion.Database.Blob.Client` | Typed operation APIs, Blob transfer validation, bounded list materialization, client errors |
 | `Assimalign.Cohesion.Database.Client` | Pool leases, transport dialing, startup handshake, framed exchanges, bounded streaming lifetime |
-| `Assimalign.Cohesion.Database.Blob` | Blob codecs, shared transfer state machine, engine and server |
+| `Assimalign.Cohesion.Database.Blob.Protocol | Blob codecs, shared transfer state machine, engine and server |
 | `Assimalign.Cohesion.Database.Protocol` | Family validation, frame envelope, startup and error vocabulary |
 | `Assimalign.Cohesion.Connections` | Transport-neutral connection factory |
 

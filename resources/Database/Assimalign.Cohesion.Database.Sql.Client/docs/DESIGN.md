@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+## Contract-only dependencies
+
+Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
+
 ## Client exception ownership
 
 `SqlClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
@@ -101,7 +105,7 @@ The SQL client references shared mechanics and its model's codecs:
 ```mermaid
 flowchart LR
     SqlClient["Database.Sql.Client"] --> Client["Database.Client"]
-    SqlClient --> Sql["Database.Sql"]
+    SqlClient --> Sql["Database.Sql.Protocol"]
     Client --> Protocol["Database.Protocol"]
     Sql --> Protocol
 ```
@@ -110,7 +114,7 @@ flowchart LR
 | --- | --- |
 | Database.Sql.Client | SQL materialization and typed APIs |
 | Database.Client | Pooling, handshake, framed exchange lifetime |
-| Database.Sql | SQL identifiers and payload codecs |
+| Database.Sql.Protocol | SQL identifiers and payload codecs |
 | Database.Protocol | Shared framing and immutable family binding |
 
 Other model clients do not depend on this package.

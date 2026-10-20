@@ -1,5 +1,9 @@
 # Documents client design
 
+## Contract-only dependencies
+
+Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
+
 ## Client exception ownership
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
@@ -16,7 +20,7 @@ cross-assembly friend grant is required.
 | --- | --- |
 | `Database.Documents.Client` | Sealed client, connection, result types and diagnostic exception |
 | `Database.Client` | Shared client and authenticated connection pool |
-| `Database.Documents` | Server, engine, document value types and model codecs |
+| `Database.Documents.Protocol | Server, engine, document value types and model codecs |
 | `Database.Protocol` | Family-bound frame reader/writer and handshake |
 | `Database.Types` | Column types and structured diagnostics |
 | `Connections` | Transport contracts; the consumer supplies a concrete driver |
@@ -24,7 +28,7 @@ cross-assembly friend grant is required.
 ```mermaid
 flowchart LR
     Client["Documents.Client"] --> Core["Database.Client"]
-    Client --> Model["Database.Documents"]
+    Client --> Model["Database.Documents.Protocol"]
     Client --> Types["Database.Types"]
     Core --> Protocol["Database.Protocol"]
     Model --> Protocol
