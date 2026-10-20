@@ -28,7 +28,7 @@ public sealed class SqlTemporalTimeZoneTests
         _output = output;
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal storage: plain strings are independent of the server zone in two child processes (#1648)")]
+    [UnixTimeZoneFact(DisplayName = "Cohesion Test [SqlEngine] - Temporal storage: plain strings are independent of the server zone in two child processes (#1648)")]
     public async Task Insert_PlainTemporalStrings_ShouldBeIndependentOfServerTimeZone()
     {
         // Arrange: child processes isolate the runtime's global zone cache from the test host.
@@ -64,6 +64,7 @@ public sealed class SqlTemporalTimeZoneTests
             + "." + nameof(Insert_PlainTemporalStrings_ShouldBeIndependentOfServerTimeZone));
         start.ArgumentList.Add("--Logger:trx;LogFileName=zone.trx");
         start.ArgumentList.Add("--ResultsDirectory:" + results);
+        LocalTimeZone.Set(start, hours);
         start.Environment[zoneVariable] = hours.ToString(CultureInfo.InvariantCulture);
         start.Environment["DOTNET_TieredCompilation"] = "0";
         start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
@@ -98,38 +99,34 @@ public sealed class SqlTemporalTimeZoneTests
     private static async Task VerifyStorageAsync(int hours)
     {
         var offset = TimeSpan.FromHours(hours);
-        var zone = TimeZoneInfo.CreateCustomTimeZone("ServerZone", offset, "Server zone", "Server zone");
-        LocalTimeZone.Set(zone);
-        try
-        {
-            // Sentinel: prove ordinary .NET parsing really sees this zone in the child.
-            TimeZoneInfo.Local.Id.ShouldBe(zone.Id);
-            TimeZoneInfo.Local.BaseUtcOffset.ShouldBe(offset);
-            DateTimeOffset.Parse("2026-01-02 03:04:05", CultureInfo.InvariantCulture).Offset.ShouldBe(offset);
-            await using var engine = SqlDatabaseEngine.Create("temporal-zone", new());
-            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
-            await using var session = await database.CreateSessionAsync(CancellationToken.None);
-            await session.ExecuteAsync("CREATE TABLE times (id INT, ts TIMESTAMP, tz TIMESTAMPTZ)", cancellationToken: CancellationToken.None);
-            await session.ExecuteAsync("INSERT INTO times VALUES "
-                + "(1, '2026-01-02T03:04:05+05:00', '2026-01-02 03:04:05'), "
-                + "(2, '2026-07-02T03:04:05-04:00', '2026-07-02 03:04:05')", cancellationToken: CancellationToken.None);
+        string zoneId = LocalTimeZone.GetId(hours);
 
-            // Read the stored values through SQL; DateTime equality alone does not check Kind.
-            await using var rows = (await session.ExecuteAsync("SELECT id, ts, tz FROM times ORDER BY id", cancellationToken: CancellationToken.None))
-                .ShouldBeAssignableTo<DatabaseResultSet>();
-            int count = 0;
-            await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
-            {
-                int month = ++count == 1 ? 1 : 7;
-                var clock = new DateTime(2026, month, 2, 3, 4, 5, DateTimeKind.Unspecified);
-                row.GetValue(1).ShouldBeOfType<DateTime>().ShouldBe(clock);
-                row.GetValue(1).ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
-                var instant = row.GetValue(2).ShouldBeOfType<DateTimeOffset>();
-                instant.Offset.ShouldBe(TimeSpan.Zero);
-                instant.ShouldBe(new DateTimeOffset(clock, TimeSpan.Zero));
-            }
-            count.ShouldBe(2);
+        // Sentinel: prove ordinary .NET parsing really sees this zone in the child.
+        TimeZoneInfo.Local.Id.ShouldBe(zoneId);
+        TimeZoneInfo.Local.BaseUtcOffset.ShouldBe(offset);
+        DateTimeOffset.Parse("2026-01-02 03:04:05", CultureInfo.InvariantCulture).Offset.ShouldBe(offset);
+        await using var engine = SqlDatabaseEngine.Create("temporal-zone", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE times (id INT, ts TIMESTAMP, tz TIMESTAMPTZ)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO times VALUES "
+            + "(1, '2026-01-02T03:04:05+05:00', '2026-01-02 03:04:05'), "
+            + "(2, '2026-07-02T03:04:05-04:00', '2026-07-02 03:04:05')", cancellationToken: CancellationToken.None);
+
+        // Read the stored values through SQL; DateTime equality alone does not check Kind.
+        await using var rows = (await session.ExecuteAsync("SELECT id, ts, tz FROM times ORDER BY id", cancellationToken: CancellationToken.None))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
+        {
+            int month = ++count == 1 ? 1 : 7;
+            var clock = new DateTime(2026, month, 2, 3, 4, 5, DateTimeKind.Unspecified);
+            row.GetValue(1).ShouldBeOfType<DateTime>().ShouldBe(clock);
+            row.GetValue(1).ShouldBeOfType<DateTime>().Kind.ShouldBe(DateTimeKind.Unspecified);
+            var instant = row.GetValue(2).ShouldBeOfType<DateTimeOffset>();
+            instant.Offset.ShouldBe(TimeSpan.Zero);
+            instant.ShouldBe(new DateTimeOffset(clock, TimeSpan.Zero));
         }
-        finally { TimeZoneInfo.ClearCachedData(); }
+        count.ShouldBe(2);
     }
 }

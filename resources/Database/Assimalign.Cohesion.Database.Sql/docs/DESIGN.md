@@ -602,10 +602,11 @@ and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Uns
 TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
 assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
 typed literals use its strict readers directly. No session zone or assembly access grant is added.
-The #1648 storage regression runs in isolated child test processes with TimeZoneInfo.Local
-configured to UTC-7 and UTC+9. A test-only UnsafeAccessor fixture changes the child's cached
-zone fields on Windows and Unix; a plain .NET parse verifies each setting before SQL inserts
-and reads both winter and summer values. The parent process and OS zone remain untouched.
+The #1648 storage regression launches isolated Unix child test processes with TZ set to
+America/Phoenix (UTC-7) and Asia/Tokyo (UTC+9); zone identity, base offset and a plain .NET parse
+verify each setting before SQL inserts and reads both winter and summer values. Windows
+reports an explicit skip because it has no supported per-process local-zone override; the
+Linux CI leg is authoritative. The parent process and OS zone remain untouched.
 
 No catalog record changes. SqlCatalogColumn.DefaultLiteral still contains canonical SQL;
 previously accepted string and signed numeric defaults resolve identically, including after reopen.

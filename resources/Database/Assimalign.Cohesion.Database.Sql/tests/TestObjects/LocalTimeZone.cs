@@ -1,34 +1,21 @@
 using System;
-using System.Runtime.CompilerServices;
+using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
-/// <summary>Changes only a child test process's local zone, on Windows as well as Unix.</summary>
+/// <summary>Configures an isolated Unix test process's local zone before it starts.</summary>
 internal static class LocalTimeZone
 {
-    internal static void Set(TimeZoneInfo zone)
+    internal static void Set(ProcessStartInfo start, int hours)
     {
-        // .NET 10 TimeZoneInfo.cs:42,46-48,880: Local is a cached instance with these fields.
-        // https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/TimeZoneInfo.cs
-        // Change its rules only in an isolated child, then ClearCachedData restores the OS zone.
-        // No OS-wide setting, reflection, shipped member or visibility grant is involved.
-        TimeZoneInfo.ClearCachedData();
-        var local = TimeZoneInfo.Local;
-        BaseUtcOffset(local) = zone.BaseUtcOffset;
-        AdjustmentRules(local) = null;
-        SupportsDaylightSavingTime(local) = false;
-        Id(local) = zone.Id;
+        // Unix TimeZoneInfo.Local reads TZ; vstest's test host inherits this environment.
+        start.Environment["TZ"] = GetId(hours);
     }
 
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_baseUtcOffset")]
-    private static extern ref TimeSpan BaseUtcOffset(TimeZoneInfo zone);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_adjustmentRules")]
-    private static extern ref TimeZoneInfo.AdjustmentRule[]? AdjustmentRules(TimeZoneInfo zone);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_supportsDaylightSavingTime")]
-    private static extern ref bool SupportsDaylightSavingTime(TimeZoneInfo zone);
-
-    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_id")]
-    private static extern ref string Id(TimeZoneInfo zone);
+    internal static string GetId(int hours) => hours switch
+    {
+        -7 => "America/Phoenix",
+        9 => "Asia/Tokyo",
+        _ => throw new ArgumentOutOfRangeException(nameof(hours)),
+    };
 }
