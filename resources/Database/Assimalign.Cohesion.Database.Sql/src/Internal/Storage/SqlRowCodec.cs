@@ -52,13 +52,13 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted SQL (#1111);
+    /// the catalog: 26 fences completion of interrupted empty creations (#1158);
+    /// 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted SQL (#1111);
     /// 24 admits explicit NULL placement in persisted view query text (#1112);
     /// 23 adds persisted read-only views (#1124);
     /// 22 quotes STRING_AGG and LISTAGG identifiers in persisted SQL (#1115);
     /// 21 adds first-class SQL namespaces (catalog kind 15, #1030);
     /// 20 admits the three additional persisted referential delete actions (#1121);
-    /// 26 fences completion of interrupted empty creations (#1158);
     /// 19 quotes PERCENT and TIES identifiers in persisted canonical SQL (#1107);
     /// 18 quotes newly executable T1 function names and BOTH/LEADING/TRAILING in persisted canonical SQL (#1120);
     /// 17 freezes ADD COLUMN missing values separately from insert defaults (table extension 6, #1122);
