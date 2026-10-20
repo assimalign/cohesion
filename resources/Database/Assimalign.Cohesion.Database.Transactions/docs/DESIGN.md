@@ -996,7 +996,9 @@ prove the overlap occurred. JournalEnrollmentTests covers standalone read-only e
 cancellation and refused enrollment. Every model's read-only transaction tests count durable
 flush attempts, journal bytes and LSN changes across read loops and every read-only end, including
 read-committed pins. TransactionCoordinatorRollbackTests anchors 1,000 writers through a lost
-checkpoint record; TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
+checkpoint record. Its fault allows the anchor initialization image to drain before failing the
+post-truncation checkpoint-record write, and asserts the journal is empty while all 1,000 writers
+remain anchored. TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
 write of a checkpoint with 40 writers and a reader. Writer durability and crash classification
 keep the same guarantees.
 

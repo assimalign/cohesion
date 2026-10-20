@@ -105,10 +105,10 @@ public sealed class StorageCheckpointAnchorTests
         var images = storage.CaptureImages();
         using var reopened = AnchorStorage.Open(images.Data, images.Journal);
 
-        // Assert: every chain page is free again, on disk too, and the file did not grow.
+        // Assert: retirement preserves the on-disk anchor type; both allocators reclaim it.
         freeAfterShrink.ShouldBe(freeWithChains + 6);
         storage.PageManager.PageCount.ShouldBe(pagesWithChains);
-        CountAnchorPages(images.Data).ShouldBe(0);
+        CountAnchorPages(images.Data).ShouldBe(6);
         reopened.CheckpointActiveTransactions.ShouldBe([4L]);
         reopened.PageManager.FreePageCount.ShouldBe(freeAfterShrink);
     }

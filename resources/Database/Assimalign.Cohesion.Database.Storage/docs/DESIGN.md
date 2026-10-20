@@ -249,6 +249,11 @@ reader never meets them, because the data file's fence refuses a format-2 file s
 
 ### Checksums
 
+A stored page checksum reserves zero for entirely zero pages by mapping a raw CRC of zero to
+`0xFFFFFFFF`. This aliases raw CRC values `0` and `0xFFFFFFFF`; the escape is symmetric on
+write and verification but is not collision-free. PostgreSQL likewise reduces its page-checksum
+space to avoid zero (`src/include/storage/checksum_impl.h:196-199`).
+
 Pages, journal frames, the identity block and the header slots use CRC-32C (Castagnoli,
 reflected polynomial `0x82F63B78`, initial value and final XOR `0xFFFFFFFF`) through
 `System.Numerics.BitOperations.Crc32C`, eight bytes per step: the CRC32C instruction on x64
@@ -1491,15 +1496,15 @@ its next record. Memory follows page identities plus the cache, not the journal'
 Recovery runs on open, writes directly to the data stream (bypassing the pool — a corrupt page
 must be overwritable), and finishes with a checkpoint unless the caller defers it.
 
-Recovery never replays onto the pages of the checkpoint anchor chain the newest header
-generation reads. Those pages are written outside the journal, while no transaction can touch
-them, so any image of one in the journal is from the page's earlier life, which ended with the
-free that returned the page to the allocator. That free is durable before the chain page is
+Recovery never replays onto the pages of either complete, verified checkpoint anchor chain.
+The chain contents are written outside the journal while no transaction can touch them. Any
+image of one in the journal is its initialization image or from its earlier life, which ended
+with the free that returned the page to the allocator. That free is durable before the chain page is
 written — the header write flushes the journal through it first, and the chain page's LSN
 makes the write-ahead gate enforce the same order ("Checkpoints") — so the free is committed in
 the journal recovery reads, and replaying an image of the page's earlier life would only
 overwrite the anchor open has just read (the next open would then refuse the file as
-corrupt). Open reads page 0 and the chain before recovery and passes the chain's pages to it.
+corrupt). Open reads page 0 and both valid chains before recovery and passes their pages to it.
 Recovery never replays onto page 0 either: nothing journals it, so an image of it is damage.
 
 ### Checkpoints
@@ -1574,6 +1579,27 @@ the page a non-durable bracket freed, and power is lost before the truncation or
 — and fails on both without the rule. The flush costs an fsync only when the journal has a
 tail that is not yet durable; a checkpoint with any dirty data page flushed it through the
 gate before.
+
+**Retired anchors and torn initialization (#1160, #1251).** Retirement returns a page only to
+the in-memory allocator and leaves its `CheckpointAnchor` bytes unchanged. An unjournaled
+conversion to `Reclaimed` could tear after the header sector and make a harmless obsolete anchor
+fail the mandatory free-page checksum check. Open preserves the complete, verified chains of
+both header slots in the allocator and excludes them from recovery replay. The newest slot's
+chain must verify; the older chain may already have been rewritten by an interrupted header
+update and is protected only when it still verifies completely. Only pages typed
+`CheckpointAnchor` outside those live chains are reclaimed without trusting their checksum,
+including a missing checksum. Ordinary `Free` and `Reclaimed` pages still require whole-page
+verification and are never excused merely because their bytes could resemble an anchor tear.
+
+A newly allocated anchor receives a journal full-page image of its initialized anchor header
+while still pinned. Its image LSN gates every write-back; the final chain write retains the
+journal's latest LSN as before. If only the second half of a new anchor write lands, its old
+`Free` or `Reclaimed` header cannot identify it as an anchor: recovery restores this image before
+the open scan. The image cannot be truncated until the chain and its new header slot are
+durable. Subsequent unjournaled rewrites and retirement therefore always leave an anchor type,
+or a journal image that repairs the transition. `StorageAnchorReclamationTests` covers the
+acknowledged-record/two-1,200-writer-checkpoints/shrink reproduction, out-of-order writes onto
+zero and reclaimed pages, both live chains, missing anchor checksums, and torn non-anchor pages.
 
 **A header write that fails after its slot write was issued takes the storage offline
 (#1268).** A failed write or fsync after the slot write leaves that slot either the previous
@@ -1660,7 +1686,8 @@ the anchor, `Storage.CheckpointActiveTransactions` returns the list at the next 
   sequences, under the ordinary page checksum, the page LSN set as above). Each slot
   owns its own chain, so writing one slot never touches the pages the other slot's generation
   reads; the chain grows from and shrinks back to the free-space map, and open frees any
-  anchor page the newest generation does not chain. The anchor used to live in page 0 alone,
+  anchor page neither valid generation chains, leaving retired anchor bytes unchanged on disk.
+  The anchor used to live in page 0 alone,
   980 sequences readers included, and a checkpoint above that was refused as busy while the
   journal kept growing.
 - Every checkpoint replaces the anchor; the non-idle shutdown path and `Flush`, which do not

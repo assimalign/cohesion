@@ -25,6 +25,8 @@ internal static class PageChecksum
         uint checksum = Crc32C.Finalize(state);
         // Zero is reserved for wholly zero pages in storage format 4. Escape a real
         // CRC of zero so a legitimate nonzero page always has a stored checksum.
+        // This aliases raw CRC 0 and 0xFFFFFFFF; it is not collision-free. PostgreSQL also
+        // reduces its checksum space to avoid zero (src/include/storage/checksum_impl.h:196-199).
         return checksum == 0 ? uint.MaxValue : checksum;
     }
 

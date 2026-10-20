@@ -55,9 +55,9 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// not written: its extension never reached the file, so nothing was stolen there.
 /// </para>
 /// <para>
-/// The pages of the checkpoint anchor chain the newest header slot reads are never replayed onto.
-/// They are written outside the journal, and only while no transaction can touch them, so any
-/// record of them in the journal is from an earlier life of the page, which ended with the free
+/// The pages of both complete, verified checkpoint anchor chains are never replayed onto.
+/// Their contents are written outside the journal while no transaction can touch them. A journal
+/// image is their initialization header or from an earlier life of the page, which ended with the free
 /// that returned it to the allocator. A header write makes the journal durable through that free's
 /// commit record before it writes the chain page (the chain page's LSN makes the buffer pool's
 /// write-ahead gate enforce the same order), so the free is committed in the journal recovery reads,
@@ -85,7 +85,7 @@ internal static class StorageRecovery
     /// <param name="data">The data stream to replay onto.</param>
     /// <param name="journal">The journal to replay.</param>
     /// <param name="forceDurable">Whether the final flush must be durable.</param>
-    /// <param name="protectedPages">Pages that hold the live checkpoint anchor chain; never replayed onto.</param>
+    /// <param name="protectedPages">Pages that hold either live checkpoint anchor chain; never replayed onto.</param>
     /// <param name="cacheCapacity">The most pages the replay holds in memory at once.</param>
     /// <returns>What recovery found and did.</returns>
     /// <exception cref="StorageCorruptionException">A page's chain of records has a gap, or a record does not decode.</exception>

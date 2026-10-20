@@ -21,8 +21,9 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// <para>
 /// <b>Torn writes.</b> Streams that share a <see cref="CrashPoint"/> lose power together at
 /// one scheduled write (counting every write and length change across them). In write-through
-/// mode the scheduled write is torn: only a durable prefix of
-/// <see cref="CrashPoint.DurableSectors"/> whole 512-byte sectors of it reaches the media,
+/// mode the scheduled write is torn: only a durable range starting at
+/// <see cref="CrashPoint.DurableSectorOffset"/>, with
+/// <see cref="CrashPoint.DurableSectors"/> whole 512-byte sectors, reaches the media,
 /// the rest of its range keeps its old bytes — the old-or-new sector model PostgreSQL's
 /// full-page writes and every double-buffered header assume. In flush-gated mode the write
 /// never reaches the media. Every later write, length change or flush on a stream sharing the
@@ -153,16 +154,17 @@ public sealed class CrashSimulationStream : IFileSystemFileHandle
         {
             if (_writeThrough)
             {
-                int durable = Math.Min(buffer.Length, _crashPoint.DurableSectors * SectorSize);
+                int start = Math.Min(buffer.Length, _crashPoint.DurableSectorOffset * SectorSize);
+                int durable = Math.Min(buffer.Length - start, _crashPoint.DurableSectors * SectorSize);
                 if (durable > 0)
                 {
-                    long end = offset + durable;
+                    long end = offset + start + durable;
                     if (_durable.Length < end)
                     {
                         Array.Resize(ref _durable, (int)end);
                     }
 
-                    buffer[..durable].CopyTo(_durable.AsSpan((int)offset));
+                    buffer.Slice(start, durable).CopyTo(_durable.AsSpan((int)offset + start));
                 }
             }
 
