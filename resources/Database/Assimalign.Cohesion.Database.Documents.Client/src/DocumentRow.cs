@@ -7,6 +7,8 @@ using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Execution;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A document query row with ordinal and column-name access.</summary>

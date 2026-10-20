@@ -8,7 +8,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Documents.Tests;
+namespace Assimalign.Cohesion.Database.Documents.Protocol.Tests;
 
 public sealed class DocumentWireCodecTests
 {

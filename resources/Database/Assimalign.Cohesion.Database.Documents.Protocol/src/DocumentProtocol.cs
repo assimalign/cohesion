@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>The document endpoint's immutable protocol family.</summary>
 public static class DocumentProtocol

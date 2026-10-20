@@ -18,6 +18,8 @@ using Windows.UI.Core;
 
 using Assimalign.Cohesion.Database.Documents;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>A history entry: the script that ran and a one-line summary.</summary>

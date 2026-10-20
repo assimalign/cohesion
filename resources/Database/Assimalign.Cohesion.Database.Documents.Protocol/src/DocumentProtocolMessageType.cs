@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>Message identifiers scoped to document endpoints.</summary>
 public enum DocumentProtocolMessageType : byte

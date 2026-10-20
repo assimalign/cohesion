@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Storage.Tests;
 
 using Assimalign.Cohesion.Database.Storage;

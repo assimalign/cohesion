@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 /// <summary>Measures every advertised OQL clause through a real document session.</summary>

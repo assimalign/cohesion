@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>A database-bound document or collection operation. Unused fields must be empty.</summary>
 /// <param name="Operation">The operation discriminator.</param>

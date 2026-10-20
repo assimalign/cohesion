@@ -1,6 +1,8 @@
 using System.Globalization;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 /// <summary>A document index constraint refused a write or an index build.</summary>

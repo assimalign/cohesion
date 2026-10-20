@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>
 /// A stored document: identity, version, and UTF-8 JSON content.

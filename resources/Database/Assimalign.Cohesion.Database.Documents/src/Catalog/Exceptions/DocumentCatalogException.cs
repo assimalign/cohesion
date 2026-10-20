@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 /// <summary>Reports malformed or unsupported persisted document catalog metadata.</summary>

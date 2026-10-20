@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentProjectionWireTests

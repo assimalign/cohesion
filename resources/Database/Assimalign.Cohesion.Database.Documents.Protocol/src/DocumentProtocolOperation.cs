@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>Operations carried by a Documents Command frame.</summary>
 public enum DocumentProtocolOperation : byte

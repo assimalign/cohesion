@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>Terminates a successful document exchange.</summary>
 /// <param name="ResultCount">The number of row, document or collection frames sent in the exchange.</param>

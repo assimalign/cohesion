@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 /// <summary>The snapshot-visible collection and document metadata of one logical database.</summary>

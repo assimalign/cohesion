@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+<resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+<resheader name="version"><value>2.0</value></resheader>
+<resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+<resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="JsonValueMissing" xml:space="preserve"><value>Expected a JSON parameter object or complete JSON result.</value></data>
+  <data name="JsonValuesMultiple" xml:space="preserve"><value>A document payload must contain exactly one JSON value.</value></data>
+  <data name="JsonPayloadMalformed" xml:space="preserve"><value>Malformed document JSON payload.</value></data>
+  <data name="PayloadTrailingBytes" xml:space="preserve"><value>Trailing bytes in document payload.</value></data>
+  <data name="CollectionNameMissing" xml:space="preserve"><value>A collection name is required.</value></data>
+  <data name="OperationMissing" xml:space="preserve"><value>Missing document operation.</value></data>
+  <data name="VersionMarkerInvalid" xml:space="preserve"><value>Invalid document version marker.</value></data>
+  <data name="ContentLengthInvalid" xml:space="preserve"><value>Invalid document content length.</value></data>
+  <data name="OperationFieldsInvalid" xml:space="preserve"><value>Invalid fields for the document operation.</value></data>
+  <data name="CompletionCountsInvalid" xml:space="preserve"><value>Invalid document completion counts.</value></data>
+  <data name="CompletionPayloadInvalid" xml:space="preserve"><value>Malformed document completion payload.</value></data>
+  <data name="ParameterLengthInvalid" xml:space="preserve"><value>Malformed document parameter length.</value></data>
+  <data name="DiagnosticCountInvalid" xml:space="preserve"><value>Invalid document diagnostic count.</value></data>
+  <data name="DiagnosticFieldsInvalid" xml:space="preserve"><value>Invalid document diagnostic location or severity.</value></data>
+  <data name="FailureCodeInvalid" xml:space="preserve"><value>Invalid document statement failure code.</value></data>
+  <data name="ResultColumnsInvalid" xml:space="preserve"><value>Invalid document result columns.</value></data>
+  <data name="ResultColumnInvalid" xml:space="preserve"><value>Invalid document result column.</value></data>
+  <data name="ResultKindInvalid" xml:space="preserve"><value>Invalid document result kind.</value></data>
+  <data name="DocumentIdentityMissing" xml:space="preserve"><value>A stored document requires an identity.</value></data>
+
+
+
+
+
+
+
+
+</root>

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 /// <summary>Describes a secondary index with ordered, case-sensitive document key paths.</summary>

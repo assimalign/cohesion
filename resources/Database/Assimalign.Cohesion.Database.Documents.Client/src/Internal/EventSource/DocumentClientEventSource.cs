@@ -5,6 +5,8 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Client;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client.Internal;
 
 /// <summary>

@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>A complete rejected statement response, after which the session is ready again.</summary>
 /// <param name="Code">ParseFailure, ExecutionFailure or Unavailable.</param>

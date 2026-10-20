@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>An OQL statement with named parameters represented by a JSON object.</summary>
 /// <param name="Statement">The OQL statement.</param>

@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>Describes named projection rows or one bare JSON value per Document frame.</summary>
 /// <param name="Columns">Names and shared type identities in projection order.</param>

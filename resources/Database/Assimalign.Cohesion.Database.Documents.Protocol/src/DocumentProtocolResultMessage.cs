@@ -1,8 +1,8 @@
 using System;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>One document result preserving its complete JSON shape and original UTF-8 bytes.</summary>
 /// <param name="Json">The UTF-8 JSON value, including an object, array, scalar, or null.</param>

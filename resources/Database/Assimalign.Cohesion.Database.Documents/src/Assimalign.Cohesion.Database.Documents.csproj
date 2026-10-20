@@ -4,6 +4,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />

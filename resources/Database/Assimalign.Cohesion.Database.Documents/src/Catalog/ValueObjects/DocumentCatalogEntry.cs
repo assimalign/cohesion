@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 /// <summary>Describes a document version and its immutable UTF-8 JSON chunk chain.</summary>

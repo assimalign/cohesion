@@ -2,6 +2,8 @@ using System.Globalization;
 
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>An INSERT found an existing identity, or INSERT/UPSERT repeated a key within one statement.</summary>

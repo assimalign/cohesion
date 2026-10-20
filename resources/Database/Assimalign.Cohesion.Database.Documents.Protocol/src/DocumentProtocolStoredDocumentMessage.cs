@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>A stored document's identity, version and exact content bytes.</summary>
 /// <param name="Document">The stored document.</param>

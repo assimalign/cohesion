@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>
 /// A monotonically increasing document version used for optimistic concurrency.

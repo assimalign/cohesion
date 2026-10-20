@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Documents;
+namespace Assimalign.Cohesion.Database.Documents.Protocol;
 
 /// <summary>
 /// A strongly-typed document identity, unique within a collection.

@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Documents.Internal;
+namespace Assimalign.Cohesion.Database.Documents.Protocol.Internal;
 
 internal static class DocumentProtocolWire
 {

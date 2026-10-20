@@ -1,5 +1,7 @@
 using Assimalign.Cohesion.Database.Documents.Catalog;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>

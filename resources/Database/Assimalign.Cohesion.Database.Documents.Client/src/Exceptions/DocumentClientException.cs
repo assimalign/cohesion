@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A document wire failure retaining its protocol code, composed server text and structured diagnostics.</summary>
