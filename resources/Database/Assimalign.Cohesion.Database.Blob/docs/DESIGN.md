@@ -192,9 +192,13 @@ database. Preserve ambiguous files and restore a complete backup. This follows N
 missing-log refusal (community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:697-698;
 community/kernel/src/main/java/org/neo4j/kernel/recovery/Recovery.java:1146-1153).
 Drop explicitly deletes the data file before recursively removing the remaining files.
-Only files no larger than the header are rejected by length. A partial final data page proceeds
-through WAL recovery; a genuine recovery failure becomes the same structured refusal and
-never recommends dropping a file containing data. No record or storage format changes.
+A file no larger than one page is incomplete creation: create flushes two pages before returning.
+Its refusal names DropDatabaseAsync followed by CreateDatabaseAsync, which can complete. A partial
+final data page proceeds through WAL recovery. Recovery may leave an uncommitted extension torn
+at the tail; storage ignores that tail and overwrites it at the next allocation, preserving all
+committed data. Only corruption is classified as unrecoverable damage. Transient storage I/O
+failures, including a full pinned buffer pool, ask callers to retry open after the condition is
+resolved, without drop or backup advice. No record or storage format changes.
 
 ## Chunk chain and disk compatibility
 

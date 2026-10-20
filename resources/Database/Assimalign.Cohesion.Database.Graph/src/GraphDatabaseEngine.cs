@@ -613,7 +613,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 if (!File.Exists(files.Journal) || !File.Exists(files.Backup)
                     || dataLength <= Page.Size)
                 {
-                    throw RefuseInterruptedCreation(name, preserve: dataLength >= Page.Size);
+                    throw RefuseInterruptedCreation(name, preserve: dataLength > Page.Size);
                 }
             }
             if (create && StorageExists(name, directory))
@@ -640,14 +640,8 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 {
                     throw new InvalidOperationException("The storage strategy returned null.");
                 }
-                // Physical WAL recovery has run. Refuse a tail it could not reconstruct,
-                // before model initialization can publish or checkpoint an incomplete file.
-                if (storage.Data.Length % Page.Size != 0)
-                {
-                    var refusal = RefuseInterruptedCreation(name, preserve: true);
-                    storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, refusal);
-                    throw refusal;
-                }
+                // Recovery may retain a partial tail described only by uncommitted work.
+                // Storage ignores it until the next allocation overwrites it.
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
 
@@ -663,7 +657,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }
-            catch (StorageException exception) when (exception is StorageCorruptionException or StorageIOException)
+            catch (StorageCorruptionException exception)
             {
                 var refusal = RefuseInterruptedCreation(name, preserve: true);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
@@ -671,12 +665,20 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
             }
             catch (DatabaseException exception) when (exception.Diagnostics.Count == 0
-                && exception.InnerException is StorageCorruptionException or StorageIOException)
+                && exception.InnerException is StorageCorruptionException)
             {
                 var refusal = RefuseInterruptedCreation(name, preserve: true);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+            }
+            catch (Exception exception) when (exception is StorageIOException or IOException
+                || exception is DatabaseException { InnerException: StorageIOException or IOException })
+            {
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(message, exception);
             }
             catch (StorageFormatException exception)
             {

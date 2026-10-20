@@ -8,6 +8,9 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>
@@ -356,13 +359,15 @@ public sealed class GraphDatabaseNameTests : IDisposable
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Unrecoverable data: the coded refusal preserves files and never advises dropping data (#1158)")]
-    public async Task OpenDatabaseAsync_UnrecoverableTail_ShouldRefuseWithoutDropAdvice()
+    public async Task OpenDatabaseAsync_ChecksumDamage_ShouldRefuseWithoutDropAdvice()
     {
         // Arrange
         await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
         string directory = Path.Combine(_rootPath, "sales");
         string path = Path.Combine(directory, "graph.dat");
-        using (var data = new FileStream(path, FileMode.Open, FileAccess.Write)) { data.SetLength(8193); }
+        byte[] damaged = File.ReadAllBytes(path);
+        damaged[Page.Size + Page.HeaderSize] ^= 1;
+        File.WriteAllBytes(path, damaged);
         var before = File.ReadAllBytes(path);
         await using var engine = CreateEngine(onDisk: true);
 
@@ -373,6 +378,95 @@ public sealed class GraphDatabaseNameTests : IDisposable
         refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG018");
         refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
         File.ReadAllBytes(path).ShouldBe(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Recovery: an uncommitted extension torn at the tail preserves committed data (#1158)")]
+    public async Task OpenDatabaseAsync_UncommittedExtensionTornAtTail_ShouldPreserveCommittedData()
+    {
+        // Arrange: steal an extension page before its physical transaction commits.
+        await using var first = CreateEngine(onDisk: true);
+        var database = await first.CreateDatabaseAsync("sales", CancellationToken.None);
+        var identity = await WriteAsync(database, "acknowledged");
+        database.DataStorage.Checkpoint();
+        string directory = Path.Combine(_rootPath, "sales");
+        Dictionary<string, byte[]> crash;
+        long extension;
+        using (var transaction = database.DataStorage.BeginTransaction())
+        {
+            using (var page = database.DataStorage.AllocatePageForWrite(transaction, PageType.Index))
+            {
+                extension = (long)page.Page.Id;
+            }
+            database.DataStorage.PageManager.FlushAll();
+            crash = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        }
+        await first.DisposeAsync();
+        foreach (var file in crash) { File.WriteAllBytes(Path.Combine(directory, file.Key), file.Value); }
+        using (var data = new FileStream(Path.Combine(directory, "graph.dat"), FileMode.Open, FileAccess.Write))
+        {
+            data.Length.ShouldBe((extension + 1) * Page.Size);
+            data.SetLength(data.Length - 1);
+        }
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var recovered = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        (await ReadAsync(recovered, identity)).ShouldBe("acknowledged");
+        var next = await WriteAsync(recovered, "after recovery");
+        (await ReadAsync(recovered, next)).ShouldBe("after recovery");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Open: a full pinned buffer pool asks for retry and preserves committed data (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_BufferPoolFull_ShouldAllowRetryWithoutDataLossAdvice(bool wrapped)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using var engine = GraphDatabaseEngine.Create("transient", new GraphDatabaseEngineOptions { StorageStrategy = strategy });
+        var database = await engine.CreateDatabaseAsync("sales", CancellationToken.None);
+        var identity = await WriteAsync(database, "acknowledged");
+        await database.DisposeAsync();
+        var full = new StorageIOException("Buffer pool is full and all pages are pinned.");
+        strategy.OpenFailure = wrapped ? new DatabaseException("Open failed.", full) : full;
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        strategy.OpenFailure = null;
+        var reopened = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
+        refusal.Message.ShouldNotContain("restore");
+        refusal.Message.ShouldNotContain("drop");
+        refusal.Diagnostics.ShouldBeEmpty();
+        (await ReadAsync(reopened, identity)).ShouldBe("acknowledged");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - One-page creation: the suggested drop and create completes (#1158)")]
+    public async Task CreateDatabaseAsync_OnePageFile_ShouldReportIncompleteAndAllowRecreation()
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string path = Path.Combine(_rootPath, "sales", "graph.dat");
+        using (var data = new FileStream(path, FileMode.Open, FileAccess.Write)) { data.SetLength(Page.Size); }
+        var before = File.ReadAllBytes(path);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        var createRefusal = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert: both operations agree, and the recommended action completes.
+        refusal.Message.ShouldBe(createRefusal.Message);
+        refusal.Message.ShouldContain("Creation never completed", Case.Sensitive);
+        refusal.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
+        refusal.Message.ShouldNotContain("restore");
+        File.ReadAllBytes(path).ShouldBe(before);
+        await engine.DropDatabaseAsync("sales", CancellationToken.None);
+        await engine.CreateDatabaseAsync("sales", CancellationToken.None);
     }
 
     private static byte[] ReadFile(string path)

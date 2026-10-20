@@ -156,8 +156,11 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     /// Reopens a database from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
     /// </summary>
+    internal Exception? OpenFailure { get; set; }
+
     public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
     {
+        if (OpenFailure is { } failure) { throw failure; }
         Files files;
         lock (_sync)
         {
