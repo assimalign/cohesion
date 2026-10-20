@@ -28,4 +28,7 @@
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Cache" />
+	</ItemGroup>
 </Project>
