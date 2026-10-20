@@ -18,11 +18,11 @@ internal sealed record SqlStorageProbe(long Length, byte[] Data, byte[] Journal,
     // Storage.Open validates the header checksums before this predicate is used. Slot 1
     // must still be unwritten; an initial page count alone also describes later checkpoints.
     internal bool HasInitialHeader => Length >= Page.Size && Data.Length >= Page.Size
-        && Data.AsSpan(4608, 3584).IndexOfAnyExcept((byte)0) < 0
-        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(520)) == 1
-        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(528)) == 0
-        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(536)) == 0
-        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(544)) == 2;
+        && Data.AsSpan(SqlStorageHeaderLayout.Slot1Offset, SqlStorageHeaderLayout.SlotSize).IndexOfAnyExcept((byte)0) < 0
+        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(SqlStorageHeaderLayout.GenerationOffset)) == 1
+        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(SqlStorageHeaderLayout.LsnFloorOffset)) == 0
+        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(SqlStorageHeaderLayout.SequenceFloorOffset)) == 0
+        && BinaryPrimitives.ReadInt64LittleEndian(Data.AsSpan(SqlStorageHeaderLayout.TotalPagesOffset)) == 2;
 
     internal bool IsSmall => Length <= 2L * Page.Size;
 

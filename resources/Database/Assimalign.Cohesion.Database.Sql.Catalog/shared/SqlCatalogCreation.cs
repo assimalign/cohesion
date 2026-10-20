@@ -12,9 +12,9 @@ internal static class SqlCatalogCreation
     internal const int NamespaceRecordKind = 15;
 
     // Only creation's counter, optional collation and dbo may precede the final marker.
-    internal static bool IsCreationOnly(SqlStorage storage, SqlCatalog catalog)
+    internal static bool IsCreationOnly(SqlStorage storage, SqlCatalog catalog, string defaultNamespace)
     {
-        if (catalog.RecordSpaceFormatVersion != 1 || catalog.Namespaces.Any(schema => schema.Name != "dbo" || schema.Owner != DatabaseObjectOwner.Adhoc || schema.OwningSchema is not null)) { return false; }
+        if (catalog.RecordSpaceFormatVersion != 1 || catalog.Namespaces.Any(schema => schema.Name != defaultNamespace || schema.Owner != DatabaseObjectOwner.Adhoc || schema.OwningSchema is not null)) { return false; }
         using var iterator = storage.GetUnitIterator();
         while (iterator.MoveNext())
         {

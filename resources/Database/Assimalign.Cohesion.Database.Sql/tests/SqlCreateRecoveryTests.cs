@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,8 +36,8 @@ public sealed class SqlCreateRecoveryTests
         var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        if (catalogExists) { refusal.Message.ShouldContain("drop the database (DropDatabaseAsync)", Case.Sensitive); }
-        else { refusal.Message.ShouldContain("restore the complete database", Case.Sensitive); }
+        refusal.Message.ShouldContain("restore the complete database", Case.Sensitive);
+        refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
         if (catalogExists)
         {
             using var catalogStorage = crashed.OpenStorage("sales", catalog: true);
@@ -286,6 +287,60 @@ public sealed class SqlCreateRecoveryTests
             foreach (var image in images) { File.ReadAllBytes(image.Key).ShouldBe(image.Value); }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Short data beside other state: preserve files without a create retry loop (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_ShortDataWithOtherState_ShouldGiveAccuratePreservationAdvice(bool catalogExists)
+    {
+        // Arrange
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-conflicting-create", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root, "sales");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllBytes(Path.Combine(directory, "sql.dat"), [1]);
+            if (catalogExists) { File.WriteAllBytes(Path.Combine(directory, "catalog.dat"), [2]); }
+            else { File.WriteAllBytes(Path.Combine(directory, "sql.log"), [3]); }
+            var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+            await using var engine = SqlDatabaseEngine.Create("conflict", new() { RootPath = root });
+
+            // Act
+            var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            var create = await Should.ThrowAsync<SqlDataStorageFormatException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+            // Assert: create is not a remedy for this persisted state.
+            refusal.Message.ShouldBe(create.Message);
+            refusal.Message.ShouldContain("Preserve all files", Case.Sensitive);
+            refusal.Message.ShouldContain("cannot safely restart", Case.Sensitive);
+            refusal.Message.ShouldNotContain("Retry");
+            refusal.Message.ShouldNotContain("restore");
+            refusal.Message.ShouldNotContain("drop");
+            Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+            foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Creation probe: transient I/O asks for retry without restore or drop advice (#1158)")]
+    public async Task OpenDatabaseAsync_DataProbeBufferPoolFull_ShouldGiveRetryAdvice()
+    {
+        // Arrange
+        var image = await CaptureCreationAsync(3);
+        image.DataProbeFailure = new Assimalign.Cohesion.Database.Storage.StorageIOException("Buffer pool is full and all pages are pinned.");
+        await using var engine = SqlDatabaseEngine.Create("transient-probe", new() { StorageStrategy = image });
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        image.DataProbeFailure = null;
+        var recovered = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
+        refusal.Message.ShouldNotContain("restore");
+        refusal.Message.ShouldNotContain("drop");
+        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
     }
 
     private static async Task<CrashCaptureSqlStorageStrategy> CaptureCreationAsync(int step, Collation? collation = null)

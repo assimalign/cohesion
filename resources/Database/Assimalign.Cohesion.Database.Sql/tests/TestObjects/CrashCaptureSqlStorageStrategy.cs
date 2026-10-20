@@ -304,11 +304,15 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         }
     }
 
+    internal Exception? DataProbeFailure { get; set; }
+
     internal override SqlStorageProbe? ProbeStorage(string databaseName, bool catalog)
     {
         if (!StorageExists(databaseName, catalog)) { return null; }
         var image = GetDurableImage(databaseName, catalog);
-        return new SqlStorageProbe(image.Data.LongLength, image.Data, image.Journal, image.Backup);
+        var probe = new SqlStorageProbe(image.Data.LongLength, image.Data, image.Journal, image.Backup);
+        return !catalog && DataProbeFailure is { } failure
+            ? probe with { OpenReadOnly = () => throw failure } : probe;
     }
 
     internal override SqlStorage RestartStorage(string databaseName, bool catalog)

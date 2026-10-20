@@ -1,6 +1,7 @@
-using System.Threading;
+using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -138,27 +139,21 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
         }
         using var data = new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read);
         bool hasSidecars = File.Exists(files.Journal) && File.Exists(files.Backup);
-        if (data.Length > 2L * Assimalign.Cohesion.Database.Storage.Units.Page.Size)
-        {
-            return new SqlStorageProbe(data.Length, [], [], [], hasSidecars);
-        }
-        byte[] bytes = new byte[(int)data.Length];
+        byte[] bytes = new byte[(int)Math.Min(data.Length, 2L * Assimalign.Cohesion.Database.Storage.Units.Page.Size)];
         data.ReadExactly(bytes);
         return new SqlStorageProbe(data.Length, bytes, [], [], hasSidecars)
         {
             JournalLength = journalLength,
             BackupLength = backupLength,
-            // Recovery writes only the private data copy. Journal analysis streams the original
-            // through a read-only handle, so a long WAL does not become a second heap image.
-            OpenReadOnly = () => OpenProbe(bytes, files.Journal, files.Backup),
+            // All file sizes use overlays. Recovery changes only private blocks; the
+            // catalog format gate cannot redo or truncate the real files.
+            OpenReadOnly = () => OpenProbe(files.Data, files.Journal, files.Backup),
         };
     }
 
-    private static SqlStorage OpenProbe(byte[] data, string journalPath, string backupPath)
+    private static SqlStorage OpenProbe(string dataPath, string journalPath, string backupPath)
     {
-        var copy = new MemoryStream();
-        copy.Write(data);
-        copy.Position = 0;
+        var copy = new SqlProbeStream(dataPath);
         Stream? journal = null;
         Stream? backup = null;
         try

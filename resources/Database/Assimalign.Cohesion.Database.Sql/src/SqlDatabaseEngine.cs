@@ -11,8 +11,10 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -683,25 +685,25 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 bool creationPending = _strategy.IsCreationPending(name);
                 var catalogProbe = _strategy.ProbeStorage(name, catalog: true);
                 var dataProbe = _strategy.ProbeStorage(name, catalog: false);
-                if (dataProbe is { Length: >= 8192, HasSidecars: false } || catalogProbe is { Length: >= 8192, HasSidecars: false })
+                if (dataProbe is { Length: >= Page.Size, HasSidecars: false } || catalogProbe is { Length: >= Page.Size, HasSidecars: false })
                 {
                     throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
                         ErrorMessages.CreationSidecarMissing, name), "COHSQLC001");
                 }
-                bool shortData = dataProbe is { Length: < 8192 };
-                bool shortCatalog = catalogProbe is { Length: < 8192 };
+                bool shortData = dataProbe is { Length: < Page.Size };
+                bool shortCatalog = catalogProbe is { Length: < Page.Size };
                 bool restartData = shortData && dataProbe!.IsPreHeader && missingCatalog
                     && (catalogProbe is null || catalogProbe.IsPreHeader);
                 if (shortData && !restartData)
                 {
-                    throw RefuseIncompleteCreation(name);
+                    throw RefuseIncompleteState(name);
                 }
-                if (shortCatalog && !catalogProbe!.IsPreHeader) { throw RefuseIncompleteCreation(name); }
+                if (shortCatalog && !catalogProbe!.IsPreHeader) { throw RefuseIncompleteState(name); }
                 if (restartData || shortCatalog)
                 {
                     if (!restartData && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
                     {
-                        throw RefuseIncompleteCreation(name);
+                        throw RefuseIncompleteState(name);
                     }
                     if (!creating)
                     {
@@ -726,18 +728,18 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 {
                     try
                     {
-                        // Small catalogs can be interrupted creates. Inspect an isolated image
-                        // before opening either original set with write access.
-                        if (catalogProbe is { IsSmall: true })
+                        // Inspect every catalog through a read-only overlay before either
+                        // original set can run recovery with write access.
+                        if (catalogProbe is not null)
                         {
                             using var probeStorage = catalogProbe.Open();
                             var probeCatalog = OpenCatalog(name, probeStorage);
-                            if (SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog)
+                            if (SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog, SqlNamespaceNames.Default)
                                 && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
                             {
-                                SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
+                                throw RefuseMissingCatalog(name);
                             }
-                            if (!SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog))
+                            if (!SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog, SqlNamespaceNames.Default))
                             {
                                 SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
                                 if (creating) { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name)); }
@@ -753,7 +755,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 }
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
                 SqlCatalog catalog = OpenCatalog(name, catalogStorage);
-                bool interrupted = SqlCatalogCreation.IsCreationOnly(catalogStorage, catalog);
+                bool interrupted = SqlCatalogCreation.IsCreationOnly(catalogStorage, catalog, SqlNamespaceNames.Default);
                 if (!interrupted)
                 {
                     SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
@@ -766,7 +768,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
                 if (interrupted && storage is null && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
                 {
-                    SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
+                    throw RefuseMissingCatalog(name);
                 }
 
                 try
@@ -785,7 +787,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 {
                     if (!SqlDatabase.IsEmptyDataStorage(storage))
                     {
-                        SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
+                        throw RefuseMissingCatalog(name);
                     }
                     if (creating || missingCatalog || catalog.DdlGeneration == 0 || FindDeclaration(name) is not null)
                     {
@@ -866,14 +868,22 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         {
             throw RefuseStorageFormat(name, "data", name, exception);
         }
-        catch (StorageException exception) when (exception is StorageIOException or StorageCorruptionException)
+        catch (StorageCorruptionException)
         {
             return false;
+        }
+        catch (Exception exception) when (exception is StorageIOException or IOException)
+        {
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.CreationProbeFailed, name, exception.Message), exception);
         }
     }
 
     private static SqlDataStorageFormatException RefuseIncompleteCreation(string name)
         => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationHeaderMissing, name), "COHSQLC001");
+
+    private static SqlDataStorageFormatException RefuseIncompleteState(string name)
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationStateIncomplete, name), "COHSQLC001");
 
     private static SqlDataStorageFormatException RefuseMissingCatalog(string name)
         => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationCatalogMissing, name), "COHSQLC001");

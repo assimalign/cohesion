@@ -2163,7 +2163,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 25 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -2813,7 +2813,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 25 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -2830,13 +2830,18 @@ project reference or InternalsVisibleTo change is required.
   upgrade path either, #1152). A format-5 table record (extension version 2)
   still loads, so that the gate below, not a decode error, refuses the database.
   Creation commits the optional default collation, then dbo, then the format marker.
-  Format 26 (#1158) adds the transient sql.create file: exactly UTF-8 COHSQLCREATE1 followed
+  Interrupted creation (#1158) uses the transient sql.create file: exactly UTF-8 COHSQLCREATE1 followed
   by LF, durably flushed after the data file is claimed and before its first header write.
   The claim must exist for a complete data header to qualify as interrupted creation. Without
   it, a lost catalog is indistinguishable from acknowledged catalog-only DDL: data pages and
   even the data journal can still be empty. Completion checkpoints data, then removes the claim
   before publishing the database. The checkpoint also fences a stale claim directory entry
-  after a crash. This is a real file-set contract change; format 25 is refused, with no upgrade.
+  after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
+  (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
+  ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
+  refuse every intact format-25 database. Claim-file creation and deletion are not directory-fsynced.
+  A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
+  by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
   shared predicate admits creation metadata (the initial object-id counter, optional collation
   and dbo only), and a read-only probe proves the data set is still empty. The probe reads at
@@ -2846,10 +2851,16 @@ project reference or InternalsVisibleTo change is required.
   lifecycle WAL must not be discarded. The durable claim, rather than an empty page scan,
   distinguishes initialization from a lost catalog after acknowledged empty-table DDL. Missing journals/backups are refused
   before write access with COHSQLC001, preserving acknowledged commits and partial drops.
+  Transient probe I/O failures surface as retryable inspection failures, never as missing-catalog
+  damage with backup advice. Storage header offsets remain local internal format constants in SQL;
+  the owning storage constants are internal to another assembly, whose boundary is not widened.
   A sub-header data file with no catalog content, or a sub-header catalog beside initial empty
   data, is restartable only with empty journal and backup images. Plain open refuses this
   unfinished claim with COHSQLC001 and names CreateDatabaseAsync as the remedy; create
-  and declared application Build restart it with the requested collation. A retried create
+  and declared application Build restart it with the requested collation. A short data file beside
+  existing catalog or journal state is instead preserved for investigation: retrying create cannot
+  safely restart it. A creation-only catalog beside non-empty data uses the missing-catalog
+  preserve/restore refusal, with no drop advice. A retried create
   applies its requested collation to every proven interrupted create, including after dbo;
   plain open keeps a committed collation or uses the declaration's collation, then Binary.
   Drop explicitly deletes sql.dat, then other *.dat files, before recursive directory removal.
@@ -2859,15 +2870,13 @@ project reference or InternalsVisibleTo change is required.
   refused before the data set opens, preserving its files for the engine that wrote
   them. A populated data set without a catalog, or beside creation-only metadata, is
   refused by the read-only probe before any data file is opened for write.
-  The catalog file set itself gets only what opening any storage does.
-  Cleanly closed, it is left byte-identical, because a storage closed with
-  nothing written through it writes nothing (Storage DESIGN.md). Crashed, it
-  gets the storage layer's physical redo/undo, which is format-agnostic and
-  idempotent, and keeps its journal. That matters because the old engine must
-  still be able to open the database to export its data, including running its
-  own transaction recovery over journals the refused open did not touch.
+  Every catalog, regardless of size, first opens through read-only source handles with private
+  write overlays. Physical redo and torn-journal truncation affect only the overlays. The header,
+  catalog marker and recorded schema formats are checked before either real file set opens for
+  writing, so every format refusal leaves all original files byte-identical. This lets the engine
+  that wrote them recover and export their data with its original journals.
   `SqlDataStorageFormatTests` pins both cases: clean images stay byte-identical,
-  and a crashed format-3 image keeps its data files and catalog journal and
+  and a crashed format-3 image keeps all of its files and
   still recovers (its uncommitted writer scrubbed) once its own engine opens it.
   **Decision (owner, 2026-10-01): no upgrade path while the line is
   pre-release.** #1099's first implementation rebuilt temporal indexes on open
