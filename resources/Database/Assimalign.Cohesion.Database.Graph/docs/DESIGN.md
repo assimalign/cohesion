@@ -269,6 +269,10 @@ after uncommitted detach/insertion page write-back, without disposal. Restart mu
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
 
+The Database solution includes `Graph.RecoveryFixture` so solution builds keep the fixture in
+the selected configuration. The Graph test build copies that configuration's outputs beside the
+test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
+
 ### Failed statements in explicit transactions (#1188)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage

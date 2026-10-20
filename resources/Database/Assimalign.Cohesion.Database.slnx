@@ -172,6 +172,9 @@
 		<File Path="Assimalign.Cohesion.Database.Graph/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Database.Graph/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph/fixtures/Assimalign.Cohesion.Database.Graph.RecoveryFixture/">
+		<Project Path="Assimalign.Cohesion.Database.Graph/fixtures/Assimalign.Cohesion.Database.Graph.RecoveryFixture/Assimalign.Cohesion.Database.Graph.RecoveryFixture.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Graph/Assimalign.Cohesion.Database.Graph/src/">
 		<Project Path="Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj" />
 	</Folder>
