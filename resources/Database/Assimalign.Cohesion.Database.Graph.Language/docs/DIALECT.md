@@ -342,6 +342,14 @@ Thus `1 IN [1, NULL]` is TRUE and `1 IN [2, NULL]` is UNKNOWN.
 IS truth tests accept Boolean/NULL and return Boolean. Evaluated non-Boolean logical values
 raise COHDBG013.
 
+A non-negated labeled predicate in a MATCH clause's top-level AND chain supplies required node
+labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep RETURN n` and
+`MATCH (n) WHERE n IS LABELED Keep RETURN n` anchor like `(n:Keep)`. Required labels also enable
+property index seeks with inline or conjunctive WHERE equalities. Any node position can anchor,
+including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label and node ordinal. The complete
+predicate still filters candidates. OR, XOR, NOT, IS NOT LABELED, truth tests and label expressions
+using `|`, `!` or `%` supply no required labels. Requirements remain local to their MATCH clause.
+
 Precedence from weakest to strongest; binary runs associate left:
 
 | Level | Operators |

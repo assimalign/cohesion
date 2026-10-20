@@ -164,7 +164,9 @@ public sealed class GqlLabelDirectionExecutionTests
         conjunction.Property.ShouldBe("k");
         conjunction.Value.ShouldBe(1L);
         (await ColumnAsync(session, "MATCH (n:A&B {k: 1}) RETURN n.name")).ShouldBe(["ab1"]);
-        predicate.Property.ShouldBeNull();
+        predicate.Label.ShouldBe("A");
+        predicate.Property.ShouldBe("k");
+        predicate.Value.ShouldBe(1L);
         (await ColumnAsync(session, "MATCH (n) WHERE n:A AND n.k = 1 RETURN n.name")).ShouldBe(["a1", "ab1"]);
     }
 

@@ -527,13 +527,21 @@ Any future plan cache must recompute anchors that depend on parameter values. Ex
 ExecutePaths bind the existing named scalar map on wire 2.0 without changing frame encoding;
 unbound parameters return ExecutionFailure carrying COHDBG001 and leave the connection ready.
 
-Label expressions (#1139) follow one anchor rule: only a node's `Labels` can choose a label scan or
-a property index, and the parser fills `Labels` only for a pure conjunction (`:A`, `:A&B`,
-`:A:B`), whose every match carries each listed label. A disjunction (`:A|B`), negation (`:!A`) or
+Label expressions (#1139, #1245) supply required labels from a pattern's pure conjunction (`:A`,
+`:A&B`, `:A:B`) and from non-negated labeled predicates in the clause's top-level `AND` chain
+whose label expression is a pure conjunction (`WHERE n:Keep`, `n IS LABELED Keep&Tagged`).
+Pattern labels precede WHERE labels in source order. Every required label participates in property
+index selection with inline or WHERE equality values. Bound entities still take precedence;
+without a seek, the first required label at any node position anchors a label scan. Thus
+`(a)->(b:Keep)` and `(a)->(b) WHERE b:Keep` can both start at `b`, expanding right then left.
+EXPLAIN reports the actual LabelScan or IndexSeek label and node ordinal. Every candidate still
+passes the full pattern and WHERE residual, including other required labels.
+A disjunction (`:A|B`), negation (`:!A`) or
 wildcard (`:%`) leaves `Labels` empty, so `(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with
 no label and no property and scan every node; anchoring on `A`'s index would silently drop the `B`
-or non-`A` rows. A `WHERE` labeled predicate (`n:A`, `n IS [NOT] LABELED A`) is a Boolean primary,
-never an equality, so `MATCH (n) WHERE n:A AND n.k = 1` also plans no index property. The
+or non-`A` rows. Predicates under OR, XOR, NOT or truth tests, and label expressions using
+disjunction, negation or wildcard, supply no required labels. Collection is clause-local and
+only node variables can supply node anchors; a relationship's labeled predicate tests its type. The
 executor evaluates the expression on every candidate node, and a relationship pattern's expression
 against visible catalog type names before seeking their adjacency ranges. `GraphLabelEvaluator` validates each expression before execution:
 an unknown kind, a null operand, name or operand list, a conjunction or disjunction with fewer than
@@ -555,19 +563,25 @@ decision 2026-10-02: do what Neo4j does; the evidence is in the
 A conjunction or disjunction of labels, and an AND, OR or XOR chain of predicates, is one n-ary node, and the
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
-anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
+anchor's predicate search walk with an explicit stack. Anchor selection reads the visible indexes
 at most once per clause (`GraphStore.GetIndexes`, grouped by label) and that clause's `WHERE`
-chain's equalities once, keeping each variable's first non-null value per key; each node then tries,
+chain once for required label conjunctions and equalities, keeping each variable's first non-null value per key; each node then tries,
 for each distinct label in order, only the keys that label has an index on. Planning each clause
 therefore costs time linear in its `E`
-equalities, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
+equalities and WHERE labels, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
 indexes its own labels carry, never the product of labels, equalities and indexes. Across `C`
 clauses, listing and grouping visible indexes costs at most `C` times `I`. Neo4j's leaf
 planner likewise groups predicates once and visits only each label's own index descriptors
 (`NodeIndexLeafPlanner.scala`:184, :201, :248-296). Selection agrees with a per-pair search: the
 first label with an index on a key the node has a value for, then that label's key whose value comes
 first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
-through a hash set built once per evaluation. Only label and predicate evaluation recurse, where the
+through a hash set built once per evaluation. Label scans still decode the store's node records;
+filtering by the anchor label occurs before charging expansion work. A deterministic 2,010-node
+fixture with ten Keep nodes charges ten candidates for the WHERE label scan, as for its pattern form.
+Neo4j likewise builds label scans from selections' HasLabels predicates for any pattern node
+(`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`,
+relative to C:/Source/repos/neo4j/neo4j; behavior consulted, no code copied).
+Only label and predicate evaluation recurse, where the
 tree nests, and each descent calls `RuntimeHelpers.EnsureSufficientExecutionStack`. A statement
 whose parse (`GQL0009`), plan or evaluation needs more stack than the executing thread has left
 fails with `COHDBG008`, statement too complex (ISO SQLSTATE 54001; Neo4j's transient

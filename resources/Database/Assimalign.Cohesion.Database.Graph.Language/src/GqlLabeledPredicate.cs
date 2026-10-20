@@ -5,7 +5,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <summary>
 /// An ISO/IEC 39075 labeled predicate in <c>WHERE</c>: <c>n IS [NOT] LABELED A|B</c>, or its
 /// colon form <c>n:A|B</c>. It is a Boolean primary over a bound node or relationship variable,
-/// and it never supplies the planner's index anchor.
+/// and a non-negated pure conjunction under the clause's top-level AND chain supplies required
+/// labels for node anchors.
 /// </summary>
 public sealed class GqlLabeledPredicate : GqlExpression
 {
