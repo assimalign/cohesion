@@ -221,6 +221,10 @@ wire. SQL parsing remains the server's responsibility.
 
 ## Lifecycle, errors, and telemetry
 
+The typed connection captures its immutable database name when it receives the shared lease
+(#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
+refuse access. The cached name keeps diagnostics independent of the returned rental.
+
 Disposing a typed connection returns its shared authenticated session; disposing
 the client closes its pool. Connections support one exchange at a time.
 
@@ -237,6 +241,13 @@ COMMIT but before the response reaches the client has an unknown outcome. Client
 exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
+
+**Known gap (#1540):** end or roll back an explicit transaction before disposing a connection.
+The pool currently preserves unfinished transaction state, which the next renter can inherit.
+Server-reported transaction status and rollback on pool return belong to #1540 (and P8 #1264).
+The skipped `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` regression
+records that required behavior. A disposed core lease rejects SQL extension calls permanently,
+even when its authenticated session is rented again.
 
 In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
 The SQL server preserves the existing `CODE: message` Error text. On a negotiated 2.1 diagnostics session, client exceptions also retain the complete structured carrier. Cancellation tests that execute sessions directly
@@ -369,8 +380,8 @@ The package has no public interface left and no `Abstractions/` folder
   (plan §7, "P5, as landed", owner review 38).
   The sealed `SqlConnection` shares its name with `Microsoft.Data.SqlClient.SqlConnection`; a
   file that imports both namespaces aliases one (plan §11, R11).
-- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
-  the next caller, so `SqlConnection` keeps its own disposed flag, as `GraphConnection` and
+- **Disposal is final for the instance.** The pool now reuses an internal connector behind a new core lease on
+  every rent (#1313); `SqlConnection` keeps its own disposed flag, as `GraphConnection` and
   `BlobConnection` do: after `DisposeAsync` or `AbortAsync` every command throws
   `ObjectDisposedException` before the observer runs, and a second dispose or an abort does
   nothing. Before the P5 review a stale `SqlConnection` ran its commands on whichever caller had

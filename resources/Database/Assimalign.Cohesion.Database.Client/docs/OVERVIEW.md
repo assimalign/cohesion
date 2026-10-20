@@ -8,11 +8,11 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
 ## Scope
 
 - **`DatabaseClient`** — the sealed pooling entry point (`DatabaseClient.Create`):
-  `RentAsync` returns an open, authenticated connection; disposing a rented
-  connection returns it to the pool with its server session intact.
+  `RentAsync` returns a fresh lease over an open, authenticated session; disposing it
+  permanently ends that lease and returns its healthy server session to the pool.
   `ExecuteStreamingAsync(DatabaseStreamingExchange)` rents on the caller's behalf
   and hands back a stream that owns the rental.
-- **`DatabaseConnection`** — one sealed protocol session, rented already open:
+- **`DatabaseConnection`** — one sealed rental lease, handed out already open:
   `ExecuteAsync<TResult>(DatabaseProtocolExchange<TResult>)` returns the model's
   result, and `ExecuteStreamingAsync(DatabaseStreamingExchange)` keeps a streaming
   exchange active while the caller reads; disposing the content stream cancels

@@ -23,6 +23,7 @@ public sealed class DatabaseExchangeHealthTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await ClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
         var first = await harness.Client.RentAsync(timeout.Token);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var exception = await Should.ThrowAsync<DatabaseClientException>(async () =>
@@ -33,7 +34,8 @@ public sealed class DatabaseExchangeHealthTests
 
         // Assert
         exception.Code.ShouldBe(code);
-        next.ShouldBeSameAs(first);
+        next.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
         result.Rows.ShouldHaveSingleItem().ShouldBe([1]);
         harness.Server.Sessions.ShouldHaveSingleItem();
     }
@@ -47,6 +49,7 @@ public sealed class DatabaseExchangeHealthTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await ClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
         var first = await harness.Client.RentAsync(timeout.Token);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var exception = await Should.ThrowAsync<DatabaseClientException>(async () =>
@@ -57,7 +60,7 @@ public sealed class DatabaseExchangeHealthTests
 
         // Assert
         exception.Code.ShouldBe(code);
-        next.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldContain(session => session.Id != sessionId);
         result.Rows.ShouldHaveSingleItem().ShouldBe([2]);
     }
 
@@ -68,6 +71,7 @@ public sealed class DatabaseExchangeHealthTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await ClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
         var first = await harness.Client.RentAsync(timeout.Token);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act
         var exception = await Should.ThrowAsync<DatabaseClientException>(async () =>
@@ -78,7 +82,8 @@ public sealed class DatabaseExchangeHealthTests
 
         // Assert
         exception.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        next.ShouldBeSameAs(first);
+        next.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
         result.Rows.ShouldHaveSingleItem();
     }
 
@@ -90,6 +95,7 @@ public sealed class DatabaseExchangeHealthTests
         await using var harness = await ClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
         var exchange = new CompleteOnceExchange();
         var first = await harness.Client.RentAsync(timeout.Token);
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         await Should.ThrowAsync<DatabaseClientException>(async () => await first.ExecuteAsync(exchange, timeout.Token));
         first.IsOpen.ShouldBeTrue();
 
@@ -102,7 +108,7 @@ public sealed class DatabaseExchangeHealthTests
 
         // Assert
         openAfterSecondRun.ShouldBeFalse();
-        next.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldContain(session => session.Id != sessionId);
         result.Rows.ShouldHaveSingleItem().ShouldBe([1]);
     }
 

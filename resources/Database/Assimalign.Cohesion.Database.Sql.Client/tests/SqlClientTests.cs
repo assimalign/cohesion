@@ -265,6 +265,31 @@ public class SqlClientTests
         harness.Server.Sessions.ShouldHaveSingleItem();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: return rolls back an unfinished explicit transaction",
+        Skip = "#1540: server-reported transaction status and pool rollback on return are not implemented.")]
+    public async Task DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
+        await using var first = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await first.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
+        await first.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (5, 'pending', 50)", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act
+        await first.DisposeAsync();
+        await using var second = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        try
+        {
+            // Assert: the next renter sees no pending row and can start its own transaction.
+            (await second.QueryAsync("SELECT id FROM users WHERE id = 5", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(0);
+            await second.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
+        }
+        finally
+        {
+            await second.ExecuteAsync("ROLLBACK", cancellationToken: SqlClientTestHarness.Timeout());
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Options: creation validates settings and factory")]
     public void Create_WithIncompleteOptions_ShouldThrow()
     {

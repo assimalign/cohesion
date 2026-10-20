@@ -154,6 +154,13 @@ retain the streaming lifetime rules below. No frame or codec change is needed on
 
 ## Path lifetime
 
+The typed connection captures its immutable database name and negotiated composite-value flag when it receives the shared lease
+(#1313). Diagnostics can finish after streaming cleanup returns that lease, whose members then
+refuse access. The cached values preserve diagnostics and let subsequent queries reach the
+telemetry path before the disposed lease rejects execution. `AbortAsync` after a failed or
+abandoned path stream joins the lease's original return, as repeated disposal does; it cannot
+abort another caller's rental.
+
 GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and
 validates the initial Path or PathsComplete frame. A terminal ParseFailure or ExecutionFailure
 before any path frame is retained as the rejected statement's error, and CopyToCoreAsync completes

@@ -43,6 +43,7 @@ public class DatabaseProtocolExchangeTests
     {
         await using var harness = await ClientTestHarness.StartAsync();
         var connection = await harness.Client.RentAsync(ClientTestHarness.Timeout());
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         await Should.ThrowAsync<OperationCanceledException>(async () =>
@@ -51,7 +52,7 @@ public class DatabaseProtocolExchangeTests
         connection.IsOpen.ShouldBeFalse();
         await connection.DisposeAsync();
         await using var replacement = await harness.Client.RentAsync(ClientTestHarness.Timeout());
-        replacement.ShouldNotBeSameAs(connection);
+        harness.Server.Sessions.ShouldContain(session => session.Id != sessionId);
         (await replacement.ExecuteAsync(new PingExchange(SqlProtocol.Family), ClientTestHarness.Timeout())).ShouldBe(ProtocolMessageType.Pong);
     }
 

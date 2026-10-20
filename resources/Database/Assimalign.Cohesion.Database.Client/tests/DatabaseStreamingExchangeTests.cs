@@ -12,6 +12,7 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>A non-Blob model uses shared streaming and pool ownership without implementing either.</summary>
+[Collection(nameof(DatabaseClientEventSourceCollection))]
 public sealed class DatabaseStreamingExchangeTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.Client] - Streaming: live streams reserve their rental through verified EOF until disposal")]
@@ -51,7 +52,7 @@ public sealed class DatabaseStreamingExchangeTests
         pending.IsCompleted.ShouldBeFalse();
         await stream.DisposeAsync();
         await using var next = await pending;
-        next.ShouldBeSameAs(original);
+        next.ShouldNotBeSameAs(original);
         harness.AcceptedConnections.ShouldBe(1);
         (await next.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
     }
@@ -242,7 +243,7 @@ public sealed class DatabaseStreamingExchangeTests
         pending.IsCompleted.ShouldBeFalse();
         await original.DisposeAsync();
         await using var next = await pending;
-        next.ShouldBeSameAs(original);
+        next.ShouldNotBeSameAs(original);
         harness.AcceptedConnections.ShouldBe(1);
     }
 
@@ -262,7 +263,6 @@ public sealed class DatabaseStreamingExchangeTests
         await using var next = await pending;
 
         // Assert
-        next.ShouldNotBeSameAs(original);
         harness.AcceptedConnections.ShouldBe(2);
         (await next.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
     }
@@ -291,7 +291,6 @@ public sealed class DatabaseStreamingExchangeTests
 
         // Assert: shared lifetime cancellation interrupts even an untokened destination write.
         completed.Task.IsCompleted.ShouldBeFalse();
-        next.ShouldNotBeSameAs(original);
         harness.AcceptedConnections.ShouldBe(2);
         (await next.ExecuteAsync(StreamingClientTestHarness.CreatePing(), timeout.Token)).ShouldBe(ProtocolMessageType.Pong);
     }

@@ -27,15 +27,20 @@ public sealed class GraphConnection : IAsyncDisposable
     private const string QueryPathsOperation = "QueryPaths";
 
     private readonly DatabaseConnection _connection;
+    // Diagnostics finish after a failed stream has returned its shared lease.
+    private readonly string _database;
+    private readonly bool _supportsCompositeValues;
     private int _disposed;
 
     internal GraphConnection(DatabaseConnection connection)
     {
         _connection = connection;
+        _database = connection.Database;
+        _supportsCompositeValues = connection.Capabilities.Contains(GraphProtocol.CompositeValues.Name);
     }
 
     /// <summary>Gets the database selected during the handshake.</summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>Gets whether the connection is open and available for use.</summary>
     public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;
@@ -87,7 +92,7 @@ public sealed class GraphConnection : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var exchange = new GraphPathsExchange(statement, parameters, _connection.Capabilities.Contains(GraphProtocol.CompositeValues.Name));
+        var exchange = new GraphPathsExchange(statement, parameters, _supportsCompositeValues);
         return new GraphPathResult(exchange, QueryPathsCoreAsync(exchange, cancellationToken));
     }
 
@@ -218,7 +223,7 @@ public sealed class GraphConnection : IAsyncDisposable
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var exchange = new GraphExecuteExchange(statement, parameters, _connection.Capabilities.Contains(GraphProtocol.CompositeValues.Name));
+        var exchange = new GraphExecuteExchange(statement, parameters, _supportsCompositeValues);
         long startTimestamp = GraphClientEventSource.Log.GetTimestamp();
         bool startWritten = GraphClientEventSource.Log.QueryStart(this, operation);
 

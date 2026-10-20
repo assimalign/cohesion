@@ -105,15 +105,16 @@ public class DatabaseClientTests
 
         // Act: rent, execute, return; then rent again
         var first = await harness.Client.RentAsync(ClientTestHarness.Timeout());
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         await first.ExecuteAsync("SELECT id FROM users WHERE id = 1", cancellationToken: ClientTestHarness.Timeout());
         await first.DisposeAsync();
 
         var second = await harness.Client.RentAsync(ClientTestHarness.Timeout());
         await second.ExecuteAsync("SELECT id FROM users WHERE id = 2", cancellationToken: ClientTestHarness.Timeout());
 
-        // Assert: the same client connection (and its server session) served both
-        // rents — no re-dial, no re-authentication.
-        second.ShouldBeSameAs(first);
+        // Assert: a new lease reuses the same authenticated server session.
+        second.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
         harness.Server.Sessions.ShouldHaveSingleItem();
 
         await second.DisposeAsync();
@@ -125,6 +126,7 @@ public class DatabaseClientTests
         // Arrange
         await using var harness = await ClientTestHarness.StartAsync(configureSettings: settings => settings.MaxPoolSize = 1);
         var first = await harness.Client.RentAsync(ClientTestHarness.Timeout());
+        Guid sessionId = harness.Server.Sessions.ShouldHaveSingleItem().Id;
 
         // Act: the second rent blocks until the first connection returns
         Task<DatabaseConnection> pending = harness.Client.RentAsync(ClientTestHarness.Timeout()).AsTask();
@@ -135,7 +137,8 @@ public class DatabaseClientTests
         var second = await pending;
 
         // Assert
-        second.ShouldBeSameAs(first);
+        second.ShouldNotBeSameAs(first);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
         await second.DisposeAsync();
     }
 
