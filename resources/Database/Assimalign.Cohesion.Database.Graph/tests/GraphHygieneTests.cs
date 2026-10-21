@@ -42,7 +42,7 @@ public sealed class GraphHygieneTests
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Catalog: record size bounds count encoded UTF-8 bytes")]
     [InlineData(false)]
     [InlineData(true)]
-    public void Encode_CatalogNameAtRecordLimit_ShouldAcceptExactFitAndRefuseOverflow(bool multibyte)
+    public async Task Encode_CatalogNameAtRecordLimit_ShouldAcceptExactFitAndRefuseOverflow(bool multibyte)
     {
         // Arrange: a label's fixed header and null schema occupy 43 bytes.
         int capacity = SlottedPage.MaxRecordSize - 43;
@@ -57,6 +57,11 @@ public sealed class GraphHygieneTests
         exact.Length.ShouldBe(SlottedPage.MaxRecordSize);
         GraphCatalogCodec.Decode(exact).Label.ShouldBe(label);
         Should.Throw<GraphElementTooLargeException>(() => GraphCatalogCodec.Encode(overflow, new TransactionSequence(1)));
+        await using var engine = GraphDatabaseEngine.Create("catalog-exact-fit", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await GraphSchema.Open(database, session).SaveLabelAsync(label, CancellationToken.None);
+        (await GraphSchema.Open(database, session).GetLabelsAsync(CancellationToken.None)).ShouldHaveSingleItem().ShouldBe(label);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: oversized catalog names fail with COHDBG009 and preserve the session")]
@@ -85,11 +90,36 @@ public sealed class GraphHygieneTests
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith("COHDBG009:", Case.Sensitive);
+        error.Message.ShouldContain("Graph catalog metadata encodes to", Case.Sensitive);
         await client.SendAsync(ProtocolMessageType.Ping);
         await client.ExpectAsync(ProtocolMessageType.Pong);
         var session = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
         (await GraphSchema.Open(session.Database, session).GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
         (await GraphSchema.Open(session.Database, session).GetRelationshipTypesAsync(CancellationToken.None)).ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: metadata-only overflow carries structured COHDBG009")]
+    public async Task SaveLabelAsync_CatalogOnlyOverflow_ShouldReportStructuredSizeFailure()
+    {
+        // Arrange: the label name fits a node record; only the catalog stores its owner name.
+        await using var engine = GraphDatabaseEngine.Create("catalog-only-size", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string name = "Fits";
+        var label = new GraphLabelMetadata(Guid.NewGuid(), name, DatabaseObjectOwner.Schema, new string('s', 9000));
+        var record = new StoredGraphNode(1, [name], new Dictionary<string, object?>());
+        GraphRecordCodec.Encode(new GraphRecord(1, 1, Node: record, LabelIds: [label.Id]), new TransactionSequence(1)).Length
+            .ShouldBeLessThan(SlottedPage.MaxRecordSize);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await GraphSchema.Open(database, session).SaveLabelAsync(label, CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
+        failure.Message.ShouldNotStartWith("COHDBG009:", Case.Sensitive);
+        failure.InnerException.ShouldBeOfType<GraphElementTooLargeException>().Message.ShouldContain("Graph catalog metadata encodes to", Case.Sensitive);
+        (await GraphSchema.Open(database, session).GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Schema: an unknown relationship type error names the type")]
