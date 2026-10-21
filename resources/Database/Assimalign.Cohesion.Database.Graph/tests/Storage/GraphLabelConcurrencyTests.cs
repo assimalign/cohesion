@@ -35,7 +35,7 @@ public sealed class GraphLabelConcurrencyTests
         await coordinator.CommitAsync(seed, timeout.Token);
         var old = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
         var elapsed = Stopwatch.StartNew();
-        const int maxIterations = 1_024;
+        const int maxIterations = 16_384;
         int continueRace = 1;
         int reading = 0, writing = 0, reads = 0, writes = 0, readOverlaps = 0, writeOverlaps = 0, rollbacks = 0, purges = 0;
         using var phases = new Barrier(2, phase =>
