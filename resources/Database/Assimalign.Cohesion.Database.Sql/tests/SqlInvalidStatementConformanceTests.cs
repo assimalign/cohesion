@@ -22,6 +22,8 @@ public sealed class SqlInvalidStatementConformanceTests
         yield return ["CREATE TABLE d (a INT, CONSTRAINT pk_d PRIMARY KEY(a, A))", "COHSQLE019", "pk_d"];
         yield return ["CREATE TABLE d (a INT, CONSTRAINT uq_d UNIQUE(a, A))", "COHSQLE019", "uq_d"];
         yield return ["CREATE TABLE d (a INT, CONSTRAINT fk_d FOREIGN KEY(a, A) REFERENCES p(a, b))", "COHSQLE019", "fk_d"];
+        yield return ["CREATE TABLE d (a INT, b INT, CONSTRAINT fk_d FOREIGN KEY(a, b) REFERENCES p(a, A))", "COHSQLE019", "fk_d"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, b) REFERENCES p(a, A)", "COHSQLE019", "fk_t"];
         yield return ["ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY(a, A)", "COHSQLE019", "pk_t"];
         yield return ["ALTER TABLE t ADD CONSTRAINT uq_t UNIQUE(a, A)", "COHSQLE019", "uq_t"];
         yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, A) REFERENCES p(a, b)", "COHSQLE019", "fk_t"];
@@ -57,6 +59,7 @@ public sealed class SqlInvalidStatementConformanceTests
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         failure.Message.ShouldContain(detail, Case.Sensitive);
+        if (detail == "PRIMARY KEY") { failure.Message.ShouldContain($"table '{PrimaryKeyTable(sql)}'", Case.Sensitive); }
         if (code == "COHSQLE019" && sql.Contains("(a, A)")) { failure.Message.ShouldContain("A", Case.Sensitive); }
         await using var rows = (await session.ExecuteAsync("SELECT a FROM t", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         (await SqlT1ScalarTests.ReadAsync(rows)).ShouldHaveSingleItem()[0].ShouldBe(7);
@@ -84,10 +87,60 @@ public sealed class SqlInvalidStatementConformanceTests
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         failure.Message.ShouldContain(detail, Case.Sensitive);
+        if (detail == "PRIMARY KEY") { failure.Message.ShouldContain($"table '{PrimaryKeyTable(sql)}'", Case.Sensitive); }
         failure.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT a FROM t", cancellationToken: TestTimeout.Token())).ShouldHaveSingleItem()["a"].ShouldBe(7);
         await connection.ExecuteAsync("CREATE TABLE d (a INT, b INT, CONSTRAINT uq_good UNIQUE(a, b))", cancellationToken: TestTimeout.Token());
     }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CREATE IF NOT EXISTS: an existing table skips invalid key declarations (#1192)")]
+    [InlineData("CREATE TABLE IF NOT EXISTS d (a INT, PRIMARY KEY(a,a))")]
+    [InlineData("CREATE TABLE IF NOT EXISTS d (a INT PRIMARY KEY, b INT PRIMARY KEY)")]
+    public async Task ExecuteAsync_ExistingTableWithInvalidKeyDeclarations_ShouldSucceedUnchanged(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("create-noop", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE d (a INT)", cancellationToken: CancellationToken.None);
+        database.Catalog.TryGetTable("dbo", "d", out var before).ShouldBeTrue();
+
+        // Act
+        var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+
+        // Assert
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
+        result.AffectedCount.ShouldBe(0);
+        database.Catalog.TryGetTable("dbo", "d", out var after).ShouldBeTrue();
+        after.ShouldBeSameAs(before);
+        await session.ExecuteAsync("INSERT INTO d VALUES (7),(7)", cancellationToken: CancellationToken.None);
+        await using var rows = (await session.ExecuteAsync("SELECT * FROM d", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+        var values = await SqlT1ScalarTests.ReadAsync(rows);
+        values.Count.ShouldBe(2);
+        values.ShouldAllBe(row => row.Length == 1 && (int)row[0]! == 7);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ADD COLUMN: a second primary key names its real declaration ordinal (#1192)")]
+    public async Task ExecuteAsync_AddColumnWithLaterPrimaryKey_ShouldNameDeclarationOrdinal()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("add-column-primary", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE p (a INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("ALTER TABLE p ADD COLUMN b INT UNIQUE PRIMARY KEY", cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE019");
+        failure.Message.ShouldContain("PrimaryKey_p_b_1", Case.Sensitive);
+        failure.Message.ShouldContain("table 'p'", Case.Sensitive);
+    }
+
+    private static string PrimaryKeyTable(string sql)
+        => sql.StartsWith("CREATE") ? "d" : sql.StartsWith("ALTER TABLE p") ? "p" : "t";
 
     private static string[] Setup() =>
     [

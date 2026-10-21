@@ -980,22 +980,6 @@ internal sealed partial class SqlPlanner
         var columns = new List<SqlCatalogColumn>(create.Columns.Count);
         var primaryKey = new List<string>();
         bool hasIdentity = false;
-        bool hasPrimaryKey = false;
-        for (int i = 0; i < create.Constraints.Count; i++)
-        {
-            var definition = create.Constraints[i];
-            string name = SqlConstraintDeclaration.Name(create.Table.TableName, definition, i);
-            SqlConstraintDeclaration.ValidateColumns(definition, name);
-            if (definition.Kind == SqlConstraintKind.PrimaryKey)
-            {
-                if (hasPrimaryKey)
-                {
-                    throw SqlConstraintDeclaration.MultiplePrimaryKeys(create.Table.TableName, name).At(create.Location);
-                }
-                hasPrimaryKey = true;
-            }
-        }
-
         foreach (var definition in create.Columns)
         {
             var type = ResolveColumnType(definition);

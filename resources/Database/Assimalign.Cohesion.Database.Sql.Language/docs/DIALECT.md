@@ -1501,13 +1501,16 @@ parse as niladic function nodes and execute using the transaction-start clock (#
 remain column references and receive `COHSQLE005` in these clauses.
 
 Repeated UPDATE SET targets fail planning with COHSQLE019, even when no row matches;
-DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child column lists
+DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child and referenced column lists
 must not repeat a column (case-insensitive); CREATE TABLE and ALTER TABLE ADD CONSTRAINT
 report COHSQLE019 naming the column and constraint. A table may declare one PRIMARY KEY:
 a second inline or table declaration, or ALTER ADD CONSTRAINT / ADD COLUMN PRIMARY KEY over an existing key, reports
 COHSQLE019 naming the constraint and table. Repeated PRIMARY KEY clauses on one column
 also fail, including ADD COLUMN. Composite keys remain supported. The live
 SqlInvalidStatementConformanceTests corpus exercises these refusals in process and over the wire.
+CREATE TABLE IF NOT EXISTS succeeds without validating key declarations when the table already
+exists and leaves it unchanged, matching PostgreSQL parse_utilcmd.c:202 (without its NOTICE).
+Refusing repeated FOREIGN KEY child columns is stricter than PostgreSQL.
 
 ## Grouping and aggregate functions (#1020)
 

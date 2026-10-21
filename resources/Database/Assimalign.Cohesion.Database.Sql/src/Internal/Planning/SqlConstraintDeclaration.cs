@@ -15,9 +15,20 @@ internal static class SqlConstraintDeclaration
     internal static void ValidateColumns(SqlConstraintDefinition definition, string name)
     {
         if (definition.Kind is not (SqlConstraintKind.PrimaryKey or SqlConstraintKind.Unique or SqlConstraintKind.ForeignKey)) { return; }
-        // PostgreSQL parse_utilcmd.c:2773-2779 rejects repeated key columns instead of deduplicating them.
+        // PostgreSQL parse_utilcmd.c:2768-2781 rejects repeated PK/UNIQUE columns.
+        // Refusing repeated FK child columns is deliberately stricter than PostgreSQL.
+        ValidateColumnList(definition.Columns, name);
+        if (definition.Kind == SqlConstraintKind.ForeignKey)
+        {
+            // PostgreSQL tablecmds.c:13982-13989 rejects repeated referenced columns (42830).
+            ValidateColumnList(definition.ReferencedColumns, name);
+        }
+    }
+
+    private static void ValidateColumnList(IReadOnlyList<string> declared, string name)
+    {
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string column in definition.Columns)
+        foreach (string column in declared)
         {
             if (!columns.Add(column))
             {

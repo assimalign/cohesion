@@ -278,10 +278,19 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var columns = table.Columns.Append(column).ToArray();
-        var primaryDefinition = plan.Constraints.FirstOrDefault(c => c.Kind == SqlConstraintKind.PrimaryKey);
+        int primaryOrdinal = -1;
+        for (int ordinal = 0; ordinal < plan.Constraints.Count; ordinal++)
+        {
+            if (plan.Constraints[ordinal].Kind == SqlConstraintKind.PrimaryKey)
+            {
+                primaryOrdinal = ordinal;
+                break;
+            }
+        }
+        var primaryDefinition = primaryOrdinal < 0 ? null : plan.Constraints[primaryOrdinal];
         if (primaryDefinition is not null && table.PrimaryKeyColumns.Count > 0)
         {
-            throw SqlConstraintDeclaration.MultiplePrimaryKeys(table.Name, ConstraintName(table, primaryDefinition, 0));
+            throw SqlConstraintDeclaration.MultiplePrimaryKeys(table.Name, ConstraintName(table, primaryDefinition, primaryOrdinal));
         }
 
         var primary = primaryDefinition?.Columns ?? table.PrimaryKeyColumns;

@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Key declaration semantics (#1192)
+
+The engine rejects repeated child or referenced key columns with COHSQLE019; rejecting
+repeated FOREIGN KEY child columns is stricter than PostgreSQL. Existing-table CREATE TABLE
+IF NOT EXISTS skips key declaration validation and preserves the table. DIALECT.md records
+these execution rules; parser shapes and advertised clauses are unchanged.
+
 ## INSERT conflict clauses (#1118)
 
 SqlOnConflictClause retains inference kind, column set or constraint name, action,

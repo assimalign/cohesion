@@ -72,8 +72,13 @@ publication or index construction, for CREATE and ALTER ADD CONSTRAINT. It uses 
 case-insensitive identity as column binding and names the column and constraint. A second
 PRIMARY KEY declaration is refused with COHSQLE019, including mixed inline/table declarations
 and ALTER ADD CONSTRAINT or ADD COLUMN on an existing primary key, or repeated PRIMARY KEY
-clauses on one added column (PostgreSQL parse_utilcmd.c:2378,2773-2779 uses 42P16
-for multiple primary keys). The live invalid-statement conformance corpus checks both execution
+clauses on one added column. PostgreSQL rewriteHandler.c:1166 uses 42601 for repeated
+whole-column assignments; parse_utilcmd.c:2773-2779 uses 42701 for repeated PK/UNIQUE
+columns, and :2378 uses 42P16 for multiple primary keys. Repeated FK child columns are
+rejected more strictly than PostgreSQL; repeated referenced columns are also refused with
+COHSQLE019 (PostgreSQL tablecmds.c:13982-13989 uses 42830). CREATE TABLE IF NOT EXISTS
+skips declaration checks when the table exists, preserving it unchanged (PostgreSQL
+parse_utilcmd.c:202). The live invalid-statement conformance corpus checks both execution
 boundaries, statement atomicity, connection usability, existing SQL0005 type limits and
 COHSQLE017 aggregate placement. No public API or persisted representation changes.
 
