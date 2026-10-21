@@ -1030,8 +1030,8 @@ public sealed class BTreeIndex
                 throw InvariantViolated(leafId, $"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
             }
 
-            bool endOfRun = at > 0 && leaf.GetKey(at - 1).SequenceEqual(key)
-                && (at < count ? key.SequenceCompareTo(leaf.GetKey(at)) < 0 : leaf.NextLeaf < 0 || IsEndOfRun(parentPath, key));
+            bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(key)
+                && (leaf.NextLeaf < 0 || IsEndOfRun(parentPath, key));
             int mid = ChooseLeafSplit(leaf, at, endOfRun);
             separator = BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid);
             EnsureLeafSeparator(leaf, leafId, mid, separator);
@@ -1074,14 +1074,16 @@ public sealed class BTreeIndex
 
     /// <summary>
     /// Chooses where a full leaf splits: the number of entries that stay on the left.
-    /// Inserts at the end of a duplicate run split at the insertion point. Appends
-    /// at the end of the tree or a run keep the last existing entry on the right to
-    /// supply that side of the separator; the incoming entry follows on re-descent.
-    /// Other inserts retain the midpoint split. This adapts PostgreSQL's rightmost
-    /// and single-value strategies
-    /// (<c>nbtsplitloc.c:95-105,390-418,1012-1033</c>) without including the incoming
-    /// entry in the split: both existing halves must be nonempty, and the incoming
-    /// entry must fit on the side its separator will route it to.
+    /// Appends to the tree, or to a leaf containing only the incoming key whose
+    /// upper fence proves its duplicate run ends here, keep the last existing entry
+    /// on the right to supply that side of the separator. Since the insertion slot
+    /// is after every entry, equality with the first key proves the whole page,
+    /// including the new item, has one value. Mixed-key leaves retain the midpoint
+    /// unless this is a rightmost append. This adapts PostgreSQL's rightmost and
+    /// single-value strategies (<c>nbtsplitloc.c:287-292,971,987-1033</c>): its
+    /// single-value strategy also requires the whole page, including the new item,
+    /// to contain duplicates. Both existing halves must be nonempty; the incoming
+    /// entry follows on re-descent.
     /// </summary>
     private static int ChooseLeafSplit(in BTreeNode leaf, int at, bool endOfRun)
     {
@@ -1091,27 +1093,7 @@ public sealed class BTreeIndex
             return count / 2;
         }
 
-        int mid = Math.Min(at, count - 1);
-        if (at < count)
-        {
-            // The incoming duplicate routes left of the next key. Moving a short
-            // higher-key suffix might not free enough room there. In that case,
-            // move the last duplicate too: it has the incoming key's size, and
-            // its separator routes the incoming identity right. The suffix was
-            // smaller than one incoming entry, so that right half holds less than
-            // three maximum-size entries, which always fit under MaxKeyLength.
-            int available = leaf.FreeSpace + leaf.OrphanedLeafBytes;
-            for (int i = at; i < count; i++)
-            {
-                available += BTreeNode.LeafEntrySize(leaf.GetKey(i).Length) + BTreeNode.DirectorySlotSize;
-            }
-            if (BTreeNode.LeafEntrySize(leaf.GetKey(at - 1).Length) > available)
-            {
-                mid--;
-            }
-        }
-
-        return mid;
+        return count - 1;
     }
 
     /// <summary>

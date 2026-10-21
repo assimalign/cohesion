@@ -405,23 +405,36 @@ baseline.
   tiebreaker attributes); the promoted separator is the
   first at which the entries before it would exceed half the node, so both halves
   keep room for the largest separator.
-- **The leaf split point is one function, `ChooseLeafSplit` (#1196).** An insert
-  after a duplicate run splits at its insertion slot; an append to the tree or a run
-  keeps `count - 1` entries left, since the separator needs an existing entry on
-  each side. At a boundary before a shorter key, it moves one more duplicate if
-  needed so the incoming entry fits after one split. Other inserts keep the midpoint.
-  This adapts PostgreSQL's rightmost
-  and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:95-105`,
-  `:390-418`, `:1012-1033`). The nearest upper ancestor separator serves as the
-  leaf's high key: a greater key proves the run ends here; an equal key retains
-  the midpoint. This takes at most one extra ancestor walk per split, without a
-  sibling-chain scan, page-format change or change to cursor continuation.
+- **The leaf split point is one function, `ChooseLeafSplit` (#1196).** An append
+  to the tree keeps `count - 1` entries left, since the separator needs an existing
+  entry on each side. A duplicate-run append does so only when the entire leaf,
+  including the incoming item, has one value and its upper fence proves the run
+  ends here. Equality with `GetKey(0)` proves the whole-page precondition because
+  the insertion slot is after every existing entry. Mixed-key leaves keep the
+  midpoint except for the unchanged rightmost-append rule. This adapts PostgreSQL's
+  rightmost and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:287-292`,
+  `:971`, `:987-1033`): PostgreSQL's single-value strategy likewise requires the
+  whole page, including the new item, to contain duplicates. The nearest upper
+  ancestor separator serves as the leaf's high key: a greater key proves the run
+  ends here; an equal key retains the midpoint. This takes at most one extra
+  ancestor walk per split, without a sibling-chain scan, page-format change or
+  change to cursor continuation.
   Deterministic 5,000-entry, 1,024-byte-key tests halve ordered leaves from 1,666
   (39.153% full) to 834 (78.211%) with duplicate/ascending heights still 6/3, and
-  show the same packing improvement for a run bounded by other keys. Three random
+  preserve the gain for a single-value leaf with a greater upper fence. A run
+  sharing its leaf with a higher key retains the midpoint. Three random
   seeds improve from 3,052 to 3,047 leaves at height 3 while shuffled duplicate
   references retain their fill and height (`BTreeShapeTests`, page/byte counts
   without pruning or timing thresholds; the external SF10 gate remains separate).
+  On real pages, loading 5,000 shuffled keys and adding one new reference per key
+  in random/ascending order uses 2,093/2,228 leaves with 1,024-byte keys, versus
+  midpoint's 2,095/2,228. Ascending initial loads retain a separate rightmost-fill
+  trade-off: with 64-byte keys, ascending updates use 175 leaves versus midpoint's
+  117 (the unrestricted run-end policy used 349); whole-page eligibility prevents
+  mixed-leaf run-end splits but does not reserve headroom in rightmost appends.
+  A 90% byte-fill target for rightmost appends retained the 834-leaf sequential
+  result but increased that 64-byte ascending-update count from 175 to 192, so
+  the existing rightmost rule is retained.
 - **Order is checked in every build.** A leaf split fails unless its separator
   falls strictly after the last entry kept left and at or before the first entry
   moved right, and every separator written into a parent must be strictly between
