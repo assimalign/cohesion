@@ -4,30 +4,6 @@ using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
-/// <summary>Identifies a persisted relational constraint. Unique constraints use unique indexes.</summary>
-public enum SqlCatalogConstraintKind : byte
-{
-    /// <summary>A foreign key requiring a matching referenced row.</summary>
-    Reference = 0,
-    /// <summary>A Boolean expression checked for each written row.</summary>
-    Check,
-}
-
-/// <summary>Identifies the action applied when a referenced parent row is deleted.</summary>
-public enum SqlCatalogReferentialAction : byte
-{
-    /// <summary>Refuses deletion while dependent rows exist.</summary>
-    Restrict = 0,
-    /// <summary>Deletes dependent rows in the same transaction.</summary>
-    Cascade,
-    /// <summary>Checks dependent rows at statement end.</summary>
-    NoAction,
-    /// <summary>Assigns NULL to the referencing columns.</summary>
-    SetNull,
-    /// <summary>Assigns each referencing column's default.</summary>
-    SetDefault,
-}
-
 /// <summary>Describes a foreign-key or check constraint persisted with its owning table.</summary>
 public sealed class SqlCatalogConstraint
 {

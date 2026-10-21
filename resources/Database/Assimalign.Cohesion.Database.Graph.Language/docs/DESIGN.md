@@ -677,7 +677,7 @@ to zero from text or numeric input with COHDBG013. DECIMAL-to-REAL parses invari
 text directly to avoid double rounding, matching SQL SqlStandardCasts.cs:161,206-249. Temporal text follows SQL's invariant
 ISO date/time grammar, absent offset means UTC, and dates convert to midnight UTC. Boolean
 CAST accepts Boolean or TRUE/FALSE text; CAST to string renders Boolean uppercase. Timestamp
-text uses SQL SqlCastText.cs:27's FFFFFFF fraction, omitting the fraction at whole seconds. Cypher
+text uses SQL resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Types/SqlCastText.cs:27's FFFFFFF fraction, omitting the fraction at whole seconds. Cypher
 conversions deliberately differ from CAST: toInteger truncates, accepts Boolean as 1/0, and
 toInteger/toFloat/toBoolean return NULL for unparsable text. String/Decimal range overflow and non-finite
 results still fail with COHDBG013. Like Neo4j, toInteger saturates finite floating values outside Int64 range; CAST rejects them. toString retains a fractional digit for floating integers and uses Cypher scientific-notation thresholds. This implements the main-session ruling over the older

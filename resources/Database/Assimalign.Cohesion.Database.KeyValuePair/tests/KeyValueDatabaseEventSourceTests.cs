@@ -21,15 +21,6 @@ using Assimalign.Cohesion.Testing;
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the key-value model's event source: the source and its counters
-/// are process-wide.
-/// </summary>
-[CollectionDefinition(nameof(KeyValueDatabaseEventSourceCollection), DisableParallelization = true)]
-public class KeyValueDatabaseEventSourceCollection
-{
-}
-
-/// <summary>
 /// The key-value model's event source against the repository's EventSource convention, and the server
 /// events it writes for real sessions over the in-memory driver: each event once, with its
 /// declared payload, and the server-session gauge back where it started (database event-sources

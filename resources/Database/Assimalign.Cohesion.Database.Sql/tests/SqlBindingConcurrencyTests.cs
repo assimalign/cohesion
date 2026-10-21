@@ -14,9 +14,6 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-[CollectionDefinition("SQL binding concurrency", DisableParallelization = true)]
-public sealed class SqlBindingConcurrencyCollection;
-
 [Collection("SQL binding concurrency")]
 public sealed class SqlBindingConcurrencyTests
 {

@@ -1,7 +1,5 @@
 using System.Linq;
 
-using Assimalign.Cohesion.Database.Types;
-
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 
 internal sealed record SqlViewRecord(string Schema, string Name, string Definition, SqlViewColumn[] Columns,
@@ -14,5 +12,3 @@ internal sealed record SqlViewRecord(string Schema, string Name, string Definiti
         Columns.Select(column => new SqlCatalogColumn(column.Name, column.Type, collation: column.Collation is null ? null : Types.Collation.FromName(column.Collation), domainName: column.DomainName)).ToArray(),
         TableDependencies, Dependencies, FunctionCalls, Owner, OwningSchema);
 }
-
-internal sealed record SqlViewColumn(string Name, DatabaseTypeInfo Type, string? Collation, string? DomainName);

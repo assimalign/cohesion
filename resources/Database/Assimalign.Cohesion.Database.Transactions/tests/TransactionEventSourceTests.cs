@@ -16,19 +16,9 @@ using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
-using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
-
-/// <summary>
-/// Serializes the tests that observe the Transactions event source: the source and its counters
-/// are process-wide.
-/// </summary>
-[CollectionDefinition(nameof(TransactionEventSourceCollection), DisableParallelization = true)]
-public class TransactionEventSourceCollection
-{
-}
 
 /// <summary>
 /// The transaction kernel's event source against the repository's EventSource convention

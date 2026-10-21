@@ -11,9 +11,6 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
-[CollectionDefinition("Journal enrollment", DisableParallelization = true)]
-public sealed class JournalEnrollmentCollection { }
-
 [Collection("Journal enrollment")]
 public sealed class JournalEnrollmentTests
 {

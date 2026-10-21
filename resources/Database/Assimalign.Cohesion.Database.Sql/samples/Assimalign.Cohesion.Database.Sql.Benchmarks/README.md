@@ -299,7 +299,7 @@ try {
     dotnet publish $sample -c Release -r win-arm64 -o "$output/aot-sample" *> "$output/native-publish-aot-sample.log"
     dotnet publish $project -c Release -r win-arm64 -o "$output/benchmarks" *> "$output/native-publish-benchmarks.log"
     (Get-Item -LiteralPath "$output/phase-timer/review/SqlDeclaredDatabase.cs").LastWriteTimeUtc=[DateTime]::UtcNow
-    (Get-Item -LiteralPath 'resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/SqlDeclaredDatabase.cs').LastWriteTimeUtc=[DateTime]::UtcNow
+    (Get-Item -LiteralPath 'resources/Database/Assimalign.Cohesion.Database.Sql/src/Internal/Provisioning/SqlDeclaredDatabase.cs').LastWriteTimeUtc=[DateTime]::UtcNow
     dotnet publish $project -c Release -r win-arm64 -o "$output/phase-review" "-p:CustomAfterMicrosoftCommonTargets=$output/Q8PhaseInstrumentation.targets" "-p:B2PhaseTimerSource=$output/phase-timer/review/SqlDeclaredDatabase.cs" *> "$output/native-publish-phase-review.log"
 }
 finally { Pop-Location }

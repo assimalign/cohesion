@@ -32,23 +32,3 @@ public sealed class SqlOnConflictClause
     /// <summary>Gets the proposed-row relation reference supplied by the parser for binding.</summary>
     public SqlRelationReference Excluded { get; }
 }
-
-/// <summary>How ON CONFLICT selects unique indexes.</summary>
-public enum SqlOnConflictTargetKind
-{
-    /// <summary>All unique indexes (DO NOTHING only).</summary>
-    None,
-    /// <summary>Every unique index with exactly the specified column set.</summary>
-    Columns,
-    /// <summary>A unique index named by ON CONSTRAINT.</summary>
-    Constraint,
-}
-
-/// <summary>The action taken for an arbiter conflict.</summary>
-public enum SqlOnConflictAction
-{
-    /// <summary>Skip the proposed row.</summary>
-    DoNothing,
-    /// <summary>Update the conflicting row.</summary>
-    DoUpdate,
-}

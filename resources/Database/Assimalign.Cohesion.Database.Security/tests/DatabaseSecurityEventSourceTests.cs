@@ -16,14 +16,6 @@ using Assimalign.Cohesion.Database.Security.Internal;
 namespace Assimalign.Cohesion.Database.Security.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the security event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(DatabaseSecurityEventSourceCollection), DisableParallelization = true)]
-public class DatabaseSecurityEventSourceCollection
-{
-}
-
-/// <summary>
 /// The security child root's event source against the repository's EventSource convention: one
 /// event per authentication verdict or failure, never the evidence, and no cost while nobody listens.
 /// </summary>

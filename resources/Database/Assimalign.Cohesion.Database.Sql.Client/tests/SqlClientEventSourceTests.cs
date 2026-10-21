@@ -16,14 +16,6 @@ using Assimalign.Cohesion.Database.Sql.Client.Internal;
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the SQL client's event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(SqlClientEventSourceCollection), DisableParallelization = true)]
-public class SqlClientEventSourceCollection
-{
-}
-
-/// <summary>
 /// The SQL client's event source against the repository's EventSource convention: each command
 /// starts and stops, or fails, once; an observer hook that throws is reported once; and no
 /// statement text or parameter value is written.

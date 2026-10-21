@@ -16,14 +16,6 @@ using Assimalign.Cohesion.Database.Protocol.Internal;
 namespace Assimalign.Cohesion.Database.Protocol.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the protocol event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(ProtocolEventSourceCollection), DisableParallelization = true)]
-public class ProtocolEventSourceCollection
-{
-}
-
-/// <summary>
 /// The protocol's event source against the repository's EventSource convention: the frame trace
 /// reports each frame once where it crosses the transport, only under its keyword, and costs the
 /// frame reader and writer nothing while nobody listens.

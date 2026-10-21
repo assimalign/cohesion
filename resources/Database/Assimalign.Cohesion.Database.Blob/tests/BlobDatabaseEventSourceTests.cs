@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 using System.IO;
@@ -18,15 +17,6 @@ using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
-
-/// <summary>
-/// Serializes the tests that observe the blob model's event source: the source and its counters
-/// are process-wide.
-/// </summary>
-[CollectionDefinition(nameof(BlobDatabaseEventSourceCollection), DisableParallelization = true)]
-public class BlobDatabaseEventSourceCollection
-{
-}
 
 /// <summary>
 /// The blob model's event source against the repository's EventSource convention, and the server

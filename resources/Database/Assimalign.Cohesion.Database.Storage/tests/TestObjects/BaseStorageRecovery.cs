@@ -199,7 +199,7 @@ internal static class BaseStorageRecovery
     }
 
     // Verbatim classification and planning from 179db17d1,
-    // resources/Database/Assimalign.Cohesion.Database.Storage/src/Internal/StorageRecovery.cs:100-167.
+    // resources/Database/Assimalign.Cohesion.Database.Storage/src/Internal/Recovery/StorageRecovery.cs:100-167.
     // Keep this independent oracle unchanged when the production fused planner changes.
     internal static PlanResult Plan(
         StorageStream data, StorageJournal journal, IReadOnlySet<long>? protectedPages = null,

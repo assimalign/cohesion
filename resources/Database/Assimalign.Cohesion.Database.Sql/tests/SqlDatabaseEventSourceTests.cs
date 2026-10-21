@@ -20,18 +20,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
-
-/// <summary>
-/// Serializes the tests that observe the SQL model's event source: the source and its counters
-/// are process-wide.
-/// </summary>
-[CollectionDefinition(nameof(SqlDatabaseEventSourceCollection), DisableParallelization = true)]
-public class SqlDatabaseEventSourceCollection
-{
-}
 
 /// <summary>
 /// The SQL model's event source against the repository's EventSource convention, and the server

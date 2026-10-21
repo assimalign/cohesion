@@ -239,7 +239,7 @@ phantom that appears only inside trigger expression trees, and its `Audit` membe
 runs). `SqlSchema` is an opaque public sealed class with an internal constructor, a
 `Name` and an instance `Compile()`; the static `Create(name, configure)` and
 `Compile(name, configure)` keep their names. The nine records stay internal
-(`Internal/SqlSchemaDeclaration.cs`), because a public positional record cannot close its
+(`Internal/SqlSchemaDeclaration.cs`, `Internal/SqlSchemaType.cs`, `Internal/SqlSchemaTable.cs`, `Internal/SqlSchemaReference.cs`, `Internal/SqlSchemaCheck.cs`, `Internal/SqlSchemaColumn.cs`, `Internal/SqlSchemaPrincipal.cs`, and `Internal/SqlSchemaGrant.cs`), because a public positional record cannot close its
 primary constructor or its `with` clone, and `SqlSchemaCompiler` is internal; the tests
 reach both through `[InternalsVisibleTo("Assimalign.Cohesion.Database.Sql.Schema.Tests")]`
 (`src/Properties/AssemblyInfo.cs`, the package's first grant). The `Sdk.Database`

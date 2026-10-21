@@ -23,14 +23,6 @@ using Assimalign.Cohesion.Hosting.Resources;
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the Database hosting event source: the source is process-wide.
-/// </summary>
-[CollectionDefinition(nameof(DatabaseHostingEventSourceCollection), DisableParallelization = true)]
-public class DatabaseHostingEventSourceCollection
-{
-}
-
-/// <summary>
 /// The Database hosting module's event source against the repository's EventSource convention, and
 /// the reopen of an offline database it reports (owner decision 22): the finding, each attempt and
 /// each outcome once, with its declared payload.

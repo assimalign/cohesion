@@ -23,15 +23,6 @@ using Assimalign.Cohesion.Database.Sql.Client;
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the client event source: the source and its counters are
-/// process-wide.
-/// </summary>
-[CollectionDefinition(nameof(DatabaseClientEventSourceCollection), DisableParallelization = true)]
-public class DatabaseClientEventSourceCollection
-{
-}
-
-/// <summary>
 /// The shared client core's event source against the repository's EventSource convention: a
 /// loopback client against a real SQL server reports each connection and pool transition once,
 /// a dead endpoint, a refused authentication, a protocol violation and a download whose broken

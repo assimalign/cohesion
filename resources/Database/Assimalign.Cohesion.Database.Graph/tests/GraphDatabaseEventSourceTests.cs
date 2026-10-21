@@ -21,15 +21,6 @@ using Assimalign.Cohesion.Database.Storage;
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the graph model's event source: the source and its counters
-/// are process-wide.
-/// </summary>
-[CollectionDefinition(nameof(GraphDatabaseEventSourceCollection), DisableParallelization = true)]
-public class GraphDatabaseEventSourceCollection
-{
-}
-
-/// <summary>
 /// The graph model's event source against the repository's EventSource convention, and the server
 /// events it writes for real sessions over the in-memory driver: each event once, with its
 /// declared payload, and the server-session gauge back where it started (database event-sources

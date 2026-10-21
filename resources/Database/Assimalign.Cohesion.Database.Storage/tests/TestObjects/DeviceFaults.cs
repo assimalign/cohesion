@@ -8,22 +8,6 @@ using Assimalign.Cohesion.FileSystem;
 namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 /// <summary>
-/// The faults a test switches on as one theory's cases (<see cref="DeviceFaults.SwitchOn"/>): each
-/// takes the database offline.
-/// </summary>
-public enum DeviceFault
-{
-    /// <summary>A write to page 0, the file header's slots, fails (#1268).</summary>
-    HeaderWrite,
-
-    /// <summary>A durable flush of the journal fails (#1243).</summary>
-    JournalFlush,
-
-    /// <summary>A write of the journal, the drain of its append buffer, fails (#1252).</summary>
-    JournalWrite,
-}
-
-/// <summary>
 /// Device faults of one file set that fire on every thread, the engine's background workers
 /// included, for as long as they are switched on: a data page write fails, a write to page 0 (the
 /// file header's slots) fails, a write of the journal (since #1252 the drain of its append buffer)

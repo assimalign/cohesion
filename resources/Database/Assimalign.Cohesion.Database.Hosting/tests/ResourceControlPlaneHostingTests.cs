@@ -5,7 +5,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -506,16 +505,5 @@ public sealed class ResourceControlPlaneHostingTests
                 await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
             }
         }
-    }
-}
-
-internal static class ResourceControlPlaneTestRegistration
-{
-    [ModuleInitializer]
-    internal static void Register()
-    {
-        ResourceRuntime.RegisterControlPlane(
-            typeof(ResourceControlPlaneTestRegistration).Assembly,
-            static () => ResourceControlPlane.Create(["database.add-database", "database.add-principal"]));
     }
 }

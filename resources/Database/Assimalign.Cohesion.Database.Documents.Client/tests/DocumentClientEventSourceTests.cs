@@ -12,9 +12,6 @@ using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
-[CollectionDefinition(nameof(DocumentClientEventSourceCollection), DisableParallelization = true)]
-public sealed class DocumentClientEventSourceCollection { }
-
 [Collection(nameof(DocumentClientEventSourceCollection))]
 public sealed class DocumentClientEventSourceTests
 {

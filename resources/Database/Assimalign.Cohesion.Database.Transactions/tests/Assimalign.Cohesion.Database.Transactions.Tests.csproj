@@ -13,5 +13,7 @@
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FaultingMemoryStream.cs" Link="TestObjects\FaultingMemoryStream.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\CrashSimulationStream.cs" Link="TestObjects\CrashSimulationStream.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\CrashPoint.cs" Link="TestObjects\CrashPoint.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedPowerLossException.cs" Link="TestObjects\SimulatedPowerLossException.cs" />
 	</ItemGroup>
 </Project>

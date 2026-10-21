@@ -10,18 +10,11 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Internal;
-using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
-
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SqlUpsertConcurrencyCollection
-{
-    public const string Name = "SQL upsert concurrency";
-}
 
 [Collection(SqlUpsertConcurrencyCollection.Name)]
 public sealed class SqlUpsertConcurrencyTests

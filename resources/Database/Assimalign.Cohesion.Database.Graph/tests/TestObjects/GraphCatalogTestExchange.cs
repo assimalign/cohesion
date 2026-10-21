@@ -9,20 +9,6 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
-// Test-only exchange over the shared DatabaseProtocolExchange base; Graph.Client's own
-// GraphExecuteExchange is internal, so the catalog tests keep this double.
-internal static partial class GraphCatalogTestExtensions
-{
-    extension(DatabaseConnection connection)
-    {
-        internal ValueTask<GraphCatalogTestResult> ExecuteAsync(string statement, CancellationToken cancellationToken = default)
-            => connection.ExecuteAsync(new GraphCatalogTestExchange(statement), cancellationToken);
-    }
-}
-
-internal sealed record GraphCatalogTestResult(
-    IReadOnlyList<(string Name, DatabaseType Type)> Columns, IReadOnlyList<object?[]> Rows, long AffectedCount, IReadOnlyList<ProtocolDiagnostic> Diagnostics);
-
 internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphCatalogTestResult>
 {
     private readonly string _statement;

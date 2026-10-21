@@ -18,20 +18,6 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
-/// Runs the record-decode tests alone: the scan race keeps a writer reclaiming slots and pages
-/// beside the scans, and beside other tests on a small CI runner that writer can be starved until
-/// the race never happens.
-/// </summary>
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SqlRecordDecodeRaceCollection
-{
-    /// <summary>
-    /// The collection name.
-    /// </summary>
-    public const string Name = "SQL record-decode races";
-}
-
-/// <summary>
 /// Row records that pass their page's checksum and owner check and still do not decode (#1362).
 /// Every read of a row (the index seek through <c>Storage.TryReadRecord</c> with the table's object
 /// id, the scan through the table's owner-scoped iterator) finds the record in a live slot of the

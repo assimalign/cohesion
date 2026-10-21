@@ -2,34 +2,6 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
-/// <summary>Identifies a parsed table or column constraint.</summary>
-public enum SqlConstraintKind
-{
-    /// <summary>A primary key.</summary>
-    PrimaryKey,
-    /// <summary>A reference to another table's key.</summary>
-    ForeignKey,
-    /// <summary>A row predicate.</summary>
-    Check,
-    /// <summary>A unique key, lowered to a unique catalog index.</summary>
-    Unique,
-}
-
-/// <summary>Identifies the supported action when a referenced parent row is deleted.</summary>
-public enum SqlReferentialAction
-{
-    /// <summary>Refuse deletion while children reference the parent.</summary>
-    Restrict,
-    /// <summary>Delete referencing children with their parent.</summary>
-    Cascade,
-    /// <summary>Checks dependent rows at statement end.</summary>
-    NoAction,
-    /// <summary>Assigns NULL to the referencing columns.</summary>
-    SetNull,
-    /// <summary>Assigns each referencing column's default.</summary>
-    SetDefault,
-}
-
 /// <summary>Describes a parsed constraint, normalized for column and table declarations.</summary>
 public sealed class SqlConstraintDefinition
 {

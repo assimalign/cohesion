@@ -239,7 +239,7 @@ There is no upgrade reader. SQL-visible grammar and limits live in DIALECT.md.
 
 ## Ordering output values (#1024)
 
-`SqlPlanner.Ordering.cs` binds aliases and standalone numeric ordinals to
+`src/Internal/Planning/SqlPlanner.Ordering.cs` binds aliases and standalone numeric ordinals to
 projection indexes for stored tables, system relations, joins and groups.
 Unqualified aliases take precedence over source columns, including inside
 scalar ordering expressions. Qualified references and aggregate operands retain
@@ -367,10 +367,10 @@ failure carries one error diagnostic naming the column and no source span, becau
 these execution paths have no source location. PostgreSQL raises this category at
 `src/backend/executor/execMain.c:2268-2274`. NOT NULL is complete for #1653.
 
-`SqlPlanner.Subqueries.cs` binds each child SELECT in a lexical scope chain and lowers its use sites to typed slots, numbered from zero across the
+`src/Internal/Planning/SqlPlanner.Subqueries.cs` binds each child SELECT in a lexical scope chain and lowers its use sites to typed slots, numbered from zero across the
 statement (`SqlSubquerySlot`); the enclosing expressions bind each use site to a
 read of its slot (`SqlBoundSubquery`, `SqlBoundInSubquery`). `SqlSubqueryPlan` owns
-those child plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs`
+those child plans and the enclosing relation plan. `src/Internal/Execution/SqlPlanExecutor.Subqueries.cs`
 executes each child with the enclosing `SqlStatementContext`, materializes its
 results, and stores a scalar's value (a NULL when it returned no row), an EXISTS's
 Boolean or an IN's value list in the execution frame's `SqlSubqueryValues` under the slot
@@ -1261,7 +1261,7 @@ and Q5L agree; Q6 costs nothing per row (911.6 bytes against Q6C's 911.5, −10.
 memory) and Q7R saves 16 (a BOOLEAN result's shared box). Q8 and Q8C measure as part 2 does in
 time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a` (4.36 MB against
 4.20 MB) while the JIT build allocates 18 KB less: publishing variants pins the difference to
-`SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
+`src/Internal/Execution/SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
 instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
 allocation decisions) rather than at an allocation the change makes; it is not yet explained.
 
@@ -2243,7 +2243,7 @@ table, and `SqlCatalogTable` has no virtual/system flag. This keeps physical
 access paths and object locks meaningful instead of inventing a dummy object id
 or storage location for metadata. No existing public interface changes.
 
-`SqlPlanExecutor.SystemViews.cs` projects catalog descriptions to rows at query
+`src/Internal/Execution/SqlPlanExecutor.SystemViews.cs` projects catalog descriptions to rows at query
 time and applies the same expression evaluator and SELECT semantics as table
 queries: column and expression projection, aliases, parameters, `WHERE`,
 `ORDER BY`, `DISTINCT`, grouping/aggregates, `LIMIT`, and `OFFSET`. The existing
@@ -3451,7 +3451,7 @@ description + exported registrations), the engine binds them.
   comparator equivalence as well as matching NULL placement.
 - **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
-  `SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
+  `src/Internal/Execution/SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
   leaves as it goes, before a later row fails the unique check; the coordinator then
   rolls the statement bracket back, which rewrites each touched page in place from
   its pre-image. Until #1371 that rewrite took no tree latch, and a concurrent seek
@@ -4887,7 +4887,7 @@ application function the engine no longer resolves does not fail the open (it bi
 unresolved, above), but fails the build of an engine that declares the database with a
 `SqlSchemaMigrationException` led by `COHSQLE009`. No runtime
 `ArithmeticException` escapes expression evaluation. Provisioning a declared database fails with
-`SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/SqlProvisioningCodes`):
+`SqlSchemaMigrationException` led by a `COHSQLP` code (`Internal/Provisioning/SqlProvisioningCodes`):
 `COHSQLP001` a declaration refused before any file is touched, `COHSQLP002` an existing database's
 collation that is not the declared one, `COHSQLP003` a `Verify` declaration that drifted or does not
 exist, `COHSQLP004` a failed schema step after compensation, `COHSQLP005` an apply refused before
@@ -4924,7 +4924,7 @@ owner-scoped iterator, find the record in a live slot of the table's own page ch
 another object's and was not reclaimed: a record too short for its stamps, an object-id prefix
 naming another object, a malformed or truncated component, a component of another type than its
 column's, and a value outside its type's range are all damage. `SqlRowCodec.Decode` throws
-`DatabaseTypeException` for each, and `DecodeRow` (`SqlPlanExecutor.Defaults.cs`), which knows the
+`DatabaseTypeException` for each, and `DecodeRow` (`src/Internal/Execution/SqlPlanExecutor.Defaults.cs`), which knows the
 location, reports it. Until #1362 the codec returned null for the first two and the executor
 dropped the row from the result, a malformed component failed with a `DatabaseException` or
 `DatabaseTypeException` naming no page, and a component of another type decoded as a value of that

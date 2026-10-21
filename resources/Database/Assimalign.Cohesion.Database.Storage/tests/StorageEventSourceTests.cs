@@ -17,15 +17,6 @@ using Assimalign.Cohesion.Database.Storage.Units;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
-/// Serializes the tests that observe the storage event source: the source and its counters are
-/// process-wide.
-/// </summary>
-[CollectionDefinition(nameof(StorageEventSourceCollection), DisableParallelization = true)]
-public class StorageEventSourceCollection
-{
-}
-
-/// <summary>
 /// The storage kernel's event source against the repository's EventSource convention
 /// (<c>.claude/rules/event-source.md</c>) and the catalog of the Database event-source plan
 /// (§4.2): each lifecycle event once, with its declared payload, from a real storage over the
