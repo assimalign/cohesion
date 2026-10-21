@@ -1788,13 +1788,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     TimeOnly time => time,
                     DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
-<<<<<<< HEAD
-                    string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
-                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimeConversionUnsupported, value.GetType().Name)),
-=======
                     string text => SqlLiteralText.ParseTime(text),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
->>>>>>> feature/L03.02.01.78.14-standard-text-forms-for-temporal
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimeConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.DateTime => value switch
                 {
@@ -1813,13 +1808,8 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.TimeSpan => value switch
                 {
                     TimeSpan timeSpan => timeSpan,
-<<<<<<< HEAD
-                    string text => TimeSpan.Parse(text, CultureInfo.InvariantCulture),
-                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IntervalConversionUnsupported, value.GetType().Name)),
-=======
                     string text => SqlCastText.ParseInterval(text),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to INTERVAL."),
->>>>>>> feature/L03.02.01.78.14-standard-text-forms-for-temporal
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IntervalConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.Guid => value switch
                 {
