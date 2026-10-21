@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
     <Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="xunit" />
@@ -12,7 +14,6 @@
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Shouldly" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
-        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tests" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.StreamingFixture" ReferenceOutputAssembly="false" />

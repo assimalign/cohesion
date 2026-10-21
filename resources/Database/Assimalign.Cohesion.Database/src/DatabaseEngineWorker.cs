@@ -192,9 +192,11 @@ public abstract class DatabaseEngineWorker
     private int _consecutiveFailures;
     private long _failureCount;
 
-    // Test-only observation of requested pump delays, before the blocking wait. The owning
+    // Test-only observation of requested pump delays and completed trigger waits. The owning
     // test assembly can connect this to a model-local checkpoint pass without a shipped grant.
     internal Action<TimeSpan>? DelayRequested;
+    internal Action<TimeSpan>? TriggerWaitCompleted;
+    internal Exception? ObserverFailure;
 
     /// <summary>
     /// Initializes a new worker with its diagnostic name, its role and its cadence.
@@ -284,7 +286,16 @@ public abstract class DatabaseEngineWorker
         {
             try
             {
-                WaitForTrigger(cancellationToken);
+                var triggerObserver = Volatile.Read(ref TriggerWaitCompleted);
+                long triggerStarted = triggerObserver is null ? 0 : Stopwatch.GetTimestamp();
+                try
+                {
+                    WaitForTrigger(cancellationToken);
+                }
+                finally
+                {
+                    if (triggerObserver is not null) { Observe(triggerObserver, Stopwatch.GetElapsedTime(triggerStarted)); }
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1015,8 +1026,19 @@ public abstract class DatabaseEngineWorker
 
     internal void Delay(TimeSpan duration, CancellationToken cancellationToken)
     {
-        Volatile.Read(ref DelayRequested)?.Invoke(duration);
+        var observer = Volatile.Read(ref DelayRequested);
+        if (observer is not null) { Observe(observer, duration); }
         cancellationToken.WaitHandle.WaitOne(duration);
+    }
+
+    private void Observe(Action<TimeSpan> observer, TimeSpan duration)
+    {
+        try { observer(duration); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Observational test hooks must not change worker failure or cancellation policy.
+            Volatile.Write(ref ObserverFailure, exception);
+        }
     }
 
     /// <summary>

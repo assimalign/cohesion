@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+
 using Shouldly;
 using Xunit;
 
@@ -5,32 +9,45 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 public sealed class WorkerPumpObservationTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database] - Worker observations: raw pump waits cannot bypass requested-delay records")]
-    public void FindUnobservedWaits_RawPumpPause_ShouldRejectEveryUnobservedWait()
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker observations: a failed trigger is measured before its recovery delay")]
+    public void Run_TriggerThrows_ShouldCompleteItsMeasurementBeforeBackoff()
     {
         // Arrange
-        const string source = """
-            class Worker
-            {
-                void Delay() => token.WaitHandle.WaitOne(duration);
-                void WaitForTrigger() => token.WaitHandle.WaitOne(interval);
-                void Run()
-                {
-                    Delay();
-                    token.WaitHandle.WaitOne(250);
-                    Thread.Sleep(250);
-                    Sleep(250);
-                    timer?.Wait();
-                    Task.Delay(250).Wait();
-                }
-            }
-            """;
+        using var stop = new CancellationTokenSource();
+        var order = new List<string>();
+        var worker = new ScriptedWorker((_, _) => { }, TimeSpan.Zero) { FailTriggers = 1 };
+        using var observation = WorkerPumpObservation.Create(worker,
+            _ => { order.Add("backoff"); stop.Cancel(); }, _ => order.Add("trigger"));
 
         // Act
-        string[] waits = WorkerPumpObservation.FindUnobservedWaits(source, "Delay", "WaitForTrigger");
+        worker.Run(stop.Token);
 
-        // Assert: all six raw calls are refused; the observed delay and trigger are allowed.
-        waits.Length.ShouldBe(6);
-        waits.ShouldAllBe(wait => wait.StartsWith("Run: ", System.StringComparison.Ordinal));
+        // Assert
+        order.ShouldBe(["trigger", "backoff"]);
+        observation.Failure.ShouldBeNull();
+        worker.Passes.ShouldBe(0);
+        worker.FailureCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker observations: callback failures cannot change a delay or pump outcome")]
+    public void Run_ObserverThrows_ShouldKeepRunningAndRetainTheObserverFailure()
+    {
+        // Arrange
+        using var stop = new CancellationTokenSource();
+        var failure = new InvalidOperationException("observer failed");
+        var worker = new ScriptedWorker((_, pass) => { if (pass == 3) { stop.Cancel(); } }, TimeSpan.Zero);
+        using var observation = WorkerPumpObservation.Create(worker, _ => throw failure, _ => throw failure);
+
+        // Act
+        worker.Delay(TimeSpan.Zero, CancellationToken.None);
+        var delayFailure = observation.Failure;
+        worker.Run(stop.Token);
+
+        // Assert
+        delayFailure.ShouldBeSameAs(failure);
+        observation.Failure.ShouldBeSameAs(failure);
+        worker.Passes.ShouldBe(3);
+        worker.Fault.ShouldBeNull();
+        worker.FailureCount.ShouldBe(0);
     }
 }

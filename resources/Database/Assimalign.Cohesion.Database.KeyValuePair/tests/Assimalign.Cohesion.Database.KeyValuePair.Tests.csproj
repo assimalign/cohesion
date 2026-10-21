@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 	<PropertyGroup>
@@ -32,7 +34,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
-        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tests" />
 		<!-- The KeyValueDatabaseServer wire suite runs over the in-memory
 		     Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

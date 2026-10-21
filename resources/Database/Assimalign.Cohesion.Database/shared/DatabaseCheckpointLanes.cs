@@ -181,6 +181,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signaled; the checkpoint goes on alone.</exception>
     public bool Run(object database, Func<bool> checkpoint, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseCheckpointPass.Visit? visit = null)
     {
+        long visitStarted = visit is null ? 0 : Stopwatch.GetTimestamp();
         var lane = new Lane(checkpoint, signal);
         bool start = false;
         lock (_sync)
@@ -220,7 +221,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
                 }
             }
 
-            if (visit is not null) { visit.LaneWait = Stopwatch.GetElapsedTime(started); }
+            if (visit is not null) { visit.LaneWait = Stopwatch.GetElapsedTime(visitStarted); }
 
             if (lane.Ended)
             {

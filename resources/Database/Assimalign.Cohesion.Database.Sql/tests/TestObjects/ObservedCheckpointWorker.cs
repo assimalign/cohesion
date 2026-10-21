@@ -19,7 +19,11 @@ internal sealed class ObservedCheckpointWorker : DatabaseCheckpointWorker<Observ
     protected override bool IsOffline(Database database) => database.Offline;
     protected override bool IsOpen(Database database) => database.Open;
     protected override long GetJournalLength(Database database) => 0;
-    protected override bool IsCheckpointDue(Database database, TimeSpan interval) => database.Due;
+    protected override bool IsCheckpointDue(Database database, TimeSpan interval, DatabaseCheckpointPass.Visit? visit)
+    {
+        if (visit is not null) { visit.Due = new(false, database.Due, false, 0, 0); }
+        return database.Due;
+    }
     protected override bool Checkpoint(Database database, TimeSpan interval, CancellationToken cancellationToken) => Work();
 
     public void Dispose()

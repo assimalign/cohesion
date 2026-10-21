@@ -13,6 +13,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
@@ -42,7 +44,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
-        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tests" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->

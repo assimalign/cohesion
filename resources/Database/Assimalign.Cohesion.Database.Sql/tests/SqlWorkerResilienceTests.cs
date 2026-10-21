@@ -170,90 +170,24 @@ public sealed class SqlWorkerResilienceTests
 
     /// <summary>
     /// Every pass visits the healthy database while another database fails and backs off.
-    /// Requested waits, rather than a ratio between independently scheduled writers, distinguish
-    /// a database backoff from a worker-wide stall, including a partial 250 ms slowdown (#1284).
+    /// Measured waits and due-state evidence distinguish a database backoff from a pump or lane
+    /// slowdown; completed worker visits prove progress independently of statement checkpoints (#1284).
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Workers: a failing database leaves every healthy pass unthrottled")]
     public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
     {
         // Arrange: observe the actual engine pump and its database lanes, without changing waits.
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        var options = Options(strategy);
+        var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
         options.CheckpointJournalSize = PaceJournalSize;
         await using var engine = SqlDatabaseEngine.Create("pace-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = (SqlCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var passes = new ConcurrentQueue<DatabaseCheckpointPass>();
-        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff);
-        worker.PassCompleted = passes.Enqueue;
-        var faults = strategy.Faults(Failing);
-        var healthyFaults = strategy.Faults(Healthy);
-        long healthyCheckpoints = healthyFaults.HeaderWrites;
-        faults.FailPageWrites = true;
-
-        // Act: run for a minimum interval, then until retry, skip and completion counters move.
-        // The ceiling diagnoses a broken pump; it is never the pace assertion.
-        var watch = Stopwatch.StartNew();
-        int writes = 0;
-        try
-        {
-            for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize; id += 10)
-            {
-                await InsertAsync(failing, id, 10);
-                watch.Elapsed.ShouldBeLessThan(Timeout);
-            }
-            do
-            {
-                // Limit each uncheckpointed batch, and produce another only after a header
-                // proves progress. Deferred checkpoints count even when a statement finishes them.
-                long healthyProgress = healthyFaults.HeaderWrites - healthyCheckpoints;
-                if (healthyProgress < 3 && writes < (healthyProgress + 1) * 1000)
-                {
-                    await InsertAsync(healthy, writes, 10);
-                    writes += 10;
-                }
-                else
-                {
-                    engine.CheckpointNeededSignal.Set();
-                }
-                await Task.Delay(5);
-            }
-            while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || worker.FailureCount < 2
-                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == Failing && visit.Reason == "BackingOff")) < 3
-                || healthyFaults.HeaderWrites - healthyCheckpoints < 3)
-                && watch.Elapsed < Timeout
-                && !passes.Any(pass => pass.PumpBackoff > TimeSpan.Zero));
-        }
-        finally
-        {
-            worker.PassCompleted = null;
-            faults.Clear();
-        }
-
-        // Assert: every recorded decision has a database, and no failure delays the whole pump.
-        var recorded = passes.ToArray();
-        foreach (var pass in recorded)
-        {
-            pass.Cancelled.ShouldBeFalse();
-            pass.Failed.ShouldBeFalse();
-            pass.PumpBackoff.ShouldBe(TimeSpan.Zero, $"pass {pass.Number}");
-            pass.TriggerTimeout.ShouldBeLessThanOrEqualTo(DatabaseCheckpointWorker<SqlDatabase>.PollInterval);
-            var healthyVisit = pass.Visits.Single(visit => visit.Database == Healthy);
-            healthyVisit.Backoff.ShouldBe(TimeSpan.Zero);
-            healthyVisit.Reason.ShouldBeOneOf("Completed", "NotDue", "Running", "Deferred", "Busy");
-            var failingVisit = pass.Visits.Single(visit => visit.Database == Failing);
-            if (failingVisit.Reason == "BackingOff")
-            {
-                failingVisit.Backoff.ShouldBe(DatabaseEngineWorker.FailureBackoff);
-                failingVisit.LaneWaits.ShouldBe(0);
-                failingVisit.LaneWaitRequested.ShouldBe(TimeSpan.Zero);
-            }
-        }
-        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2);
-        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == Failing && visit.Reason == "BackingOff"))
-            .ShouldBeGreaterThanOrEqualTo(3);
-        (healthyFaults.HeaderWrites - healthyCheckpoints).ShouldBeGreaterThanOrEqualTo(3);
+        // Act / Assert: all five engines use the same per-visit progress proof.
+        await CheckpointPace.VerifyAsync(worker, engine.CheckpointNeededSignal, failing.DataStorage, healthy.DataStorage,
+            Failing, Healthy, strategy.Faults(Failing),
+            id => InsertAsync(failing, id, 10), id => InsertAsync(healthy, id, 10), PaceJournalSize);
     }
 
     /// <summary>
@@ -726,7 +660,9 @@ public sealed class SqlWorkerResilienceTests
         await using var engine = SqlDatabaseEngine.Create("sql-engine", options);
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
-        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var worker = (SqlCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var passes = new ConcurrentQueue<DatabaseCheckpointPass>();
+        worker.PassCompleted = passes.Enqueue;
         var faults = strategy.Faults(Failing);
 
         // Act: the failing database's journal grows past the cap while its checkpoints fail.
@@ -756,6 +692,9 @@ public sealed class SqlWorkerResilienceTests
         }
 
         // Assert
+        passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == Failing && visit.GiveUpRequested);
+        passes.SelectMany(pass => pass.Visits).ShouldContain(visit => visit.Database == Failing && visit.Offline);
+        worker.PassCompleted = null;
         offline.ShouldBeTrue();
         // Long before the window: fewer failed passes than the window holds at the backoff.
         failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));

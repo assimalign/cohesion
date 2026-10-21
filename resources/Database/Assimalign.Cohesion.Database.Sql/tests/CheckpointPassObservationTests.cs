@@ -16,6 +16,62 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlWorkerResilienceTests))]
 public sealed class CheckpointPassObservationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint observations: an unobserved idle pass allocates no observation state")]
+    public void RunIteration_NoObserver_ShouldAllocateNoObservationState()
+    {
+        // Arrange: no lane work or changing snapshots; warm the existing pass machinery.
+        using var worker = new ObservedCheckpointWorker();
+        worker.Databases[0].Due = false;
+        for (int pass = 0; pass < 100; pass++) { worker.RunIteration(CancellationToken.None); }
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int pass = 0; pass < 1_000; pass++) { worker.RunIteration(CancellationToken.None); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        allocated.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint observations: an absent delay hook differs from no requested delay")]
+    public void RunIteration_DelayHookAbsent_ShouldRecordNotObserved()
+    {
+        // Arrange
+        using var worker = new ObservedCheckpointWorker();
+        worker.Databases[0].Due = false;
+        DatabaseCheckpointPass? pass = null;
+        worker.PassCompleted = observed => pass = observed;
+
+        // Act
+        worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        pass.ShouldNotBeNull().PumpBackoff.ShouldBeNull();
+        pass.TriggerMeasured.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint observations: callback failure leaves pass and pump failure policy unchanged")]
+    public void RunIteration_ObserverThrows_ShouldRetainFailureWithoutFailingThePass()
+    {
+        // Arrange
+        using var worker = new ObservedCheckpointWorker();
+        worker.Databases[0].Due = false;
+        var failure = new InvalidOperationException("observer failed");
+        worker.PassCompleted = _ => throw failure;
+
+        // Act
+        bool succeeded = worker.RunIteration(CancellationToken.None);
+        worker.PassCompleted = null;
+        bool nextSucceeded = worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        succeeded.ShouldBeTrue();
+        nextSucceeded.ShouldBeTrue();
+        worker.PassObserverFailure.ShouldBeSameAs(failure);
+        worker.FailureCount.ShouldBe(0);
+        worker.Fault.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Checkpoint observations: every visit exit records its reason")]
     [InlineData("Completed")]
     [InlineData("Deferred")]
@@ -46,18 +102,18 @@ public sealed class CheckpointPassObservationTests
         // Act: a lane may finish after the initial bounded wait on a loaded machine.
         worker.RunIteration(CancellationToken.None);
         worker.WaitForCheckpoints(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-        if (passes[^1].Visits[0].Reason == "Running") { worker.RunIteration(CancellationToken.None); }
+        if (passes[^1].Visits[0].Reason == DatabaseCheckpointPass.VisitReason.Running) { worker.RunIteration(CancellationToken.None); }
 
         // Assert
         var visit = passes[^1].Visits.Single();
         visit.Database.ShouldBe(database.Name);
-        visit.Reason.ShouldBe(reason);
+        visit.Reason.ShouldBe(Enum.Parse<DatabaseCheckpointPass.VisitReason>(reason));
         visit.Backoff.ShouldBe(reason == "Failed" ? DatabaseEngineWorker.FailureBackoff : TimeSpan.Zero);
         visit.LaneWait.ShouldBeGreaterThanOrEqualTo(TimeSpan.Zero);
         if (reason == "Failed")
         {
             worker.RunIteration(CancellationToken.None);
-            passes[^1].Visits.Single().Reason.ShouldBe("BackingOff");
+            passes[^1].Visits.Single().Reason.ShouldBe(DatabaseCheckpointPass.VisitReason.BackingOff);
             passes[^1].Visits.Single().LaneWaits.ShouldBe(0);
         }
     }
@@ -70,6 +126,7 @@ public sealed class CheckpointPassObservationTests
         worker.Databases[0].Due = false;
         var passes = new List<DatabaseCheckpointPass>();
         worker.PassCompleted = passes.Add;
+        worker.PumpBackoffObserved = true;
         var delay = TimeSpan.FromMilliseconds(250);
         var duration = Stopwatch.StartNew();
         int rounds = 0;
@@ -130,11 +187,11 @@ public sealed class CheckpointPassObservationTests
 
         // Assert
         passes.Count.ShouldBe(3);
-        passes[0].Failed.ShouldBeTrue();
+        passes[0].PassThrew.ShouldBeTrue();
         passes[0].Visits.ShouldBeEmpty();
         passes[1].Cancelled.ShouldBeTrue();
-        passes[1].Visits.Single().Reason.ShouldBe("Cancelled");
-        passes[2].Failed.ShouldBeFalse();
+        passes[1].Visits.ShouldBeEmpty();
+        passes[2].PassThrew.ShouldBeFalse();
         passes[2].Cancelled.ShouldBeFalse();
         passes.Select(pass => pass.Number).ShouldBe([1L, 2L, 3L]);
     }
