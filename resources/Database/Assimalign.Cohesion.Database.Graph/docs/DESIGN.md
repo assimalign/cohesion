@@ -2496,3 +2496,12 @@ The following public types move from their Catalog or Storage assembly into Assi
 
 - From `Assimalign.Cohesion.Database.Graph.Catalog`: `Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalogException`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphIndexMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphLabelMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphPropertyKeyMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphRelationshipTypeMetadata`.
 - From `Assimalign.Cohesion.Database.Graph.Storage`: `Assimalign.Cohesion.Database.Graph.Storage.GraphElementTooLargeException`, `Assimalign.Cohesion.Database.Graph.Storage.GraphIncidentDirection`, `Assimalign.Cohesion.Database.Graph.Storage.GraphStorage`, `Assimalign.Cohesion.Database.Graph.Storage.GraphStore`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphIndex`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphNode`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphRelationship`.
+
+## Checkpoint progress observations (#1284)
+
+The shared checkpointer records the closed flag and storage due flags used by this model's
+predicate before deciding whether to attempt work. The linked pace helper asserts due attempts,
+worker completions and bounded recorded trigger/lane waits; statement-completed checkpoints do
+not supply its progress count. The observation remains internal and opt-in; see the
+[root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
+for publication scope, callback isolation and the limits of the wait budgets.
