@@ -236,7 +236,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// exactly the current marker: this engine stamps it before it registers the index.
     /// </remarks>
     /// <exception cref="DatabaseException">The database is on another entry-space format.</exception>
-    private static void ThrowIfFormatIsNotCurrent(string name, KeyValueCatalog catalog)
+    internal static void ThrowIfFormatIsNotCurrent(string name, KeyValueCatalog catalog)
     {
         int version = catalog.EntrySpaceFormatVersion;
         int current = KeyValueRecordCodec.EntrySpaceFormatVersion;

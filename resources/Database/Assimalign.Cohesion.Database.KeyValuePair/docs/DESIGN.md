@@ -87,7 +87,9 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   catalog-persisted and gated at open (below); there is no upgrade machinery.
 - **Entry-space format 2 (#1194), gated in both directions.** The marker
   describes the whole data file set: the entry records and the primary index
-  tree that rides it. Format 2 keeps format 1's entry records, but its primary
+  tree that rides it. The engine opens and validates the catalog before opening
+  the data set, so a catalog refusal cannot apply data recovery (#1270).
+  Format 2 keeps format 1's entry records, but its primary
   index is a tree of `Database.Indexing`'s B-tree page format 2 (entries ordered
   by key, entry location and writer) instead of format 1 (ordered by key alone).
   The engine stamps the marker at creation before it registers the primary
@@ -701,7 +703,10 @@ the invariant lower case of its name:
   `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
   now it is `catalog.*` inside the database's own directory, and a drop deletes the
   directory, both sets at once. An open whose data set exists without a catalog set
-  still creates the catalog set, as before. A directory without the data set, which an
+  is refused with `COHDBK006` before either set is opened, including an empty data set
+  left by interrupted creation (#1238). The error names `keyvalue.dat` and `catalog.dat`;
+  surviving files remain byte-identical and no replacement catalog is created.
+  Create still creates both sets. A directory without the data set, which an
   interrupted create or drop leaves, is no database: an open does not find it, a
   create refuses it with a message that names the remedy (a stale catalog set must
   never meet a new data set), and a drop deletes it.
@@ -1162,6 +1167,10 @@ Drop explicitly deletes keyvalue.dat, then the remaining *.dat files, before rec
 removing the directory. Open requires each existing file set's original journal and backup;
 missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
 all files and restore the complete backup, since a lost journal may hold acknowledged commits.
+An entirely missing catalog receives `COHDBK006` at the engine's earlier existence gate (#1238).
+As with PostgreSQL's refusal of a missing database directory
+(`src/backend/utils/init/postinit.c:1198-1212`), open reports the missing durable identity
+instead of creating it. The model-specific two-file-set gate follows SQL's catalog-first open.
 
 
 ## Catalog component

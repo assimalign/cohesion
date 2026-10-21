@@ -383,6 +383,70 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         Text((await database.GetAsync(session, Bytes("alpha"), TestTimeout.Token()))!.Value.Value).ShouldBe("one");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Open: A missing catalog is refused before opening data (#1238)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_MissingCatalog_ShouldRefuseWithoutChangingFiles(bool populated)
+    {
+        // Arrange
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            await using var session = await database.CreateSessionAsync();
+            if (populated)
+            {
+                await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: TestTimeout.Token());
+            }
+        }
+        foreach (string path in Directory.GetFiles(Path.Combine(_rootPath, "kv"), "catalog.*")) { File.Delete(path); }
+        var before = Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act: even an unavailable data file must not be opened before the missing-catalog check.
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        DatabaseException failure;
+        using (var held = File.Open(Path.Combine(_rootPath, "kv", "keyvalue.dat"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+        }
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK006");
+        failure.Message.ShouldContain("keyvalue.dat", Case.Sensitive);
+        failure.Message.ShouldContain("catalog.dat", Case.Sensitive);
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        await reopened.DisposeAsync();
+        Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ShouldBe(before.Keys, ignoreOrder: true);
+        foreach (var (path, bytes) in before) { File.ReadAllBytes(path).ShouldBe(bytes, $"{path} was modified by the refused open"); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Open: Catalog format gates run before opening data (#1238, #1270)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Open_RefusedCatalog_ShouldValidateBeforeOpeningData(bool storageFormat)
+    {
+        // Arrange
+        await using (var engine = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath }))
+        {
+            var database = await engine.CreateDatabaseAsync("kv", TestTimeout.Token());
+            if (!storageFormat) { await database.Catalog.SetEntrySpaceFormatVersionAsync(1, TestTimeout.Token()); }
+        }
+        if (storageFormat) { StorageFormatFiles.WriteVersion(Path.Combine(_rootPath, "kv", "catalog.dat"), version: 2); }
+        string dataPath = Path.Combine(_rootPath, "kv", "keyvalue.dat");
+        byte[] before = File.ReadAllBytes(dataPath);
+
+        // Act
+        await using var reopened = KeyValueDatabaseEngine.Create("keyvalue-engine", new KeyValueDatabaseEngineOptions { RootPath = _rootPath });
+        DatabaseException failure;
+        using (var held = File.Open(dataPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
+        }
+
+        // Assert
+        failure.Message.ShouldContain(storageFormat ? "catalog file set" : "entry-space format 1", Case.Sensitive);
+        reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
+        File.ReadAllBytes(dataPath).ShouldBe(before);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
     public async Task Open_PrimaryIndexInFormatOne_ShouldBeRefused()
     {
