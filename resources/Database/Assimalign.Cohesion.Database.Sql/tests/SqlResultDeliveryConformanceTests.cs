@@ -1,6 +1,4 @@
 using System;
-using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,7 +10,6 @@ using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
-using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -20,14 +17,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlResultDeliveryConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: partial rows end with a coded Error and the same session is reused")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: encoding fails before any result frame and the same session is reused")]
     [InlineData("value")]
     [InlineData("unicode")]
     [InlineData("oversized")]
+    [InlineData("binary")]
     [InlineData("enumeration")]
     [InlineData("uncoded")]
     [InlineData("dispose")]
     [InlineData("header")]
+    [InlineData("buffered")]
     public async Task ExecuteAsync_LateResultFailure_ShouldEndStatementAndReuseSession(string failure)
     {
         // Arrange
@@ -40,11 +39,6 @@ public sealed class SqlResultDeliveryConformanceTests
 
         // Act
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 1").Encode());
-        if (failure != "header")
-        {
-            await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader);
-            await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow);
-        }
         var error = ProtocolErrorMessage.Decode((await peer.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
         serverSession.ExecuteResultOverride = null;
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 42").Encode());
@@ -52,18 +46,31 @@ public sealed class SqlResultDeliveryConformanceTests
         // Assert: no completion remained from the failed statement; this is the next header.
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         error.Message.ShouldStartWith(failure == "enumeration" ? "COHSQLE041:" : "COHSQLE045:", Case.Sensitive);
+        if (failure is "oversized" or "binary")
+        {
+            error.Message.ShouldContain(failure == "binary" ? "16777219" : "16777220", Case.Sensitive);
+            error.Message.ShouldContain(ProtocolFrameHeader.MaxPayloadLength.ToString(), Case.Sensitive);
+        }
         result.Disposed.ShouldBeTrue();
-        result.RowsVisited.ShouldBe(failure == "header" ? 0 : failure is "enumeration" or "uncoded" or "dispose" ? 1 : 2);
+        result.RowsVisited.ShouldBe(failure == "buffered" ? 65 : failure == "header" ? 0 : failure is "enumeration" or "uncoded" or "dispose" ? 1 : 2);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete);
         harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(serverSession);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: the typed client discards partial rows and an explicit transaction is aborted")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task QueryAsync_InjectedResultFailure_ShouldAbortExplicitTransactionAndReuseConnection(bool explicitTransaction)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: result failures roll back only the statement and keep an explicit transaction active")]
+    [InlineData(false, "insert")]
+    [InlineData(true, "insert")]
+    [InlineData(false, "insert-select")]
+    [InlineData(true, "insert-select")]
+    [InlineData(false, "upsert")]
+    [InlineData(true, "upsert")]
+    [InlineData(false, "update")]
+    [InlineData(true, "update")]
+    [InlineData(false, "delete")]
+    [InlineData(true, "delete")]
+    public async Task QueryAsync_InjectedResultFailure_ShouldRollbackStatementAndKeepTransaction(bool explicitTransaction, string mutation)
     {
         // Arrange
         await using var harness = await ServerTestHarness.StartAsync();
@@ -74,6 +81,7 @@ public sealed class SqlResultDeliveryConformanceTests
         });
         await using var connection = await client.ConnectAsync(TestTimeout.Token());
         var serverSession = (SqlDatabaseServerSession)harness.Server.Sessions.ShouldHaveSingleItem();
+        await connection.ExecuteAsync("CREATE UNIQUE INDEX users_pk ON users(id)", cancellationToken: TestTimeout.Token());
         if (explicitTransaction)
         {
             await connection.ExecuteAsync("BEGIN", cancellationToken: TestTimeout.Token());
@@ -81,10 +89,18 @@ public sealed class SqlResultDeliveryConformanceTests
         }
         var result = new ResultDeliveryFailureSet("value");
         serverSession.ExecuteResultOverride = () => result;
+        string statement = mutation switch
+        {
+            "insert-select" => "INSERT INTO users SELECT 5, 'failed' RETURNING id",
+            "upsert" => "INSERT INTO users VALUES (1, 'changed') ON CONFLICT(id) DO UPDATE SET name = EXCLUDED.name RETURNING id",
+            "update" => "UPDATE users SET name = 'changed' RETURNING id",
+            "delete" => "DELETE FROM users RETURNING id",
+            _ => "INSERT INTO users VALUES (5, 'failed') RETURNING id",
+        };
 
         // Act
         var failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync("SELECT id FROM users", cancellationToken: TestTimeout.Token()));
+            await connection.QueryAsync(statement, cancellationToken: TestTimeout.Token()));
         serverSession.ExecuteResultOverride = null;
 
         // Assert
@@ -95,16 +111,14 @@ public sealed class SqlResultDeliveryConformanceTests
         result.Disposed.ShouldBeTrue();
         if (explicitTransaction)
         {
-            serverSession.DatabaseSession!.CurrentTransaction!.State.ShouldBe(TransactionState.Faulted);
-            var refused = await Should.ThrowAsync<SqlClientException>(async () =>
-                await connection.QueryAsync("SELECT id FROM users", cancellationToken: TestTimeout.Token()));
-            refused.Message.ShouldStartWith("COHSQLT005:", Case.Sensitive);
-            await connection.ExecuteAsync("ROLLBACK", cancellationToken: TestTimeout.Token());
+            serverSession.DatabaseSession!.CurrentTransaction!.State.ShouldBe(TransactionState.Active);
         }
-        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token())).Count.ShouldBe(2);
-        await connection.ExecuteAsync("BEGIN", cancellationToken: TestTimeout.Token());
+        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token())).Count.ShouldBe(explicitTransaction ? 3 : 2);
+        (await connection.QueryAsync("SELECT name FROM users WHERE id = 1", cancellationToken: TestTimeout.Token()))[0].GetString(0).ShouldBe("ada");
+        if (!explicitTransaction) { await connection.ExecuteAsync("BEGIN", cancellationToken: TestTimeout.Token()); }
         await connection.ExecuteAsync("INSERT INTO users VALUES (4, 'later')", cancellationToken: TestTimeout.Token());
         await connection.ExecuteAsync("COMMIT", cancellationToken: TestTimeout.Token());
+        (await connection.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: TestTimeout.Token())).Count.ShouldBe(explicitTransaction ? 4 : 3);
         harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(serverSession);
     }
 
@@ -122,8 +136,8 @@ public sealed class SqlResultDeliveryConformanceTests
 
         // Act
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 1").Encode());
-        await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader);
-        await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow);
+        await result.EnumerationBlocked.Task.WaitAsync(TestTimeout.Token());
+        transaction.RunningStatements.ShouldBe(1);
         await session.DisposeAsync().AsTask().WaitAsync(TestTimeout.Token());
 
         // Assert
@@ -132,95 +146,47 @@ public sealed class SqlResultDeliveryConformanceTests
         harness.Server.Sessions.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: failed abort preserves the result error and releases operation admission")]
-    public async Task AbortResultDeliveryAsync_FailedRollbackNotification_ShouldRetainCauseAndReleaseGate()
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result preparation: deterministic failure and disposal orders release statement admission")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_DisposalDuringPreparation_ShouldReleaseStatementAndTransaction(bool failureFirst)
     {
-        // Arrange
-        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
-        await using var engine = SqlDatabaseEngine.Create("result-abort-failure", new()
-        {
-            StorageStrategy = strategy, MaintenanceInterval = TimeSpan.FromHours(1),
-            CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1),
-        });
-        var database = await engine.CreateDatabaseAsync("app", TestTimeout.Token());
-        await using var session = await database.CreateSessionAsync(TestTimeout.Token());
-        await session.ExecuteAsync("CREATE TABLE t(id INT)", cancellationToken: TestTimeout.Token());
-        await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: TestTimeout.Token());
-        await using var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
-        await session.ExecuteAsync("INSERT INTO t VALUES (2)", cancellationToken: TestTimeout.Token());
-        database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
-        var pageId = database.DataStorage.GetOwnerPages(table.ObjectId).ShouldHaveSingleItem();
-        var storage = database.DataStorage;
-        var other = Enumerable.Range(1, (int)storage.PageManager.PageCount - 1).Select(page => (PageId)(long)page)
-            .First(page => page != pageId && storage.FreeSpaceMap.IsAllocated(page));
-        int capacity = storage.BufferPoolCapacity;
-        storage.BufferPoolCapacity = 1;
-        using (storage.PageManager.GetPage(other)) { }
-        storage.BufferPoolCapacity = capacity;
-        var faults = strategy.Faults("app");
-        faults.RottenPage = pageId;
-        var cause = new DatabaseException("Injected result failure.");
-        int aborts = 0;
-        var original = database.Coordinator.OnUndoDeferred;
-        database.Coordinator.OnUndoDeferred = () =>
-        {
-            aborts++;
-            // The first abort holds operation admission; a reentrant abort must return without
-            // taking the transaction end gate again or replacing the first failure.
-            session.AbortResultDeliveryAsync(new DatabaseException("Reentrant abort.")).IsCompletedSuccessfully.ShouldBeTrue();
-            throw new InvalidOperationException("Injected cleanup failure.");
-        };
-        try
-        {
-            // Act
-            await session.AbortResultDeliveryAsync(cause);
+        // Arrange: enumeration is held inside the INSERT apply bracket, before encoding fails.
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var peer = await harness.DialAsync();
+        await peer.HandshakeAsync();
+        var session = (SqlDatabaseServerSession)harness.Server.Sessions.ShouldHaveSingleItem();
+        var transaction = await session.DatabaseSession!.BeginTransactionAsync(TestTimeout.Token());
+        var result = new ResultDeliveryFailureSet("blocked");
+        session.ExecuteResultOverride = () => result;
 
-            // Assert
-            aborts.ShouldBe(1);
-            transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(cause);
-            transaction.State.ShouldBe(TransactionState.Faulted);
+        // Act: the hook fixes each order instead of hoping a scheduler produces both.
+        await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute,
+            ProtocolExecuteMessage.Create("INSERT INTO users VALUES (5, 'failed') RETURNING id").Encode());
+        await result.EnumerationBlocked.Task.WaitAsync(TestTimeout.Token());
+        transaction.RunningStatements.ShouldBe(1);
+        await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+        transaction.State.ShouldBe(TransactionState.Active);
+        if (failureFirst)
+        {
+            result.ReleaseEnumeration.SetResult();
+            var error = ProtocolErrorMessage.Decode((await peer.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+            error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            transaction.RunningStatements.ShouldBe(0);
+            transaction.State.ShouldBe(TransactionState.Active);
         }
-        finally { database.Coordinator.OnUndoDeferred = original; faults.RottenPage = null; }
-        await transaction.RollbackAsync(TestTimeout.Token());
-        await using var next = await session.BeginTransactionAsync(TestTimeout.Token());
-        await next.RollbackAsync(TestTimeout.Token());
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: abort and disposal races release the session operation gate")]
-    public async Task AbortResultDeliveryAsync_RacingDisposal_ShouldKeepFirstCauseAndReleaseResources()
-    {
-        // Arrange
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await using var engine = SqlDatabaseEngine.Create("result-abort-race", new());
-        var database = await engine.CreateDatabaseAsync("app", timeout.Token);
-        var clock = Stopwatch.StartNew();
-        int resultWon = 0, disposalWon = 0, iterations = 0;
-
-        // Act: run for a minimum interval, then until both orders have actually won, with a ceiling.
-        do
-        {
-            await using var session = await database.CreateSessionAsync(timeout.Token);
-            var transaction = await session.BeginTransactionAsync(timeout.Token);
-            var cause = new DatabaseException("Injected result failure.");
-            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var abort = Task.Run(async () => { await start.Task; if ((iterations & 1) == 0) { await Task.Yield(); } await session.AbortResultDeliveryAsync(cause); }, timeout.Token);
-            var dispose = Task.Run(async () => { await start.Task; if ((iterations & 1) != 0) { await Task.Yield(); } await session.DisposeAsync(); }, timeout.Token);
-            start.SetResult();
-            await Task.WhenAll(abort, dispose).WaitAsync(timeout.Token);
-            var refused = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
-            if (ReferenceEquals(refused.InnerException, cause)) { resultWon++; } else { disposalWon++; }
-            await session.AbortResultDeliveryAsync(cause); // closed-session early exit is idempotent
-            iterations++;
-        } while (clock.Elapsed < TimeSpan.FromMilliseconds(250) ||
-            ((resultWon == 0 || disposalWon == 0) && clock.Elapsed < TimeSpan.FromSeconds(10)));
+        await session.DisposeAsync().AsTask().WaitAsync(TestTimeout.Token());
 
         // Assert
-        resultWon.ShouldBeGreaterThan(0);
-        disposalWon.ShouldBeGreaterThan(0);
-        iterations.ShouldBe(resultWon + disposalWon);
-        await using var reusable = await database.CreateSessionAsync(timeout.Token);
-        await reusable.AbortResultDeliveryAsync(new DatabaseException("No transaction."));
-        await using var fresh = await reusable.BeginTransactionAsync(timeout.Token);
-        await fresh.RollbackAsync(timeout.Token);
+        result.Disposed.ShouldBeTrue();
+        transaction.RunningStatements.ShouldBe(0);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        harness.Server.Sessions.ShouldBeEmpty();
+        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out var database).ShouldBeTrue();
+        await using var fresh = await database!.CreateSessionAsync(TestTimeout.Token());
+        await using var rows = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await fresh.ExecuteAsync("SELECT id FROM users", cancellationToken: TestTimeout.Token());
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(TestTimeout.Token())) { count++; }
+        count.ShouldBe(2);
     }
 }

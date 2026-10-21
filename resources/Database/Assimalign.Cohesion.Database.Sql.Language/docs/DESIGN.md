@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Result encoding failures (#1651)
+
+DIALECT records COHSQLE045's statement-atomic result preparation contract. The SQL engine
+encodes and validates headers and rows before committing, with frame and aggregate buffer
+limits (size refusals correspond to SQLSTATE 54000). An explicit transaction stays usable;
+transport failure after execution remains terminal. Parser and AST shapes are unchanged.
+
 ## Key declaration semantics (#1192)
 
 The engine rejects repeated child or referenced key columns with COHSQLE019; rejecting

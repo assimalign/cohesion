@@ -233,8 +233,8 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
                 }
-                return returned is null ? (DatabaseResult)new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
-                    : MaterializeProjected(returning!, returned, writes.Count);
+                return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
+                    : MaterializeProjected(returning!, returned, writes.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch when (!applyStarted)

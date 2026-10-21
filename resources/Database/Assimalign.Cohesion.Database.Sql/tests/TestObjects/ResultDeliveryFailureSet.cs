@@ -19,6 +19,8 @@ internal sealed class ResultDeliveryFailureSet : DatabaseResultSet
 
     internal int RowsVisited { get; private set; }
     internal bool Disposed { get; private set; }
+    internal TaskCompletionSource EnumerationBlocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal TaskCompletionSource ReleaseEnumeration { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => -1;
     public override IReadOnlyList<Diagnostic> Diagnostics => [];
@@ -32,7 +34,21 @@ internal sealed class ResultDeliveryFailureSet : DatabaseResultSet
         RowsVisited++;
         yield return new SqlMaterializedRow(["partial"]);
         await Task.Yield();
-        if (_failure == "cancel") { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+        if (_failure is "cancel" or "blocked")
+        {
+            EnumerationBlocked.SetResult();
+            await ReleaseEnumeration.Task.WaitAsync(cancellationToken);
+        }
+        if (_failure == "buffered")
+        {
+            string value = new('x', 1048576);
+            for (int index = 0; index < 64; index++)
+            {
+                RowsVisited++;
+                yield return new SqlMaterializedRow([value]);
+            }
+            yield break;
+        }
         if (_failure == "enumeration")
         {
             throw new DatabaseException("Injected enumeration failure.",
@@ -45,6 +61,7 @@ internal sealed class ResultDeliveryFailureSet : DatabaseResultSet
         {
             "unicode" => "\uD800",
             "oversized" => new string('x', (int)ProtocolFrameHeader.MaxPayloadLength),
+            "binary" => new byte[ProtocolFrameHeader.MaxPayloadLength / 2],
             _ => new object(),
         }]);
     }

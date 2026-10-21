@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <para>
 /// <b>A statement is statement-atomic.</b> Inside an explicit transaction, a statement that fails
 /// writes nothing and leaves the transaction active (the owner's 2026-10-04 per-statement decision).
-/// A later wire result-delivery failure aborts the explicit transaction (#1651). A statement is admitted
+/// Wire result encoding is part of statement execution (#1651). A statement is admitted
 /// into the transaction through the base's operation admission, so a commit cannot start while it
 /// runs, and a transaction that refuses work (its commit or rollback is running, or the kernel
 /// ended it under its caller) refuses the statement. Statements do not hold the session (the
@@ -158,24 +158,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     internal Action<long, long?>? ProvisioningProgress { get; set; }
 
-    // Result delivery runs after execution released statement admission. Take the session operation
-    // gate before reading its transaction, then take the transaction's end gate during abort. The
-    // root session latch is released before transaction/kernel work; no latch spans an await.
-    internal async ValueTask AbortResultDeliveryAsync(Exception cause)
-    {
-        bool held;
-        try { held = TryEnterOperation(); }
-        catch (DatabaseException) when (State == SessionState.Closed) { return; }
-        if (!held) { return; }
-        try
-        {
-            if (CurrentTransaction is { } transaction)
-            {
-                await transaction.AbortResultDeliveryAsync(cause).ConfigureAwait(false);
-            }
-        }
-        finally { ExitOperation(); }
-    }
+    // Set only by the owning wire pump; embedded execution needs no wire buffers.
+    internal SqlResultPreparation? ResultPreparation { get; set; }
 
     // Test-only observation of the real timer token, so commit-boundary proofs await its expiry.
     internal Action<CancellationToken>? StatementTimerArmed { get; set; }
@@ -527,7 +511,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     // snapshot must see writers that committed while the statement waited for a lock
                     // (a cascade's index deletes did, until #1370 matched them by stamps).
                     var scope = new SqlStatementContext(transaction.Context, _coordinator, _provisioningSchema,
-                        _database.Name.ToString(), transaction.CatalogSnapshot, transactionStart: transaction.TransactionStart);
+                        _database.Name.ToString(), transaction.CatalogSnapshot, transactionStart: transaction.TransactionStart, resultPreparation: ResultPreparation);
                     _lastStatementMetrics = scope.Metrics;
                     return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
@@ -589,7 +573,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
@@ -631,7 +615,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     {
         if (request.Statement.SqlExpression is not SqlExplainExpression explain)
         {
-            return _executor.ExecuteAsync(request, scope, cancellationToken);
+            var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
+            // Embedded execution keeps its direct task path and allocation budget.
+            return ResultPreparation is null ? execution : PrepareExecutionResultAsync(execution, scope, cancellationToken);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -643,13 +629,19 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             var plan = planner.Plan(explain.Statement);
             scope.Metrics.IsPlanned = true;
-            return Task.FromResult<DatabaseResult>(SqlPlanner.Describe(plan, request.Statement.Diagnostics));
+            var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
+            return ResultPreparation is null ? Task.FromResult<DatabaseResult>(result)
+                : scope.PrepareResultAsync(result, cancellationToken).AsTask();
         }
         catch (SqlUnsupportedQueryException exception)
         {
             return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0, [.. exception.Diagnostics]));
         }
     }
+
+    private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
+        SqlStatementContext scope, CancellationToken cancellationToken)
+        => await scope.PrepareResultAsync(await execution.ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
 
     private async ValueTask CompleteScriptStatementAsync(DatabaseResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
     {

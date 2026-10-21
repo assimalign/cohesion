@@ -30,7 +30,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>A statement is statement-atomic</b>, so a failed statement leaves the transaction active (a
-/// constraint violation, an evaluation fault, a deadlock victim). Storage corruption or I/O failure
+/// constraint violation, an evaluation fault, a result encoding or size failure, a deadlock victim).
+/// Storage corruption or I/O failure
 /// is the exception (#1364): it aborts the transaction through the base, retains the coded cause,
 /// and requires rollback before further statements. A commit or rollback that started always ends
 /// the context (#1226): the
@@ -113,17 +114,6 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     internal DatabaseException CreateStatementRefusal() => CreateRefusal();
 
     internal bool HasStorageFailure => _storageFailure is not null;
-
-    internal async ValueTask AbortResultDeliveryAsync(Exception cause)
-    {
-        try { await AbortAsync(cause).ConfigureAwait(false); }
-        catch (Exception abortFailure) when (abortFailure is not OutOfMemoryException)
-        {
-            // Preserve the result failure while recording a secondary rollback failure, just as
-            // storage-failure abort does. AbortAsync records the cause before attempting rollback.
-            SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, abortFailure);
-        }
-    }
 
     internal Exception RecordStorageFailure(Exception cause)
     {

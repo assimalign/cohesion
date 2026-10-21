@@ -342,7 +342,6 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
     private async Task ReadyLoopAsync(CancellationToken softStop)
     {
-        var rowWriter = new DatabaseKeyWriter();
 
         while (true)
         {
@@ -383,7 +382,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                 case (ProtocolMessageType)SqlProtocolMessageType.Execute:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
-                    await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
+                    await ExecuteAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
                     break;
 
                 case ProtocolMessageType.Ping:
@@ -401,7 +400,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         }
     }
 
-    private async Task ExecuteAsync(ProtocolFrame frame, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
+    private async Task ExecuteAsync(ProtocolFrame frame, CancellationToken cancellationToken)
     {
         ProtocolExecuteMessage message = ProtocolExecuteMessage.Decode(frame.Payload.Span);
         Dictionary<string, object?>? parameters = null;
@@ -426,12 +425,12 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         }
 
         DatabaseResult result;
+        var preparation = new SqlResultPreparation(ExecuteResultOverride);
+        _databaseSession!.ResultPreparation = preparation;
 
         try
         {
-            result = ExecuteResultOverride is { } execute
-                ? execute()
-                : await _databaseSession!.ExecuteAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
+            result = await _databaseSession.ExecuteAsync(message.Statement, parameters, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseParseException exception)
         {
@@ -457,70 +456,25 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             return;
         }
 
-        try
-        {
-            await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
-        {
-            // Enumeration and encoding can fail after rows have reached the peer. ExecutionFailure
-            // ends that statement; transport/framing failures still belong to the terminal pump.
-            var failure = exception is DatabaseException databaseFailure &&
-                databaseFailure.Diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code))
-                ? databaseFailure : ResultDeliveryFailure(ErrorMessages.ResultDeliveryFailed, exception);
-            await _databaseSession!.AbortResultDeliveryAsync(failure).ConfigureAwait(false);
-            var diagnostic = failure.Diagnostics.First(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code));
-            string errorText = failure.Message.StartsWith(diagnostic.Code + ":", StringComparison.Ordinal)
-                ? failure.Message : $"{diagnostic.Code}: {failure.Message}";
-            await WriteDiagnosticsAsync(PrepareDiagnostics(failure.Diagnostics), cancellationToken).ConfigureAwait(false);
-            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
-        }
+        finally { _databaseSession.ResultPreparation = null; }
+
+        // All fallible result work finished before the statement ended. Transport failures here
+        // are terminal: a committed write must never be reported as an ordinary statement error.
+        await WriteResultAsync(result, preparation, cancellationToken).ConfigureAwait(false);
     }
 
-    private static DatabaseException ResultDeliveryFailure(string message, Exception? cause = null)
-        => new(message, [new Diagnostic { Code = "COHSQLE045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
-
-    private async Task WriteResultAsync(DatabaseResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
+    private async Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
     {
         byte[]? diagnosticPayload = PrepareDiagnostics(result.Diagnostics);
-        if (result is DatabaseResultSet resultSet)
+        if (result is DatabaseResultSet)
         {
-            long affectedCount;
-            await using (resultSet.ConfigureAwait(false))
+            await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, preparation.Header!, cancellationToken).ConfigureAwait(false);
+            foreach (byte[] row in preparation.Rows)
             {
-                var columns = new List<(string Name, byte Type, int? MaxLength)>(resultSet.Columns.Count);
-
-                foreach (DatabaseColumn column in resultSet.Columns)
-                {
-                    columns.Add((column.Name, (byte)column.Type, column.MaxLength));
-                }
-
-                await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
-
-                await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
-                {
-                    rowWriter.Reset();
-
-                    for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
-                    {
-                        DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
-                        if (rowWriter.Length > ProtocolFrameHeader.MaxPayloadLength)
-                        {
-                            // Refuse before the frame writer: its ProtocolException means a real
-                            // wire violation and would terminate this otherwise usable session.
-                            throw ResultDeliveryFailure(ErrorMessages.ResultRowTooLarge);
-                        }
-                    }
-
-                    await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
-                }
-                affectedCount = resultSet.AffectedCount;
+                await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, row, cancellationToken).ConfigureAwait(false);
             }
-
-            // Dispose before publishing completion: a failed release must still end with Error.
-            // SELECT reports -1; RETURNING preserves the write's actual affected count.
             await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
-            await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(affectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+            await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, preparation.Completion!, cancellationToken).ConfigureAwait(false);
             return;
         }
 
