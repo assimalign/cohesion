@@ -51,6 +51,9 @@ using Assimalign.Cohesion.Database.Types;
 /// </remarks>
 internal sealed class KeyValueOperationExecutor
 {
+    // Test seam: after the final PUT effect, while its statement apply is still admitted.
+    internal static Action? AfterPutApplied { get; set; }
+
     /// <summary>
     /// The object id of the (single, implicit) key space: the owner tag of the
     /// entry record chain, the object the primary index registers under, and the
@@ -255,6 +258,7 @@ internal sealed class KeyValueOperationExecutor
                 await _primaryIndex.InsertAsync(context.Transaction, indexKey, reference, cancellationToken).ConfigureAwait(false);
                 context.Coordinator.VersionStore.RecordIndexEntryCreated(context.Transaction.Sequence, _primaryIndexVersions, indexKey.Encoded, reference);
 
+                AfterPutApplied?.Invoke();
                 return true;
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }

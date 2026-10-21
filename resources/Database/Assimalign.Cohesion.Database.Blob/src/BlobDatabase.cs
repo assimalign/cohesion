@@ -50,6 +50,9 @@ public sealed class BlobDatabase : DatabaseInstance
 {
     private readonly BlobDatabaseEngine _engine;
 
+    // Test seam at the snapshot cleanup boundary, including operations without a pin.
+    internal Action? BeforeSnapshotPinRelease { get; set; }
+
     internal BlobDatabase(DatabaseName name, BlobDatabaseEngine engine, BlobStorage storage, bool recover)
         : base(name, engine)
     {

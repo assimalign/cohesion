@@ -441,7 +441,12 @@ public sealed class TransactionManager : IAsyncDisposable
     /// and waits on no durable flush.
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">
+    /// Observed only before the end is claimed. Cancellation by then leaves the
+    /// transaction active and untouched; after the claim, commit runs to completion.
+    /// </param>
+    /// <returns>A task that completes when the transaction's commit ends.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled before the commit started.</exception>
     /// <exception cref="TransactionAbortedException">
     /// Thrown when the transaction was aborted by conflict or deadlock resolution; when
     /// the commit record could not be written, in which case the transaction was
@@ -458,6 +463,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     public async ValueTask CommitAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var owned = ClaimEnd(context);
 
         try
@@ -472,7 +478,7 @@ public sealed class TransactionManager : IAsyncDisposable
                 // durable. Only then does the transaction leave the active table — no
                 // snapshot can observe it as committed before its record is on stable
                 // storage.
-                await _log.AppendCommitAsync(owned.Sequence, cancellationToken).ConfigureAwait(false);
+                await _log.AppendCommitAsync(owned.Sequence).ConfigureAwait(false);
             }
             catch (TransactionCommitUnconfirmedException)
             {
@@ -940,6 +946,10 @@ public sealed class TransactionManager : IAsyncDisposable
 
         lock (_sync)
         {
+            // Lock order: the manager's _sync precedes the context's end latch in
+            // TryClaimEnd. Release both before waiting for applies or touching the log
+            // (whose append gate may be held by a checkpoint). Caller cancellation
+            // stops before this claim and cannot interrupt the owned end afterward.
             // Disposal sets its flag under this lock: an end claimed here is counted before
             // disposal can look, so disposal waits for it.
             ObjectDisposedException.ThrowIf(_disposed, this);

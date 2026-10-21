@@ -1053,6 +1053,15 @@ behind its `Open` factory.
 
 ## Diagnostics
 
+After a successful automatic commit, snapshot cleanup failures preserve the committed result
+and emit `StatementCleanupFailed` (14), following Graph's guard. `OutOfMemoryException` still
+propagates; cleanup failures before a successful commit or in an explicit transaction still fail
+the operation. The session hold is released in all cases. `BlobOperationOutcomeTests` injects
+failures at the internal cleanup boundary and checks warnings and reopen persistence.
+The warning carries only the exception type because its message may echo blob input.
+The late-flush and explicit-transaction `BlobCommitCancellationTests` are regression guards;
+SQL and Key-Value execution-completion cases prove the session cancellation fix (#1246).
+
 Child-root storage and catalog failures cross the engine boundary as DatabaseException with
 Error entries in Diagnostics and the original InnerException (#1247). Offline and common
 COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
@@ -1096,6 +1105,7 @@ four servers.
 | 11 | `EngineRefused` | Warning | — | `engineName`, `phase` (`Accept`, `Handshake` or `Exchange`), `state` (the `EngineState` name) |
 | 12 | `HostTransactionAbortFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 13 | `TransferFailed` | Error | — | `sessionId`, `container` (cut to 256 characters), `code` (the error frame's `ProtocolErrorCode`: `ExecutionFailure`, or `Unavailable` for an offline database; empty for the guarded stream, which sends none), `exceptionType` |
+| 14 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot cleanup failed after a successful automatic commit |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,

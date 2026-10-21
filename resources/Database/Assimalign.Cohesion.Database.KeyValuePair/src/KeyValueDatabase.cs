@@ -546,7 +546,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="key">The key to write.</param>
     /// <param name="value">The value to store.</param>
     /// <param name="options">Write conditions (insert-only, compare-and-swap), or null for an unconditional upsert.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">Observed during execution; once automatic commit starts, it cannot cancel the commit or delivery of its outcome.</param>
     /// <returns>The write outcome: whether it applied, and the new (or current) etag.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
@@ -562,7 +562,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            // Execute completed (and auto-commit, if any): deliver its materialized outcome
+            // without letting late cancellation report a committed write as canceled (#1246).
+            await foreach (DatabaseRow row in set.GetRowsAsync(CancellationToken.None).ConfigureAwait(false))
             {
                 return new KeyValuePutResult(row.GetBoolean(0), row.IsNull(1) ? null : row.GetInt64(1));
             }

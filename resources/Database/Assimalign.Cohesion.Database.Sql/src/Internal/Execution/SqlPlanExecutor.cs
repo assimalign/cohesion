@@ -26,6 +26,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed partial class SqlPlanExecutor
 {
+    // Test seam: after the final INSERT effect, while its statement apply is still admitted.
+    internal static Action? AfterInsertApplied { get; set; }
+    internal static Action? AfterSelfCommit { get; set; }
+
     private readonly SqlStorage _storage;
     private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
@@ -989,6 +993,7 @@ internal sealed partial class SqlPlanExecutor
     {
         await commit.ConfigureAwait(false);
         statement.Metrics.RecordSelfCommit();
+        AfterSelfCommit?.Invoke();
     }
 
     /// <summary>
@@ -1004,6 +1009,7 @@ internal sealed partial class SqlPlanExecutor
     {
         T result = await commit.ConfigureAwait(false);
         statement.Metrics.RecordSelfCommit();
+        AfterSelfCommit?.Invoke();
         return result;
     }
 

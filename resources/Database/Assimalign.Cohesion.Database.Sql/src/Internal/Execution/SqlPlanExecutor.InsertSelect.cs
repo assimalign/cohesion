@@ -179,6 +179,7 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }
+                AfterInsertApplied?.Invoke();
                 return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)
                     : MaterializeProjected(returning!, returned, rows.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);
