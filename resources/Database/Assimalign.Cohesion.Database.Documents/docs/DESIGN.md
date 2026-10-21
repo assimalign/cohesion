@@ -1832,6 +1832,9 @@ and location map insert or replace a reference in O(log n). A current pointer fo
 order, including deletion, since an early ReadCommitted writer can replace a later writer.
 Its intact head takes O(1) selection work. An invisible or rolled-back head falls back to linked
 history and stops at the first visible, untombstoned version; older snapshots visit newer versions.
+Own saves retain their writer's predecessor, so rollback restores the head without a history walk.
+A reclaimed committed head proves deletion below the safe purge bound; the entire name's cached
+history can then be detached without visits, including index-definition directory keys.
 Open reconstructs the current pointer from untombstoned records after recovery and rebuilds
 writer order independently of page order. An old reader never replaces a newer head.
 

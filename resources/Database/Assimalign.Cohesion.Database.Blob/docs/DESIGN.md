@@ -1248,6 +1248,9 @@ and replace reused slots in O(log n). A current pointer follows publication orde
 deletion: a ReadCommitted writer can begin before the version it later replaces. Its intact
 head takes O(1) selection work; an invisible or rolled-back head falls back to linked history,
 stopping at the first visible, untombstoned version. Older snapshots visit newer versions.
+Own saves retain the head preceding their writer, so rollback restores that head without walking
+the writer's discarded versions. A committed head's physical reclamation proves the name was
+deleted below the safe purge bound: its entire cached history can be detached without visits.
 Open reconstructs the current pointer from untombstoned records after recovery and rebuilds
 writer order independently of physical page order. Old readers never replace a newer head.
 

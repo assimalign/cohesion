@@ -323,7 +323,7 @@ public sealed partial class DocumentCatalog
         // so transaction rollback, purge and page reuse cannot stale the directory.
         lock (_sync)
         {
-            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence));
+            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence, context));
         }
     }
 
@@ -421,29 +421,46 @@ public sealed partial class DocumentCatalog
         // Early exit must not strand old references after purge. Two rotating probes per
         // lookup (including the lookup before save) retire stale references faster than
         // saves add them, with constant extra record reads even after a large purge.
+        // A logical rollback restores the head preceding all of that writer's own saves.
+        // No snapshot can need an ended writer's created versions. The prior head stays
+        // physical until that writer commits, since its tombstones are not prunable yet.
+        while (versions.Current is { Context.State: TransactionState.RolledBack or TransactionState.Faulted } aborted)
+        {
+            versions.Current = aborted.PriorHead;
+        }
+
         int probes = Math.Min(2, versions.Count);
         for (int i = 0; i < probes; i++)
         {
             var candidate = versions.NextSweep()!;
-            if (Read(candidate, matches) is null) { versions.Remove(candidate); }
+            if (Read(candidate, matches) is null)
+            {
+                if (Forget(versions, candidate)) { return null; }
+            }
         }
 
         // Model writers serialize publication, so this reference is also the current
         // deletion marker. Re-read it: rollback can remove it or clear its deleter.
         // A read-committed writer may have begun before the version it replaces, so
         // publication order, rather than writer order, identifies the current head.
-        bool skippedInvisibleWriter = false;
-        if (versions.Current is { } current)
+        while (versions.Current is { } current)
         {
             var head = Read(current, matches);
-            if (head is null) { versions.Remove(current); }
+            if (head is null)
+            {
+                if (Forget(versions, current)) { return null; }
+                // Undo can remove a created head before the manager publishes its final
+                // state. Read its restored predecessor, whose deleter is still checked.
+                continue;
+            }
             else if (snapshot.IsVisible(current.Writer))
             {
                 return head.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(head.Value.Deleter)
                     ? new Found(current, head.Value.Record) : null;
             }
-            else { skippedInvisibleWriter = true; }
+            break;
         }
+        if (versions.Current is null) { return null; }
 
         for (var reference = versions.Last; reference is not null;)
         {
@@ -451,19 +468,13 @@ public sealed partial class DocumentCatalog
             var record = Read(reference, matches);
             if (record is null)
             {
-                versions.Remove(reference);
+                if (Forget(versions, reference)) { return null; }
             }
             else
             {
-                if (!snapshot.IsVisible(reference.Writer)) { skippedInvisibleWriter = true; }
-                else if (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter))
+                if (snapshot.IsVisible(reference.Writer)
+                    && (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter)))
                 {
-                    // A rollback removed the head. Do not replace it with an old reader's
-                    // version when a newer, invisible writer remains in the directory.
-                    if (!skippedInvisibleWriter && record.Value.Deleter == TransactionSequence.None)
-                    {
-                        versions.Current = reference;
-                    }
                     return new Found(reference, record.Value.Record);
                 }
             }
@@ -472,8 +483,35 @@ public sealed partial class DocumentCatalog
         return null;
     }
 
+    private static bool Forget(Versions versions, Reference reference)
+    {
+        if (ReferenceEquals(versions.Current, reference))
+        {
+            if (reference.Committed || reference.Context?.State == TransactionState.Committed)
+            {
+                // A committed current head can disappear only after its committed delete
+                // became visible to every retained snapshot and purge reclaimed it.
+                // All preceding versions are then invisible too, so retire the name's
+                // directory value without reading or individually removing its history.
+                versions.Discard();
+                return true;
+            }
+            versions.Current = reference.PriorHead;
+        }
+        versions.Remove(reference);
+        return false;
+    }
+
     private (CatalogRecord Record, TransactionSequence Deleter)? Read(Reference reference, Func<CatalogRecord, bool> matches)
     {
+        if (reference.Context?.State == TransactionState.Committed)
+        {
+            // The writer can never roll back now. Avoid retaining its transaction,
+            // snapshot and predecessor through a committed directory reference.
+            reference.Committed = true;
+            reference.Context = null;
+            reference.PriorHead = null;
+        }
         // Reclaimed slots/pages and changed identities are absence. CRC, I/O and live
         // decoding failures propagate, including during the bounded cleanup probes.
         _recordReadCount++;

@@ -12,11 +12,13 @@ public sealed partial class BlobCatalog
     // breaking ties by publication order for repeated saves in one transaction.
     private sealed class Reference
     {
-        public Reference(PageId pageId, int slotIndex, TransactionSequence writer)
+        public Reference(PageId pageId, int slotIndex, TransactionSequence writer, TransactionContext? context = null)
         {
             PageId = pageId;
             SlotIndex = slotIndex;
             Writer = writer;
+            Context = context;
+            Committed = context is null;
         }
 
         public PageId PageId { get; }
@@ -25,6 +27,9 @@ public sealed partial class BlobCatalog
         public long Order { get; set; }
         public Reference? Previous { get; set; }
         public Reference? Next { get; set; }
+        public TransactionContext? Context { get; set; }
+        public bool Committed { get; set; }
+        public Reference? PriorHead { get; set; }
     }
 
     private sealed class Versions
@@ -38,10 +43,11 @@ public sealed partial class BlobCatalog
         private long _order;
         private Reference? _sweep;
         private bool _recoveredCurrentDeleted;
+        private bool _discarded;
 
         public Reference? First { get; private set; }
         public Reference? Last { get; private set; }
-        public int Count => _locations.Count;
+        public int Count => _discarded ? 0 : _locations.Count;
         public Reference? Current { get; set; }
 
         public void Add(Reference reference, TransactionSequence? recoveredDeleter)
@@ -73,6 +79,12 @@ public sealed partial class BlobCatalog
                 || (recoveredDeleter == TransactionSequence.None
                     && (_recoveredCurrentDeleted || reference.Writer >= Current.Writer)))
             {
+                if (recoveredDeleter is null)
+                {
+                    // One model writer publishes at a time. Collapse repeated own saves
+                    // to the head before that writer, so rollback restores it in O(1).
+                    reference.PriorHead = Current?.Writer == reference.Writer ? Current.PriorHead : Current;
+                }
                 Current = reference;
                 _recoveredCurrentDeleted = recoveredDeleter is not null && recoveredDeleter != TransactionSequence.None;
             }
@@ -97,6 +109,14 @@ public sealed partial class BlobCatalog
             var reference = _sweep ?? First;
             _sweep = reference?.Next ?? First;
             return reference;
+        }
+
+        public void Discard()
+        {
+            // The caller removes this directory value when Count reaches zero. Do not
+            // visit its obsolete references: detach the whole structure for collection.
+            _discarded = true;
+            Current = null;
         }
     }
 }

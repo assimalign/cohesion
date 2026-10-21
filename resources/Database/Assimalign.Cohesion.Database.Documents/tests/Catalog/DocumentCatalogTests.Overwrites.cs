@@ -101,9 +101,49 @@ public sealed partial class DocumentCatalogTests
         await coordinator.RollbackAsync(pinned);
         coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
         var fresh = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        long beforePurgeLookup = catalog.RecordReadCount;
         catalog.FindDocument(parent, "item", fresh.Snapshot).ShouldBeNull();
+        (catalog.RecordReadCount - beforePurgeLookup).ShouldBeLessThanOrEqualTo(3);
         catalog.CachedReferenceCount.ShouldBe(1);
         await coordinator.RollbackAsync(fresh);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Rollback: many own versions restore the prior head with constant reads (#1281)")]
+    [InlineData(32)]
+    [InlineData(256)]
+    public async Task FindDocument_RolledBackOwnHistory_ShouldBoundCurrentRecordReads(int versions)
+    {
+        // Arrange
+        await using var fixture = await Fixture.Create();
+        var coordinator = fixture.Coordinator;
+        var catalog = fixture.Catalog;
+        var parent = fixture.Collection.Id;
+        await fixture.Write("item", "{}");
+        var pinned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var original = catalog.FindDocument(parent, "item", pinned.Snapshot);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        for (int version = 0; version < versions; version++)
+        {
+            await fixture.WriteIn(writer, "item", "{}");
+        }
+        await coordinator.RollbackAsync(writer);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        long reads = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = catalog.RecordReadCount;
+            catalog.FindDocument(parent, "item", reader.Snapshot).ShouldBe(original);
+            (catalog.RecordReadCount - before).ShouldBeLessThanOrEqualTo(3);
+            reads = Math.Min(reads, catalog.RecordReadCount - before);
+        }
+
+        // Assert
+        reads.ShouldBe(3);
+        catalog.FindDocument(parent, "item", pinned.Snapshot).ShouldBe(original);
+        await coordinator.RollbackAsync(reader);
+        await coordinator.RollbackAsync(pinned);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Lookup: writer order survives late publication, reopen and same-writer rollback (#1281)")]

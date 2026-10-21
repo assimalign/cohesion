@@ -69,9 +69,52 @@ public sealed partial class BlobCatalogTests
         await coordinator.RollbackAsync(pinned);
         coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
         var fresh = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        long beforePurgeLookup = catalog.RecordReadCount;
         catalog.FindBlob(parent, "item", fresh.Snapshot).ShouldBeNull();
+        (catalog.RecordReadCount - beforePurgeLookup).ShouldBeLessThanOrEqualTo(3);
         catalog.CachedReferenceCount.ShouldBe(0);
         await coordinator.RollbackAsync(fresh);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Rollback: many own versions restore the prior head with constant reads (#1281)")]
+    [InlineData(32)]
+    [InlineData(256)]
+    public async Task FindBlob_RolledBackOwnHistory_ShouldBoundCurrentRecordReads(int versions)
+    {
+        // Arrange
+        await using var database = new TestDatabase();
+        var coordinator = database.Coordinator;
+        var catalog = database.Catalog;
+        var parent = Guid.NewGuid();
+        var entry = Entry(parent, "item");
+        var seed = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await catalog.SaveBlobAsync(entry, seed);
+        await coordinator.CommitAsync(seed);
+        var pinned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var original = catalog.FindBlob(parent, "item", pinned.Snapshot);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        for (int version = 0; version < versions; version++)
+        {
+            await catalog.SaveBlobAsync(entry with { ETag = (ulong)version + 100 }, writer);
+        }
+        await coordinator.RollbackAsync(writer);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act
+        long reads = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = catalog.RecordReadCount;
+            catalog.FindBlob(parent, "item", reader.Snapshot).ShouldBe(original);
+            (catalog.RecordReadCount - before).ShouldBeLessThanOrEqualTo(3);
+            reads = Math.Min(reads, catalog.RecordReadCount - before);
+        }
+
+        // Assert
+        reads.ShouldBe(3);
+        catalog.FindBlob(parent, "item", pinned.Snapshot).ShouldBe(original);
+        await coordinator.RollbackAsync(reader);
+        await coordinator.RollbackAsync(pinned);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Lookup: writer order survives late publication, reopen and same-writer rollback (#1281)")]
