@@ -1242,6 +1242,25 @@ immutable values.
 
 #### Catalog: Directory and visibility
 
+Version references are ordered by writer sequence, with publication order breaking ties for
+repeated saves in one transaction (#1281). A balanced set and a location map maintain the order
+and replace reused slots in O(log n). A current pointer follows publication order, including
+deletion: a ReadCommitted writer can begin before the version it later replaces. Its intact
+head takes O(1) selection work; an invisible or rolled-back head falls back to linked history,
+stopping at the first visible, untombstoned version. Older snapshots visit newer versions.
+Open reconstructs the current pointer from untombstoned records after recovery and rebuilds
+writer order independently of physical page order. Old readers never replace a newer head.
+
+Each lookup, including the lookup before save, also checks at most two rotating references.
+These probes retire physically reclaimed or identity-changed references faster than saves add
+them, so early exit does not strand an ever-growing directory after purge. Cleanup is incremental:
+an idle name retains its references until accessed again, and catching up after a large purge
+takes further accesses, each with constant extra record reads. No unsafe approximation of the
+kernel's internal snapshot prune bound is used. Pinned snapshots necessarily retain their live
+versions and content. Lock order is the engine writer lock, catalog monitor, then storage page
+latches; physical apply releases the catalog monitor before entering the coordinator apply gate.
+Purge never acquires the catalog monitor. Lookup and cleanup preserve CRC, I/O and decode failures.
+
 At open, the catalog scans only owner-zero metadata pages into a directory from ordinal
 container names and `(container identity, blob name)` pairs to version locations. Chunk pages
 have nonzero owners. Listing consults this directory and rereads candidate metadata through
