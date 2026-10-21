@@ -52,6 +52,8 @@ representation — model-specific layouts live in the Storage components of each
 - **File header** — page 0: an identity block written at creation and two alternating,
   separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
   copy of the identity block), so a torn header write cannot make a file set unopenable.
+  A half-page read error permits fallback only with verified journal coverage and emits a
+  Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`COHDBS003`).
   Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 4;
   any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
   path (#1152).

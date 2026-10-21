@@ -429,6 +429,21 @@ internal sealed class StorageEventSource : EventSource
         }
     }
 
+    /// <summary>Reports every header fallback whose journal coverage was verified after a half could not be read.</summary>
+    /// <param name="storage">The storage being opened.</param>
+    /// <param name="slot">The readable header slot selected.</param>
+    /// <param name="generation">The selected header generation.</param>
+    /// <param name="lsnFloor">The selected generation's LSN floor.</param>
+    /// <param name="error">The header read failure.</param>
+    [NonEvent]
+    public void HeaderReadFallback(Storage storage, int slot, long generation, long lsnFloor, Exception error)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            HeaderReadFallback(storage.Name.ToString(), slot, generation, lsnFloor, error.GetType().FullName ?? error.GetType().Name, error.Message);
+        }
+    }
+
     [Event(1, Level = EventLevel.Informational, Message = "Storage '{0}' ({1}, {2}) created a new file set.")]
     private void StorageCreated(string database, string storageId, string model)
         => WriteEvent(1, database, storageId, model);
@@ -496,6 +511,10 @@ internal sealed class StorageEventSource : EventSource
     [Event(17, Level = EventLevel.Informational, Message = "Storage '{0}' closed in {1} ms.")]
     private void StorageClosed(string database, double durationMilliseconds)
         => WriteEvent(17, database, durationMilliseconds);
+
+    [Event(18, Level = EventLevel.Warning, Message = "Storage '{0}' opened header slot {1}, generation {2}, LSN floor {3}, with verified journal coverage after a header read failed: {4}: {5}.")]
+    private void HeaderReadFallback(string database, int slot, long generation, long lsnFloor, string exceptionType, string exceptionMessage)
+        => WriteEvent(18, database, slot, generation, lsnFloor, exceptionType, exceptionMessage);
 
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)

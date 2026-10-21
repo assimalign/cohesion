@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,7 +64,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 {
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
-    private readonly Dictionary<long, long> _pageWriteLocks = new();
+    private readonly Dictionary<long, StorageTransaction> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
     private readonly StorageGroupCommitGate _groupCommitGate = new();
     private readonly StorageModel _model;
@@ -1114,13 +1116,20 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// The identity block of page 0 fails its checksum, neither header slot verifies, or the
     /// newest slot's checkpoint anchor chain does not verify.
     /// </exception>
-    /// <exception cref="StorageIOException">The file is not a Cohesion storage file.</exception>
+    /// <exception cref="StorageIOException">
+    /// The file is not a Cohesion storage file, or a header half ended prematurely and no
+    /// journal-covered fallback is available.
+    /// </exception>
+    /// <exception cref="IOException">
+    /// A header half could not be read and the journal cannot prove coverage of the other slot,
+    /// or neither half could be read. Checksum damage without a valid slot is corruption instead.
+    /// </exception>
     /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
     /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
     protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var header = ReadHeader(out long[] anchor, out _);
+        var header = ReadHeader(out long[] anchor, out _, out var headerReadFailure);
         NameComponents();
         _checkpointActives = anchor;
         var protectedPages = new HashSet<long>(_anchorChains[0]);
@@ -1131,6 +1140,17 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // never committed (#1253).
         AttachJournal();
         _journal!.EnsureInitialized(cancellationToken);
+        if (headerReadFailure is not null)
+        {
+            // An unreadable slot may be a durable, newer checkpoint that already discarded
+            // the readable generation's journal. Refuse before replay writes any data (#1270).
+            if (!JournalCoversHeader(header, anchor))
+            {
+                ExceptionDispatchInfo.Capture(headerReadFailure).Throw();
+            }
+
+            StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure);
+        }
         bool journalHadRecords = _journal!.LastLsn > 0;
 
         // LSNs resume above both the journal's last record and the floor the newest header
@@ -1419,7 +1439,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page to modify.</param>
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the page is owned by another transaction.</exception>
     /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId)
     {
@@ -1438,7 +1458,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="latch">The latch the structure's readers hold while they read the page; the caller holds it exclusively.</param>
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
     /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the page is owned by another transaction.</exception>
     /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId, StoragePageLatch latch)
     {
@@ -1458,7 +1478,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="type">The type of page to allocate.</param>
     /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
-    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage or is not active.</exception>
     public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
@@ -1477,7 +1497,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
     /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage or is not active.</exception>
     public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, StoragePageLatch latch, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
@@ -1716,7 +1736,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ReadOnlySpan<byte> data)
         => InsertRecord(transaction, 0, data);
 
@@ -1731,7 +1751,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
@@ -1976,7 +1996,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe void DeleteRecord(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         var owner = ValidateTransaction(transaction);
@@ -2025,7 +2045,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="data">The new record data.</param>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe void UpdateRecord(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
@@ -2145,7 +2165,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="maximumPages">The positive maximum number of pages to release; defaults to the whole owner.</param>
     /// <returns>The number of pages released.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumPages"/> is not positive.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or a chain page is owned by another transaction.</exception>
     public unsafe int FreeOwnerPages(StorageTransaction transaction, ulong ownerId, int maximumPages = int.MaxValue)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPages);
@@ -2958,6 +2978,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
+        if (!ReferenceEquals(transaction.Owner, this))
+        {
+            throw new StorageTransactionException(StorageTransactionErrorCode.ForeignStorage, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.TransactionStorageMismatch, transaction.Sequence, transaction.Owner.Name, Name));
+        }
+
         if (!transaction.IsActive)
         {
             throw new StorageTransactionException($"Storage transaction {transaction.Sequence} has already completed.");
@@ -3022,19 +3048,26 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long pageId = (long)handle.Id;
         bool locked = false;
 
+        // First-touch order: any structure latch -> page pin (pool monitor released) ->
+        // _transactionLock. This path and bracket completion never acquire a structure
+        // latch under that monitor. Completion takes _ownerLock -> free-map lock inside it;
+        // page lookup/allocation releases those locks before it comes here. Checkpoint's
+        // separate, idle-only transaction -> header -> pool -> journal order is documented
+        // at Checkpoint. Lock owners are bracket identities, including their Storage,
+        // never per-storage sequence numbers (#1286).
         lock (_transactionLock)
         {
-            if (_pageWriteLocks.TryGetValue(pageId, out long owner))
+            if (_pageWriteLocks.TryGetValue(pageId, out var owner))
             {
-                if (owner != transaction.Sequence)
+                if (!ReferenceEquals(owner, transaction))
                 {
                     throw new StorageTransactionException(
-                        $"Page {pageId} is write-locked by transaction {owner}.");
+                        $"Page {pageId} is write-locked by transaction {owner.Sequence}.");
                 }
             }
             else
             {
-                _pageWriteLocks[pageId] = transaction.Sequence;
+                _pageWriteLocks[pageId] = transaction;
                 locked = true;
             }
         }
@@ -3159,7 +3192,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             foreach (long pageId in transaction.PreImages.Keys)
             {
-                if (_pageWriteLocks.TryGetValue(pageId, out long owner) && owner == transaction.Sequence)
+                if (_pageWriteLocks.TryGetValue(pageId, out var owner) && ReferenceEquals(owner, transaction))
                 {
                     _pageWriteLocks.Remove(pageId);
                 }
@@ -3478,6 +3511,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="anchor">The checkpoint anchor the newest generation records.</param>
     /// <param name="anchorChain">The anchor pages of that generation, in chain order.</param>
+    /// <param name="readFailure">A half-page read failure whose fallback requires journal coverage before replay.</param>
     /// <returns>The newest valid header slot.</returns>
     /// <remarks>
     /// The identity block shares slot 0's 4 KiB block. On a drive with 4 KiB physical sectors
@@ -3486,9 +3520,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// 1 is intact. A page 0 whose magic or identity checksum fails is therefore opened from
     /// the newest valid slot's copy of the identity block, and only a page 0 with neither a
     /// verified identity block nor a valid slot is refused: as not a storage file when its
-    /// magic is wrong, as corruption otherwise.
+    /// magic is wrong, as corruption otherwise. After a read error, an invalid slot in the
+    /// readable half is page-0 corruption with the read error attached; two unreadable halves
+    /// preserve the I/O failure. A valid fallback still requires journal coverage before replay.
     /// </remarks>
-    private StorageHeaderSlot ReadHeader(out long[] anchor, out List<long> anchorChain)
+    private StorageHeaderSlot ReadHeader(out long[] anchor, out List<long> anchorChain, out Exception? readFailure)
     {
         if (Data.Length < Page.Size)
         {
@@ -3497,7 +3533,34 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         var page0 = new byte[Page.Size];
-        Data.ReadPage((PageId)0L, page0);
+        readFailure = null;
+        int unreadableBlocks = 0;
+        for (int offset = 0; offset < Page.Size; offset += StorageHeaderPage.LeadingBlockSize)
+        {
+            var block = page0.AsSpan(offset, StorageHeaderPage.LeadingBlockSize);
+            try
+            {
+                int total = 0;
+                while (total < block.Length)
+                {
+                    int read = Data.Read(block[total..], (long)offset + total);
+                    if (read == 0)
+                    {
+                        throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.HeaderBlockIncomplete, offset));
+                    }
+                    total += read;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or StorageIOException)
+            {
+                // A failed read may have copied a prefix: invalidate the entire physical block.
+                // The other 4 KiB block has an independent slot and identity copy (#1270).
+                block.Clear();
+                unreadableBlocks |= 1 << (offset / StorageHeaderPage.LeadingBlockSize);
+                readFailure ??= exception;
+            }
+        }
 
         // The format fence reads the two fields every storage format keeps at the same
         // offsets, before any checksum: the checksum algorithm is itself part of the format,
@@ -3522,6 +3585,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         var identity = StorageHeaderPage.IdentityBlock(page0);
+        if (newest is null && readFailure is not null)
+        {
+            if (unreadableBlocks == 3)
+            {
+                // No readable bytes establish checksum damage: retain the device I/O failure.
+                ExceptionDispatchInfo.Capture(readFailure).Throw();
+            }
+
+            // At least one half was read completely and its slot did not validate. An I/O
+            // failure on the other half must not hide that page-0 corruption (#1270).
+            throw new StorageCorruptionException((PageId)0L, ErrorMessages.HeaderSlotsUnreadableOrDamaged, readFailure);
+        }
         if (magic != StorageFileHeader.ExpectedMagic || !StorageHeaderPage.VerifyIdentity(identity))
         {
             if (newest is null)
@@ -3591,6 +3666,45 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         _lsnFloor = newest.LsnFloor;
         _sequenceFloor = newest.SequenceFloor;
         return newest;
+    }
+
+    /// <summary>
+    /// Proves that the retained journal covers a header selected after a page-0 read failure.
+    /// A checkpoint's record immediately follows the LSN floor its header persisted; its anchor
+    /// must match too. An empty or torn prefix proves nothing. Called before replay or appends.
+    /// </summary>
+    private bool JournalCoversHeader(StorageHeaderSlot header, ReadOnlySpan<long> anchor)
+    {
+        // Checkpoints discard their entire prefix, so the first verified record is either
+        // at/below the floor, or must be this generation's checkpoint at floor + 1.
+        using var records = _journal!.ReadSequentialBorrowed().GetEnumerator();
+        if (!records.MoveNext())
+        {
+            return false;
+        }
+
+        var first = records.Current;
+        if (first.Lsn > 0 && first.Lsn <= header.LsnFloor)
+        {
+            return true;
+        }
+
+        if (first.Type != JournalRecordType.Checkpoint || first.Lsn <= 0 || first.Lsn - 1 != header.LsnFloor
+            || first.Payload.Length % sizeof(long) != 0 || first.Payload.Length / sizeof(long) != anchor.Length)
+        {
+            return false;
+        }
+
+        var payload = first.Payload.Span;
+        for (int index = 0; index < anchor.Length; index++)
+        {
+            if (BinaryPrimitives.ReadInt64LittleEndian(payload[(index * sizeof(long))..]) != anchor[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

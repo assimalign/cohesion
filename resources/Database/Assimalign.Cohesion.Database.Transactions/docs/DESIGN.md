@@ -27,6 +27,11 @@ no project or package dependency, including no dependency on Indexing.
 
 ## Type shape: sealed kernel types, three abstract seams (#1257, #1258)
 
+Storage's raw page allocation and free methods are internal (#1270). Transactions tests
+that construct page workloads use `AllocatePageForWrite` and `OpenPageForWrite` in committed
+physical brackets, including the checkpoint latency probe; no cross-assembly visibility grant
+or unjournaled setup is needed.
+
 The area is concrete-first (`.claude/rules/database-area.md`); the project declares no
 interface since phase 2 of the concrete-types program
 (`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`).

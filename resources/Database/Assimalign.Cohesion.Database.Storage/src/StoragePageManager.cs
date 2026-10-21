@@ -53,7 +53,7 @@ public sealed class StoragePageManager
     /// </summary>
     /// <param name="type">The type of page to allocate.</param>
     /// <returns>A handle to the newly allocated page, pinned in the buffer pool.</returns>
-    public unsafe StoragePageHandle AllocatePage(PageType type)
+    internal unsafe StoragePageHandle AllocatePage(PageType type)
     {
         var pageId = _freeSpaceMap.Allocate();
 
@@ -102,7 +102,7 @@ public sealed class StoragePageManager
             page.Type = type;
             // The clear is outside the journal: an allocating storage transaction images the page at
             // its touch, initialization included (invariant A), and anything else allocating is the
-            // storage itself (its first page, an anchor page) or a raw caller.
+            // storage itself (its first page, an anchor page) or a test through the internal API.
             handle.MarkDirty();
 
             return handle;
@@ -134,7 +134,7 @@ public sealed class StoragePageManager
     /// rebuilds the page from its journal records, as it stood before the free. Storage
     /// transactions free pages through the storage's record operations, which are journaled.
     /// </remarks>
-    public unsafe void FreePage(PageId pageId)
+    internal unsafe void FreePage(PageId pageId)
     {
         ThrowIfHeaderPage(pageId);
         WroteOutsideJournal?.Invoke((long)pageId);

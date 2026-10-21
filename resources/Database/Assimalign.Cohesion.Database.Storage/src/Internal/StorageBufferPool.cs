@@ -864,12 +864,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// <exception cref="StorageCorruptionException">The header's overflow area does not fit the buffer.</exception>
     private static void VerifyFitsBuffer(Page page, PageId pageId)
     {
-        if (page.IsOverflow && (page.OverflowSize < 0 || page.OverflowSize > Page.Size - Page.HeaderSize))
-        {
-            throw new StorageCorruptionException(
-                pageId,
-                $"Page {(long)pageId} declares an overflow area of {page.OverflowSize} bytes, which does not fit its {Page.Size}-byte buffer.");
-        }
+        _ = page.GetValidatedBodySize(pageId);
     }
 
     /// <summary>

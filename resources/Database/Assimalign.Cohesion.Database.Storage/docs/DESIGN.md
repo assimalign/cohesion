@@ -89,6 +89,19 @@ StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writ
 
 ## The page model
 
+`Page.AsSpan` and `AsBodySpan` validate a single snapshot of the overflow body length
+before constructing a span (#1162), including over caller-owned memory. The owner default
+is to throw `StorageCorruptionException` with the page id for a length outside
+`0..Page.Size - Page.HeaderSize`; clamping could silently change the meaning of damaged
+content. Pool loads reuse the same check with the physical page id. Multi-page overflow
+storage remains reserved: `OverflowSize` currently means the body length inside one
+8 KiB buffer. The pointer constructor requires that full buffer; its length-taking overload
+rejects undersized caller memory before reading any header, and ignores extra bytes.
+A default page's span accessors throw `InvalidOperationException` before dereferencing.
+The memory-safety goal is shared with Neo4j's bounded cursor access
+(`community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnPageCursor.java:517-533`);
+Cohesion throws immediately rather than deferring the cursor's out-of-bounds flag.
+
 - **8 KiB pages, 96-byte header.** The header layout (`Page.Header`) is an explicit
   struct persisted on disk, so field offsets are a wire contract: id (0), LSN (8),
   checksum (16), flags (20), type (21), slot count (22), free-data end (24), overflow
@@ -113,6 +126,38 @@ StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writ
   uninitialized pages; page 0 is outside the pool and retains its separate checksums.
 
 ### Page 0: the identity block and two alternating header slots
+
+Open reads page 0 in two independent 4 KiB halves (#1270), completing short reads within
+each half. An `IOException` or `StorageIOException` (including a premature zero-byte read)
+invalidates that whole half, including any partially read
+bytes; the other slot can supply the identity and checkpoint state. If no slot verifies,
+the open throws page-0 `StorageCorruptionException` (`COHDBS003`) when a completely read
+half has a damaged slot, attaching the other half's read error as its inner exception so
+`StorageCorruptionException.Find` and the engine corruption translation recognize it.
+If both halves are unreadable, no checksum damage is established and the original I/O
+failure is preserved. A recovered leading half uses the existing deferred identity
+repair on the next slot-0 write. This extends the existing self-contained-header design
+from Voron (`src/Voron/Impl/FileHeaders/HeaderAccessor.cs:71-86`) to a sector read failure.
+
+After any half-page read error, a valid other slot is accepted only if the verified journal
+still covers that generation: its first retained LSN is at or below the slot's `LsnFloor`,
+or it retains that generation's checkpoint record, at `LsnFloor + 1` with the same complete
+anchor. Checkpoints truncate their entire prefix, so this record must be first. The proof
+runs before recovery writes any pages. An empty/torn prefix or a newer checkpoint proves
+nothing; open rethrows the header read error without writing either file. This is an I/O
+refusal when the readable slot verifies, distinct from an unrecoverable page 0 with known
+checksum damage. Every accepted fallback emits Warning `HeaderReadFallback` (18), including
+consecutive opens; a device degradation must not silently roll back the checkpoint anchor
+or sequence floor. `StorageHeaderReadTests` exercises both slot orders, journal truncation,
+empty journals, both coverage proofs, warning payloads, rows and sequence monotonicity.
+
+The page-header scan cannot cheaply reconstruct the sequence floor: the shared 96-byte
+header carries an LSN and owner, but no transaction sequence, and record bodies are opaque
+model data. Interpreting version stamps here would cross the model boundary and still miss
+reserved sequences with no rows. Sequence assignment therefore resumes above the verified
+header floor and the retained journal's maximum; the coverage proof prevents accepting an
+older floor after a newer checkpoint has discarded its journal witnesses. No disk layout or
+format version changes.
 
 `StorageFileHeader` sits in the **body** of page 0, after the standard 96-byte page header,
 not at file offset 0. An earlier draft overlaid it on the page header, which made page 0
@@ -867,7 +912,21 @@ Every rule below is stated for a storage transaction (a *bracket*):
    checkpoint interval would keep the LSN of its free, its next delta would chain onto the freed
    page, and the initialization made before the touch would be in no record — recovery would
    rebuild a page that never existed (`StorageRedoTests`, "freed and reallocated").
-7. **Page-level single-writer.** A page touched by an active transaction is
+7. **Storage-qualified transaction ownership (#1286).** Every record or page mutation
+   validates the bracket's owning Storage by reference before enlisting a latch or taking a pin, lock,
+   pre-image or journal record. A foreign bracket throws `StorageTransactionException`
+   with `Code = StorageTransactionErrorCode.ForeignStorage`, naming both storages.
+   Page write locks hold the bracket object itself, so equal
+   sequence numbers from different storages never identify the same lock owner.
+   Commit and rollback route through the bracket's immutable owner. The lock order at
+   first touch is an already-held structure latch and pin, then the transaction monitor;
+   the pool monitor is released before that monitor is taken. Completion takes the owner
+   directory and free-map locks inside the transaction monitor, and releases page locks
+   before publishing pending frees. These bracket paths acquire no structure latch under
+   the transaction monitor. An idle checkpoint instead takes transaction monitor, header,
+   pool flush gate, pool monitor and journal, as documented at `Checkpoint`.
+
+   A page touched by an active transaction is
    write-locked to it (conflicts throw rather than wait). Record-level concurrency is
    `Database.Transactions`' job above this layer; a delta computed against a private pre-image
    is only correct because two transactions can never interleave on one page. This division is
@@ -881,8 +940,9 @@ Every rule below is stated for a storage transaction (a *bracket*):
    since the checkpoint, the next image would even make it committed content. The storage's own
    exceptions are page 0 (never in the pool), allocation's clear (the allocating bracket images
    the page at its touch, invariant A), the checkpoint anchor pages (written only by header
-   writes, never replayed onto, "Checkpoints"), and the page manager's raw `AllocatePage` and
-   `FreePage` (no production caller; a raw free is lost to a crash before the next checkpoint).
+   writes, never replayed onto, "Checkpoints"). The page manager's raw `AllocatePage` and
+   `FreePage` are internal (#1270); external allocation uses `AllocatePageForWrite`, and
+   releases use transactional record deletion or `FreeOwnerPages` with commit-deferred reuse.
    The debug consistency check audits the rule on every page, whether or not it was imaged
    since the checkpoint ("The debug consistency check").
 
@@ -1135,7 +1195,7 @@ pinned handle right after a checkpoint went unreported whether a checkpoint wrot
 next bracket's image absorbed it (the review's probes A1 and A2, now `StorageConsistencyCheckTests`
 cases). The pages the storage writes outside the journal on purpose — allocation's clear (the
 allocating bracket images the page at its touch, invariant A), a new file set's first page, the
-checkpoint anchor pages, the page manager's raw `AllocatePage` and `FreePage` — are reported to
+checkpoint anchor pages, and test-only raw frees through the internal page-manager API — are reported to
 the check and exempt from those two audits until the next checkpoint has written them; page 0
 never enters the pool. What remains unchecked is a change never marked dirty to a page that is
 neither touched nor written back again: readers see it until the page leaves the pool, and
@@ -1877,7 +1937,10 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   written per truncation stayed between 0.89 and 1.06 sizes (in format 2 a peak reached almost
   ten). It is not a hard bound: a single statement journals all of its bracket before the
   checkpoint can run, so one statement that writes more than the size (a large index build or
-  `INSERT ... SELECT`, a large upload) overshoots it by that much.
+  `INSERT ... SELECT`, a large upload) overshoots it by that much. The owner default for
+  #1270 keeps this soft trigger: bracket caps remain rejected, and splitting a statement
+  requires a separate design that preserves statement atomicity.
+  The journal-size hard bound is deferred; #1270 is not fully delivered by this soft trigger.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of
@@ -2176,9 +2239,9 @@ to another page, and the dead space stays until its page holds no live record.
 (The SQL index seek and the version store used to read any `StorageException` from a record
 read as reclamation, `StorageCorruptionException` included; #1342 closed that with
 `Storage.TryReadRecord`, "Reading a record through a reference" above.)
-Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
-the header only because the pool refuses an oversized one at load, and a `Page` built
-over caller memory carries no such check. Each follow-up needs its own work item.
+Overflow pages themselves remain unimplemented. Their reserved body length is checked
+by both span accessors and the pool (#1162, "The page model"); caller memory follows the
+same throw-on-invalid-geometry rule. Compaction and multi-page overflow need their own work items.
 
 ## Measurements (#1251, 2026-10-04)
 
@@ -2441,6 +2504,7 @@ session enables.
 | 15 | `BufferPoolResized` | Informational | — | `database`, `oldCapacity`, `newCapacity` | `StorageBufferPool.Resize` (`Storage.BufferPoolCapacity`), when the capacity changed |
 | 16 | `PageChecksumFailed` | Error | — | `database`, `pageId` | a pool miss whose page failed `PageChecksum.Verify`; not the other corruption checks of a load (an overflow area past the buffer) |
 | 17 | `StorageClosed` | Informational | — | `database`, `durationMilliseconds` | the first `Dispose`/`DisposeAsync` of a storage whose create or open completed |
+| 18 | `HeaderReadFallback` | Warning | — | `database`, `slot`, `generation`, `lsnFloor`, `exceptionType`, `exceptionMessage` | every header fallback after a half-page I/O failure, once journal coverage is proved and before replay; never throttled |
 
 **Start/Stop pairs always close.** Recovery and checkpoints are same-flow work, so they are
 `Start`/`Stop` activities. A recovery or a checkpoint that throws still writes its stop, with
@@ -2492,7 +2556,7 @@ the others) stay as they were; the counters are their process-wide totals for to
 
 ## Error model
 
-`StorageException` is the area root for this library. `StorageIOException` (stream and
+`StorageException` is the child root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
 `StorageCorruptionException` (`COHDBS003`, checksum/header integrity failures, and since #1253 a gap
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
@@ -2507,6 +2571,11 @@ inner-exception or aggregate chain, and
 failed), and `JournalException` (journal framing violations: a record whose frame would exceed
 2 GiB; since #1252 a failed append no longer raises it) all derive from it, so consumers can
 catch the family or the specific failure.
+Foreign-storage transaction refusals remain `StorageTransactionException` under that child
+root and carry `Code = StorageTransactionErrorCode.ForeignStorage`, before latch enlistment,
+pins, locks, pre-images or journal changes. Other transaction violations carry `Unspecified`.
+The ownership race test runs for a minimum duration and until every coverage counter reaches
+its milestone; its five-minute timeout is a hang guard that fails the test, never a coverage window.
 Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
 with their own code, or into `DatabaseTransactionCommitUnconfirmedException` when
 `CommitRecordWritten` is set.
