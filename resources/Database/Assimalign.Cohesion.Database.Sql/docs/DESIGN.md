@@ -51,6 +51,19 @@ commit/delivery and carry the direct affected count; ordinary query sets retain 
 ResultComplete already carries that value. No new plan wrapper, public interface,
 visibility grant, persisted text, storage version or protocol change is needed.
 
+## Invalid statement declarations (#1192)
+
+UPDATE binds each target ordinal only once and rejects repeated assignments with COHSQLE019,
+including DEFAULT and empty inputs. A shared internal declaration validator rejects repeated
+columns in PRIMARY KEY, UNIQUE and FOREIGN KEY child lists before key deduplication, catalog
+publication or index construction, for CREATE and ALTER ADD CONSTRAINT. It uses the same
+case-insensitive identity as column binding and names the column and constraint. A second
+PRIMARY KEY declaration is refused with COHSQLE019, including mixed inline/table declarations
+and ALTER on an existing primary key (PostgreSQL parse_utilcmd.c:2378,2773-2779 uses 42P16
+for multiple primary keys). The live invalid-statement conformance corpus checks both execution
+boundaries, statement atomicity, connection usability, existing SQL0005 type limits and
+COHSQLE017 aggregate placement. No public API or persisted representation changes.
+
 ## Identity execution (#1123)
 
 CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,

@@ -964,7 +964,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
-        => definition.Name ?? $"{definition.Kind}_{table.Name}_{string.Join('_', definition.Columns)}_{ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 
     private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions)
     {
@@ -979,6 +979,7 @@ internal sealed partial class SqlPlanExecutor
         {
             var definition = definitions[i];
             string name = ConstraintName(table, definition, i);
+            SqlConstraintDeclaration.ValidateColumns(definition, name);
             if (!names.Add(name))
             {
                 throw new DatabaseException($"Constraint or index '{name}' already exists on '{table.Name}'.");

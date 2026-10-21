@@ -1495,6 +1495,14 @@ parse as niladic function nodes and execute using the transaction-start clock (#
 `NOW()` executes with the same clock. Quoted datetime names and qualified references
 remain column references and receive `COHSQLE005` in these clauses.
 
+Repeated UPDATE SET targets fail planning with COHSQLE019, even when no row matches;
+DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child column lists
+must not repeat a column (case-insensitive); CREATE TABLE and ALTER TABLE ADD CONSTRAINT
+report COHSQLE019 naming the column and constraint. A table may declare one PRIMARY KEY:
+a second inline or table declaration, or ALTER ADD PRIMARY KEY over an existing key, reports
+COHSQLE019 naming the constraint and table. Composite keys remain supported. The live
+SqlInvalidStatementConformanceTests corpus exercises these refusals in process and over the wire.
+
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
@@ -3073,7 +3081,7 @@ pin in the same change.
 | `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary |
 | `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
 | `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
-| `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
+| `COHSQLE019` | Error | Duplicate target column, key constraint column, PRIMARY KEY declaration, table binding or ambiguous output alias |
 | `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
 | `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 | `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |

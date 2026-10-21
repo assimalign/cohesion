@@ -204,7 +204,7 @@ internal sealed partial class SqlPlanExecutor
         EnsureCurrentDefinition(plan.Table);
         if (plan.Constraint.Kind == SqlConstraintKind.PrimaryKey && plan.Table.PrimaryKeyColumns.Count > 0)
         {
-            throw new DatabaseException($"Table '{plan.Table.Name}' already has a primary key.");
+            throw SqlConstraintDeclaration.MultiplePrimaryKeys(plan.Table.Name, ConstraintName(plan.Table, plan.Constraint, 0));
         }
 
         var constraints = BindConstraints(plan.Table, [plan.Constraint]);

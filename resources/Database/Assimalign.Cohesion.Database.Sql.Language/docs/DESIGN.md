@@ -438,7 +438,8 @@ same shape: optional name, ordered key columns, foreign-key target and deletion
 action, or a check predicate. `SqlCreateTableExpression.Constraints` contains all
 constraints; column definitions also retain their own constraints so `ALTER TABLE
 ADD COLUMN` carries the same information. The executor consumes the normalized
-table list once. `CHECK` retains both its expression tree and the predicate source
+table list once. The engine rejects duplicate key columns and multiple PRIMARY KEY declarations
+with COHSQLE019 before publication; it does not merge separate declarations (#1192). `CHECK` retains both its expression tree and the predicate source
 as written (`CheckExpressionText`, for tooling); the engine never persists that
 source. It persists the canonical text `SqlExpressionRenderer` renders from the
 tree (below), so no spelling — and no leniency an older parser had for a spelling —
