@@ -40,7 +40,7 @@ public sealed class KeyValueDiagnosticTests
         await using var client = DatabaseClient.Create(new DatabaseClientOptions
         {
             Settings = new() { Database = "kv", Principal = "tester", EndPoint = harness.Listener.EndPoint },
-            Family = KeyValueProtocol.Family, ConnectionFactory = harness.Listener.CreateFactory(),
+            Family = KeyValueProtocol.Family, ConnectionFactory = harness.Factory,
         });
         await using var connection = await client.RentAsync(KeyValueClientTestHarness.Timeout());
         var parameters = new Dictionary<string,object?> { ["k"] = new byte[]{1}, ["v"] = new byte[]{2}, ["etag"] = 1L, ["empty"] = Array.Empty<byte>(), ["wrong"] = "wrong" };

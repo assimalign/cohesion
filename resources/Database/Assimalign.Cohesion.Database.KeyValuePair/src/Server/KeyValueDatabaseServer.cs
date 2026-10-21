@@ -174,6 +174,8 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
                     // The accept loop observed the stop signal mid-accept.
                 }
 
+                // Order: root lifecycle gate -> join accept -> join pumps and rejections.
+                // Pumps and rejection cleanup never acquire the lifecycle gate.
                 // Graceful drain: session pumps never fault (they own their
                 // errors), so awaiting their completions cannot throw.
                 Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).Concat(_rejections.Values.Select(completion => completion.Task)).ToArray());

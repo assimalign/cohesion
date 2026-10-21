@@ -1,8 +1,11 @@
 using System;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Client;
 
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
@@ -10,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 internal sealed class BlobClientTestHarness : IAsyncDisposable
 {
     private BlobClientTestHarness(BlobDatabaseEngine engine, BlobDatabase database, BlobDatabaseSession session, BlobContainer container,
-        InMemoryConnectionListener listener, BlobDatabaseServer server, RecordingConnectionFactory factory, BlobClient client)
+        IDuplexConnectionListener listener, BlobDatabaseServer server, RecordingConnectionFactory factory, BlobClient client)
     {
         Engine = engine;
         Database = database;
@@ -31,25 +34,27 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
     /// </summary>
     internal BlobDatabaseSession Session { get; }
     internal BlobContainer Container { get; }
-    internal InMemoryConnectionListener Listener { get; }
+    internal IDuplexConnectionListener Listener { get; }
     internal BlobDatabaseServer Server { get; }
     internal RecordingConnectionFactory Factory { get; }
     internal BlobClient Client { get; }
 
-    internal static async Task<BlobClientTestHarness> StartAsync(CancellationToken token)
+    internal static async Task<BlobClientTestHarness> StartAsync(CancellationToken token, bool tcp = false)
     {
         var engine = BlobDatabaseEngine.Create("blob-engine", new());
         var database = await engine.CreateDatabaseAsync("app", token);
         var session = await database.CreateSessionAsync(token);
         var container = await session.CreateContainerAsync("files", token);
-        var listener = new InMemoryConnectionListener();
+        IDuplexConnectionListener listener = tcp
+            ? TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0))
+            : new InMemoryConnectionListener();
         var server = BlobDatabaseServer.Create(engine, new()
         {
             Listener = listener,
-            ShutdownDrainTimeout = TimeSpan.FromMilliseconds(100)
+            ShutdownDrainTimeout = tcp ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(100)
         });
         await server.StartAsync(token);
-        var factory = new RecordingConnectionFactory(listener.CreateFactory());
+        var factory = new RecordingConnectionFactory(tcp ? new TcpConnectionFactory() : ((InMemoryConnectionListener)listener).CreateFactory());
         var client = BlobClient.Create(new BlobClientOptions
         {
             Settings = new DatabaseConnectionSettings { Database = "app", Principal = "tester", EndPoint = listener.EndPoint, MaxPoolSize = 1 },

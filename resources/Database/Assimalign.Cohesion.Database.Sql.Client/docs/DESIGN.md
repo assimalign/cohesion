@@ -1,5 +1,14 @@
 # Database.Sql.Client — Design
 
+## Terminal TCP conformance (#1087)
+
+The real SqlClient and model server run missing-database handshakes on InMemory and
+loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
+tests assert DatabaseNotFound and ConnectionFailure kind and reuse a one-slot pool to expose leaked failed rentals.
+TCP also covers 200 authentication and capacity refusals through the typed client, 200
+unsupported-major handshakes through the public protocol (production clients send Current),
+and 200 idle and graceful-stop notices read directly as unsolicited protocol frames.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.

@@ -1,5 +1,11 @@
 # Documents client design
 
+## Terminal TCP conformance (#1087)
+
+The real DocumentClient and model server run missing-database handshakes on InMemory and
+loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
+tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed rentals.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
