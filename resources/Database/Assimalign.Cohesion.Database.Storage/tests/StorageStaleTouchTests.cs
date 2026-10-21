@@ -295,21 +295,38 @@ public sealed class StorageStaleTouchTests
         await ExerciseRaceAsync(insert, reuse, completion, stop.Token);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Stale touch regression loop: repeat insert, open, reuse and every bracket completion")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Stale touch regression loop: repeat owner lookup, pin, free, reuse and bracket completion")]
     public async Task TouchPage_RepeatedRaceRegressions_ShouldLeaveNoStaleLocksOrPins()
     {
         // Arrange
         using var stop = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var elapsed = Stopwatch.StartNew();
-        var exercised = new int[12];
+        (bool Insert, bool Index, bool Committed, bool SameOwner)[] ownerScenarios =
+        [
+            (true, false, false, false), (true, false, false, true),
+            (true, false, true, false), (true, false, true, true),
+            (false, false, false, false), (false, false, false, true),
+            (false, false, true, false), (false, false, true, true),
+            (false, true, false, false), (false, true, false, true),
+            (false, true, true, false), (false, true, true, true)
+        ];
+        var exercised = new int[12 + ownerScenarios.Length];
         int rounds = 0;
 
-        // Act: every round rendezvous after the pin, so a counter means the race occurred.
+        // Act: every round rendezvous after lookup or pin, so a counter proves that window occurred.
         do
         {
             stop.Token.ThrowIfCancellationRequested();
             int scenario = rounds % exercised.Length;
-            await ExerciseRaceAsync(scenario >= 6, scenario % 6 >= 3, scenario % 3, stop.Token);
+            if (scenario < 12)
+            {
+                await ExerciseRaceAsync(scenario >= 6, scenario % 6 >= 3, scenario % 3, stop.Token);
+            }
+            else
+            {
+                var (insert, index, committed, sameOwner) = ownerScenarios[scenario - 12];
+                await ExerciseOwnerReadRaceAsync(insert, index, committed, sameOwner, stop.Token);
+            }
             exercised[scenario]++;
             rounds++;
         }
@@ -317,7 +334,7 @@ public sealed class StorageStaleTouchTests
 
         // Assert
         exercised.ShouldAllBe(count => count >= 5);
-        rounds.ShouldBeGreaterThanOrEqualTo(60);
+        rounds.ShouldBeGreaterThanOrEqualTo(exercised.Length * 5);
     }
 
     private static async Task ExerciseRaceAsync(bool insert, bool reuse, int completion, CancellationToken cancellationToken)

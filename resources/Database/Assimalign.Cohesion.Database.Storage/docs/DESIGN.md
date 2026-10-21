@@ -700,7 +700,7 @@ object ids, so a table scan stops decoding the whole database.
   lock and free-map lock; the free-map lock is never held across a pin or a wait for
   the transaction lock. Deterministic owner-lookup and pin/free rendezvous tests verify
   active and committed replacements, surviving records, updateability and recovery.
-  A non-parallel regression loop repeats the pin/free scenarios for a minimum duration
+  A non-parallel regression loop repeats both race windows for a minimum duration
   and until every scenario counter reaches its milestone, with a failing timeout.
   Reallocation runs on a separate thread after the freeing commit returns.
   PostgreSQL guards the same edge from the
