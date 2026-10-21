@@ -1334,6 +1334,9 @@ its data and its journal (up to the checkpoint size, briefly twice that while th
 past it, released by the checkpoint). The reasoning is in `Database.Storage` DESIGN.md
 ("Capacity", "Checkpoint triggers").
 
+If history maintenance fails after a failed purge pass, both exceptions are retained in an
+AggregateException with the purge failure first; cleanup never replaces the original failure.
+
 Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
 assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
 the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted

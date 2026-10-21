@@ -512,15 +512,43 @@ public sealed partial class DocumentCatalog
         versions.Retire();
     }
 
+    // Test-only hook at the call site: no shipped assembly boundary is widened.
+    internal Action? BeforeHistoryMaintenance { get; set; }
+
     // Model-local pass: the worker and deterministic catalog tests use the same boundary.
     internal long RunVersionPurgePass(CancellationToken cancellationToken)
     {
-        try { return _coordinator.RunVersionPurgePass(cancellationToken); }
-        finally { MaintainPurgedReferences(); }
+        Exception? purgeFailure = null;
+        bool purgeCompleted = false;
+        try
+        {
+            long total = _coordinator.RunVersionPurgePass(cancellationToken);
+            purgeCompleted = true;
+            return total;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            purgeFailure = exception;
+            throw;
+        }
+        finally
+        {
+            // An uncaught fatal failure must escape without allocating or running more maintenance.
+            if (purgeCompleted || purgeFailure is not null)
+            {
+                try { MaintainPurgedReferences(); }
+                catch (Exception maintenanceFailure) when (purgeFailure is not null && maintenanceFailure is not OutOfMemoryException)
+                {
+                    // Preserve both faults in execution order; cleanup must not hide the purge failure.
+                    throw new AggregateException(purgeFailure, maintenanceFailure);
+                }
+            }
+        }
     }
 
     internal void MaintainPurgedReferences()
     {
+        BeforeHistoryMaintenance?.Invoke();
         lock (_sync)
         {
             // One reference per key per turn, round-robin: at most 128 record reads per
