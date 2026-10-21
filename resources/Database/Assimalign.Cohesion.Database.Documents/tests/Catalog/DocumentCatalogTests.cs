@@ -19,6 +19,7 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
+[Collection("Document index concurrency")]
 public sealed partial class DocumentCatalogTests
 {
     [Fact]

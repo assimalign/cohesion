@@ -33,8 +33,14 @@ public sealed partial class DocumentCatalog
     private readonly DocumentStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
-    private readonly Dictionary<string, List<Reference>> _collections = new(StringComparer.Ordinal);
-    private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _documents = new();
+    private long _recordReadCount;
+
+    private readonly Dictionary<string, Versions> _collections = new(StringComparer.Ordinal);
+    private readonly Dictionary<(Guid CollectionId, string Name), Versions> _documents = new();
+
+    // Deterministic lookup-work observability for this assembly's tests.
+    internal long RecordReadCount { get { lock (_sync) { return _recordReadCount; } } }
+    internal int CachedReferenceCount { get { lock (_sync) { return _collections.Values.Concat(_documents.Values).Concat(_indexDefinitions.Values).Sum(versions => versions.Count); } } }
 
     private DocumentCatalog(DocumentStorage storage, TransactionCoordinator coordinator)
     {
@@ -60,8 +66,8 @@ public sealed partial class DocumentCatalog
         {
             var unit = iterator.Current;
             var record = DocumentCatalogCodec.Decode(unit.Data.Span);
-            var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
-            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer));
+            var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
+            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
         catalog.OpenIndexes();
         return catalog;
@@ -347,14 +353,14 @@ public sealed partial class DocumentCatalog
         _coordinator.VersionStore.RecordTombstoned(writer, reference.PageId, reference.SlotIndex);
     }
 
-    private void Add(CatalogRecord record, Reference reference)
+    private void Add(CatalogRecord record, Reference reference, TransactionSequence? recoveredDeleter = null)
     {
-        List<Reference>? versions;
+        Versions? versions;
         if (record.Collection is { } collection)
         {
             if (!_collections.TryGetValue(collection.Name, out versions))
             {
-                _collections[collection.Name] = versions = new List<Reference>();
+                _collections[collection.Name] = versions = new Versions();
             }
         }
         else if (record.Index is { } index)
@@ -362,7 +368,7 @@ public sealed partial class DocumentCatalog
             var key = (index.CollectionId, index.Name);
             if (!_indexDefinitions.TryGetValue(key, out versions))
             {
-                _indexDefinitions[key] = versions = new List<Reference>();
+                _indexDefinitions[key] = versions = new Versions();
             }
         }
         else
@@ -371,11 +377,10 @@ public sealed partial class DocumentCatalog
             var key = (document.CollectionId, document.Name);
             if (!_documents.TryGetValue(key, out versions))
             {
-                _documents[key] = versions = new List<Reference>();
+                _documents[key] = versions = new Versions();
             }
         }
-        versions.RemoveAll(item => item.PageId == reference.PageId && item.SlotIndex == reference.SlotIndex);
-        versions.Add(reference);
+        versions.Add(reference, recoveredDeleter);
     }
 
     private Found? FindCollectionVersion(string name, TransactionSnapshot snapshot)
@@ -406,43 +411,81 @@ public sealed partial class DocumentCatalog
         return result;
     }
 
-    private Found? Find(List<Reference> versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
+    private Found? Find(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
     {
-        Found? result = null;
-        for (int i = versions.Count - 1; i >= 0; i--)
+        // Lock order: engine writer lock (for mutations), then _sync, then storage page
+        // latches. Never enter the coordinator apply gate while holding _sync. Purge takes
+        // the apply gate and page latches but never _sync; publication takes _sync only
+        // after its physical bracket has released both.
+        //
+        // Early exit must not strand old references after purge. Two rotating probes per
+        // lookup (including the lookup before save) retire stale references faster than
+        // saves add them, with constant extra record reads even after a large purge.
+        int probes = Math.Min(2, versions.Count);
+        for (int i = 0; i < probes; i++)
         {
-            var reference = versions[i];
-            // Only a reclaimed location (a deleted or reverted slot, an owner-zero page the
-            // purge freed or the allocator reused) and a changed identity invalidate a cached
-            // physical reference. CRC and I/O exceptions deliberately propagate (#1342).
-            if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes))
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
-            {
-                throw new DocumentCatalogException("Truncated document catalog record.");
-            }
-            var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
-            if (writer != reference.Writer)
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            var record = DocumentCatalogCodec.Decode(bytes.Span);
-            if (!matches(record))
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter))
-                && (result is null || writer > result.Value.Reference.Writer))
-            {
-                result = new Found(reference, record);
-            }
+            var candidate = versions.NextSweep()!;
+            if (Read(candidate, matches) is null) { versions.Remove(candidate); }
         }
-        return result;
+
+        // Model writers serialize publication, so this reference is also the current
+        // deletion marker. Re-read it: rollback can remove it or clear its deleter.
+        // A read-committed writer may have begun before the version it replaces, so
+        // publication order, rather than writer order, identifies the current head.
+        bool skippedInvisibleWriter = false;
+        if (versions.Current is { } current)
+        {
+            var head = Read(current, matches);
+            if (head is null) { versions.Remove(current); }
+            else if (snapshot.IsVisible(current.Writer))
+            {
+                return head.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(head.Value.Deleter)
+                    ? new Found(current, head.Value.Record) : null;
+            }
+            else { skippedInvisibleWriter = true; }
+        }
+
+        for (var reference = versions.Last; reference is not null;)
+        {
+            var previous = reference.Previous;
+            var record = Read(reference, matches);
+            if (record is null)
+            {
+                versions.Remove(reference);
+            }
+            else
+            {
+                if (!snapshot.IsVisible(reference.Writer)) { skippedInvisibleWriter = true; }
+                else if (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter))
+                {
+                    // A rollback removed the head. Do not replace it with an old reader's
+                    // version when a newer, invisible writer remains in the directory.
+                    if (!skippedInvisibleWriter && record.Value.Deleter == TransactionSequence.None)
+                    {
+                        versions.Current = reference;
+                    }
+                    return new Found(reference, record.Value.Record);
+                }
+            }
+            reference = previous;
+        }
+        return null;
+    }
+
+    private (CatalogRecord Record, TransactionSequence Deleter)? Read(Reference reference, Func<CatalogRecord, bool> matches)
+    {
+        // Reclaimed slots/pages and changed identities are absence. CRC, I/O and live
+        // decoding failures propagate, including during the bounded cleanup probes.
+        _recordReadCount++;
+        if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
+        if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
+        {
+            throw new DocumentCatalogException("Truncated document catalog record.");
+        }
+        var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+        if (writer != reference.Writer) { return null; }
+        var record = DocumentCatalogCodec.Decode(bytes.Span);
+        return matches(record) ? (record, deleter) : null;
     }
 
     private static void EnsureActive(TransactionContext context)
@@ -453,6 +496,5 @@ public sealed partial class DocumentCatalog
         }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer);
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
 }

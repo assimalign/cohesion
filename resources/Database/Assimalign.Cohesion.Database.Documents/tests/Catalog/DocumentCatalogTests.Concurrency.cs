@@ -1,0 +1,124 @@
+using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
+
+public sealed partial class DocumentCatalogTests
+{
+    [Fact(DisplayName = "Cohesion Test [Database.Documents.Catalog] - Concurrent overwrites, rollback, snapshots and purge all make progress (#1281)")]
+    public async Task FindDocument_ConcurrentOverwriteRollbackAndPurge_ShouldPreserveSnapshotsAndProgress()
+    {
+        // Arrange: the containing collection disables test parallelization.
+        await using var fixture = await Fixture.Create();
+        var coordinator = fixture.Coordinator;
+        var catalog = fixture.Catalog;
+        var parent = fixture.Collection.Id;
+        await fixture.Write("item", "{}");
+        var pinned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var expected = catalog.FindDocument(parent, "item", pinned.Snapshot);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        int writes = 0;
+        int reads = 0;
+        int rollbacks = 0;
+        int passes = 0;
+        long purged = 0;
+
+        async Task Run(Func<Task> iteration)
+        {
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    await iteration();
+                    await Task.Yield();
+                }
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        }
+
+        var writerTask = Task.Run(() => Run(async () =>
+        {
+            var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot, stop.Token);
+            try
+            {
+                await fixture.WriteIn(writer, "item", "{}");
+                if (Volatile.Read(ref writes) % 4 == 0)
+                {
+                    await coordinator.RollbackAsync(writer);
+                    Interlocked.Increment(ref rollbacks);
+                }
+                else { await coordinator.CommitAsync(writer); }
+                Interlocked.Increment(ref writes);
+            }
+            finally
+            {
+                if (writer.State == TransactionState.Active) { await coordinator.RollbackAsync(writer); }
+            }
+        }), CancellationToken.None);
+        var readerTask = Task.Run(() => Run(async () =>
+        {
+            var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, stop.Token);
+            try
+            {
+                catalog.FindDocument(parent, "item", reader.Snapshot).ShouldNotBeNull();
+                catalog.GetDocuments(parent, null, reader.Snapshot).ShouldHaveSingleItem();
+                Interlocked.Increment(ref reads);
+            }
+            finally { await coordinator.RollbackAsync(reader); }
+        }), CancellationToken.None);
+        var purgeTask = Task.Run(() => Run(() =>
+        {
+            Interlocked.Add(ref purged, coordinator.RunVersionPurgePass(stop.Token));
+            Interlocked.Increment(ref passes);
+            return Task.CompletedTask;
+        }), CancellationToken.None);
+        var all = Task.WhenAll(writerTask, readerTask, purgeTask);
+        var elapsed = Stopwatch.StartNew();
+
+        // Act: retain an old snapshot first, then release it while the same tasks keep racing.
+        try
+        {
+            while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || Volatile.Read(ref writes) < 64
+                || Volatile.Read(ref reads) < 64 || Volatile.Read(ref passes) < 4)
+                && !all.IsCompleted && !stop.IsCancellationRequested)
+            {
+                catalog.FindDocument(parent, "item", pinned.Snapshot).ShouldBe(expected);
+                await Task.Delay(5, CancellationToken.None);
+            }
+            catalog.FindDocument(parent, "item", pinned.Snapshot).ShouldBe(expected);
+            await coordinator.RollbackAsync(pinned);
+            var released = elapsed.Elapsed;
+            while ((elapsed.Elapsed - released < TimeSpan.FromMilliseconds(250) || Interlocked.Read(ref purged) == 0)
+                && !all.IsCompleted && !stop.IsCancellationRequested)
+            {
+                await Task.Delay(5, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            stop.Cancel();
+            await all;
+            if (pinned.State == TransactionState.Active) { await coordinator.RollbackAsync(pinned); }
+        }
+
+        // Assert: counters prove overwrite, rollback, read and physical reclamation overlapped.
+        writes.ShouldBeGreaterThanOrEqualTo(64);
+        reads.ShouldBeGreaterThanOrEqualTo(64);
+        rollbacks.ShouldBeGreaterThan(0);
+        passes.ShouldBeGreaterThanOrEqualTo(4);
+        purged.ShouldBeGreaterThan(0);
+        coordinator.RunVersionPurgePass(default);
+        var fresh = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        int retained = catalog.CachedReferenceCount;
+        for (int probe = 0; probe < retained; probe++) { catalog.FindDocument(parent, "item", fresh.Snapshot).ShouldNotBeNull(); }
+        catalog.CachedReferenceCount.ShouldBe(2);
+        await coordinator.RollbackAsync(fresh);
+    }
+}

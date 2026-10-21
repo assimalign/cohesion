@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 public sealed partial class DocumentCatalog
 {
-    private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
+    private readonly Dictionary<(Guid CollectionId, string Name), Versions> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
     private BTreeIndexManager _indexes = null!;

@@ -1826,6 +1826,24 @@ check their reference arguments themselves. Public metadata records are immutabl
 
 #### Catalog: Snapshot directory and ownership
 
+Version references for collections, documents and index definitions are ordered by writer
+sequence, with publication order breaking ties within one transaction (#1281). A balanced set
+and location map insert or replace a reference in O(log n). A current pointer follows publication
+order, including deletion, since an early ReadCommitted writer can replace a later writer.
+Its intact head takes O(1) selection work. An invisible or rolled-back head falls back to linked
+history and stops at the first visible, untombstoned version; older snapshots visit newer versions.
+Open reconstructs the current pointer from untombstoned records after recovery and rebuilds
+writer order independently of page order. An old reader never replaces a newer head.
+
+Every lookup, including the lookup before save, checks at most two rotating references for
+physical reclamation or changed identity. This bounds cleanup reads per access and removes stale
+references faster than writes add them after purge. Idle names retain references until accessed;
+catching up after a large purge takes further accesses. This local cleanup needs no access to
+the kernel's internal safe prune bound and cannot drop versions a pinned snapshot still needs.
+The lock order is the engine writer lock, catalog monitor, then storage page latches; catalog
+code releases its monitor before entering the coordinator apply gate. Purge never acquires the
+catalog monitor. Cleanup preserves the same CRC, I/O and live decoding failures as selection.
+
 Opening scans only owner-zero metadata pages, building directories keyed by ordinal collection
 name, `(collectionId, documentId)`, and `(collectionId, indexName)`. Directories retain physical
 version references. Every lookup rereads record stamps and identity: rollback, purge, and slot
