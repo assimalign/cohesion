@@ -39,16 +39,6 @@ internal sealed class ResultDeliveryFailureSet : DatabaseResultSet
             EnumerationBlocked.SetResult();
             await ReleaseEnumeration.Task.WaitAsync(cancellationToken);
         }
-        if (_failure == "buffered")
-        {
-            string value = new('x', 1048576);
-            for (int index = 0; index < 64; index++)
-            {
-                RowsVisited++;
-                yield return new SqlMaterializedRow([value]);
-            }
-            yield break;
-        }
         if (_failure == "enumeration")
         {
             throw new DatabaseException("Injected enumeration failure.",

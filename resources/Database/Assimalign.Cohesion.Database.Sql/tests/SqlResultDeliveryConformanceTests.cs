@@ -17,28 +17,41 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlResultDeliveryConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: encoding fails before any result frame and the same session is reused")]
-    [InlineData("value")]
-    [InlineData("unicode")]
-    [InlineData("oversized")]
-    [InlineData("binary")]
-    [InlineData("enumeration")]
-    [InlineData("uncoded")]
-    [InlineData("dispose")]
-    [InlineData("header")]
-    [InlineData("buffered")]
-    public async Task ExecuteAsync_LateResultFailure_ShouldEndStatementAndReuseSession(string failure)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: read encoding failures end partial results and the same session is reused")]
+    [InlineData("value", false)]
+    [InlineData("value", true)]
+    [InlineData("unicode", false)]
+    [InlineData("unicode", true)]
+    [InlineData("oversized", false)]
+    [InlineData("oversized", true)]
+    [InlineData("binary", false)]
+    [InlineData("binary", true)]
+    [InlineData("enumeration", false)]
+    [InlineData("enumeration", true)]
+    [InlineData("uncoded", false)]
+    [InlineData("uncoded", true)]
+    [InlineData("dispose", false)]
+    [InlineData("dispose", true)]
+    [InlineData("header", false)]
+    [InlineData("header", true)]
+    public async Task ExecuteAsync_LateResultFailure_ShouldEndStatementAndReuseSession(string failure, bool explicitTransaction)
     {
         // Arrange
         await using var harness = await ServerTestHarness.StartAsync();
         await using var peer = await harness.DialAsync();
         await peer.HandshakeAsync();
         var serverSession = (SqlDatabaseServerSession)harness.Server.Sessions.ShouldHaveSingleItem();
+        var transaction = explicitTransaction ? await serverSession.DatabaseSession!.BeginTransactionAsync(TestTimeout.Token()) : null;
         var result = new ResultDeliveryFailureSet(failure);
         serverSession.ExecuteResultOverride = () => result;
 
         // Act
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 1").Encode());
+        if (failure != "header")
+        {
+            await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader);
+            await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow);
+        }
         var error = ProtocolErrorMessage.Decode((await peer.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
         serverSession.ExecuteResultOverride = null;
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 42").Encode());
@@ -52,7 +65,8 @@ public sealed class SqlResultDeliveryConformanceTests
             error.Message.ShouldContain(ProtocolFrameHeader.MaxPayloadLength.ToString(), Case.Sensitive);
         }
         result.Disposed.ShouldBeTrue();
-        result.RowsVisited.ShouldBe(failure == "buffered" ? 65 : failure == "header" ? 0 : failure is "enumeration" or "uncoded" or "dispose" ? 1 : 2);
+        if (transaction is not null) { transaction.State.ShouldBe(TransactionState.Active); }
+        result.RowsVisited.ShouldBe(failure == "header" ? 0 : failure is "enumeration" or "uncoded" or "dispose" ? 1 : 2);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow);
         await peer.ExpectAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete);
@@ -122,6 +136,38 @@ public sealed class SqlResultDeliveryConformanceTests
         harness.Server.Sessions.ShouldHaveSingleItem().ShouldBeSameAs(serverSession);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result preparation: failures precede catalog and transaction commits")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_SelfCommittingResultFailure_ShouldKeepChangesUncommitted(bool commit)
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var peer = await harness.DialAsync();
+        await peer.HandshakeAsync();
+        var session = (SqlDatabaseServerSession)harness.Server.Sessions.ShouldHaveSingleItem();
+        var transaction = commit ? await session.DatabaseSession!.BeginTransactionAsync(TestTimeout.Token()) : null;
+        var result = new ResultDeliveryFailureSet("value");
+        session.ExecuteResultOverride = () => result;
+
+        // Act
+        await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute,
+            ProtocolExecuteMessage.Create(commit ? "COMMIT" : "CREATE TABLE failed(id INT)").Encode());
+        var error = ProtocolErrorMessage.Decode((await peer.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        session.ExecuteResultOverride = null;
+
+        // Assert: no result frame preceded the error, and neither commit boundary was crossed.
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldStartWith("COHSQLE045:", Case.Sensitive);
+        result.Disposed.ShouldBeTrue();
+        if (transaction is not null) { transaction.State.ShouldBe(TransactionState.Active); }
+        await using var rows = (Assimalign.Cohesion.Database.Execution.DatabaseResultSet)await session.DatabaseSession!.ExecuteAsync(
+            "SELECT table_name FROM information_schema.tables WHERE table_name = 'failed'", cancellationToken: TestTimeout.Token());
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(TestTimeout.Token())) { count++; }
+        count.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: cancellation disposes the result and aborts the session transaction")]
     public async Task ExecuteAsync_CancelledEnumeration_ShouldDisposeResultAndEndTransaction()
     {
@@ -137,7 +183,7 @@ public sealed class SqlResultDeliveryConformanceTests
         // Act
         await peer.SendAsync((ProtocolMessageType)SqlProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 1").Encode());
         await result.EnumerationBlocked.Task.WaitAsync(TestTimeout.Token());
-        transaction.RunningStatements.ShouldBe(1);
+        transaction.RunningStatements.ShouldBe(0);
         await session.DisposeAsync().AsTask().WaitAsync(TestTimeout.Token());
 
         // Assert

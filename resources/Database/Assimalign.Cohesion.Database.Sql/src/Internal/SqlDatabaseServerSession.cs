@@ -458,13 +458,32 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
         finally { _databaseSession.ResultPreparation = null; }
 
-        // All fallible result work finished before the statement ended. Transport failures here
-        // are terminal: a committed write must never be reported as an ordinary statement error.
+        // Writes finished all fallible result work before committing. Reads encode during delivery.
         await WriteResultAsync(result, preparation, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteResultAsync(DatabaseResult result, SqlResultPreparation preparation, CancellationToken cancellationToken)
     {
+        if (!preparation.IsPrepared)
+        {
+            // No write used this preparation. A late result failure can safely end this exchange;
+            // the materialized read already released statement admission and wrote nothing.
+            try
+            {
+                result = await preparation.OverrideAsync(result).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
+            {
+                // An execution error raised by the test seam retains its original diagnostics.
+                await WriteResultFailureAsync(exception as DatabaseException ?? SqlResultPreparation.TranslateFailure(exception), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (result is DatabaseResultSet readOnly)
+            {
+                await WriteReadOnlyResultAsync(readOnly, preparation, PrepareDiagnostics(result.Diagnostics), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
         byte[]? diagnosticPayload = PrepareDiagnostics(result.Diagnostics);
         if (result is DatabaseResultSet)
         {
@@ -490,7 +509,50 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
         }
 
         await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
-        await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete,
+            preparation.Completion ?? new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task WriteReadOnlyResultAsync(DatabaseResultSet result, SqlResultPreparation encoder,
+        byte[]? diagnosticPayload, CancellationToken cancellationToken)
+    {
+        bool transportFailed = false;
+        byte[] completion;
+        try
+        {
+            await using (result.ConfigureAwait(false))
+            {
+                await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, encoder.EncodeHeader(result, cancellationToken)).ConfigureAwait(false);
+                await foreach (DatabaseRow row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await WriteAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, encoder.EncodeRow(row, cancellationToken)).ConfigureAwait(false);
+                }
+                completion = new ProtocolResultCompleteMessage(result.AffectedCount).Encode();
+            }
+        }
+        catch (Exception exception) when (!transportFailed && exception is DatabaseException or DatabaseTypeException)
+        {
+            await WriteResultFailureAsync(SqlResultPreparation.TranslateFailure(exception), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, completion, cancellationToken).ConfigureAwait(false);
+
+        async Task WriteAsync(ProtocolMessageType type, byte[] payload)
+        {
+            try { await WriteFrameAsync(type, payload, cancellationToken).ConfigureAwait(false); }
+            // A delivery failure stays terminal even if disposal also fails while unwinding it.
+            catch { transportFailed = true; throw; }
+        }
+    }
+
+    private async Task WriteResultFailureAsync(DatabaseException exception, CancellationToken cancellationToken)
+    {
+        var diagnostic = exception.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
+        string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal)
+            ? $"{code}: {exception.Message}" : exception.Message;
+        await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
+        await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

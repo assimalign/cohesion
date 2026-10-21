@@ -24,19 +24,20 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
-The server encodes and size-checks the header and every row during statement execution,
-before autocommit commit or explicit-transaction statement completion. Enumeration and disposal
-also finish before that boundary. Encoding and size failures produce ExecutionFailure before
-any result frame; they roll back the statement, leave the explicit transaction active, and
-keep the connection reusable. COHSQLE045 identifies uncoded result failures and size refusals;
-already-coded failures retain their diagnostics. Size refusals correspond to SQLSTATE 54000
-and report encoded bytes and the limit: ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB)
-for each header/row, or 64 MiB for all retained encoded payloads of one statement.
-Diagnostics, when negotiated, immediately precede Error. Successful preparation retains the
-encoded payloads for delivery without encoding again. A transport failure during delivery is
-terminal; a committed write is never reported as an ordinary statement failure (#1651).
-The client continues to accept ExecutionFailure after partial result frames as a statement
-boundary, discarding all partial columns and rows before allowing reuse.
+Writing statements encode and size-check the header and every row before their commit or
+explicit-transaction statement completion. DML enumeration and disposal finish inside its undo
+bracket; DDL and transaction control prepare their fixed completion before execution/commit.
+Result failures precede any committed write or result frame and roll back only the DML statement.
+Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery. A late result failure
+ends even a partial exchange with ExecutionFailure; the client discards partial columns and rows.
+Both paths keep the connection and explicit transaction usable on result failures.
+COHSQLE045 identifies uncoded result failures and size refusals; already-coded failures retain
+their diagnostics. Size refusals correspond to SQLSTATE 54000 and report encoded bytes and
+ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB) for each header/row. Neither path has an
+aggregate result cap. Writes retain their prepared payloads for delivery without re-encoding;
+reads retain only the current encoded frame. Diagnostics, when negotiated, immediately precede
+Error. A transport failure during delivery is terminal; a committed write is never reported as
+an ordinary statement failure (#1651).
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
 sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
 `COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more

@@ -472,6 +472,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // Control requests bypass the executor, but their maps obey the same contract.
             _ = SqlQueryExecutor.NormalizeParameters(request.Parameters);
             _lastStatementMetrics = null;
+            // Control commands have a fixed, zero-count completion, including COMMIT.
+            if (ResultPreparation is { } preparation)
+            {
+                await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
+            }
             return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
         }
 
@@ -615,9 +620,15 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     {
         if (request.Statement.SqlExpression is not SqlExplainExpression explain)
         {
+            if (ResultPreparation is not null && IsSelfCommitting(request))
+            {
+                return ExecuteSelfCommittingResultAsync(request, scope, cancellationToken);
+            }
             var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
-            // Embedded execution keeps its direct task path and allocation budget.
-            return ResultPreparation is null ? execution : PrepareExecutionResultAsync(execution, scope, cancellationToken);
+            // Reads encode during delivery. Embedded execution keeps its direct task path.
+            return ResultPreparation is not null && request.Statement.SqlExpression.CommandType is
+                SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete
+                    ? PrepareExecutionResultAsync(execution, scope, cancellationToken) : execution;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -630,8 +641,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             var plan = planner.Plan(explain.Statement);
             scope.Metrics.IsPlanned = true;
             var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
-            return ResultPreparation is null ? Task.FromResult<DatabaseResult>(result)
-                : scope.PrepareResultAsync(result, cancellationToken).AsTask();
+            return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
         {
@@ -642,6 +652,16 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
         SqlStatementContext scope, CancellationToken cancellationToken)
         => await scope.PrepareResultAsync(await execution.ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+
+    private async Task<DatabaseResult> ExecuteSelfCommittingResultAsync(SqlQueryRequest request,
+        SqlStatementContext scope, CancellationToken cancellationToken)
+    {
+        // Every supported DDL success returns only a zero-count completion. Prepare that fixed
+        // result before invoking the executor: catalog publication may commit inside execution.
+        var prepared = await scope.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
+        var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+        return result.Status == DatabaseResultStatus.Success ? prepared : result;
+    }
 
     private async ValueTask CompleteScriptStatementAsync(DatabaseResult result, TransactionContext transaction, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
     {

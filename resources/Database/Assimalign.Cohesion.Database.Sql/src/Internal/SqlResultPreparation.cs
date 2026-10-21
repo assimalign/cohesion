@@ -14,18 +14,15 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Prepares wire results inside execution, including the DML apply bracket. Delivery only
-/// writes these owned payloads. The bound is additional to today's materialized result values.
+/// Encodes individual result frames. Writing statements retain their payloads inside execution,
+/// including the DML apply bracket; read-only statements encode one frame at a time during delivery.
 /// </summary>
 internal sealed class SqlResultPreparation
 {
-    internal const int MaxBufferedPayloadLength = 64 * 1024 * 1024;
-
     private readonly Func<DatabaseResult>? _resultOverride;
     private DatabaseResult? _prepared;
     private DatabaseKeyWriter _rowWriter = new();
     private int _rowCapacity;
-    private long _bufferedLength;
 
     internal SqlResultPreparation(Func<DatabaseResult>? resultOverride = null)
     {
@@ -35,73 +32,86 @@ internal sealed class SqlResultPreparation
     internal byte[]? Header { get; private set; }
     internal List<byte[]> Rows { get; } = [];
     internal byte[]? Completion { get; private set; }
+    internal bool IsPrepared => _prepared is not null;
+
+    internal async ValueTask<DatabaseResult> OverrideAsync(DatabaseResult result)
+    {
+        if (_resultOverride is null) { return result; }
+        if (result is DatabaseResultSet original) { await original.DisposeAsync().ConfigureAwait(false); }
+        return _resultOverride();
+    }
 
     internal async ValueTask<DatabaseResult> PrepareAsync(DatabaseResult result, CancellationToken cancellationToken)
     {
         // DML already prepared its result before ApplyStatementAsync released the undo bracket.
         if (ReferenceEquals(result, _prepared)) { return result; }
-        // The owning-assembly execution seam can throw an execution error of its own.
-        if (_resultOverride is not null)
-        {
-            if (result is DatabaseResultSet original) { await original.DisposeAsync().ConfigureAwait(false); }
-            result = _resultOverride();
-        }
+        // The owning-assembly seam can throw an execution error of its own.
+        result = await OverrideAsync(result).ConfigureAwait(false);
         try
         {
             if (result is DatabaseResultSet resultSet)
             {
                 await using (resultSet.ConfigureAwait(false))
                 {
-                    var columns = new List<(string Name, byte Type, int? MaxLength)>(resultSet.Columns.Count);
-                    long headerSize = 8; // Format marker and column count (SQL header format 2).
-                    foreach (DatabaseColumn column in resultSet.Columns)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        headerSize += 9L + Encoding.UTF8.GetByteCount(column.Name);
-                        columns.Add((column.Name, (byte)column.Type, column.MaxLength));
-                    }
-                    CheckFrameSize(headerSize, ErrorMessages.ResultHeaderTooLarge);
-                    Reserve(headerSize);
-                    Header = new ProtocolResultHeaderMessage(columns).Encode();
+                    Header = EncodeHeader(resultSet, cancellationToken);
                     await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                     {
-                        long size = MeasureRow(row, cancellationToken);
-                        CheckFrameSize(size, ErrorMessages.ResultRowTooLarge);
-                        Reserve(size);
-                        if (size > _rowCapacity)
-                        {
-                            _rowCapacity = (int)size;
-                            _rowWriter = new DatabaseKeyWriter(_rowCapacity);
-                        }
-                        _rowWriter.Reset();
-                        for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            DatabaseValueCodec.Append(_rowWriter, row.GetValue(ordinal));
-                        }
-                        // Keep refusals inside execution even if a future codec changes its size.
-                        CheckFrameSize(_rowWriter.Length, ErrorMessages.ResultRowTooLarge);
-                        if (_rowWriter.Length != size) { Reserve(_rowWriter.Length - size); }
-                        Rows.Add(_rowWriter.ToArray());
+                        Rows.Add(EncodeRow(row, cancellationToken));
                     }
                     Completion = new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode();
-                    Reserve(Completion.Length);
                 }
             }
+            else { Completion = new ProtocolResultCompleteMessage(result.AffectedCount).Encode(); }
             // Disposal is part of preparation, so a failed release still rolls back the statement.
             _prepared = result;
             return result;
         }
         catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
         {
-            if (exception is DatabaseException coded &&
-                coded.Diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code)))
-            {
-                throw;
-            }
-            throw Failure(ErrorMessages.ResultDeliveryFailed, exception);
+            var failure = TranslateFailure(exception);
+            if (ReferenceEquals(failure, exception)) { throw; }
+            throw failure;
         }
     }
+
+    internal byte[] EncodeHeader(DatabaseResultSet resultSet, CancellationToken cancellationToken)
+    {
+        var columns = new List<(string Name, byte Type, int? MaxLength)>(resultSet.Columns.Count);
+        long size = 8; // Format marker and column count (SQL header format 2).
+        foreach (DatabaseColumn column in resultSet.Columns)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            size += 9L + Encoding.UTF8.GetByteCount(column.Name);
+            columns.Add((column.Name, (byte)column.Type, column.MaxLength));
+        }
+        CheckFrameSize(size, ErrorMessages.ResultHeaderTooLarge);
+        return new ProtocolResultHeaderMessage(columns).Encode();
+    }
+
+    internal byte[] EncodeRow(DatabaseRow row, CancellationToken cancellationToken)
+    {
+        long size = MeasureRow(row, cancellationToken);
+        CheckFrameSize(size, ErrorMessages.ResultRowTooLarge);
+        if (size > _rowCapacity)
+        {
+            _rowCapacity = (int)size;
+            _rowWriter = new DatabaseKeyWriter(_rowCapacity);
+        }
+        _rowWriter.Reset();
+        for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DatabaseValueCodec.Append(_rowWriter, row.GetValue(ordinal));
+        }
+        // Keep refusals ahead of delivery even if a future codec changes its size.
+        CheckFrameSize(_rowWriter.Length, ErrorMessages.ResultRowTooLarge);
+        return _rowWriter.ToArray();
+    }
+
+    internal static DatabaseException TranslateFailure(Exception exception)
+        => exception is DatabaseException coded &&
+            coded.Diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code))
+                ? coded : Failure(ErrorMessages.ResultDeliveryFailed, exception);
 
     private static long MeasureRow(DatabaseRow row, CancellationToken cancellationToken)
     {
@@ -175,16 +185,6 @@ internal sealed class SqlResultPreparation
         {
             throw Failure(string.Format(CultureInfo.CurrentCulture, message, size, ProtocolFrameHeader.MaxPayloadLength));
         }
-    }
-
-    private void Reserve(long size)
-    {
-        if (size > MaxBufferedPayloadLength - _bufferedLength)
-        {
-            throw Failure(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResultBufferTooLarge,
-                _bufferedLength + size, MaxBufferedPayloadLength));
-        }
-        _bufferedLength += size;
     }
 
     private static DatabaseException Failure(string message, Exception? cause = null)
