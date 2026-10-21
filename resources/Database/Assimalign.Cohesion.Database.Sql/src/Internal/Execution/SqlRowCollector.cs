@@ -15,6 +15,7 @@ internal sealed class SqlRowCollector
     private readonly SqlSubqueryValues? _subqueries;
     private readonly bool _canBound;
     private readonly CancellationToken _cancellationToken;
+    private readonly SqlStatementMetrics? _metrics;
     private readonly long? _limit;
     private readonly long _offset;
     private readonly long _bound;
@@ -23,13 +24,15 @@ internal sealed class SqlRowCollector
     private long _visited;
     private int _comparisons;
     private bool _collationsInitialized;
+    private bool _isHeap;
 
     internal SqlRowCollector(IReadOnlyList<SqlBoundOrdering> orderBy, SqlSubqueryValues? subqueries,
-        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken)
+        SqlRowCount? limit, SqlRowCount? offset, CancellationToken cancellationToken, SqlStatementMetrics? metrics = null)
     {
         _orderBy = orderBy;
         _subqueries = subqueries;
         _cancellationToken = cancellationToken;
+        _metrics = metrics;
         _limit = limit?.Count;
         _offset = offset?.Count ?? 0;
         // Do not size an allocation or narrow a count from user input. A sum beyond
@@ -37,8 +40,7 @@ internal sealed class SqlRowCollector
         _bound = _limit is { } count && count <= long.MaxValue - _offset ? count + _offset : long.MaxValue;
         _collations = new Collation[orderBy.Count];
         _canBound = _limit.HasValue;
-        // A deferred collation may depend on the final correlated row's frame.
-        // Preserve full-sort resolution for that uncommon case.
+        // Deferred collations follow the last qualifying row, so retain full sorting.
         for (int i = 0; i < orderBy.Count; i++) { _canBound &= orderBy[i].Collation.IsFixed; }
         cancellationToken.ThrowIfCancellationRequested();
     }
@@ -57,48 +59,43 @@ internal sealed class SqlRowCollector
             return;
         }
         var entry = new Entry(output, keys, ordinal);
+        // Capture while this qualifying row's subqueries are still available. A later
+        // rejected row can advance/clear the frame before Finish runs.
+        ResolveCollations(refresh: !_canBound);
         if (!_canBound)
         {
             _ordered.Add(entry);
+            RecordRetainedCount();
             return;
         }
         // Max-heap: the worst retained key (latest input on ties) is at the root.
         // PostgreSQL src/backend/utils/sort/tuplesort.c:2482-2523 uses the same reversed-order bound;
         // this implementation keeps the stable input ordinal explicitly.
-        ResolveCollations();
         if (_ordered.Count < _bound)
         {
-            int child = _ordered.Count;
             _ordered.Add(entry);
-            while (child > 0)
-            {
-                int parent = (child - 1) / 2;
-                if (Compare(_ordered[parent], entry) >= 0) { break; }
-                _ordered[child] = _ordered[parent];
-                child = parent;
-            }
-            _ordered[child] = entry;
+            RecordRetainedCount();
+            return;
         }
-        else if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0)
+        if (!_isHeap)
         {
-            int parent = 0;
-            while (parent < _ordered.Count / 2)
+            // Build only when the bound is exceeded: LIMIT >= input pays for one sort,
+            // without per-row sifting. Unlike tuplesort.c:1126-1144's 2x staging,
+            // overflow-triggered heapification preserves an exact OFFSET + LIMIT bound.
+            for (int parent = _ordered.Count / 2 - 1; parent >= 0; parent--)
             {
-                int child = parent * 2 + 1;
-                if (child + 1 < _ordered.Count && Compare(_ordered[child], _ordered[child + 1]) < 0) { child++; }
-                if (Compare(entry, _ordered[child]) >= 0) { break; }
-                _ordered[parent] = _ordered[child];
-                parent = child;
+                SiftDown(parent, _ordered[parent]);
             }
-            _ordered[parent] = entry;
+            _isHeap = true;
         }
+        if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0) { SiftDown(0, entry); }
     }
 
-    internal List<object?[]> Finish()
+    internal List<object?[]> Finish(bool resolveEmptyCollations = true)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         if (_orderBy.Count == 0) { return _rows; }
-        if (_ordered.Count > 0) { ResolveCollations(); }
+        if (_ordered.Count > 0 || resolveEmptyCollations) { ResolveCollations(); }
         try { _ordered.Sort(Compare); }
         catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
         {
@@ -117,13 +114,34 @@ internal sealed class SqlRowCollector
         return _rows;
     }
 
-    private void ResolveCollations()
+    private void RecordRetainedCount()
     {
-        if (_collationsInitialized) { return; }
+        if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, _ordered.Count); }
+    }
+
+    private void SiftDown(int parent, Entry entry)
+    {
+        while (parent < _ordered.Count / 2)
+        {
+            int child = parent * 2 + 1;
+            if (child + 1 < _ordered.Count && Compare(_ordered[child], _ordered[child + 1]) < 0) { child++; }
+            if (Compare(entry, _ordered[child]) >= 0) { break; }
+            _ordered[parent] = _ordered[child];
+            parent = child;
+        }
+        _ordered[parent] = entry;
+    }
+
+    private void ResolveCollations(bool refresh = false)
+    {
+        if (_collationsInitialized && !refresh) { return; }
         for (int i = 0; i < _orderBy.Count; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            _collations[i] = _orderBy[i].Collation.Resolve(_subqueries);
+            if (!_collationsInitialized || !_orderBy[i].Collation.IsFixed)
+            {
+                _collations[i] = _orderBy[i].Collation.Resolve(_subqueries);
+            }
         }
         _collationsInitialized = true;
     }

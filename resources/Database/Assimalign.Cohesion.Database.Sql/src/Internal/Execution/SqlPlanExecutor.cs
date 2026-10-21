@@ -42,6 +42,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
     private bool _containsLike;
+    private SqlStatementMetrics? _metrics;
 
     /// <summary>Initializes an executor for one statement.</summary>
     /// <param name="storage">The database's data storage.</param>
@@ -79,6 +80,7 @@ internal sealed partial class SqlPlanExecutor
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;
+        _metrics = statement.Metrics;
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
@@ -185,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
-    private static DatabaseResult MaterializeSelect(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
+    private DatabaseResult MaterializeSelect(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken)
@@ -197,11 +199,12 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
-        SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
+        Collation[]? projectionCollations = null)
     {
         if (isDistinct)
         {
-            projected = Deduplicate(projected, projections, evaluator, cancellationToken);
+            projected = Deduplicate(projected, projections, evaluator, cancellationToken, projectionCollations);
         }
 
         return MaterializeProjected(projections, isDistinct ? ApplyRowWindow(projected, limit, offset) : projected);
@@ -240,7 +243,7 @@ internal sealed partial class SqlPlanExecutor
     /// Keeps source columns available for scalar keys and materializes output values
     /// once for aliases and ordinals, matching grouped-query ordering semantics.
     /// </summary>
-    private static List<object?[]> ProjectAndSortRows(IEnumerable<object?[]> matches,
+    private List<object?[]> ProjectAndSortRows(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
         SqlRowCount? limit = null, SqlRowCount? offset = null)
@@ -261,9 +264,24 @@ internal sealed partial class SqlPlanExecutor
                 projected.Add(output);
                 if (--remaining == 0) { break; }
             }
+            cancellationToken.ThrowIfCancellationRequested();
             return projected;
         }
-        var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken);
+        if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
+        {
+            // Preserve the old sort-then-project path, including its call count before
+            // pagination. PostgreSQL planner.c:6649-6662 likewise postpones independent
+            // volatile outputs. Aliases/ordinals still require projection before sorting.
+            var sources = matches.ToList();
+            if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
+            if (sources.Count == 0) { return []; }
+            var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
+            var projected = new List<object?[]>(sorted.Count);
+            foreach (var source in sorted) { projected.Add(ProjectRow(source, projections, evaluator, cancellationToken)); }
+            cancellationToken.ThrowIfCancellationRequested();
+            return ApplyRowWindow(projected, limit, offset);
+        }
+        var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
         if (rows.IsComplete) { return []; }
         foreach (var source in matches)
         {
@@ -286,7 +304,26 @@ internal sealed partial class SqlPlanExecutor
             rows.Add(output, keys);
             if (rows.IsComplete) { break; }
         }
-        return rows.Finish();
+        // The base ordinary SELECT skips sort/collation resolution over empty input.
+        return rows.Finish(resolveEmptyCollations: false);
+    }
+
+    private static bool ContainsVolatileCall(SqlBoundExpression? expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is null) { return false; }
+        if (expression is SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
+        if (expression is SqlBoundCase choice)
+        {
+            if (ContainsVolatileCall(choice.Input) || ContainsVolatileCall(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            {
+                if (ContainsVolatileCall(when.Condition) || ContainsVolatileCall(when.Result)) { return true; }
+            }
+        }
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(ContainsVolatileCall)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(ContainsVolatileCall)) { return true; }
+        return BoundChildren(expression).Any(ContainsVolatileCall);
     }
 
     private static object?[] ProjectRow(object?[] row, IReadOnlyList<SqlProjection> projections,
@@ -387,9 +424,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
     private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
-        var seen = new HashSet<object?[]>(new GroupKeyComparer(projections
+        var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
             .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
         int count = 0;
         for (int i = 0; i < rows.Count; i++)
@@ -400,6 +437,22 @@ internal sealed partial class SqlPlanExecutor
         }
         rows.RemoveRange(count, rows.Count - count);
         return rows;
+    }
+
+    private static Collation[] CaptureProjectionCollations(IReadOnlyList<SqlProjection> projections,
+        SqlExpressionEvaluator evaluator, Collation[]? collations, CancellationToken cancellationToken)
+    {
+        bool first = collations is null;
+        collations ??= new Collation[projections.Count];
+        for (int i = 0; i < projections.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (first || !projections[i].Collation.IsFixed)
+            {
+                collations[i] = projections[i].Collation.Resolve(evaluator.SubqueryValues);
+            }
+        }
+        return collations;
     }
 
     // ── DML ────────────────────────────────────────────────────────────

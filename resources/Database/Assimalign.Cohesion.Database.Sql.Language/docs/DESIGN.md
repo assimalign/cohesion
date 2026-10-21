@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Bounded SELECT evaluation (#1523)
+
+DIALECT.md records early termination across stored/system, grouped, correlated,
+join and set output paths, including skipped projection/HAVING errors and calls.
+It also specifies input-order projection/key evaluation, the full-sort fallback
+for independent volatile outputs, and qualifying-row collation preservation.
+These are engine execution rules; grammar and public syntax are unchanged.
+
 ## Key declaration semantics (#1192)
 
 The engine rejects repeated child or referenced key columns with COHSQLE019; rejecting

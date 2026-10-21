@@ -86,7 +86,8 @@ internal sealed partial class SqlPlanExecutor
         var matches = new List<object?[]>();
         bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
         var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
-            plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken);
+            plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
+        Collation[]? projectionCollations = null;
         foreach (var (key, states) in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -122,7 +123,11 @@ internal sealed partial class SqlPlanExecutor
             if (correlatedOrdering) { matches.Add(row); }
             else
             {
-                var orderingKeys = new object?[plan.OrderBy.Count];
+                if (plan.IsDistinct)
+                {
+                    projectionCollations = CaptureProjectionCollations(plan.Projections, evaluator, projectionCollations, cancellationToken);
+                }
+                var orderingKeys = plan.OrderBy.Count == 0 ? Array.Empty<object?>() : new object?[plan.OrderBy.Count];
                 for (int i = 0; i < orderingKeys.Length; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -141,7 +146,7 @@ internal sealed partial class SqlPlanExecutor
                 plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
         }
         return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, cancellationToken);
+            plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
 
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
         GroupAggregateState[] CreateStates()

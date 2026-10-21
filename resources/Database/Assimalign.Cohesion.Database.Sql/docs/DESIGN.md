@@ -3404,10 +3404,26 @@ project reference or InternalsVisibleTo change is required.
   evaluates every input but retains a max-heap of at most OFFSET + LIMIT outputs
   and fixed key tuples, then sorts that heap. The input ordinal breaks key ties
   to preserve the full sort's stability, collations and independent NULL placement.
-  Deferred ordering collations retain full sorting so resolution still sees the
-  completed correlated frame. The heap follows the reversed-bound principle in PostgreSQL
+  Deferred ordering collations retain full sorting; ordering and DISTINCT capture
+  resolved collations from qualifying rows before a later rejected row clears the
+  correlated frame. Empty grouped/correlated sorts still resolve collations, as
+  before; ordinary empty SELECTs skip ordering resolution as their base path did.
+  Independent volatile outputs in ordinary SELECTs without output ordering dependencies
+  retain full source sorting followed by projection in sorted order before pagination,
+  preserving the base's call order/count (PostgreSQL
+  `src/backend/optimizer/plan/planner.c:6649-6662` postpones independent volatile outputs).
+  Other projections and keys evaluate together in input order, projection first;
+  errors can therefore precede errors a sort-first path used to report.
+  The final projection checks the statement token before early stop completes,
+  preserving caller cancellation and statement-deadline translation.
+  The heap follows the reversed-bound principle in PostgreSQL
   `src/backend/utils/sort/tuplesort.c:2482-2523`; its storage grows from actual
-  retained rows, never from the requested count. DISTINCT keeps the full ordering
+  retained rows, never from the requested count. It appends until the bound and
+  heapifies only on overflow, avoiding heap work when LIMIT covers the input
+  while keeping the exact bound (rather than PostgreSQL's 2x staging at
+  `tuplesort.c:1126-1144`). The internal statement metric `PeakOrderedRows`
+  measures actual collector retention through execution, independently of scan
+  decode/projection allocations. DISTINCT keeps the full ordering
   and deduplication path before pagination. Group and set operators share bounded
   final ordering, but aggregation states, set operands, join inputs/results and
   correlated grouped outputs still materialize. A full sort remains in memory.
@@ -3415,6 +3431,8 @@ project reference or InternalsVisibleTo change is required.
   snapshot, locks and reader-epoch ownership remain statement-scoped. Ordered index
   access, pull/batch result delivery, mid-stream errors and granted spilling are
   deferred slices; this change adds no public option, visibility grant or wire frame.
+  Per-input decode, projection and key arrays remain; decode column pruning and
+  reusable key scratch/admission-only allocation are follow-ups.
 - **Row-window counts retain Int64 semantics (#1100).** The planner accepts
   nonnegative integers through `Int64.MaxValue`, as PostgreSQL evaluates its
   offset and limit as Int64 (`src/backend/executor/nodeLimit.c:369-399`). After

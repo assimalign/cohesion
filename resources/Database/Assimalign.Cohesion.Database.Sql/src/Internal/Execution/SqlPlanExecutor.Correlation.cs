@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -150,7 +151,8 @@ internal sealed partial class SqlPlanExecutor
         SqlBoundExpression? where = null)
     {
         var collected = new SqlRowCollector(orderBy, _subqueryValues,
-            distinct ? null : limit, distinct ? null : offset, cancellationToken);
+            distinct ? null : limit, distinct ? null : offset, cancellationToken, statement.Metrics);
+        Collation[]? projectionCollations = null;
         if (collected.IsComplete) { return MaterializeProjected(projections, []); }
         foreach (var source in matches)
         {
@@ -176,10 +178,18 @@ internal sealed partial class SqlPlanExecutor
                     }
                 }
             }
-            var orderedRow = new object?[source.Length + output.Length];
-            source.CopyTo(orderedRow, 0);
-            output.CopyTo(orderedRow, source.Length);
-            var keys = new object?[orderBy.Count];
+            if (distinct)
+            {
+                projectionCollations = CaptureProjectionCollations(projections, evaluator, projectionCollations, cancellationToken);
+            }
+            var orderedRow = source;
+            if (orderBy.Count > 0)
+            {
+                orderedRow = new object?[source.Length + output.Length];
+                source.CopyTo(orderedRow, 0);
+                output.CopyTo(orderedRow, source.Length);
+            }
+            var keys = orderBy.Count == 0 ? Array.Empty<object?>() : new object?[orderBy.Count];
             for (int i = 0; i < keys.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -189,6 +199,6 @@ internal sealed partial class SqlPlanExecutor
             collected.Add(output, keys);
             if (collected.IsComplete) { break; }
         }
-        return FinishSelect(collected.Finish(), projections, limit, offset, distinct, evaluator, cancellationToken);
+        return FinishSelect(collected.Finish(), projections, limit, offset, distinct, evaluator, cancellationToken, projectionCollations);
     }
 }
