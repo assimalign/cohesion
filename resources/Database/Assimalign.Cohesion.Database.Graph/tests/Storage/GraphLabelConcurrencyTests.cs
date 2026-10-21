@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,8 +33,9 @@ public sealed class GraphLabelConcurrencyTests
         }
         await coordinator.CommitAsync(seed, timeout.Token);
         var old = await coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
-        var elapsed = Stopwatch.StartNew();
-        const int maxIterations = 16_384;
+        // A fixed number of rounds, never a wall-clock window: each round is a scripted
+        // interleaving, so the count alone decides coverage.
+        const int rounds = 64;
         int continueRace = 1;
         int reading = 0, writing = 0, reads = 0, writes = 0, readOverlaps = 0, writeOverlaps = 0, rollbacks = 0, purges = 0;
         using var phases = new Barrier(2, phase =>
@@ -43,7 +43,7 @@ public sealed class GraphLabelConcurrencyTests
             // Each round has cursor-open, mutation-complete and reader-complete phases.
             // Decide once for both tasks, after both completed the round.
             if (phase.CurrentPhaseNumber % 3 == 2)
-            { Volatile.Write(ref continueRace, elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || reads < 8 ? 1 : 0); }
+            { Volatile.Write(ref continueRace, reads < rounds ? 1 : 0); }
         });
         store.OnLabelEntryRead = () =>
         {
@@ -54,10 +54,10 @@ public sealed class GraphLabelConcurrencyTests
             phases.SignalAndWait(timeout.Token);
         };
 
-        // Act: at least eight coordinated races over 250 ms, with a hard iteration ceiling.
+        // Act: exactly `rounds` coordinated races.
         var reader = Task.Run(() =>
         {
-            for (int iteration = 0; iteration < maxIterations; iteration++)
+            for (int iteration = 0; iteration < rounds; iteration++)
             {
                 timeout.Token.ThrowIfCancellationRequested();
                 Volatile.Write(ref reading, 1);
@@ -76,7 +76,7 @@ public sealed class GraphLabelConcurrencyTests
         }, timeout.Token);
         var writer = Task.Run(async () =>
         {
-            for (int iteration = 0; iteration < maxIterations; iteration++)
+            for (int iteration = 0; iteration < rounds; iteration++)
             {
                 timeout.Token.ThrowIfCancellationRequested();
                 Volatile.Write(ref writing, 1);
@@ -123,9 +123,8 @@ public sealed class GraphLabelConcurrencyTests
         }
 
         // Assert
-        reads.ShouldBeInRange(8, maxIterations);
+        reads.ShouldBe(rounds);
         writes.ShouldBe(reads);
-        elapsed.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(250));
         readOverlaps.ShouldBe(reads);
         writeOverlaps.ShouldBe(writes);
         rollbacks.ShouldBeGreaterThan(0);
