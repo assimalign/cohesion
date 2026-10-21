@@ -386,7 +386,10 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   stream flush also leave the monitor. A flush/resize/disposal gate serializes those operations
   before they take the monitor; a shrink never exposes a resident set above its capacity while
   waiting for a frame's I/O. Disposal drains I/O before clearing frames or closing
-  streams. Every exception releases the frame lease and rented image in `finally`.
+  streams. Blocked-handle rendezvous tests observe resize and disposal waiting on that
+  gate and verify frame residency before releasing I/O in both Debug and Release.
+  Every exception releases the frame lease and rented image in `finally`; lease waiters
+  are pulsed before the debug frame assertion can throw.
   Foreground misses and evictions still perform their own I/O under the monitor; moving
   those paths is #1541. No checkpoint completion-time target or spread checkpoint is added.
 - **Write-back writes a private copy.** A pinned writer can change a page while the pool
@@ -435,7 +438,9 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   the page LSN too, which storage format 3 relies on (invariant A, "Write ordering rules").
   If obtaining the overwrite pin or initializing the page fails, allocation releases any pin
   and returns the reserved id to the free map; repeated refusals when every frame is pinned
-  therefore consume no allocated pages (#1269).
+  therefore consume no allocated pages (#1269). The unjournaled-write audit runs after
+  stream extension but before buffer initialization, and dirty marking runs last, so a
+  refusing audit preserves a resident free page's bytes and dirty version.
 
 ### Capacity (#1254)
 

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -240,7 +239,7 @@ public sealed class StorageCheckpointFlushTests
         pool.CheckInvariants();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Flush: concurrent eviction, pins and paced/full write-back exercise frame exclusion (#1269)")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Flush: pins and eviction progress during parked I/O while resize waits (#1269)")]
     public async Task FlushAll_ConcurrentEviction_ShouldExercisePinsDuringIo()
     {
         // Arrange
@@ -252,77 +251,82 @@ public sealed class StorageCheckpointFlushTests
         {
             Initialize(pool, stream, id, (byte)id);
         }
+        pool.FlushAll(stream);
+        using (var page = pool.Pin((PageId)5L, stream))
+        {
+            page.MarkDirty();
+        }
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        int writes = 0;
+        file.BeforeWrite = () =>
+        {
+            if (Interlocked.Increment(ref writes) == 1)
+            {
+                entered.Set();
+                release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
+            }
+        };
         int hitsDuringIo = 0;
-        int passes = 0;
         int mutations = 0;
-        int resizeRaces = 0;
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var readers = Task.Run(() =>
-        {
-            while (!stop.IsCancellationRequested)
-            {
-                // Keep a resident hit and a miss in circulation.
-                using var page = pool.Pin((PageId)5L, stream);
-                if (Volatile.Read(ref file.ActiveWrites) != 0)
-                {
-                    Interlocked.Increment(ref hitsDuringIo);
-                }
-                page.Page.Id.ShouldBe(5);
-                Thread.Yield();
-            }
-        });
-        var writer = Task.Run(() =>
-        {
-            int turn = 0;
-            while (!stop.IsCancellationRequested)
-            {
-                long id = turn++ % 12;
-                using var page = pool.Pin((PageId)id, stream);
-                page.Page.AsBodySpan()[0] = (byte)id;
-                page.MarkDirty();
-                Interlocked.Increment(ref mutations);
-                Thread.Yield();
-            }
-        });
-        var resizer = Task.Run(() =>
-        {
-            int turn = 0;
-            while (!stop.IsCancellationRequested)
-            {
-                if (Volatile.Read(ref file.ActiveWrites) != 0)
-                {
-                    Interlocked.Increment(ref resizeRaces);
-                }
-                pool.Resize(6 + (turn++ & 1), stream);
-                Thread.Yield();
-            }
-        });
-
-        // Act: a minimum duration, then continue until each race counter has moved.
-        var elapsed = Stopwatch.StartNew();
+        var flushing = Task.Factory.StartNew(() => pool.FlushAll(stream), CancellationToken.None,
+            TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task? resizing = null;
         try
         {
-            do
+            entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            var resizeStarted = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+            resizing = Task.Factory.StartNew(() =>
             {
-                pool.FlushAll(stream);
-                pool.FlushSome(stream, 2);
-                Interlocked.Increment(ref passes);
-            }
-            while (!stop.IsCancellationRequested && (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) ||
-                Volatile.Read(ref hitsDuringIo) < 20 || Volatile.Read(ref mutations) < 100 ||
-                Volatile.Read(ref resizeRaces) < 10 || passes < 10));
+                resizeStarted.SetResult(Thread.CurrentThread);
+                pool.Resize(7, stream);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+            // Act: the worker has entered Resize and is blocked on the flush gate.
+            await WaitForGateAsync(resizing, resizeStarted.Task);
+            pool.Capacity.ShouldBe(6);
+            await Task.Run(() =>
+            {
+                for (int i = 0; i < 32; i++)
+                {
+                    using var page = pool.Pin((PageId)5L, stream);
+                    page.Entry.WriteInProgress.ShouldBeTrue();
+                    page.Page.Id.ShouldBe(5);
+                    hitsDuringIo++;
+                }
+                for (int i = 0; i < 100; i++)
+                {
+                    long id = i % 12;
+                    using var page = pool.Pin((PageId)id, stream);
+                    page.Page.AsBodySpan()[0] = (byte)id;
+                    page.MarkDirty();
+                    mutations++;
+                }
+                using var leased = pool.Pin((PageId)5L, stream);
+                leased.Entry.WriteInProgress.ShouldBeTrue();
+            }).WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert: every pin and mutation completed while the first write stayed parked.
+            release.IsSet.ShouldBeFalse();
+            hitsDuringIo.ShouldBe(32);
+            mutations.ShouldBe(100);
+            writes.ShouldBeGreaterThan(1); // Dirty foreground evictions also ran.
+            resizing.IsCompleted.ShouldBeFalse();
+            pool.CheckInvariants();
         }
         finally
         {
-            stop.Cancel();
-            await Task.WhenAll(readers, writer, resizer).WaitAsync(TimeSpan.FromSeconds(10));
+            file.BeforeWrite = null;
+            release.Set();
+            await flushing.WaitAsync(TimeSpan.FromSeconds(10));
+            if (resizing is not null)
+            {
+                await resizing.WaitAsync(TimeSpan.FromSeconds(10));
+            }
         }
 
-        // Assert
-        hitsDuringIo.ShouldBeGreaterThanOrEqualTo(20);
-        mutations.ShouldBeGreaterThanOrEqualTo(100);
-        passes.ShouldBeGreaterThanOrEqualTo(10);
-        resizeRaces.ShouldBeGreaterThanOrEqualTo(10);
+        pool.Capacity.ShouldBe(7);
+        pool.FlushSome(stream, 2).ShouldBeGreaterThan(0);
         pool.FlushAll(stream);
         for (long id = 0; id < 12; id++)
         {
@@ -405,8 +409,25 @@ public sealed class StorageCheckpointFlushTests
         {
             // Act
             entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-            closing = Task.Run(pool.Dispose);
-            handle.Entry.WriteInProgress.ShouldBeTrue();
+            var disposeStarted = new TaskCompletionSource<Thread>(TaskCreationOptions.RunContinuationsAsynchronously);
+            closing = Task.Factory.StartNew(() =>
+            {
+                disposeStarted.SetResult(Thread.CurrentThread);
+                pool.Dispose();
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            await WaitForGateAsync(closing, disposeStarted.Task);
+
+            // Assert before releasing I/O, in Release as well as Debug: disposal keeps
+            // the leased frame resident until the parked write has completed.
+            pool.Count.ShouldBe(1);
+            pool.TryGet((PageId)0L, out var resident).ShouldBeTrue();
+            using (resident)
+            {
+                resident!.Entry.ShouldBeSameAs(handle.Entry);
+                resident.Entry.WriteInProgress.ShouldBeTrue();
+            }
+            release.IsSet.ShouldBeFalse();
+            closing.IsCompleted.ShouldBeFalse();
         }
         finally
         {
@@ -418,7 +439,8 @@ public sealed class StorageCheckpointFlushTests
             }
         }
 
-        // Assert
+        // Assert: disposal completed after the write and cleared the resident frames.
+        pool.Count.ShouldBe(0);
         handle.Page.AsBodySpan()[0].ShouldBe((byte)11);
         handle.Entry.WriteInProgress.ShouldBeFalse();
         Should.Throw<ObjectDisposedException>(() => pool.Pin((PageId)0L, stream));
@@ -487,12 +509,58 @@ public sealed class StorageCheckpointFlushTests
         using (failed)
         {
             failed!.PinCount.ShouldBe(1);
+            failed.IsDirty.ShouldBeFalse();
+            failed.Page.Type.ShouldBe(PageType.Free);
         }
         using var retry = manager.AllocatePage(PageType.Data);
         ((long)retry.Id).ShouldBe(1);
         retry.PinCount.ShouldBe(1);
         manager.FreePageCount.ShouldBe(0);
         pool.CheckInvariants();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - AllocatePage: a refusing audit preserves a resident free page's bytes and dirty version (#1269)")]
+    public void AllocatePage_AuditFailsForResidentFreePage_ShouldPreserveBuffer()
+    {
+        // Arrange
+        using var stream = StorageStream.FromInMemory();
+        stream.SetLength(2L * Page.Size);
+        using var pool = new StorageBufferPool(1);
+        var manager = new StoragePageManager(stream, pool, new StorageFreeSpaceMap());
+        using (var page = pool.Pin((PageId)1L, stream))
+        {
+            var content = page.Page;
+            content.Id = 1;
+            content.Type = PageType.Reclaimed;
+            page.Page.AsBodySpan()[0] = 17;
+            page.MarkDirty();
+        }
+        manager.WroteOutsideJournal = _ => throw new IOException("Injected allocation audit failure");
+
+        // Act
+        Should.Throw<IOException>(() => manager.AllocatePage(PageType.Data));
+
+        // Assert
+        manager.FreePageCount.ShouldBe(1);
+        pool.TryGet((PageId)1L, out var preserved).ShouldBeTrue();
+        using (preserved)
+        {
+            preserved!.PinCount.ShouldBe(1);
+            preserved.IsDirty.ShouldBeTrue();
+            preserved.Page.Type.ShouldBe(PageType.Reclaimed);
+            preserved.Page.AsBodySpan()[0].ShouldBe((byte)17);
+        }
+        pool.CheckInvariants();
+    }
+
+    private static async Task WaitForGateAsync(Task operation, Task<Thread> started)
+    {
+        var worker = await started.WaitAsync(TimeSpan.FromSeconds(10));
+        // After the execution handshake the worker only calls the pool operation.
+        // Observe its monitor wait, or its completion if the gate was removed.
+        SpinWait.SpinUntil(() => operation.IsCompleted ||
+            (worker.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0,
+            TimeSpan.FromSeconds(10)).ShouldBeTrue();
     }
 
     private static void Initialize(StorageBufferPool pool, StorageStream stream, long id, byte value)

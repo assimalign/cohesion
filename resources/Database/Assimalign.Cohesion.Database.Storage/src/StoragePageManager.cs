@@ -83,6 +83,10 @@ public sealed class StoragePageManager
             // flush write-back too, which now runs outside the pool monitor.
             _bufferPool.EnsureLength(_stream, ((long)pageId + 1) * Page.Size);
 
+            // Run the audit hook before changing the buffer: if it refuses the allocation,
+            // a resident free page must keep its previous bytes and dirty version.
+            WroteOutsideJournal?.Invoke((long)pageId);
+
             // Initialize the fresh page (local copy shares the same pointer). The clear spans
             // the pool buffer's fixed size, never a length read from the page's own header.
             //
@@ -96,12 +100,10 @@ public sealed class StoragePageManager
             new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = (long)pageId;
             page.Type = type;
-            handle.MarkDirty();
-
             // The clear is outside the journal: an allocating storage transaction images the page at
             // its touch, initialization included (invariant A), and anything else allocating is the
             // storage itself (its first page, an anchor page) or a raw caller.
-            WroteOutsideJournal?.Invoke((long)pageId);
+            handle.MarkDirty();
 
             return handle;
         }

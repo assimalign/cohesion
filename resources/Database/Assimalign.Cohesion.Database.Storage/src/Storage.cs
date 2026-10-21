@@ -3226,8 +3226,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <para>
     /// The LSN floor is the journal's last LSN: every LSN a data page carries came from a
     /// journal record, so the floor bounds them all even after the journal is truncated. The
-    /// sequence floor is the highest sequence assigned so far; a checkpoint holds the
-    /// transaction lock, under which sequences are assigned, so for a checkpoint it is exact.
+    /// sequence floor bounds stamps whose journal witnesses a checkpoint may discard.
+    /// Readers may reserve higher sequences concurrently without stamping pages; a later
+    /// promotion appends fresh begin and page records to the retained journal. Reopen resumes
+    /// above the maximum of the persisted floor and the surviving journal's sequences.
     /// </para>
     /// </remarks>
     /// <exception cref="StorageOfflineException">

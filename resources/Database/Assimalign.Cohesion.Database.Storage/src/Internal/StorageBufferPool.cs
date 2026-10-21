@@ -565,8 +565,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             lock (_syncRoot)
             {
                 expected.WriteInProgress = false;
-                AssertFrameLocked(id, expected);
                 Monitor.PulseAll(_syncRoot);
+                AssertFrameLocked(id, expected);
             }
         }
     }
