@@ -627,6 +627,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>An async sequence of visible, live entries in ascending key order.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="ArgumentException">At the first <c>MoveNextAsync</c>, <paramref name="options"/> combines a non-empty prefix with non-empty start/end bounds, or carries a negative limit.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>

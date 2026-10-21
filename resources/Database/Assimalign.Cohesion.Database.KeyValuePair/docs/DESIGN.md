@@ -77,6 +77,11 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
   construction, so a divergence is a bug this filter contains). Prefix scans map
   to `[prefix, successor(prefix))` by byte-successor arithmetic; an all-0xFF
   prefix is unbounded above.
+  Null or zero-length `Prefix`, `Start` and `End` mean absent, including an implicitly
+  converted null `byte[]` (#1088). `KeyValueScanRequest` normalizes before checking
+  prefix/range conflicts. Options retain presence until parsing finishes so repeated
+  empty clauses still fail; a null grammar operand remains invalid. The typed client
+  omits empty clauses. Empty point-operation keys remain invalid.
 - **Entry records.** `[writer u64][deleter u64]` — the fixed 16-byte stamp
   header, the same layout the SQL record space and the B+Tree leaves carry —
   followed by the shared tuple codec payload (`key` binary component, `value`

@@ -222,7 +222,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
     /// <param name="range">Scan bounds and limits, or null to scan the whole key space.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The matching entries in ascending key order, materialized; empty, never null, when nothing matches.</returns>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="range"/> combines a prefix with explicit start or end bounds.</exception>
+    /// <exception cref="ArgumentException">Thrown when the returned task is awaited if <paramref name="range"/> combines a non-empty prefix with non-empty start or end bounds.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the connection is disposed.</exception>
     /// <exception cref="InvalidOperationException">Thrown when another command is active on the connection.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the command is canceled, which marks the connection broken.</exception>
@@ -234,24 +234,24 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
         if (range is not null)
         {
-            if (range.Prefix is not null && (range.Start is not null || range.End is not null))
+            if (range.Prefix is { IsEmpty: false } && (range.Start is { IsEmpty: false } || range.End is { IsEmpty: false }))
             {
                 throw new ArgumentException("A prefix scan cannot combine with explicit start/end bounds.", nameof(range));
             }
 
-            if (range.Start is { } start)
+            if (range.Start is { IsEmpty: false } start)
             {
                 command += " FROM @start";
                 parameters["start"] = start.ToArray();
             }
 
-            if (range.End is { } end)
+            if (range.End is { IsEmpty: false } end)
             {
                 command += " TO @end";
                 parameters["end"] = end.ToArray();
             }
 
-            if (range.Prefix is { } prefix)
+            if (range.Prefix is { IsEmpty: false } prefix)
             {
                 command += " PREFIX @prefix";
                 parameters["prefix"] = prefix.ToArray();

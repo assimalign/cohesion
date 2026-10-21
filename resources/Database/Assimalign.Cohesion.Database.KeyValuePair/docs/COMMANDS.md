@@ -54,7 +54,7 @@ limit    :=  <non-negative integer literal> | @limit
   execute call's parameter map (the wire's named tuple-codec parameters). The
   only literal the grammar admits is the `LIMIT` count.
 - **Clause rules:** `SCAN` clauses may appear in any order, each at most once;
-  `PREFIX` cannot combine with `FROM`/`TO`.
+  a non-empty `PREFIX` cannot combine with non-empty `FROM`/`TO` bounds.
 
 ## Operand types
 
@@ -67,6 +67,15 @@ limit    :=  <non-negative integer literal> | @limit
 A missing parameter, a non-`@` operand token, or a wrong operand type is a
 **parse error** (`DatabaseParseException` → `ParseFailure` on the wire) — the
 command never reaches execution.
+
+For `SCAN`, a zero-length `@prefix`, `@start` or `@end` byte array means an absent
+bound (#1088). Thus `SCAN TO @empty` equals `SCAN`, and `SCAN PREFIX @p FROM @empty`
+equals `SCAN PREFIX @p`. A null operand remains a `COHKV012` parse error. An empty
+operand still counts as a clause: `FROM @empty FROM @s` is `COHKV010`.
+`KeyValueScanOptions`, `KeyValueScanRange` and `KeyValueScanRequest` use the same
+zero-length-as-absent rule, including a null `byte[]` implicitly converted to
+`ReadOnlyMemory<byte>?`. The request normalizes before validating prefix conflicts;
+the typed client omits empty clauses and their parameters from the wire command.
 
 ## Diagnostic codes (#1105)
 

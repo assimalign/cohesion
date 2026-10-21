@@ -10,17 +10,17 @@ public sealed class KeyValueScanOptions
 {
     /// <summary>
     /// Gets or sets the key prefix entries must match. Cannot combine with
-    /// <see cref="Start"/> or <see cref="End"/>.
+    /// non-empty <see cref="Start"/> or <see cref="End"/>. Null or zero length means absent.
     /// </summary>
     public ReadOnlyMemory<byte>? Prefix { get; set; }
 
     /// <summary>
-    /// Gets or sets the inclusive lower key bound, or null to start at the first key.
+    /// Gets or sets the inclusive lower key bound; null or zero length starts at the first key.
     /// </summary>
     public ReadOnlyMemory<byte>? Start { get; set; }
 
     /// <summary>
-    /// Gets or sets the exclusive upper key bound, or null to scan to the last key.
+    /// Gets or sets the exclusive upper key bound; null or zero length scans to the last key.
     /// </summary>
     public ReadOnlyMemory<byte>? End { get; set; }
 
