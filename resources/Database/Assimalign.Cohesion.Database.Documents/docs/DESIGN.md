@@ -1334,8 +1334,9 @@ its data and its journal (up to the checkpoint size, briefly twice that while th
 past it, released by the checkpoint). The reasoning is in `Database.Storage` DESIGN.md
 ("Capacity", "Checkpoint triggers").
 
-If history maintenance fails after a failed purge pass, both exceptions are retained in an
-AggregateException with the purge failure first; cleanup never replaces the original failure.
+If history maintenance fails after a failed purge pass, the purge exception escapes unchanged,
+with the maintenance exception attached as Data["HistoryMaintenanceFailure"]. Busy, cancellation
+and disposal classifications survive cleanup; a maintenance failure alone escapes normally.
 
 Persistent storage refusals (#1277) are reported once through the worker's per-database
 failure path after three refused attempts against the same blocked page/bracket and oldest

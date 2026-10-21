@@ -882,8 +882,9 @@ briefly twice that while the buffer doubles past it, released by the checkpoint)
 constrained-heap wire round trip (a 256 MiB object through a 64 MiB heap) passes with the default
 pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint triggers").
 
-If history maintenance fails after a failed purge pass, both exceptions are retained in an
-AggregateException with the purge failure first; cleanup never replaces the original failure.
+If history maintenance fails after a failed purge pass, the purge exception escapes unchanged,
+with the maintenance exception attached as Data["HistoryMaintenanceFailure"]. Busy, cancellation
+and disposal classifications survive cleanup; a maintenance failure alone escapes normally.
 
 Persistent storage refusals (#1277) are reported once through the worker's per-database
 failure path after three refused attempts against the same blocked page/bracket and oldest

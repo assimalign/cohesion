@@ -539,8 +539,9 @@ public sealed partial class DocumentCatalog
                 try { MaintainPurgedReferences(); }
                 catch (Exception maintenanceFailure) when (purgeFailure is not null && maintenanceFailure is not OutOfMemoryException)
                 {
-                    // Preserve both faults in execution order; cleanup must not hide the purge failure.
-                    throw new AggregateException(purgeFailure, maintenanceFailure);
+                    // Let the original throw continue unchanged, including busy, cancellation and
+                    // disposal classification. Cleanup remains available for separate diagnosis.
+                    purgeFailure.Data["HistoryMaintenanceFailure"] = maintenanceFailure;
                 }
             }
         }
