@@ -1116,13 +1116,20 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// The identity block of page 0 fails its checksum, neither header slot verifies, or the
     /// newest slot's checkpoint anchor chain does not verify.
     /// </exception>
-    /// <exception cref="StorageIOException">The file is not a Cohesion storage file.</exception>
+    /// <exception cref="StorageIOException">
+    /// The file is not a Cohesion storage file, or a header half ended prematurely and no
+    /// journal-covered fallback is available.
+    /// </exception>
+    /// <exception cref="IOException">
+    /// A header half could not be read and the journal cannot prove coverage of the other slot,
+    /// or neither half could be read. Checksum damage without a valid slot is corruption instead.
+    /// </exception>
     /// <param name="cancellationToken">Cancels journal replay and page reconstruction between records.</param>
     /// <exception cref="OperationCanceledException">Recovery was canceled; the journal remains available for retry.</exception>
     protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var header = ReadHeader(out long[] anchor, out _);
+        var header = ReadHeader(out long[] anchor, out _, out var headerReadFailure);
         NameComponents();
         _checkpointActives = anchor;
         var protectedPages = new HashSet<long>(_anchorChains[0]);
@@ -1133,6 +1140,17 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // never committed (#1253).
         AttachJournal();
         _journal!.EnsureInitialized(cancellationToken);
+        if (headerReadFailure is not null)
+        {
+            // An unreadable slot may be a durable, newer checkpoint that already discarded
+            // the readable generation's journal. Refuse before replay writes any data (#1270).
+            if (!JournalCoversHeader(header, anchor))
+            {
+                ExceptionDispatchInfo.Capture(headerReadFailure).Throw();
+            }
+
+            StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure);
+        }
         bool journalHadRecords = _journal!.LastLsn > 0;
 
         // LSNs resume above both the journal's last record and the floor the newest header
@@ -3493,6 +3511,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     /// <param name="anchor">The checkpoint anchor the newest generation records.</param>
     /// <param name="anchorChain">The anchor pages of that generation, in chain order.</param>
+    /// <param name="readFailure">A half-page read failure whose fallback requires journal coverage before replay.</param>
     /// <returns>The newest valid header slot.</returns>
     /// <remarks>
     /// The identity block shares slot 0's 4 KiB block. On a drive with 4 KiB physical sectors
@@ -3501,9 +3520,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// 1 is intact. A page 0 whose magic or identity checksum fails is therefore opened from
     /// the newest valid slot's copy of the identity block, and only a page 0 with neither a
     /// verified identity block nor a valid slot is refused: as not a storage file when its
-    /// magic is wrong, as corruption otherwise.
+    /// magic is wrong, as corruption otherwise. After a read error, an invalid slot in the
+    /// readable half is page-0 corruption with the read error attached; two unreadable halves
+    /// preserve the I/O failure. A valid fallback still requires journal coverage before replay.
     /// </remarks>
-    private StorageHeaderSlot ReadHeader(out long[] anchor, out List<long> anchorChain)
+    private StorageHeaderSlot ReadHeader(out long[] anchor, out List<long> anchorChain, out Exception? readFailure)
     {
         if (Data.Length < Page.Size)
         {
@@ -3512,7 +3533,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         var page0 = new byte[Page.Size];
-        IOException? readFailure = null;
+        readFailure = null;
+        int unreadableBlocks = 0;
         for (int offset = 0; offset < Page.Size; offset += StorageHeaderPage.LeadingBlockSize)
         {
             var block = page0.AsSpan(offset, StorageHeaderPage.LeadingBlockSize);
@@ -3530,11 +3552,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     total += read;
                 }
             }
-            catch (IOException exception)
+            catch (Exception exception) when (exception is IOException or StorageIOException)
             {
                 // A failed read may have copied a prefix: invalidate the entire physical block.
                 // The other 4 KiB block has an independent slot and identity copy (#1270).
                 block.Clear();
+                unreadableBlocks |= 1 << (offset / StorageHeaderPage.LeadingBlockSize);
                 readFailure ??= exception;
             }
         }
@@ -3564,7 +3587,15 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var identity = StorageHeaderPage.IdentityBlock(page0);
         if (newest is null && readFailure is not null)
         {
-            ExceptionDispatchInfo.Capture(readFailure).Throw();
+            if (unreadableBlocks == 3)
+            {
+                // No readable bytes establish checksum damage: retain the device I/O failure.
+                ExceptionDispatchInfo.Capture(readFailure).Throw();
+            }
+
+            // At least one half was read completely and its slot did not validate. An I/O
+            // failure on the other half must not hide that page-0 corruption (#1270).
+            throw new StorageCorruptionException((PageId)0L, ErrorMessages.HeaderSlotsUnreadableOrDamaged, readFailure);
         }
         if (magic != StorageFileHeader.ExpectedMagic || !StorageHeaderPage.VerifyIdentity(identity))
         {
@@ -3635,6 +3666,45 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         _lsnFloor = newest.LsnFloor;
         _sequenceFloor = newest.SequenceFloor;
         return newest;
+    }
+
+    /// <summary>
+    /// Proves that the retained journal covers a header selected after a page-0 read failure.
+    /// A checkpoint's record immediately follows the LSN floor its header persisted; its anchor
+    /// must match too. An empty or torn prefix proves nothing. Called before replay or appends.
+    /// </summary>
+    private bool JournalCoversHeader(StorageHeaderSlot header, ReadOnlySpan<long> anchor)
+    {
+        // Checkpoints discard their entire prefix, so the first verified record is either
+        // at/below the floor, or must be this generation's checkpoint at floor + 1.
+        using var records = _journal!.ReadSequentialBorrowed().GetEnumerator();
+        if (!records.MoveNext())
+        {
+            return false;
+        }
+
+        var first = records.Current;
+        if (first.Lsn > 0 && first.Lsn <= header.LsnFloor)
+        {
+            return true;
+        }
+
+        if (first.Type != JournalRecordType.Checkpoint || first.Lsn <= 0 || first.Lsn - 1 != header.LsnFloor
+            || first.Payload.Length % sizeof(long) != 0 || first.Payload.Length / sizeof(long) != anchor.Length)
+        {
+            return false;
+        }
+
+        var payload = first.Payload.Span;
+        for (int index = 0; index < anchor.Length; index++)
+        {
+            if (BinaryPrimitives.ReadInt64LittleEndian(payload[(index * sizeof(long))..]) != anchor[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

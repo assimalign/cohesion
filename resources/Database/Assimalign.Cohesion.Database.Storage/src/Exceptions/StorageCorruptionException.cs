@@ -35,6 +35,16 @@ public sealed class StorageCorruptionException : StorageException
         PageId = pageId;
     }
 
+    /// <summary>Initializes a page-scoped integrity failure with its underlying cause.</summary>
+    /// <param name="pageId">The corrupted page.</param>
+    /// <param name="message">A message describing the corruption.</param>
+    /// <param name="inner">The underlying failure, such as an unreadable part of the page.</param>
+    public StorageCorruptionException(PageId pageId, string message, Exception inner)
+        : base(message, inner)
+    {
+        PageId = pageId;
+    }
+
     /// <summary>
     /// Gets the identifier of the corrupted page, when the corruption is page-scoped.
     /// </summary>

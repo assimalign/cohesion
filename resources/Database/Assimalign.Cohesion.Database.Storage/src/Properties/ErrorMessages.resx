@@ -8,5 +8,6 @@
   <data name="PageBufferUninitialized" xml:space="preserve"><value>The page has no backing buffer.</value></data>
   <data name="PageOverflowOutOfBounds" xml:space="preserve"><value>Page {0} declares an overflow area of {1} bytes, which does not fit its {2}-byte buffer.</value></data>
   <data name="HeaderBlockIncomplete" xml:space="preserve"><value>Invalid storage file: the header block at offset {0} ended before 4096 bytes were read.</value></data>
+  <data name="HeaderSlotsUnreadableOrDamaged" xml:space="preserve"><value>Invalid storage file: neither header slot of page 0 validates; one half could not be read and the other is damaged.</value></data>
   <data name="TransactionStorageMismatch" xml:space="preserve"><value>Storage transaction {0} belongs to storage '{1}' and cannot be used by storage '{2}'.</value></data>
 </root>

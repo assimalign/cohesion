@@ -36,6 +36,8 @@ internal sealed class DeviceFaults
 
     // A physical 4 KiB block of page 0 that cannot be read; -1 means no fault.
     internal int UnreadableHeaderBlock { get; set; } = -1;
+    internal bool FailAllHeaderReads { get; set; }
+    internal bool HeaderReadReturnsZero { get; set; }
     internal int HeaderReadPrefixBytes { get; set; }
     internal int MaximumDataReadSize { get; set; } = int.MaxValue;
     private long _headerReadFailures;
@@ -218,6 +220,8 @@ internal sealed class DeviceFaults
         FailNextPageWrites(0);
         FailHeaderWrites = false;
         UnreadableHeaderBlock = -1;
+        FailAllHeaderReads = false;
+        HeaderReadReturnsZero = false;
         HeaderReadPrefixBytes = 0;
         MaximumDataReadSize = int.MaxValue;
         FailJournalFlushes = false;
@@ -324,6 +328,12 @@ internal sealed class DeviceFaults
     private int BeforeDataRead(long offset, int length)
     {
         const int blockSize = Page.Size / 2;
+        if (FailAllHeaderReads && offset < Page.Size)
+        {
+            Interlocked.Increment(ref _headerReadFailures);
+            if (HeaderReadReturnsZero) { return 0; }
+            throw new System.IO.IOException("Injected header block read failure.");
+        }
         long start = (long)UnreadableHeaderBlock * blockSize;
         if (UnreadableHeaderBlock >= 0 && offset < start + blockSize && offset + length > start)
         {
@@ -332,6 +342,7 @@ internal sealed class DeviceFaults
                 return Math.Min(length, (int)(start + HeaderReadPrefixBytes - offset));
             }
             Interlocked.Increment(ref _headerReadFailures);
+            if (HeaderReadReturnsZero) { return 0; }
             throw new System.IO.IOException("Injected header block read failure.");
         }
 

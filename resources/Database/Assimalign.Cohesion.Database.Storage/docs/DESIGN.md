@@ -128,11 +128,36 @@ Cohesion throws immediately rather than deferring the cursor's out-of-bounds fla
 ### Page 0: the identity block and two alternating header slots
 
 Open reads page 0 in two independent 4 KiB halves (#1270), completing short reads within
-each half. An `IOException` invalidates that whole half, including any partially read
+each half. An `IOException` or `StorageIOException` (including a premature zero-byte read)
+invalidates that whole half, including any partially read
 bytes; the other slot can supply the identity and checkpoint state. If no slot verifies,
-the read error is preserved. A recovered leading half uses the existing deferred identity
+the open throws page-0 `StorageCorruptionException` (`COHDBS003`) when a completely read
+half has a damaged slot, attaching the other half's read error as its inner exception so
+`StorageCorruptionException.Find` and the engine corruption translation recognize it.
+If both halves are unreadable, no checksum damage is established and the original I/O
+failure is preserved. A recovered leading half uses the existing deferred identity
 repair on the next slot-0 write. This extends the existing self-contained-header design
 from Voron (`src/Voron/Impl/FileHeaders/HeaderAccessor.cs:71-86`) to a sector read failure.
+
+After any half-page read error, a valid other slot is accepted only if the verified journal
+still covers that generation: its first retained LSN is at or below the slot's `LsnFloor`,
+or it retains that generation's checkpoint record, at `LsnFloor + 1` with the same complete
+anchor. Checkpoints truncate their entire prefix, so this record must be first. The proof
+runs before recovery writes any pages. An empty/torn prefix or a newer checkpoint proves
+nothing; open rethrows the header read error without writing either file. This is an I/O
+refusal when the readable slot verifies, distinct from an unrecoverable page 0 with known
+checksum damage. Every accepted fallback emits Warning `HeaderReadFallback` (18), including
+consecutive opens; a device degradation must not silently roll back the checkpoint anchor
+or sequence floor. `StorageHeaderReadTests` exercises both slot orders, journal truncation,
+empty journals, both coverage proofs, warning payloads, rows and sequence monotonicity.
+
+The page-header scan cannot cheaply reconstruct the sequence floor: the shared 96-byte
+header carries an LSN and owner, but no transaction sequence, and record bodies are opaque
+model data. Interpreting version stamps here would cross the model boundary and still miss
+reserved sequences with no rows. Sequence assignment therefore resumes above the verified
+header floor and the retained journal's maximum; the coverage proof prevents accepting an
+older floor after a newer checkpoint has discarded its journal witnesses. No disk layout or
+format version changes.
 
 `StorageFileHeader` sits in the **body** of page 0, after the standard 96-byte page header,
 not at file offset 0. An earlier draft overlaid it on the page header, which made page 0
@@ -1914,6 +1939,7 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   `INSERT ... SELECT`, a large upload) overshoots it by that much. The owner default for
   #1270 keeps this soft trigger: bracket caps remain rejected, and splitting a statement
   requires a separate design that preserves statement atomicity.
+  The journal-size hard bound is deferred; #1270 is not fully delivered by this soft trigger.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of
@@ -2477,6 +2503,7 @@ session enables.
 | 15 | `BufferPoolResized` | Informational | — | `database`, `oldCapacity`, `newCapacity` | `StorageBufferPool.Resize` (`Storage.BufferPoolCapacity`), when the capacity changed |
 | 16 | `PageChecksumFailed` | Error | — | `database`, `pageId` | a pool miss whose page failed `PageChecksum.Verify`; not the other corruption checks of a load (an overflow area past the buffer) |
 | 17 | `StorageClosed` | Informational | — | `database`, `durationMilliseconds` | the first `Dispose`/`DisposeAsync` of a storage whose create or open completed |
+| 18 | `HeaderReadFallback` | Warning | — | `database`, `slot`, `generation`, `lsnFloor`, `exceptionType`, `exceptionMessage` | every header fallback after a half-page I/O failure, once journal coverage is proved and before replay; never throttled |
 
 **Start/Stop pairs always close.** Recovery and checkpoints are same-flow work, so they are
 `Start`/`Stop` activities. A recovery or a checkpoint that throws still writes its stop, with
