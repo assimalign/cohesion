@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -141,15 +142,17 @@ public sealed class SqlRowCodecTests
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Row codec: a dropped component is skipped without being read as a value, stamps preserved")]
     public void Decode_DroppedComponent_ShouldBeSkippedWithTheStamps()
     {
-        // Arrange: a tombstoned version whose dropped component is a long string.
+        // Arrange: the largest storable version whose dropped component is a long string.
+        int overhead = SqlRowCodec.Encode(Created, [7, "", 12.50m, TokenValue], new TransactionSequence(5)).Length;
         byte[] record = SqlRowCodec.WithDeleter(
-            SqlRowCodec.Encode(Created, [7, new string('x', 100_000), 12.50m, TokenValue], new TransactionSequence(5)),
+            SqlRowCodec.Encode(Created, [7, new string('x', SlottedPage.MaxRecordSize - overhead), 12.50m, TokenValue], new TransactionSequence(5)),
             new TransactionSequence(9));
 
         // Act
         var values = SqlRowCodec.Decode(record, NoteDropped, out var writer, out var deleter, out int stored);
 
         // Assert
+        record.Length.ShouldBe(SlottedPage.MaxRecordSize);
         values.ShouldBe(new object?[] { 7, 12.50m, TokenValue });
         writer.ShouldBe(new TransactionSequence(5));
         deleter.ShouldBe(new TransactionSequence(9));

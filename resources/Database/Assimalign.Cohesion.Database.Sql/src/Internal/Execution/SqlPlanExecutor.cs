@@ -511,8 +511,8 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            CollectUniqueKeyHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
@@ -630,8 +630,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in updates.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var location = _storage.InsertRow(bracket, update.Table.ObjectId,
-                    SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence));
+                var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                 try
                 {
@@ -770,20 +769,26 @@ internal sealed partial class SqlPlanExecutor
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
-        return IndexKey.From(writer);
+        var key = IndexKey.From(writer);
+        // SQL's documented key limit matches Indexing's internal BTreeNode.MaxKeyLength.
+        // Keep the policy local: no shipped-assembly visibility grant is needed (#1266).
+        const int maxKeyLength = 1024;
+        if (key.Length > maxKeyLength)
+        {
+            throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, maxKeyLength);
+        }
+        return key;
     }
 
     /// <summary>
-    /// Collects the key-lock hashes a row contributes on every unique index.
+    /// Validates every index key before apply and collects the unique keys' lock hashes.
     /// </summary>
-    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
     {
         foreach (var liveIndex in indexes)
         {
-            if (liveIndex.Metadata.IsUnique)
-            {
-                hashes.Add(BuildIndexKey(table, liveIndex.KeyOrdinals, values).Hash());
-            }
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            if (liveIndex.Metadata.IsUnique) { hashes.Add(key.Hash()); }
         }
     }
 

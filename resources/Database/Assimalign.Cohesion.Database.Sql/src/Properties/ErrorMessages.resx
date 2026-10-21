@@ -23,6 +23,8 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
+  <data name="RowTooLarge" xml:space="preserve"><value>Row for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
+  <data name="IndexKeyTooLarge" xml:space="preserve"><value>Index key for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="ColumnDefaultMissing" xml:space="preserve">
     <value>Column '{0}' does not allow NULL and has no default.</value>
   </data>

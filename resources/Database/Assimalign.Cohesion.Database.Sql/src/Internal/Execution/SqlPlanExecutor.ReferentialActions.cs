@@ -149,6 +149,7 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), update.Assigned.ToArray());
                 ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
+                update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
             }
             // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
             // RI writes while transaction snapshots retain their crosscheck.
@@ -167,8 +168,8 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes);
-                CollectUniqueKeyHashes(indexes, group.Key, update.NewValues, hashes);
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.OldValues, hashes);
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes);
             }
             await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
         }

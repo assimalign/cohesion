@@ -19,7 +19,11 @@ internal sealed partial class SqlPlanExecutor
 {
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
-        object?[] OldValues, object?[] NewValues, HashSet<int> Assigned);
+        object?[] OldValues, object?[] NewValues, HashSet<int> Assigned)
+    {
+        // Referential actions fill this only after every assignment to the final row is known.
+        internal byte[] NewVersion { get; set; } = [];
+    }
 
     /// <summary>
     /// One row on the cascade walk's path (<see cref="CollectCascadeDeletesAsync"/>),
@@ -907,7 +911,7 @@ internal sealed partial class SqlPlanExecutor
             var hashes = new List<ulong>();
             foreach (var row in group)
             {
-                CollectUniqueKeyHashes(GetLiveIndexes(row.Table), row.Table, row.Values, hashes);
+                ValidateIndexKeysAndCollectUniqueHashes(GetLiveIndexes(row.Table), row.Table, row.Values, hashes);
             }
 
             await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken).ConfigureAwait(false);

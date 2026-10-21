@@ -160,7 +160,7 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, values) in rows)
         {
-            CollectUniqueKeyHashes(indexes, table, values, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, table, values, uniqueKeyHashes);
         }
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
         var returned = returning is null ? null : new List<object?[]>(rows.Count);

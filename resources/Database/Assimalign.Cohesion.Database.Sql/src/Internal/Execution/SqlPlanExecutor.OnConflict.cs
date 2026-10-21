@@ -167,10 +167,13 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (write.OldValues is not null)
                 {
-                    CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
-                    CollectUniqueKeyHashes(indexes, table, write.Values, hashes);
+                    ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.OldValues, hashes);
                 }
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes);
             }
+            // Arbitration takes sorted key locks, then try-acquires rows. A refused row
+            // releases new keys before waiting (WaitForUpsertRowAsync). Size checks stay
+            // inside this release scope and precede the coordinator gate and page latches.
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
             var pendingUpdates = BuildConstraintUpdates(table,
