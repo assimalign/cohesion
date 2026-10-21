@@ -118,7 +118,7 @@ public sealed class GqlUnknownTokenWarningTests
 
         // Assert
         rows.Select(row => row[0]).ShouldBe(["l"]);
-        diagnostics.ShouldBeNull();
+        diagnostics.ShouldBeEmpty();
         invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
     }
 
@@ -147,11 +147,11 @@ public sealed class GqlUnknownTokenWarningTests
         // Assert
         before.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe(GraphTokenResolver.UnknownLabelCode);
         ownRows.Select(row => row[0]).ShouldBe(["later"]);
-        own.ShouldBeNull();
+        own.ShouldBeEmpty();
         otherRows.ShouldBeEmpty();
         otherBeforeCommit.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe(GraphTokenResolver.UnknownLabelCode);
         committedRows.Select(row => row[0]).ShouldBe(["later"]);
-        committed.ShouldBeNull();
+        committed.ShouldBeEmpty();
     }
 
     /// <summary>
