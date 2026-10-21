@@ -67,6 +67,15 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
 
 ## Execution model
 
+Automatic commit follows the same cancellation boundary as every other engine (#1246):
+once command execution has completed, the session ends its context without forwarding the
+caller token. A cancellation during that commit cannot change success into an abort; real
+append and durability failures retain their existing outcomes. Explicit commit and rollback
+observe cancellation only before their shared end starts. See the Transactions DESIGN,
+"Ending a transaction", for the kernel rule.
+`PutAsync` consumes its already materialized outcome without the command token after
+execution completes, so cancellation during automatic commit cannot mask a committed write.
+
 - **Index-primary reads.** `GET`/`EXISTS` seek the unique primary index
   (`key` → packed record location) through the command's snapshot; `SCAN` drives
   an incremental snapshot cursor over an `IndexKeyRange` (#1542). Open and each move receive the command token; LIMIT stops after its bounded batch, and disposal drops owned keys. Reads finish before any mutation applies. Keys go into `IndexKey` **raw** —

@@ -32,6 +32,15 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     private static readonly AsyncLocal<Budget?> s_failures = new();
     private static readonly AsyncLocal<Budget?> s_flushFailures = new();
     private static readonly AsyncLocal<Budget?> s_recordFailures = new();
+    private static readonly AsyncLocal<Action?> _beforeCommitFlush = new();
+
+    /// <summary>Gets or sets a callback on this flow before a durable journal flush (#1246).</summary>
+    internal static Action? BeforeCommitFlush
+    {
+        get => _beforeCommitFlush.Value;
+        set => _beforeCommitFlush.Value = value;
+    }
+
     private readonly Dictionary<string, Files> _storages = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DeviceFaults> _faults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
@@ -467,6 +476,8 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
             {
                 return;
             }
+
+            _beforeCommitFlush.Value?.Invoke();
 
             if (Spend(s_flushFailures, _storageName))
             {

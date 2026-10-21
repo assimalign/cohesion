@@ -484,10 +484,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
             // The executor must finish mandatory cleanup after a catalog self-commit.
-            // Then report caller cancellation directly, before the logical commit wraps it
-            // as a transaction-aborted error. Rollback below only ends the statement context.
+            // Then report caller cancellation directly. Rollback below only ends the
+            // statement context; the catalog's durable changes have already committed.
             if (scope.Metrics.SelfCommits > 0) { cancellationToken.ThrowIfCancellationRequested(); }
-            await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
+            // Execution completed: auto-commit owns the end from here, as in every model.
+            await _coordinator.CommitAsync(context).ConfigureAwait(false);
             return result;
         }
         catch (TransactionCommitUnconfirmedException exception)

@@ -174,6 +174,28 @@ exception to, and which is not retryable.
 
 ## Ending a transaction: a started rollback always completes (#1226)
 
+**One cancellation rule for commit and rollback (#1246).** The caller's token is observed
+only before the manager claims the end. A token canceled by then throws
+`OperationCanceledException` without claiming the end, changing visibility, undoing writes,
+releasing locks or writing a lifecycle record; the transaction remains usable. Once claimed,
+the end ignores caller cancellation while it drains admitted applies and appends or flushes
+the log. Commit still reports real append failures as `TransactionAbortedException`, or a
+written record whose durability failed as `TransactionCommitUnconfirmedException`; cancellation
+cannot turn a started commit into either failure or a `CommitRecordWriteFailed` event.
+The rule includes read-only contexts, which still append and flush nothing (#1280).
+
+Every model's explicit transaction uses the root end state machine. Automatic commit also
+owns an uncancellable end once execution has completed: SQL and KeyValuePair pass no caller
+token to the coordinator, matching Documents, Graph and Blob. SQL preserves its separate
+post-cleanup cancellation check for catalog DDL that self-committed. Statement execution
+and lock waits continue to observe their tokens before that automatic end.
+
+PostgreSQL likewise holds interrupts through commit cleanup:
+`src/backend/access/transam/xact.c:2382-2383` (`HOLD_INTERRUPTS`) through
+`:2548` (`RESUME_INTERRUPTS`). The Cohesion boundary is the manager's end claim, shared
+with rollback and disposal. Its lock order is manager `_sync` then context end latch;
+both are released before apply draining or journal append/checkpoint gates are entered.
+
 A rollback, once it starts, ends its transaction whatever fails or is canceled. The
 start is a claim: `CommitAsync`, `RollbackAsync` and the abort that disposal forces
 each claim the context's end first, so exactly one of them runs. A second attempt
@@ -181,7 +203,7 @@ while one runs fails with `TransactionAbortedException` ("already ending"), and 
 commit can never race a rollback of the same writer. The same claim closes the
 context to statement applies ("Ending a transaction under a running statement",
 below): the context carries one end flag, so the end that wins the claim is also the
-end every later apply is refused for. `RollbackAsync` observes the caller's token only
+end every later apply is refused for. Both end methods observe the caller's token only
 before the claim: a token canceled by then throws `OperationCanceledException` and
 leaves the transaction active and untouched. After the claim no token reaches the
 rollback, and it throws nothing:

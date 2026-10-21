@@ -4249,6 +4249,14 @@ drivers, while the server owns bind-through-release lifecycle.
 
 ## SQL transaction control and the B7 seam
 
+Automatic commit follows the same cancellation boundary as every other engine (#1246):
+once statement execution has completed, the session ends its context without forwarding the
+caller token. A cancellation during that commit cannot change success into an abort; real
+append and durability failures retain their existing outcomes. Explicit commit and rollback
+observe cancellation only before their shared end starts. See the Transactions DESIGN,
+"Ending a transaction", for the kernel rule. Catalog DDL that self-committed still finishes
+mandatory cleanup before reporting cancellation.
+
 The transaction also owns the #1120 start instant, captured once at BEGIN/API start.
 Every statement context borrows it until commit or rollback; auto-commit captures
 one per statement. The internal TimeProvider is the existing engine test seam.
