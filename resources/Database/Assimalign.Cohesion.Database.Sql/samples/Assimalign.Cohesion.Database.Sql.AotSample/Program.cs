@@ -249,7 +249,9 @@ internal static class Program
         Check("in process: NULLS LAST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x NULLS LAST, id"), [[1], [3], [2]]);
         Check("in process: DESC NULLS FIRST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x DESC NULLS FIRST, id"), [[2], [3], [1]]);
         Check("in process: aggregate NULL placement", await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY x NULLS LAST, id) FROM null_ordering"), [["a,c,b"]]);
-        Check("in process: SELECT without FROM (#1373)", await RowsAsync(session, "SELECT (SELECT 42) WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)"), [[42]]);
+        Check("in process: SELECT without FROM (#1373)", await RowsAsync(session, "SELECT (SELECT 42) WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)"), [[42L]]);
+        Check("in process: public function timestamp (#1373)",
+            new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "COHSQLE003");
         Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
         Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);
