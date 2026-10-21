@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Blob.Client;
 using Assimalign.Cohesion.Database.Blob.Protocol;
@@ -64,7 +65,64 @@ internal static class Program
         Check(documentError.Diagnostics[0].Severity == DiagnosticSeverity.Warning);
         Check(new KeyValueClientException(KeyValueClientErrorKind.ExecutionFailure, shared.Code, "kv", shared).Diagnostics.Count == 0);
         Check(new BlobClientException(shared.Code, "blob", shared).Diagnostics.Count == 0);
-        Console.WriteLine("Client-only NativeAOT canary passed: five clients, five wire codecs and six diagnostic exception paths.");
+        using var pathTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await RunPathExchangeAsync(graph, listener, pathTimeout.Token);
+        Console.WriteLine("Client-only NativeAOT canary passed: five clients, five wire codecs, six diagnostic exception paths and twenty batched graph paths.");
+    }
+
+    private static async Task RunPathExchangeAsync(GraphClient graph, InMemoryConnectionListener listener,
+        CancellationToken cancellationToken = default)
+    {
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task peer = ServePathsAsync(listener, finished.Task, cancellationToken);
+        try
+        {
+            await using var connection = await graph.ConnectAsync(cancellationToken);
+            GraphPath? retained = null;
+            int count = 0;
+            await foreach (var path in connection.QueryPathsAsync("MATCH (n) RETURN n", cancellationToken: cancellationToken))
+            {
+                retained ??= path;
+                Check(path.Nodes.Count == 1 && path.Nodes[0].Id.Value == 1 && path.Relationships.Count == 0);
+                count++;
+            }
+            Check(count == 20 && Equals(retained!.Nodes[0].Properties["name"], "canary"));
+        }
+        finally
+        {
+            // Keep the peer alive through terminal verification, and join it on every exit.
+            finished.TrySetResult();
+            await peer;
+        }
+    }
+
+    private static async Task ServePathsAsync(InMemoryConnectionListener listener, Task finished,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transport = await listener.AcceptAsync(cancellationToken);
+        await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, batchWrites: true);
+        var startupFrame = await channel.Reader.ReadBorrowedFrameAsync(cancellationToken);
+        Check(startupFrame?.Type == ProtocolMessageType.Startup);
+        var startup = ProtocolStartupMessage.Decode(startupFrame!.Value.Payload.Span);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        Check((await channel.Reader.ReadBorrowedFrameAsync(cancellationToken))?.Type == ProtocolMessageType.AuthenticateResponse);
+        var ready = channel.Negotiate(ProtocolVersion.Current, startup.Capabilities);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        Check((await channel.Reader.ReadBorrowedFrameAsync(cancellationToken))?.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
+        var node = new GraphNode(new(1), ["Canary"], new Dictionary<string, object?> { ["name"] = "canary" });
+        var message = new GraphProtocolPathMessage([node], []);
+        byte[] payload = new byte[message.GetEncodedLength()];
+        Check(message.Encode(payload) == payload.Length);
+        for (int i = 0; i < 20; i++)
+        {
+            await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.Path, payload), cancellationToken);
+        }
+        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
+            new GraphProtocolPathsCompleteMessage(20).Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        await finished.WaitAsync(cancellationToken);
     }
 
     private static async Task CanceledAsync(Func<Task> operation)

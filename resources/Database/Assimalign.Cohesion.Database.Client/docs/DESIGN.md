@@ -24,6 +24,10 @@ The implementation uses Framework MSBuild-compatible path normalization and has 
 
 Direct references are Database.Protocol, Database.Types and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample. The resource-database workflow publishes and runs it in the NativeAOT job, rejects IL2xxx/IL3xxx warnings, and executes its pre-trim compiler-closure guard during publish.
 
+The NativeAOT canary also runs a real twenty-path graph exchange against an in-memory wire peer
+(#1539). It exercises bounded frame batching, borrowed pooled reads, the span path encoder and
+the typed client's single-decode channel after trimming, retaining a path across later reads.
+
 ## Client exception ownership
 
 `DatabaseClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
