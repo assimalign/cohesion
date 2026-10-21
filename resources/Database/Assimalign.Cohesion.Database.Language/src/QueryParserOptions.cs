@@ -13,7 +13,7 @@ public class QueryParserOptions
     public List<QueryAnalyzer> Analyzers { get; } = new List<QueryAnalyzer>();
 
     /// <summary>
-    /// Gets or sets the timeout shared by all analyzers. Defaults to five seconds.
+    /// Gets or sets the timeout shared by all analyzers. Defaults to five seconds; ignored when no analyzers are registered.
     /// </summary>
     public TimeSpan AnalyzerTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }

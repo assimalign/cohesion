@@ -80,6 +80,11 @@ public abstract class QueryParser
 
         QueryStatement statement = ParseCore(lexer);
 
+        if (_options.Analyzers.Count == 0)
+        {
+            return statement;
+        }
+
         Analyze(new QueryAnalyzerContext(statement), _options.AnalyzerTimeout);
 
         return statement;
@@ -95,6 +100,17 @@ public abstract class QueryParser
         {
             analyzers.Add(analyzer.AnalyzeAsync(context, cancellationTokenSource.Token));
         }
-        Task.WhenAll(analyzers).WaitAsync(cancellationTokenSource.Token).GetAwaiter().GetResult();
+        var completion = Task.WhenAll(analyzers);
+        try
+        {
+            completion.WaitAsync(cancellationTokenSource.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
+            // An analyzer may ignore cancellation and fault after the caller has left.
+            _ = completion.ContinueWith(static task => { _ = task.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
+        }
     }
 }

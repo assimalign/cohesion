@@ -12,6 +12,24 @@ namespace Assimalign.Cohesion.Database.Language.Tests;
 
 public sealed class QueryAnalyzerTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Language] - No analyzers means no timeout or analyzer allocations (#1267, #1422)")]
+    [InlineData(0)]
+    [InlineData(5000)]
+    public void Parse_NoAnalyzers_ShouldAllocateNothingAndIgnoreTimeout(int milliseconds)
+    {
+        // Arrange: isolate analyzer work from the model's lexer and statement allocations.
+        var parser = new AllocationAnalyzerTestParser(new QueryParserOptions { AnalyzerTimeout = TimeSpan.FromMilliseconds(milliseconds) });
+        for (int i = 0; i < 100; i++) { parser.Parse(""); }
+
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) { parser.Parse(""); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Assert
+        allocated.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Language] - Parse waits for every analyzer's diagnostics")]
     public void Parse_AsynchronousAnalyzers_ShouldReturnAllDiagnostics()
     {
