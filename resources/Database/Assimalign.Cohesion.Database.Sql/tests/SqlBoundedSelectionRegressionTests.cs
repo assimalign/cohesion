@@ -39,9 +39,9 @@ public sealed class SqlBoundedSelectionRegressionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Empty ordering: deferred collations preserve empty results (#1523)")]
-    [InlineData("SELECT id FROM t WHERE id < 0 ORDER BY " + DeferredKey + " LIMIT 1")]
+    [InlineData("SELECT id FROM t WHERE id < 0 ORDER BY " + deferredKey + " LIMIT 1")]
     [InlineData("SELECT id, name FROM t GROUP BY id, name HAVING id < 0 ORDER BY ('x' IN (SELECT u.name COLLATE case_insensitive FROM t u)) || name LIMIT 1")]
-    [InlineData("SELECT (SELECT u.id FROM t u WHERE u.id = t.id) FROM t WHERE id < 0 ORDER BY " + DeferredKey + " LIMIT 1")]
+    [InlineData("SELECT (SELECT u.id FROM t u WHERE u.id = t.id) FROM t WHERE id < 0 ORDER BY " + deferredKey + " LIMIT 1")]
     public async Task ExecuteAsync_EmptyDeferredOrdering_ShouldPreserveEmptyResults(string sql)
     {
         // Arrange
@@ -86,7 +86,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         await SeedAsync(session);
 
         // Act
-        var rows = await RowsAsync(session, "SELECT id FROM t WHERE id < 3 ORDER BY " + DeferredKey + window);
+        var rows = await RowsAsync(session, "SELECT id FROM t WHERE id < 3 ORDER BY " + deferredKey + window);
 
         // Assert
         rows.Select(row => row[0]).ShouldBe(window.Length == 0 ? new object?[] { 1, 2 } : [1]);
@@ -102,7 +102,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         await SeedAsync(session);
 
         // Act
-        var rows = await RowsAsync(session, "SELECT DISTINCT " + DeferredKey + " FROM t WHERE id < 3");
+        var rows = await RowsAsync(session, "SELECT DISTINCT " + deferredKey + " FROM t WHERE id < 3");
 
         // Assert
         rows.Select(row => row[0]).ShouldBe(new object?[] { "FALSEa" });
@@ -247,7 +247,7 @@ public sealed class SqlBoundedSelectionRegressionTests
         calls.ShouldBe(expectedCalls);
     }
 
-    private const string DeferredKey = "('x' IN (SELECT u.name COLLATE case_insensitive FROM t u WHERE u.id = t.id)) || name";
+    private const string deferredKey = "('x' IN (SELECT u.name COLLATE case_insensitive FROM t u WHERE u.id = t.id)) || name";
 
     private static async Task SeedAsync(SqlDatabaseSession session)
     {
