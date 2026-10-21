@@ -281,12 +281,17 @@ GQL transaction-control syntax is outside the profile. Wire transactions are del
 `ProtocolViolation`. No connection-level transaction API is exposed. Results materialize before
 the statement transaction is released, so result iteration cannot race record reclamation.
 
-Open defers the storage checkpoint, performs physical WAL recovery, then invokes coordinator
-record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery
+Open defers the storage checkpoint, performs physical WAL recovery, validates graph/index formats
+before coordinator record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery
 plan, and checkpoints last. The process fixture exits after committed graph/index creation and
 after uncommitted detach/insertion page write-back, without disposal. Restart must recover the
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
+
+Recovery fixtures compare selected-label reads before and after an uncommitted labeled create
+and relabel: the committed label ranges and properties survive, while partial postings disappear.
+The process fixture exits after page write-back with both operations still uncommitted and
+checks the same committed label membership after recovery and a second reopen.
 
 The Database solution includes `Graph.RecoveryFixture` so solution builds keep the fixture in
 the selected configuration. The Graph test build copies that configuration's outputs beside the

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +16,62 @@ namespace Assimalign.Cohesion.Database.Graph.Storage.Tests;
 
 public sealed partial class GraphStoreTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Labels: recovery discards uncommitted labeled creation and relabeling together with their postings (#1534)")]
+    public async Task GetNodes_UncommittedCreateAndRelabel_ShouldMatchBeforeAndAfterRecoveryAsync()
+    {
+        // Arrange: use the existing crash-image fixture pattern, copying live files before disposal.
+        var data = new MemoryStream();
+        var journal = new MemoryStream();
+        using var storage = GraphStorage.Create(data, journal, new MemoryStream(), "label-recovery");
+        await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        var store = GraphStore.Open(storage, coordinator);
+        var seed = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var node = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("x", 0)),
+            TestLabelIds.All, seed, CancellationToken.None);
+        await coordinator.CommitAsync(seed, CancellationToken.None);
+        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var before = new[] { "N", "M" }.ToDictionary(label => label, label => store.GetNodes(label, reader.Snapshot).ToArray());
+        before["N"].ShouldHaveSingleItem().Id.ShouldBe(node.Id);
+        before["M"].ShouldBeEmpty();
+        var partial = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        var created = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("x", 1)),
+            TestLabelIds.All, partial, CancellationToken.None);
+        await store.UpdateNodeAsync(node.Id, ["M"], Properties("x", 2), TestLabelIds.All, partial, CancellationToken.None);
+        store.GetNodes("N", partial.Snapshot).ShouldHaveSingleItem().Id.ShouldBe(created.Id);
+        store.GetNodes("M", partial.Snapshot).ShouldHaveSingleItem().Id.ShouldBe(node.Id);
+        foreach (var (label, expected) in before)
+        {
+            var found = store.GetNodes(label, reader.Snapshot);
+            found.Select(item => item.Id).ShouldBe(expected.Select(item => item.Id));
+            found.Select(item => item.Properties["x"]).ShouldBe(expected.Select(item => item.Properties["x"]));
+        }
+        // Drain the live journal into the recovery image without rolling back the logical writer.
+        storage.WriteAheadJournal.Flush(forceDurable: false);
+
+        // Act
+        using var recovered = GraphStorage.Open(Clone(data), Clone(journal), new MemoryStream(), checkpointOnOpen: false);
+        await using var recovery = new TransactionCoordinator(recovered, recovered.WriteAheadJournal, recovered.Records);
+        GraphStore.EnsureIndexFormat(recovered);
+        var plan = recovery.AnalyzeAndScrub();
+        plan.Aborted.ShouldContain(partial.Sequence);
+        var reopened = GraphStore.Open(recovered, recovery);
+        await reopened.RecoverIndexesAsync(plan.Aborted, CancellationToken.None);
+        recovery.CompleteRecovery();
+        var current = await recovery.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+
+        // Assert: both label ranges and the full-scan oracle retain exactly the committed version.
+        foreach (var (label, expected) in before)
+        {
+            var found = reopened.GetNodes(label, current.Snapshot);
+            found.Select(item => item.Id).ShouldBe(expected.Select(item => item.Id));
+            found.Select(item => item.Properties["x"]).ShouldBe(expected.Select(item => item.Properties["x"]));
+            found.Select(item => item.Id).ShouldBe(reopened.GetNodes(null, current.Snapshot)
+                .Where(item => item.Labels.Contains(label)).Select(item => item.Id));
+        }
+        reopened.FindNode(created.Id, current.Snapshot).ShouldBeNull();
+        await coordinator.RollbackAsync(partial, CancellationToken.None);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Labels: missing tree registration refuses open instead of hiding nodes (#1534)")]
     public async Task Open_MissingLabelRegistration_ShouldRefuseAsync()
     {

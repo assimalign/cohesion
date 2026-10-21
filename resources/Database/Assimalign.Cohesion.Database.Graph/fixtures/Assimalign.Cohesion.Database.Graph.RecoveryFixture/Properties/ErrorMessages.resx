@@ -6,4 +6,6 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="OriginalUpdateMissing" xml:space="preserve"><value>The original indexed and scanned update version was not recovered.</value></data>
   <data name="UncommittedUpdateSurvived" xml:space="preserve"><value>An uncommitted update survived recovery.</value></data>
+  <data name="LabelSnapshotChanged" xml:space="preserve"><value>The committed label scan changed during an uncommitted write or its recovery.</value></data>
+  <data name="UncommittedRelabelSurvived" xml:space="preserve"><value>An uncommitted relabel survived recovery.</value></data>
 </root>

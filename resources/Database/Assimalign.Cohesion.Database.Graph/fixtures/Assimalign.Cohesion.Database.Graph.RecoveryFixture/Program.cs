@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph;
@@ -20,10 +22,15 @@ if (args[0] == "seed")
     await session.ExecuteAsync("CREATE (a:Person {name:'a'})-[r:LINK]->(b:Person {name:'b'})");
     await GraphSchema.Open(db, session).CreateIndexAsync("Person", "by_name", "name");
     await session.ExecuteAsync("MATCH (a:Person {name:'a'}) SET a.committed=TRUE");
+    await using var observer = await db.CreateSessionAsync();
+    var before = await PersonNamesAsync(observer);
     await session.BeginTransactionAsync();
     await session.ExecuteAsync("MATCH (a:Person {name:'a'}) DETACH DELETE a");
     await session.ExecuteAsync("CREATE (a:Person {name:'partial'})-[r:PARTIAL]->(b:Person {name:'partial2'})");
     await session.ExecuteAsync("MATCH (b:Person {name:'b'}) SET b.name='b2'");
+    await session.ExecuteAsync("MATCH (b:Person {name:'b2'}) REMOVE b:Person SET b:Other");
+    if (!before.SequenceEqual(await PersonNamesAsync(observer)))
+    { throw new InvalidOperationException(ErrorMessages.LabelSnapshotChanged); }
     foreach (var worker in engine.Workers)
     {
         // A pass records its failure instead of throwing it (#1268); the fixture fails fast.
@@ -52,6 +59,11 @@ else if (args[0] == "verify")
     count = 0;
     await foreach (var row in all.GetRowsAsync()) { count++; }
     if (count != 2) { throw new InvalidOperationException("Partial nodes survived recovery."); }
+    if (!(await PersonNamesAsync(session)).SequenceEqual(new[] { "a", "b" }))
+    { throw new InvalidOperationException(ErrorMessages.LabelSnapshotChanged); }
+    await using var other = (DatabaseResultSet)await session.ExecuteAsync("MATCH (n:Other) RETURN n.name");
+    await foreach (var row in other.GetRowsAsync())
+    { throw new InvalidOperationException(ErrorMessages.UncommittedRelabelSurvived); }
     foreach (string query in new[] { "MATCH (b:Person {name:'b'}) RETURN b.name", "MATCH (b:Person) WHERE b.name STARTS WITH 'b' RETURN b.name" })
     {
         await using var b = (DatabaseResultSet)await session.ExecuteAsync(query);
@@ -63,6 +75,15 @@ else if (args[0] == "verify")
     await foreach (var row in b2.GetRowsAsync()) { throw new InvalidOperationException(ErrorMessages.UncommittedUpdateSurvived); }
     if ((await GraphSchema.Open(db, session).GetRelationshipTypesAsync()).Count != 1)
     { throw new InvalidOperationException("Uncommitted relationship metadata survived recovery."); }
-    Console.WriteLine("Committed nodes, relationships, adjacency and index recovered; partial writes absent.");
+    Console.WriteLine("Committed nodes, relationships, adjacency, label postings and property index recovered; partial creates and relabels absent.");
 }
 else { throw new ArgumentException("Unknown fixture mode."); }
+
+static async Task<List<string>> PersonNamesAsync(GraphDatabaseSession session)
+{
+    await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+        "MATCH (n:Person) RETURN n.name ORDER BY n.name", cancellationToken: CancellationToken.None);
+    var names = new List<string>();
+    await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { names.Add(row.GetString(0)!); }
+    return names;
+}
