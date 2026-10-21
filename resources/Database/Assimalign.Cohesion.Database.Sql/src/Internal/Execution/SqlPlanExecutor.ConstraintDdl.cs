@@ -162,18 +162,13 @@ internal sealed partial class SqlPlanExecutor
                                 new IndexDefinition(metadata.Name, IndexKind.BTree, true), cancellationToken).ConfigureAwait(false);
                             created.Add(metadata.Name);
                             var ordinals = metadata.ColumnNames.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                            var keys = new HashSet<string>(StringComparer.Ordinal);
                             foreach (var version in ScanVersions(table, cancellationToken))
                             {
                                 var key = BuildIndexKey(table, ordinals, version.Values);
-                                if (version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
-                                {
-                                    throw new SqlConstraintViolationException(metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
-                                }
-
                                 await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
                                     version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
                             }
+                            await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
                         }
                         return true;
                     }, durable: true, cancellationToken).ConfigureAwait(false);
@@ -217,11 +212,12 @@ internal sealed partial class SqlPlanExecutor
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray(),
             plan.Table.DroppedColumnOrdinals);
-        var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
+        var snapshot = ConstraintCurrentSnapshot(statement);
+        long total = statement.ProvisioningProgress is null ? 0 : Scan(plan.Table, statement, cancellationToken, snapshot).LongCount();
         _definitions.Get(replacement, cancellationToken);
         long processed = 0;
-        statement.ProvisioningProgress?.Invoke(0, rows.Count);
-        foreach (var row in rows)
+        statement.ProvisioningProgress?.Invoke(0, total);
+        foreach (var (_, row) in Scan(plan.Table, statement, cancellationToken, snapshot))
         {
             cancellationToken.ThrowIfCancellationRequested();
             for (int i = 0; i < columns.Length; i++)
@@ -229,7 +225,7 @@ internal sealed partial class SqlPlanExecutor
                 CoerceForColumn(row[i], columns[i]);
             }
             ValidateRows(replacement, [row], statement, cancellationToken, current: true);
-            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
+            statement.ProvisioningProgress?.Invoke(++processed, total);
         }
 
         // The backfill binds the replacement version, which is the instance published below.
@@ -333,15 +329,16 @@ internal sealed partial class SqlPlanExecutor
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
-        var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
-        var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement, cancellationToken);
+        var snapshot = ConstraintCurrentSnapshot(statement);
+        long total = statement.ProvisioningProgress is null ? 0 : Scan(replacement, statement, cancellationToken, snapshot).LongCount();
+        var bound = plan.Column.DomainName is null ? null : _definitions.Get(replacement, cancellationToken);
         var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart);
 
         // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
         int[]? added = bound is null ? null : [columns.Length - 1];
         long processed = 0;
-        statement.ProvisioningProgress?.Invoke(0, rows.Count);
-        foreach (var row in rows)
+        statement.ProvisioningProgress?.Invoke(0, total);
+        foreach (var (_, row) in Scan(replacement, statement, cancellationToken, snapshot))
         {
             cancellationToken.ThrowIfCancellationRequested();
             row[^1] = CoerceForColumn(row[^1], column);
@@ -350,7 +347,7 @@ internal sealed partial class SqlPlanExecutor
                 CheckDomains(bound!, row, evaluator!, added);
             }
             ValidateRows(replacement, [row], statement, cancellationToken, current: true);
-            statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
+            statement.ProvisioningProgress?.Invoke(++processed, total);
         }
 
         if (plan.Constraints.Count == 0)

@@ -33,7 +33,7 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
     public override long AffectedCount { get; }
 
     /// <inheritdoc />
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic> Diagnostics => [];
 
     /// <inheritdoc />
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;

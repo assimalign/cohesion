@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database;
 /// A parsed typed statement with error diagnostics has the same contract: the exception
 /// carries the complete diagnostic list and an error-recovery tree is never executed.
 /// </remarks>
-public class DatabaseParseException : DatabaseException
+public sealed class DatabaseParseException : DatabaseException
 {
     /// <summary>
     /// Initializes a new instance of <see cref="DatabaseParseException"/> with a message.

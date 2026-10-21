@@ -20,12 +20,9 @@ internal static class DatabaseResultReader
         outcome.Failed = result.Status != DatabaseResultStatus.Success;
         outcome.AffectedCount = result.AffectedCount;
 
-        if (result.Diagnostics is { } diagnostics)
+        foreach (Diagnostic diagnostic in result.Diagnostics)
         {
-            foreach (Diagnostic diagnostic in diagnostics)
-            {
-                outcome.Diagnostics.Add(ToInfo("engine", diagnostic, outcome.StatementOffset, null));
-            }
+            outcome.Diagnostics.Add(ToInfo("engine", diagnostic, outcome.StatementOffset, null));
         }
 
         if (result is DatabaseResultSet set)

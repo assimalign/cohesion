@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Threading;
@@ -23,16 +24,39 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
     private readonly byte[] _header = new byte[ProtocolFrameHeader.Size];
+    private byte[]? _borrowedPayload;
+    private bool _disposed;
 
     internal ProtocolStreamFrameReader(Stream stream, bool leaveOpen)
+        : base(supportsBorrowedPayloads: true)
     {
         _stream = stream;
         _leaveOpen = leaveOpen;
     }
 
     /// <inheritdoc />
-    protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
+    protected override ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
+        => ReadAsync(borrow: false, cancellationToken);
+
+    protected override async ValueTask<bool> ReadBorrowedFrameCoreAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken)
     {
+        try
+        {
+            ProtocolFrame? frame = await ReadAsync(borrow: true, cancellationToken).ConfigureAwait(false);
+            if (frame is not { } value) { return false; }
+            consume(value);
+            return true;
+        }
+        finally
+        {
+            ReturnPayload();
+        }
+    }
+
+    private async ValueTask<ProtocolFrame?> ReadAsync(bool borrow, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ReturnPayload();
         int headerRead = await ReadUpToAsync(_header, ProtocolFrameHeader.Size, cancellationToken).ConfigureAwait(false);
 
         if (headerRead == 0)
@@ -58,27 +82,48 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
             return new ProtocolFrame(header.Type, ReadOnlyMemory<byte>.Empty);
         }
 
-        var payload = new byte[header.PayloadLength];
-        int payloadRead = await ReadUpToAsync(payload, payload.Length, cancellationToken).ConfigureAwait(false);
-
-        if (payloadRead < payload.Length)
+        int length = (int)header.PayloadLength;
+        byte[] payload = borrow ? _borrowedPayload = ProtocolBufferPool.Rent(length) : new byte[length];
+        try
         {
-            throw new ProtocolException("The connection ended inside a frame payload.");
-        }
+            int payloadRead = await ReadUpToAsync(payload, length, cancellationToken).ConfigureAwait(false);
 
-        ProtocolEventSource.Log.FrameRead(header.Type, payload.Length);
-        return new ProtocolFrame(header.Type, payload);
+            if (payloadRead < length)
+            {
+                throw new ProtocolException("The connection ended inside a frame payload.");
+            }
+
+            ProtocolEventSource.Log.FrameRead(header.Type, length);
+            return new ProtocolFrame(header.Type, payload.AsMemory(0, length));
+        }
+        catch
+        {
+            ReturnPayload();
+            throw;
+        }
     }
 
     /// <inheritdoc />
     protected override ValueTask DisposeAsyncCore()
     {
+        if (_disposed) { return default; }
+        _disposed = true;
+        ReturnPayload();
         if (!_leaveOpen)
         {
             _stream.Dispose();
         }
 
         return default;
+    }
+
+    private void ReturnPayload()
+    {
+        if (_borrowedPayload is { } payload)
+        {
+            _borrowedPayload = null;
+            ProtocolBufferPool.Return(payload);
+        }
     }
 
     private async ValueTask<int> ReadUpToAsync(byte[] buffer, int count, CancellationToken cancellationToken)

@@ -35,7 +35,7 @@ internal sealed class GraphQueryResult : DatabaseResultSet
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => _affected;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
+    public override IReadOnlyList<Diagnostic> Diagnostics => _warnings;
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;
     public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

@@ -56,7 +56,9 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
 
     private readonly string _threadName;
 
-    // Guards everything below; never held while a checkpoint runs.
+    // Lock order: worker pass gate -> this monitor. Release this monitor before checkpoint
+    // model/apply/storage locks, failure reporting, signal callbacks or pass publication.
+    // A lane publishes its outcome under this monitor, then sets the signal after releasing it.
     private readonly object _sync = new();
     private readonly Dictionary<object, Lane> _lanes = new(ReferenceEqualityComparer.Instance);
     private readonly List<Runner> _idle = [];
@@ -174,10 +176,12 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     /// <param name="timeout">The longest the worker waits.</param>
     /// <param name="cancellationToken">Cancels the wait; the checkpoint goes on.</param>
     /// <param name="outcome">How the checkpoint ended, when it did.</param>
+    /// <param name="visit">The optional pass observation to receive wait requests and elapsed time.</param>
     /// <returns>True when the checkpoint ended; false when it was left running on its lane.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signaled; the checkpoint goes on alone.</exception>
-    public bool Run(object database, Func<bool> checkpoint, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome)
+    public bool Run(object database, Func<bool> checkpoint, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseCheckpointPass.Visit? visit = null)
     {
+        long visitStarted = visit is null ? 0 : Stopwatch.GetTimestamp();
         var lane = new Lane(checkpoint, signal);
         bool start = false;
         lock (_sync)
@@ -209,13 +213,15 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         {
             while (!lane.Ended && !cancellationToken.IsCancellationRequested)
             {
-                Monitor.Wait(_sync, WaitSlice);
+                WaitForLane(WaitSlice, visit);
                 var waited = Stopwatch.GetElapsedTime(started);
                 if (lane.Ended || waited >= timeout || (waited >= WaitSlice && signal.IsSet))
                 {
                     break;
                 }
             }
+
+            if (visit is not null) { visit.LaneWait = Stopwatch.GetElapsedTime(visitStarted); }
 
             if (lane.Ended)
             {
@@ -230,6 +236,18 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         outcome = default;
         return false;
+    }
+
+    // The caller holds _sync. Keep the requested delay and the blocking operation together,
+    // including early wakeups: elapsed time and the number of requests are separate signals.
+    private void WaitForLane(TimeSpan timeout, DatabaseCheckpointPass.Visit? visit)
+    {
+        if (visit is not null)
+        {
+            visit.LaneWaits++;
+            visit.LaneWaitRequested += timeout;
+        }
+        Monitor.Wait(_sync, timeout);
     }
 
     /// <summary>

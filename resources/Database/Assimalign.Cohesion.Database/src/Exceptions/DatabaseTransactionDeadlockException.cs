@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database;
 /// message names the deadlock; the session stays usable — roll the transaction
 /// back and retry.
 /// </remarks>
-public class DatabaseTransactionDeadlockException : DatabaseTransactionAbortedException
+public sealed class DatabaseTransactionDeadlockException : DatabaseTransactionAbortedException
 {
     /// <summary>
     /// Initializes a new <see cref="DatabaseTransactionDeadlockException"/>.

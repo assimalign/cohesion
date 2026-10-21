@@ -1,5 +1,10 @@
 # Documents engine design
 
+## Result diagnostics (#1264)
+
+Document command and query results return a non-null Diagnostics collection, empty when
+there is nothing to report (#1264). Failure frames retain their existing diagnostic payload.
+
 ## Child-root failure boundaries (#1247, #1364)
 
 Attached-index damage becomes `DatabaseCorruptionException` / `COHDBS003`, retaining the
@@ -2295,3 +2300,12 @@ The following public types move from their Catalog or Storage assembly into Assi
 - From `Assimalign.Cohesion.Database.Documents.Storage`: `Assimalign.Cohesion.Database.Documents.Storage.DocumentContentReference`, `Assimalign.Cohesion.Database.Documents.Storage.DocumentStorage`.
 
 Identical resource keys `IndexPathCount` are stored once with their unchanged values.
+
+## Checkpoint progress observations (#1284)
+
+The shared checkpointer records the closed flag and storage due flags used by this model's
+predicate before deciding whether to attempt work. The linked pace helper asserts due attempts,
+worker completions and bounded recorded trigger/lane waits; statement-completed checkpoints do
+not supply its progress count. The observation remains internal and opt-in; see the
+[root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
+for publication scope, callback isolation and the limits of the wait budgets.

@@ -258,14 +258,14 @@ public sealed class SqlNullOrderingTests
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         result.Status.ShouldBe(DatabaseResultStatus.Success, sql);
-        result.Diagnostics?.ShouldBeEmpty(sql);
+        result.Diagnostics.ShouldBeEmpty(sql);
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         var result = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         result.Status.ShouldBe(DatabaseResultStatus.Success, sql);
-        result.Diagnostics?.ShouldBeEmpty(sql);
+        result.Diagnostics.ShouldBeEmpty(sql);
         await using var rows = result.ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<object?[]>();
         await foreach (var row in rows.GetRowsAsync(CancellationToken.None))

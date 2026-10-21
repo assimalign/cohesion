@@ -36,7 +36,7 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => -1;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic> Diagnostics => [];
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;
     public override async IAsyncEnumerable<DatabaseRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

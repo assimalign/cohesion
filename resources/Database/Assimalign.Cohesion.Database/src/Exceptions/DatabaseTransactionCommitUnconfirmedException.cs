@@ -38,7 +38,7 @@ namespace Assimalign.Cohesion.Database;
 /// <c>COHDBD002</c>, <c>COHDBG012</c> and <c>COHDBB002</c>.
 /// </para>
 /// </remarks>
-public class DatabaseTransactionCommitUnconfirmedException : DatabaseException
+public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseException
 {
     /// <summary>
     /// Initializes a new <see cref="DatabaseTransactionCommitUnconfirmedException"/>.

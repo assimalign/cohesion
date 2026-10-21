@@ -35,6 +35,7 @@ public class KeyValueCommandTests
     private static async Task<List<object?[]>> MaterializeAsync(DatabaseResult result)
     {
         var rows = new List<object?[]>();
+        result.Diagnostics.ShouldBeEmpty();
         var set = (DatabaseResultSet)result;
 
         await using (set)
@@ -136,9 +137,11 @@ public class KeyValueCommandTests
         // Act / Assert: stale etag deletes nothing; the current one deletes.
         var staleDelete = await session.ExecuteCommandTextAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag + 1000)), TestTimeout.Token());
         staleDelete.AffectedCount.ShouldBe(0);
+        staleDelete.Diagnostics.ShouldBeEmpty();
 
         var delete = await session.ExecuteCommandTextAsync("DELETE @k IF @etag", Parameters(("k", Bytes("k")), ("etag", etag)), TestTimeout.Token());
         delete.AffectedCount.ShouldBe(1);
+        delete.Diagnostics.ShouldBeEmpty();
 
         var missingDelete = await session.ExecuteCommandTextAsync("DELETE @k", Parameters(("k", Bytes("k"))), TestTimeout.Token());
         missingDelete.AffectedCount.ShouldBe(0);

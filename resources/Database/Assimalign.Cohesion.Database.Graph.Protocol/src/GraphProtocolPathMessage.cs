@@ -16,26 +16,54 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
     /// <exception cref="ProtocolException">The path is disconnected, has zero identities, or contains unsupported property values.</exception>
     public byte[] Encode()
     {
+        byte[] payload = new byte[GetEncodedLength()];
+        EncodeCore(payload, measure: false);
+        return payload;
+    }
+
+    /// <summary>Measures the unchanged Path payload without allocating an encoded copy.</summary>
+    /// <returns>The bounded payload length in bytes.</returns>
+    /// <exception cref="ProtocolException">The path is invalid or exceeds the frame limit.</exception>
+    public int GetEncodedLength()
+    {
         Validate();
-        var buffer = new List<byte>();
-        ProtocolPayload.WriteInt32(buffer, Nodes.Count);
-        foreach (var node in Nodes)
+        return EncodeCore(default, measure: true);
+    }
+
+    /// <summary>Encodes the unchanged Path payload directly into caller-owned storage.</summary>
+    /// <param name="destination">Storage for the complete payload.</param>
+    /// <returns>The number of bytes written.</returns>
+    /// <exception cref="ProtocolException">The path or a property is invalid, or exceeds the frame limit.</exception>
+    /// <exception cref="ArgumentException">The destination is too small.</exception>
+    public int Encode(Span<byte> destination)
+    {
+        Validate();
+        return EncodeCore(destination, measure: false);
+    }
+
+    private int EncodeCore(Span<byte> destination, bool measure)
+    {
+        var writer = new GraphProtocolPathWriter(destination, measure);
+        writer.WriteInt32(Nodes.Count);
+        for (int i = 0; i < Nodes.Count; i++)
         {
-            ProtocolPayload.WriteInt64(buffer, unchecked((long)node.Id.Value));
-            ProtocolPayload.WriteInt32(buffer, node.Labels.Count);
-            foreach (string label in node.Labels) { ProtocolPayload.WriteString(buffer, label); }
-            GraphProtocolProperties.Write(buffer, node.Properties);
+            GraphNode node = Nodes[i];
+            writer.WriteInt64(unchecked((long)node.Id.Value));
+            writer.WriteInt32(node.Labels.Count);
+            for (int j = 0; j < node.Labels.Count; j++) { writer.WriteString(node.Labels[j]); }
+            writer.WriteProperties(node.Properties);
         }
-        ProtocolPayload.WriteInt32(buffer, Relationships.Count);
-        foreach (var relationship in Relationships)
+        writer.WriteInt32(Relationships.Count);
+        for (int i = 0; i < Relationships.Count; i++)
         {
-            ProtocolPayload.WriteInt64(buffer, unchecked((long)relationship.Id.Value));
-            ProtocolPayload.WriteInt64(buffer, unchecked((long)relationship.From.Value));
-            ProtocolPayload.WriteInt64(buffer, unchecked((long)relationship.To.Value));
-            ProtocolPayload.WriteString(buffer, relationship.Type);
-            GraphProtocolProperties.Write(buffer, relationship.Properties);
+            GraphRelationship relationship = Relationships[i];
+            writer.WriteInt64(unchecked((long)relationship.Id.Value));
+            writer.WriteInt64(unchecked((long)relationship.From.Value));
+            writer.WriteInt64(unchecked((long)relationship.To.Value));
+            writer.WriteString(relationship.Type);
+            writer.WriteProperties(relationship.Properties);
         }
-        return buffer.ToArray();
+        return writer.Length;
     }
 
     /// <summary>Decodes and validates a complete path payload.</summary>
@@ -87,9 +115,9 @@ public sealed record GraphProtocolPathMessage(IReadOnlyList<GraphNode> Nodes, IR
         {
             throw new ProtocolException("A path requires one more node than relationships.");
         }
-        foreach (var node in Nodes)
+        for (int i = 0; i < Nodes.Count; i++)
         {
-            if (node.Id.Value == 0) { throw new ProtocolException("Graph identities must be nonzero."); }
+            if (Nodes[i].Id.Value == 0) { throw new ProtocolException("Graph identities must be nonzero."); }
         }
         for (int i = 0; i < Relationships.Count; i++)
         {

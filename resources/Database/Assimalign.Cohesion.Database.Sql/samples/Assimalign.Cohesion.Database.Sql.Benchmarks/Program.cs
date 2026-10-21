@@ -446,7 +446,7 @@ internal static class Program
         }
         else if (result.Status != DatabaseResultStatus.Success)
         {
-            throw new InvalidOperationException($"'{sql}' failed: {string.Join("; ", result.Diagnostics?.Select(diagnostic => diagnostic.Message) ?? [])}");
+            throw new InvalidOperationException($"'{sql}' failed: {string.Join("; ", result.Diagnostics.Select(diagnostic => diagnostic.Message))}");
         }
     }
 

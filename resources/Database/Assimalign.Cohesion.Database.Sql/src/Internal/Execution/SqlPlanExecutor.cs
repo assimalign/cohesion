@@ -1322,22 +1322,14 @@ internal sealed partial class SqlPlanExecutor
                     var index = await _indexManager.CreateIndexAsync(statement.Transaction, plan.Table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
                     registered = true;
 
-                    var liveKeys = plan.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
-
                     foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
                     {
                         var key = BuildIndexKey(plan.Table, ordinals, values);
 
-                        if (liveKeys is not null && deleter == TransactionSequence.None && !liveKeys.Add(Convert.ToHexString(key.Encoded.Span)))
-                        {
-                            throw new SqlConstraintViolationException(plan.IndexName, $"{plan.Table.Schema}.{plan.Table.Name}", "UNIQUE",
-                                SafeValue(ordinals.Select(ordinal => values[ordinal]).ToArray()));
-                        }
-
                         await index.InsertVersionAsync(
                             bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
                     }
-
+                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals).ConfigureAwait(false);
                     return true;
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }

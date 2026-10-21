@@ -158,11 +158,14 @@ traced. `FrameRead` follows a complete frame; the clean end of the stream writes
 does a truncated or oversized frame, which the core refuses. `FrameWritten` follows a completed
 stream write, before an explicit writer flush; the stream may already have flushed on write.
 
-**The trace costs nothing while nobody takes it.** The stream cores are already asynchronous
+**The trace allocates nothing while nobody takes it.** The stream cores are already asynchronous
 methods, so the trace adds one `IsEnabled(Verbose, Frames)` check per frame and no wrapper, task
-or allocation; the public members return the core's task unchanged. No counters: the SQL server
-writes one frame per result row, and a process-wide count updated per frame by every session would
-be a contention point. Frame failures (`ProtocolException`) are not events here: the server
+or allocation; the public members return the core's task unchanged. Plan decision D6 keeps
+ordinary writers free of process-wide per-frame counter updates: SQL writes one frame per row,
+and shared atomics would contend between sessions. Exact transport counters count only batched
+writers' stream write calls and explicit flush calls, including failed attempts. Pool counters
+cover batched writer buffers and borrowed payloads, excluding ordinary writers' temporary arrays.
+Frame failures (`ProtocolException`) are not events here: the server
 session or the client that catches one reports it, with its session or connection.
 
 `ProtocolEventSourceTests` checks the name, the strict manifest, one event per frame through a
@@ -173,6 +176,41 @@ await and fail if one did not complete synchronously, so the per-thread allocati
 miss work that moved to another thread.
 
 ## Terminal close contract and TCP conformance (#1087)
+
+### Bounded batches and borrowed payloads (#1539)
+
+`ProtocolFrameWriter.CreateBatched` copies complete frames into one pooled batch, bounded by
+bytes (64 KiB by default) and frame count (32). A frame larger than the batch byte bound is
+written alone; every frame retains the 16 MiB limit. There is no aggregate result cap.
+`ProtocolChannel(batchWrites: true)` selects these defaults. Callers serialize writes, flushes
+and disposal, flush at result and latency boundaries, and await transport writes for
+backpressure. Disposal discards an unfinished batch. Buffers stay owned by the writer until
+pending I/O completes and are cleared before return on success, failure and cancellation.
+FrameWritten events are emitted after successful transport writes, once per enclosed frame.
+A failed batch write (including cancellation before copying any bytes) or standalone oversized
+write faults the batched writer. Later writes and flushes throw IOException, since the accepted
+frames may have been sent partially or not at all. Disposal still returns its cleared batch
+without retrying or sending any subsequent frames. A separate flush failure after a successful
+batch write does not fault it: complete frames were written, so a session can still attempt
+its terminal notice after soft-stop cancellation of the final handshake flush (#1087).
+
+`ReadFrameAsync` still returns owned memory. The optional `SupportsBorrowedPayloads` capability
+and `ReadBorrowedFrameAsync` scope reader-owned pooled memory to a synchronous consume callback.
+The existing optional operation now accepts that callback and returns whether a frame was read;
+no separate public release seam or shipped friend grant is needed. A consumer decodes or copies
+retained values within the callback. The reader clears and returns the rental in finally before
+the read completes, including callback failures, so backpressure and idle connections retain no
+payload rental. The stream reader and channel family reader support it; unsupported decorators
+explicitly refuse it. Lengths are validated before renting, and only the declared slice is exposed.
+The single read flow must be joined before disposal; no lock is held across transport I/O.
+
+The source lazily publishes `transport-write-calls`, `transport-flush-calls` and
+`pooled-buffers-in-use`. Backing values are maintained without a listener. The first two count
+attempted Stream operations exactly, including failures; generic streams do not expose their
+internal flush policy. For DuplexPipeStream each write also flushes, so the sum is the number
+of pipe flush requests. Twenty small frames plus completion fit one transport write and one
+explicit flush, independent of row count. Ownership, byte/count bounds, partial frames and
+backpressured cancellation have deterministic tests in ProtocolBatchTests.
 
 Each frame's header and payload cross the Stream boundary in one WriteAsync. The stream may
 flush on write (DuplexPipeStream does), so an explicit FlushAsync does not promise batching.

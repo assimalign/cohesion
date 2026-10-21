@@ -17,6 +17,47 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection(nameof(GraphDatabaseEventSourceCollection))]
 public sealed class GraphOperationOutcomeTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Path latency flush disposal stays a transport fault")]
+    public async Task ExecutePathsAsync_LatencyFlushDisposed_ShouldCloseWithoutEngineErrorOrRetry()
+    {
+        // Arrange: cross the cooperative latency boundary before the second path, with no
+        // performance deadline. An injected flush failure must not become COHDBG019.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
+        await using var harness = await GraphServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var serverSession = (GraphDatabaseServerSession)harness.Server.Sessions.Single();
+        var session = serverSession.DatabaseSession!;
+        await using var transaction = await session.BeginTransactionAsync(timeout.Token);
+        await session.ExecuteAsync("INSERT (:Pending), (:Pending)", cancellationToken: timeout.Token);
+        int writes = 0;
+        int flushes = 0;
+        serverSession.BeforeTransportWrite = () =>
+        {
+            if (++writes == 1) { Thread.Sleep(20); }
+        };
+        serverSession.BeforeTransportFlush = () =>
+        {
+            flushes++;
+            throw new ObjectDisposedException("protocol flush");
+        };
+
+        // Act
+        await client.SendAsync(GraphProtocolMessageType.ExecutePaths,
+            GraphProtocolExecuteMessage.Create("MATCH (n:Pending) RETURN n").Encode());
+        (await client.ReadAsync()).ShouldBeNull();
+        await serverSession.Completion.WaitAsync(timeout.Token);
+
+        // Assert: failure happened on a path flush, before completion, and no retry escaped.
+        writes.ShouldBeInRange(1, 2);
+        flushes.ShouldBe(1);
+        serverSession.CloseReason.ShouldBe(GraphDatabaseEventSource.CloseReason.Faulted);
+        recorder.Events.Where(item => item.EventId == 7).ShouldHaveSingleItem();
+        await using var observer = await session.Database.CreateSessionAsync(timeout.Token);
+        (await GraphCatalogIntrospectionTests.Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: streaming disposal distinguishes result failures from disposed transport")]
     [InlineData(false)]
     [InlineData(true)]

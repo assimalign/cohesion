@@ -35,7 +35,7 @@ internal sealed class KeyValueMaterializedResultSet : DatabaseResultSet
     public override long AffectedCount => _affectedCount;
 
     /// <inheritdoc />
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic> Diagnostics => [];
 
     /// <inheritdoc />
     public override IReadOnlyList<DatabaseColumn> Columns => _columns;

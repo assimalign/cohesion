@@ -6,12 +6,14 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
-using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // Test seam: sample retained workspace while the validation cursor is still walking.
+    internal static Action? UniqueIndexEntryValidated { get; set; }
+
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken)
     {
@@ -31,7 +33,6 @@ internal sealed partial class SqlPlanExecutor
                 return createdIndex;
             },
             durable: true, cancellationToken).ConfigureAwait(false);
-        var keys = definition.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
         long processed = 0;
 
         // Each bracket is bounded; no table-sized storage gate prevents another table
@@ -44,10 +45,6 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var key = BuildIndexKey(table, ordinals, version.Values);
-                    if (keys is not null && version.Deleter == TransactionSequence.None && !keys.Add(Convert.ToHexString(key.Encoded.Span)))
-                    {
-                        throw new SqlConstraintViolationException(definition.Name, $"{table.Schema}.{table.Name}", "UNIQUE");
-                    }
                     await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
                         version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
                 }
@@ -56,7 +53,48 @@ internal sealed partial class SqlPlanExecutor
             processed += batch.Length;
             statement.ProvisioningProgress(processed, Math.Max(processed, total));
         }
+        await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
         statement.ProvisioningProgress(processed, processed);
+    }
+
+    private async ValueTask ValidateBuiltUniqueIndexAsync(SqlCatalogTable table, BTreeIndex index,
+        SqlStatementContext statement, CancellationToken cancellationToken, int[]? valueOrdinals = null)
+    {
+        if (!index.IsUnique) { return; }
+
+        // Lock/latch order: the caller holds table X before any apply gate, then the
+        // cursor takes the tree read latch and page pins for one bounded batch. It
+        // takes no key locks and retains no latch across a move or disposal. Table X
+        // outlives validation and publication, so latest-state visibility is stable
+        // even when the DDL transaction's original snapshot predates live writers.
+        // All versions remain in the tree for older readers; only live keys compare.
+        await using var cursor = index.OpenCursor(ConstraintCurrentSnapshot(statement), IndexKeyRange.All,
+            cancellationToken: cancellationToken);
+        IndexKey? previous = null;
+        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var key = cursor.CurrentKey;
+            if (previous is { } last && last.Encoded.Span.SequenceEqual(key.Encoded.Span))
+            {
+                object? value = null;
+                if (valueOrdinals is not null)
+                {
+                    // Preserve CREATE INDEX's safe scalar diagnostic without retaining
+                    // the build's rows or decoding any row on the successful path.
+                    var (pageId, slotIndex) = SqlRecordLocation.Unpack(cursor.CurrentEntryReference);
+                    if (_storage.TryReadRecord(pageId, slotIndex, table.ObjectId, out var record))
+                    {
+                        var values = DecodeRow(record, pageId, slotIndex, table,
+                            _definitions.Get(table, cancellationToken).MissingValues, out _, out _);
+                        if (values is not null) { value = SafeValue(valueOrdinals.Select(ordinal => values[ordinal]).ToArray()); }
+                    }
+                }
+                throw new SqlConstraintViolationException(index.Name, $"{table.Schema}.{table.Name}", "UNIQUE", value);
+            }
+            // CurrentKey owns its bytes; retaining it across a batch needs no copy.
+            previous = key;
+            UniqueIndexEntryValidated?.Invoke();
+        }
     }
 
     // Unpublished trees are never published by unrelated DDL.

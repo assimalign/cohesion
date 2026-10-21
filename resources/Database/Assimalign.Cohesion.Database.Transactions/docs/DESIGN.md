@@ -776,6 +776,9 @@ Storage owns the physical journal (`Database.Storage`); the transaction log is t
 
 ## Error model
 
+`TransactionDeadlockException` and `TransactionCommitUnconfirmedException` are sealed leaves
+(#1264). `TransactionAbortedException` remains the shared base for retryable abort variants.
+
 `TransactionAbortedException : Exception` for engine-initiated aborts (an independent exception root — this package is a child root and must not depend on the area contracts; a model engine that surfaces an abort through the area's session contract wraps it in a `DatabaseException` at the model boundary, the same rule the engines apply to `StorageException`); `TransactionDeadlockException : TransactionAbortedException` for deadlock victims (retryable by construction). `TransactionCommitUnconfirmedException : Exception`, a second independent root, for a commit whose record was written but not made durable: the transaction is committed, so it is deliberately not an abort and not retryable ("A commit record that was written but not made durable", above); engines wrap it in the area's `DatabaseTransactionCommitUnconfirmedException`. Caller-initiated rollback is not an error: once started it throws nothing (#1226); before the start it throws only for a canceled token or a context it cannot end, and `ObjectDisposedException` once the manager's disposal began.
 
 The version store throws the storage library's errors unchanged when a version page cannot be read: `PurgeWriterAsync` (a failed undo, which requeues the writer), `PruneAsync` and so `RunVersionPurgePass` (each after reclaiming everything else it can), and `GetVisibleVersionAsync`. A version reclaimed beneath its ledger entry is not one of them (#1342; "Shared per-database composition (#918)", below).

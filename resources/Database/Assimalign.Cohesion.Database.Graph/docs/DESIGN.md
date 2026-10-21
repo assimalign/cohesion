@@ -1014,8 +1014,8 @@ yet keeps the caller's transaction and its earlier writes.
   no source position, so a name is reported once per kind, at its first mention, clause by clause:
   each clause's patterns path by path (labels, then relationship types), then its `WHERE`. A
   warning for a name first met in a labeled predicate carries that predicate's span
-  (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` stays null
-  for a statement with nothing to report. The warning travels on a row result (`DatabaseResultSet`), on
+  (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` is empty
+  for a statement with nothing to report (#1264). The warning travels on a row result (`DatabaseResultSet`), on
   `GraphPathsQueryResult`, and on the result of a statement with no projection.
 - **Writes.** `INSERT` still defines new labels and relationship types. A write whose `MATCH` names
   an unknown name empties that MATCH stage, so following `INSERT` or `DELETE` stages act on no rows until a resetting NEXT: the statement
@@ -1048,9 +1048,8 @@ yet keeps the caller's transaction and its earlier writes.
   A null label is an `ArgumentNullException` before the read starts.
   `GraphSchemaResult<T>.Diagnostics` is empty, never null, when the read reports nothing: it is a
   new collection property, and .NET's design guidelines rule out a null collection.
-  `DatabaseResult.Diagnostics` keeps its existing null-when-empty contract, so a caller tests `Count`
-  on the schema result and null on a statement result until the concrete-type redesign of the
-  Database models settles one convention. The other schema reads take no name (`GetLabelsAsync`,
+  `DatabaseResult.Diagnostics` follows the same empty-when-absent contract (#1264), so a caller
+  tests `Count` on both schema and statement results. The other schema reads take no name (`GetLabelsAsync`,
   `GetRelationshipTypesAsync`) or a definition identity (`GetPropertyKeysAsync`, empty for an
   unknown identity, unchanged).
 - **Traversal.** `TraverseAsync` resolves `GraphTraversal.RelationshipType` through the catalog before its
@@ -1527,6 +1526,37 @@ their syntax; the existing closed projection gate propagates entity-valued resul
 
 ## Graph wire family
 
+### Bounded path delivery (#1539)
+
+The server uses the protocol's bounded writer for path results: at most 64 KiB or 32 frames
+per batch, a cooperative 10 ms latency boundary between already-materialized paths, and an
+explicit flush at completion, diagnostics and errors. A larger frame is sent alone under
+the existing 16 MiB per-frame limit; results have no aggregate wire cap. Every write awaits
+transport backpressure. Path encoding measures first, rents caller-owned storage, writes
+directly from spans and returns cleared storage only after the writer has copied or sent it.
+This keeps a temporary encoding buffer plus the batch copy, including for large paths that fit
+the batch; a reserve API was deferred to keep the framing boundary model-neutral and avoid
+another public seam. Paths larger than the batch use one standalone transport write.
+Only the session pump uses the writer; teardown joins the pump before returning its buffers.
+The terminal error output-completion and drain deadline contract remains unchanged.
+Latency and completion flushes share the transport boundary: disposed flushes close the
+session once and never become an engine COHDBG019 response or a second transport write.
+
+GraphDatabaseEventSource adds Verbose event 15, PathPhaseCompleted, under Sessions, with
+sessionId, phase (Execute, Encode or Send) and durationMilliseconds. Exact cumulative counters
+path-execute-calls, path-encode-calls, path-send-calls and the corresponding *-milliseconds
+attribute work independently of listeners. Execute includes parse/planning/materialization;
+encode counts each attempted path; send counts each attempted Path handoff, including
+backpressure and latency flush waits. Diagnostics and PathsComplete do not increment path
+send counts or timings. Failure and cancellation still close the attempted phase. A failed
+transport write faults the batched writer, so even a best-effort soft-stop terminal notice
+cannot append to an uncertain stream; the session closes. Canceling only the final Ready
+flush after a successful write preserves the terminal Unavailable notice (#1087).
+Shared protocol transport-write-calls and transport-flush-calls expose batching at the
+Stream boundary; for DuplexPipeStream their sum counts implicit plus explicit flush requests.
+GraphClient's decode counters complete the per-phase view. No durability setting or Path
+payload changed; the local allocation proxy is the 20-path TCP test in Graph.Client.
+
 Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
 write. The pump flushes the complete frame, completes connection Output, consumes remaining
 peer input until close, TerminalDrainLinger or deadline, then disposes. Deadline and hard-abort callbacks abort the
@@ -1683,8 +1713,8 @@ Node labels and relationship types remain model strings; no fake table schema is
 After Ready, the path client sends ExecutePaths and consumes zero or more Path messages followed
 by one PathsComplete, or a shared Error with no completion. Requests are serialized. The completion
 count must match received paths; zero matches requires count zero. Each path fits one frame.
-The client enumerates those frames through a `DatabaseStreamingExchange` and
-`ExecuteStreamingAsync`, keeping the shared connection lease until enumeration completes or is
+The client enumerates independently owned decoded paths through a bounded channel driven by
+`DatabaseProtocolExchange<bool>`, keeping the shared connection lease until enumeration completes or is
 disposed. Consuming PathsComplete or a terminal statement Error before any Path permits reuse;
 an Error after path output discards the connection. Cancellation or
 early disposal before terminal consumption leaves the exchange incomplete and discards the
@@ -1887,6 +1917,7 @@ four servers.
 | 11 | `IndexRecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (an offline refusal's model code; empty otherwise), `exceptionType` |
 | 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
+| 15 | `PathPhaseCompleted` | Verbose | `Sessions` | `sessionId`, `phase`, `durationMilliseconds` |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
@@ -1931,10 +1962,11 @@ the failures the session answers as statement failures; any other exception is a
 fault, which the pump reports once, as `SessionFaulted`. The in-process text path parses inside
 the root call, so the root's `StatementFailed` reports it and this event does not.
 
-Counters, maintained whether or not anyone listens and updated on accept, rejection and close
-only, never per frame or row: `current-server-sessions` (gauge: up when the accept loop
+Session counters, maintained whether or not anyone listens and updated on accept, rejection and close: `current-server-sessions` (gauge: up when the accept loop
 registers a session, down when the session's completion removes it), `total-server-sessions`,
 `total-rejected-sessions`.
+
+Path execute, encode and send counters and event 15 are documented under Bounded path delivery.
 
 Every write sits behind `IsEnabled(level, keywords)`; a session reads its start timestamp only
 while `SessionClosed` is on, and a recovery reads its own only while its start is written. No
@@ -2464,3 +2496,12 @@ The following public types move from their Catalog or Storage assembly into Assi
 
 - From `Assimalign.Cohesion.Database.Graph.Catalog`: `Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalogException`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphIndexMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphLabelMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphPropertyKeyMetadata`, `Assimalign.Cohesion.Database.Graph.Catalog.GraphRelationshipTypeMetadata`.
 - From `Assimalign.Cohesion.Database.Graph.Storage`: `Assimalign.Cohesion.Database.Graph.Storage.GraphElementTooLargeException`, `Assimalign.Cohesion.Database.Graph.Storage.GraphIncidentDirection`, `Assimalign.Cohesion.Database.Graph.Storage.GraphStorage`, `Assimalign.Cohesion.Database.Graph.Storage.GraphStore`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphIndex`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphNode`, `Assimalign.Cohesion.Database.Graph.Storage.StoredGraphRelationship`.
+
+## Checkpoint progress observations (#1284)
+
+The shared checkpointer records the closed flag and storage due flags used by this model's
+predicate before deciding whether to attempt work. The linked pace helper asserts due attempts,
+worker completions and bounded recorded trigger/lane waits; statement-completed checkpoints do
+not supply its progress count. The observation remains internal and opt-in; see the
+[root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
+for publication scope, callback isolation and the limits of the wait budgets.

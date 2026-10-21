@@ -15,7 +15,7 @@ internal sealed class KeyValueResult : DatabaseResult
     {
         Status = status;
         AffectedCount = affectedCount;
-        Diagnostics = diagnostics;
+        Diagnostics = diagnostics ?? [];
     }
 
     /// <inheritdoc />
@@ -25,5 +25,5 @@ internal sealed class KeyValueResult : DatabaseResult
     public override long AffectedCount { get; }
 
     /// <inheritdoc />
-    public override IReadOnlyList<Diagnostic>? Diagnostics { get; }
+    public override IReadOnlyList<Diagnostic> Diagnostics { get; }
 }

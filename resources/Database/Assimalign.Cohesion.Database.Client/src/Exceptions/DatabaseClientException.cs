@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Database.Client;
 /// exception too. No server sends <see cref="ProtocolErrorCode.ConnectionFailure"/>: an error
 /// frame that carries it is a <see cref="ProtocolErrorCode.ProtocolViolation"/>.
 /// </remarks>
-public class DatabaseClientException : Exception
+public sealed class DatabaseClientException : Exception
 {
     /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();

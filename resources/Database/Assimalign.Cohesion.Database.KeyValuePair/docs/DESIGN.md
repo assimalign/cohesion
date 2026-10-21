@@ -1,5 +1,11 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Result diagnostics (#1264)
+
+Key-value command and materialized row results return a non-null Diagnostics collection,
+empty when there is nothing to report (#1264). Supplied command diagnostics remain intact.
+`KeyValueCatalogException` is a sealed public exception leaf (#1264).
+
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
@@ -1428,3 +1434,12 @@ The following public types move from their Catalog or Storage assembly into Assi
 
 - From `Assimalign.Cohesion.Database.KeyValuePair.Catalog`: `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog`, `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalogException`, `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalogSnapshot`.
 - From `Assimalign.Cohesion.Database.KeyValuePair.Storage`: `Assimalign.Cohesion.Database.KeyValuePair.Storage.KeyValueStorage`.
+
+## Checkpoint progress observations (#1284)
+
+The shared checkpointer records the closed flag and storage due flags used by this model's
+predicate before deciding whether to attempt work. The linked pace helper asserts due attempts,
+worker completions and bounded recorded trigger/lane waits; statement-completed checkpoints do
+not supply its progress count. The observation remains internal and opt-in; see the
+[root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
+for publication scope, callback isolation and the limits of the wait budgets.

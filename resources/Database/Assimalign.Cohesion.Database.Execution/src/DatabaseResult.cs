@@ -25,12 +25,13 @@ public abstract class DatabaseResult
     public abstract long AffectedCount { get; }
 
     /// <summary>
-    /// Gets any diagnostics the model reported while it parsed or executed the request.
+    /// Gets the diagnostics the model reported while it parsed or executed the request, or an
+    /// empty collection when there is nothing to report.
     /// </summary>
     /// <remarks>
     /// Uses the <see cref="Diagnostic"/> type from <c>Database.Types</c>: a code, a message and a
     /// severity, and, for a diagnostic a language model found in statement text, its position in
     /// that text (start, end, line). A model that executes typed requests sets no position.
     /// </remarks>
-    public abstract IReadOnlyList<Diagnostic>? Diagnostics { get; }
+    public abstract IReadOnlyList<Diagnostic> Diagnostics { get; }
 }

@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <c>DatabaseTransactionCommitUnconfirmedException</c> at its boundary.
 /// </para>
 /// </remarks>
-public class TransactionCommitUnconfirmedException : Exception
+public sealed class TransactionCommitUnconfirmedException : Exception
 {
     /// <summary>
     /// Initializes a new <see cref="TransactionCommitUnconfirmedException"/>.
