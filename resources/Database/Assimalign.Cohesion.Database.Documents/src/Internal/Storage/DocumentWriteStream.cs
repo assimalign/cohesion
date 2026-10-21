@@ -153,6 +153,7 @@ internal sealed class DocumentWriteStream : Stream
         var record = DocumentChunkCodec.Encode(_buffer.AsSpan(0, _buffered), _context.Sequence);
         ulong next = await _coordinator.ApplyStatementAsync(_context, bracket =>
         {
+            _storage.BeforeContentChunkWrite?.Invoke();
             var (page, slot) = _storage.InsertChunk(bracket, record);
             ulong location = DocumentStorage.PackLocation(page, slot);
             if (_tail != 0)

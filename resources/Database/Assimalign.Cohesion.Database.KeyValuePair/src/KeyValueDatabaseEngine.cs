@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
@@ -386,7 +387,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">A file set or the entry-space format of the database was refused.</exception>
+    /// <exception cref="DatabaseException">Creation is incomplete or the catalog is missing (<c>COHDBK006</c>), or a file set or the entry-space format of the database was refused.</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -573,30 +574,29 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            KeyValueStorage storage;
-            try
+            string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);
+            bool incompleteCreation = _strategy is FileSystemKeyValueStorageStrategy files && files.HasIncompleteCreation(name);
+            if (incompleteCreation || !_strategy.StorageExists(name, catalog: true))
             {
-                storage = _strategy.OpenStorage(name, catalog: false);
-            }
-            catch (StorageFormatException exception)
-            {
-                throw RefuseStorageFormat(name, "data", name, exception);
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    incompleteCreation ? ErrorMessages.DatabaseCreationIncomplete : ErrorMessages.DatabaseCatalogMissing, name);
+                throw new DatabaseException(message, [new Types.Diagnostic
+                { Code = "COHDBK006", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
             }
 
+            KeyValueStorage? storage = null;
             KeyValueStorage? catalogStorage = null;
-            string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);
 
             // See CreateDatabaseCoreAsync: instance construction commits (recovery
             // checkpoint, primary-index re-attachment), so the flush worker must
             // see the storages first under grouped durability.
             try
             {
-                ConfigureStorage(storage, name, catalog: false);
+                // Under the engine lifecycle lock, open and validate the catalog before opening
+                // data: a catalog refusal must not run the data set's physical recovery (#1270).
                 try
                 {
-                    catalogStorage = _strategy.StorageExists(name, catalog: true)
-                        ? _strategy.OpenStorage(name, catalog: true)
-                        : _strategy.CreateStorage(name, catalog: true);
+                    catalogStorage = _strategy.OpenStorage(name, catalog: true);
                 }
                 catch (StorageFormatException exception)
                 {
@@ -604,11 +604,22 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 }
 
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
+                var catalog = KeyValueCatalog.Open(catalogStorage);
+                KeyValueDatabase.ThrowIfFormatIsNotCurrent(name, catalog);
+                try
+                {
+                    storage = _strategy.OpenStorage(name, catalog: false);
+                }
+                catch (StorageFormatException exception)
+                {
+                    throw RefuseStorageFormat(name, "data", name, exception);
+                }
+                ConfigureStorage(storage, name, catalog: false);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
 
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
-                var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true);
+                var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true, catalog: catalog);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
@@ -616,7 +627,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             {
                 try
                 {
-                    storage.Dispose();
+                    storage?.Dispose();
                 }
                 finally
                 {

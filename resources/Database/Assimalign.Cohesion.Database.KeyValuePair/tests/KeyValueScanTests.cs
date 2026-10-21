@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -174,5 +175,52 @@ public class KeyValueScanTests
 
         // Act / Assert
         Should.Throw<System.ArgumentException>(() => new KeyValueScanRequest(options));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Scan: Null arrays and empty memories are absent bounds (#1088)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Scan_EmptyBounds_ShouldNormalizeBeforeValidation(bool emptyArray)
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        await SeedAsync(database, session, "a", "b", "user:1", "user:2", "z");
+        byte[]? bound = emptyArray ? Array.Empty<byte>() : null;
+        var options = new KeyValueScanOptions { Prefix = bound, Start = bound, End = bound };
+
+        // Act
+        var request = new KeyValueScanRequest(options);
+        var all = await CollectKeysAsync(database, session, options);
+        var lower = await CollectKeysAsync(database, session, new() { Start = Bytes("b"), End = bound });
+        var prefixed = await CollectKeysAsync(database, session, new() { Prefix = Bytes("user:"), Start = bound, End = bound });
+        bool useBound = false;
+        var conditional = await CollectKeysAsync(database, session, new() { End = useBound ? Bytes("b") : null });
+        var emptyPrefix = await CollectKeysAsync(database, session, new() { Prefix = bound, Start = Bytes("b") });
+
+        // Assert
+        request.Prefix.ShouldBeNull();
+        request.Start.ShouldBeNull();
+        request.End.ShouldBeNull();
+        all.ShouldBe(["a", "b", "user:1", "user:2", "z"]);
+        lower.ShouldBe(["b", "user:1", "user:2", "z"]);
+        emptyPrefix.ShouldBe(lower);
+        prefixed.ShouldBe(["user:1", "user:2"]);
+        conditional.ShouldBe(all);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Scan: Invalid options throw on first enumeration (#1088)")]
+    public async Task Scan_InvalidOptions_ShouldThrowOnFirstMove()
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        var scan = database.ScanAsync(session, new() { Prefix = Bytes("p"), End = Bytes("z") }, TestTimeout.Token());
+
+        // Act / Assert
+        await using var iterator = scan.GetAsyncEnumerator();
+        await Should.ThrowAsync<ArgumentException>(async () => await iterator.MoveNextAsync());
     }
 }

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -170,6 +172,49 @@ public class KeyValueCommandTests
         prefixed.Count.ShouldBe(2);
         limited.Count.ShouldBe(2);
         limitedByParameter.Count.ShouldBe(3);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: Empty SCAN operands mean absent bounds (#1088)")]
+    [InlineData("SCAN FROM @empty TO @empty PREFIX @empty", false)]
+    [InlineData("SCAN TO @empty", false)]
+    [InlineData("SCAN PREFIX @p FROM @empty TO @empty", true)]
+    public async Task Execute_EmptyScanBounds_ShouldMatchUnboundedOrPrefix(string command, bool prefix)
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+        foreach (string key in new[] { "a:1", "b:1", "b:2", "c:1" })
+        {
+            await database.PutAsync(session, Bytes(key), Bytes("v"), cancellationToken: TestTimeout.Token());
+        }
+
+        // Act
+        var rows = await MaterializeAsync(await session.ExecuteCommandTextAsync(command,
+            Parameters(("empty", Array.Empty<byte>()), ("p", Bytes("b:"))), TestTimeout.Token()));
+
+        // Assert
+        rows.Select(row => Text((byte[])row[0]!)).ShouldBe(prefix ? ["b:1", "b:2"] : new[] { "a:1", "b:1", "b:2", "c:1" });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: Empty SCAN operands still count as clauses and null fails parsing (#1088)")]
+    [InlineData("SCAN FROM @empty FROM @p", false, "COHKV010")]
+    [InlineData("SCAN TO @empty TO @p", false, "COHKV010")]
+    [InlineData("SCAN PREFIX @empty PREFIX @p", false, "COHKV010")]
+    [InlineData("SCAN TO @empty", true, "COHKV012")]
+    public async Task Execute_RepeatedOrNullScanOperand_ShouldRetainParseFailure(string command, bool nullOperand, string code)
+    {
+        // Arrange
+        var (engine, database) = await CreateAsync();
+        await using var _ = engine;
+        await using var session = await database.CreateSessionAsync();
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteCommandTextAsync(command,
+            Parameters(("empty", nullOperand ? null : Array.Empty<byte>()), ("p", Bytes("b:"))), TestTimeout.Token()));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commands: Grammar violations fail as parse errors")]

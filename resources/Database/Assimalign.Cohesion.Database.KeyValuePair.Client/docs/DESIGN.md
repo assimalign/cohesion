@@ -131,6 +131,10 @@ Materialized scans are this package's policy. Use a range limit to bound results
 cursor composition can resume after the last key. An incremental API can be added
 here without changing shared result policy.
 
+Null or zero-length scan bounds mean absent, including a null `byte[]` implicitly
+converted to nullable memory (#1088). The client validates conflicts only among
+non-empty bounds and omits empty clauses and their parameters from the command.
+
 Encoding and materialization use no reflection or runtime code generation.
 Wire transactions, typed serialization, caching, retry policy, and rent-time
 liveness pings remain outside this surface.

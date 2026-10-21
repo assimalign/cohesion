@@ -2051,6 +2051,15 @@ and scrubs its indexes, and only then calls `CompleteRecovery`. Checkpointing ea
 the commit evidence needed to distinguish abandoned logical writes. Engine disposal aborts active
 logical contexts before durably flushing storage. Storage owns the passed streams.
 
+`WriteContentAsync` borrows its caller's context and never commits or rolls it back,
+even after a chunk failure or cancellation (#1244). Earlier chunks remain tracked until
+the caller aborts. The engine's failure handler orders the operation completion gate,
+transaction end gate, then coordinator apply gate, serializing abort with rollback and
+session disposal; storage must return the failure to that handler. This keeps
+`COHDBD001` refusals until the caller rolls back. PostgreSQL likewise sends a command
+error through its transaction end handler (`src/backend/tcop/postgres.c:4629`,
+`AbortCurrentTransaction`); the existing engine end contract supplies the synchronization.
+
 #### Storage: Serialization rules, version 1
 
 Content is exactly one UTF-8 JSON value, without a BOM, comments, or trailing commas. Objects,

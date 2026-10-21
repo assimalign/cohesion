@@ -14,6 +14,9 @@ namespace Assimalign.Cohesion.Database.Documents.Storage;
 
 public sealed partial class DocumentStorage
 {
+    // Owning-assembly tests inject a chunk failure without taking the journal offline.
+    internal Action? BeforeContentChunkWrite { get; set; }
+
     /// <summary>Validates one UTF-8 JSON value against the persisted document format.</summary>
     /// <param name="content">The complete JSON document.</param>
     /// <exception cref="JsonException">JSON is malformed, duplicates a property, or contains a number outside the decimal domain.</exception>
@@ -25,22 +28,27 @@ public sealed partial class DocumentStorage
 
     /// <summary>Validates and writes a complete JSON value as a transactional chunk chain.</summary>
     /// <param name="coordinator">The coordinator bound to this storage.</param>
-    /// <param name="context">The active logical transaction; this method does not commit it.</param>
+    /// <param name="context">The caller-owned active logical transaction; this method neither commits nor rolls it back, including on failure.</param>
     /// <param name="content">One UTF-8 JSON value.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The immutable content reference for catalog publication.</returns>
     /// <exception cref="JsonException">The content is outside the document format.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    /// <remarks>The caller must abort the transaction after a failure to undo any chunks already written.</remarks>
     public async ValueTask<DocumentContentReference> WriteContentAsync(TransactionCoordinator coordinator,
         TransactionContext context, ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateContent(content);
         DocumentContentReference result = default;
+        // The caller owns logical completion. The engine orders its operation completion gate,
+        // transaction end gate, then coordinator apply gate. Returning the failure to that path
+        // avoids a storage rollback racing the caller's rollback or session disposal (#1244).
         await using (var write = OpenWrite(coordinator, context, reference =>
         {
             result = reference;
             return default;
-        }, () => coordinator.RollbackAsync(context), cancellationToken))
+        }, static () => ValueTask.CompletedTask, cancellationToken))
         {
             await write.WriteAsync(content, cancellationToken).ConfigureAwait(false);
         }
