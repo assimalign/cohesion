@@ -6,21 +6,103 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
+[Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlCommitCancellationConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Execute: cancellation at execution completion preserves affected count and durable success (#1246 proof)")]
+    public async Task ExecuteAsync_CanceledAtExecutionCompletion_ShouldCommitAndPersist()
+    {
+        // Arrange: cancel inside the apply callback after its final effect, before the
+        // session enters CommitAsync or its log. Restoring the old session token fails here.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = true };
+        await using var engine = SqlDatabaseEngine.Create("execution-cancellation", new()
+        {
+            StorageStrategy = strategy,
+            Durability = StorageCommitDurability.Synchronous,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("test", timeout.Token);
+        await using var session = await database.CreateSessionAsync(cancellationToken: timeout.Token);
+        await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: timeout.Token);
+        int applies = 0;
+        SqlPlanExecutor.AfterInsertApplied = () => { applies++; canceled.Cancel(); };
+
+        // Act
+        DatabaseResult result;
+        try { result = await session.ExecuteAsync("INSERT INTO items VALUES (42)", cancellationToken: canceled.Token); }
+        finally { SqlPlanExecutor.AfterInsertApplied = null; }
+
+        // Assert
+        applies.ShouldBe(1);
+        canceled.IsCancellationRequested.ShouldBeTrue();
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
+        result.AffectedCount.ShouldBe(1);
+        session.CurrentTransaction.ShouldBeNull();
+        await VerifyAsync(database, timeout.Token);
+        await session.DisposeAsync();
+        await database.DisposeAsync();
+        await VerifyAsync(await engine.OpenDatabaseAsync("test", timeout.Token), timeout.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - CREATE TABLE: cancellation after catalog self-commit delivers success without a retry (#1246)")]
+    public async Task ExecuteAsync_CanceledAfterDdlSelfCommit_ShouldDeliverSuccessAndOneTable()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = true };
+        await using var engine = SqlDatabaseEngine.Create("ddl-cancellation", new()
+        {
+            StorageStrategy = strategy,
+            Durability = StorageCommitDurability.Synchronous,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("test", timeout.Token);
+        await using var session = await database.CreateSessionAsync(cancellationToken: timeout.Token);
+        int commits = 0;
+        SqlPlanExecutor.AfterSelfCommit = () => { commits++; canceled.Cancel(); };
+
+        // Act: the catalog committed durably; mandatory cleanup must still finish.
+        DatabaseResult result;
+        try { result = await session.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY)", cancellationToken: canceled.Token); }
+        finally { SqlPlanExecutor.AfterSelfCommit = null; }
+
+        // Assert: use the table immediately, without retrying CREATE TABLE.
+        commits.ShouldBe(1);
+        canceled.IsCancellationRequested.ShouldBeTrue();
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
+        session.LastStatementMetrics!.SelfCommits.ShouldBe(1);
+        database.Catalog.Tables.ShouldHaveSingleItem().Name.ShouldBe("items");
+        (await session.ExecuteAsync("INSERT INTO items VALUES (42)", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        await session.DisposeAsync();
+        await database.DisposeAsync();
+        var reopened = await engine.OpenDatabaseAsync("test", timeout.Token);
+        reopened.Catalog.Tables.ShouldHaveSingleItem().Name.ShouldBe("items");
+        await VerifyAsync(reopened, timeout.Token);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246 regression guard)")]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(true, true)]
     public async Task CommitAsync_CancellationAtEndBoundary_ShouldPreserveOutcome(bool explicitTransaction, bool sqlControl)
     {
-        // Arrange: only successful durable flushes survive the simulated reopen.
+        // Regression guard for late-flush cancellation and explicit ends; the execution-
+        // completion case above proves the session fix. Only durable flushes survive reopen.
+        // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = true };

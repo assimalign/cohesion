@@ -2292,8 +2292,8 @@ before cleanup failures are aggregated. DROP TABLE and DROP INDEX share the dire
 ALTER's post-commit binding also ignores caller cancellation, and rename attempts every affected
 table before aggregating failures. DROP COLUMN binds its projected definition before publication
 with the caller's token, then adopts that binding after commit without refolding. The session
-observes cancellation after this mandatory cleanup and before its logical commit, preserving cancellation instead of wrapping it as
-a transaction-aborted error. RESTRICT, locks, ownership and the CASCADE
+delivers the committed result after this mandatory cleanup even if the caller canceled, so a
+retry cannot repeat an already committed DDL change (#1246). RESTRICT, locks, ownership and the CASCADE
 drop set use SqlPlanExecutor.Schemas.ObjectsInNamespace over a catalog snapshot. Future views
 (#1124) must extend this one SQL-side enumeration and its revalidation; the catalog's commit-time
 check remains an independent invariant guard.
@@ -4254,8 +4254,14 @@ once statement execution has completed, the session ends its context without for
 caller token. A cancellation during that commit cannot change success into an abort; real
 append and durability failures retain their existing outcomes. Explicit commit and rollback
 observe cancellation only before their shared end starts. See the Transactions DESIGN,
-"Ending a transaction", for the kernel rule. Catalog DDL that self-committed still finishes
-mandatory cleanup before reporting cancellation.
+"Ending a transaction", for the kernel rule. Catalog DDL that self-committed finishes
+mandatory cleanup with `CancellationToken.None` and delivers its committed result even if the
+caller canceled. A successful CREATE TABLE needs no retry; the table exists once after reopen.
+
+The execution-completion case in `SqlCommitCancellationConformanceTests` cancels inside the
+INSERT apply callback after its final effect, before coordinator/log commit entry. It proves
+the session boundary by checking success, affected count and persistence across reopen. Its
+late-flush and explicit-transaction cases are regression guards, not proof of that session fix.
 
 The transaction also owns the #1120 start instant, captured once at BEGIN/API start.
 Every statement context borrows it until commit or rollback; auto-commit captures

@@ -5,19 +5,62 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
+[Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueCommitCancellationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246)")]
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Execute: cancellation at execution completion preserves affected count and durable success (#1246 proof)")]
+    public async Task ExecuteAsync_CanceledAtExecutionCompletion_ShouldCommitAndPersist()
+    {
+        // Arrange: cancel inside the apply callback after its final effect, before the
+        // session enters CommitAsync or its log. Restoring the old session token fails here.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var canceled = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = true };
+        await using var engine = KeyValueDatabaseEngine.Create("execution-cancellation", new()
+        {
+            StorageStrategy = strategy,
+            Durability = StorageCommitDurability.Synchronous,
+            CheckpointInterval = TimeSpan.FromHours(1),
+            PageWriteBackInterval = TimeSpan.FromHours(1),
+            MaintenanceInterval = TimeSpan.FromHours(1),
+        });
+        var database = await engine.CreateDatabaseAsync("test", timeout.Token);
+        await using var session = await database.CreateSessionAsync(cancellationToken: timeout.Token);
+        int applies = 0;
+        KeyValueOperationExecutor.AfterPutApplied = () => { applies++; canceled.Cancel(); };
+
+        // Act
+        DatabaseResult result;
+        try { result = await session.ExecuteAsync(new KeyValuePutRequest(new byte[] { 1 }, new byte[] { 42 }), canceled.Token); }
+        finally { KeyValueOperationExecutor.AfterPutApplied = null; }
+
+        // Assert
+        applies.ShouldBe(1);
+        canceled.IsCancellationRequested.ShouldBeTrue();
+        result.Status.ShouldBe(DatabaseResultStatus.Success);
+        result.AffectedCount.ShouldBe(1);
+        session.CurrentTransaction.ShouldBeNull();
+        await VerifyAsync(database, timeout.Token);
+        await session.DisposeAsync();
+        await database.DisposeAsync();
+        await VerifyAsync(await engine.OpenDatabaseAsync("test", timeout.Token), timeout.Token);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246 regression guard)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CommitAsync_CancellationAtEndBoundary_ShouldPreserveOutcome(bool explicitTransaction)
     {
-        // Arrange: only successful durable flushes survive the simulated reopen.
+        // Regression guard for late-flush cancellation and explicit ends; the execution-
+        // completion case above proves the session fix. Only durable flushes survive reopen.
+        // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true) { LoseUnconfirmedJournalOnReopen = true };

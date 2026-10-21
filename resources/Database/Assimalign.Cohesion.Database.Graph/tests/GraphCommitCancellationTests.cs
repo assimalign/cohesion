@@ -13,11 +13,13 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphCommitCancellationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Commit: pre-cancellation preserves the transaction; cancellation during explicit or automatic commit preserves durable success (#1246 regression guard)")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CommitAsync_CancellationAtEndBoundary_ShouldPreserveOutcome(bool explicitTransaction)
     {
+        // Regression guard: late-flush cancellation and explicit ends were already handled by
+        // the old session path. SQL/Key-Value execution-completion cases prove the session fix.
         // Arrange: only successful durable flushes survive the simulated reopen.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;

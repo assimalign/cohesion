@@ -76,6 +76,11 @@ observe cancellation only before their shared end starts. See the Transactions D
 `PutAsync` consumes its already materialized outcome without the command token after
 execution completes, so cancellation during automatic commit cannot mask a committed write.
 
+The execution-completion case in `KeyValueCommitCancellationTests` cancels inside the PUT
+apply callback after its final effect, before coordinator/log commit entry. It proves the
+session boundary through success, affected count and persistence across reopen. The late-flush
+and explicit-transaction cases are regression guards, not proof of that session fix.
+
 - **Index-primary reads.** `GET`/`EXISTS` seek the unique primary index
   (`key` → packed record location) through the command's snapshot; `SCAN` drives
   an incremental snapshot cursor over an `IndexKeyRange` (#1542). Open and each move receive the command token; LIMIT stops after its bounded batch, and disposal drops owned keys. Reads finish before any mutation applies. Keys go into `IndexKey` **raw** —

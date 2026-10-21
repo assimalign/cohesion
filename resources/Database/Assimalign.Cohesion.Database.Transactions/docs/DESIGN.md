@@ -186,9 +186,19 @@ The rule includes read-only contexts, which still append and flush nothing (#128
 
 Every model's explicit transaction uses the root end state machine. Automatic commit also
 owns an uncancellable end once execution has completed: SQL and KeyValuePair pass no caller
-token to the coordinator, matching Documents, Graph and Blob. SQL preserves its separate
-post-cleanup cancellation check for catalog DDL that self-committed. Statement execution
+token to the coordinator, matching Documents, Graph and Blob. SQL catalog DDL that self-committed
+finishes mandatory cleanup without caller cancellation and delivers its committed result. Statement execution
 and lock waits continue to observe their tokens before that automatic end.
+
+This rule covers the in-process result. A wire connection that dies after commit may drop the
+outcome frame: SQL and Key-Value server sessions stream results with the connection token.
+The durable commit cannot guarantee delivery over a dead connection.
+
+SQL and Key-Value execution-completion tests cancel inside the statement apply callback after
+execution, before coordinator/log commit entry, and prove the session fix through success,
+affected count and reopen persistence. Documents, Graph and Blob cancellation tests and the
+explicit-transaction engine cases are regression guards; their late-flush cancellation was
+already handled by the old session path.
 
 PostgreSQL likewise holds interrupts through commit cleanup:
 `src/backend/access/transam/xact.c:2382-2383` (`HOLD_INTERRUPTS`) through

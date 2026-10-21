@@ -483,10 +483,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
-            // The executor must finish mandatory cleanup after a catalog self-commit.
-            // Then report caller cancellation directly. Rollback below only ends the
-            // statement context; the catalog's durable changes have already committed.
-            if (scope.Metrics.SelfCommits > 0) { cancellationToken.ThrowIfCancellationRequested(); }
+            // Catalog DDL has already committed and finished its mandatory cleanup.
+            // Deliver that result even if the caller canceled after the durable commit.
             // Execution completed: auto-commit owns the end from here, as in every model.
             await _coordinator.CommitAsync(context).ConfigureAwait(false);
             return result;
