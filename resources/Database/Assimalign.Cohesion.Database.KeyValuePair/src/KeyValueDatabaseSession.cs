@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
@@ -130,7 +131,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
         {
             throw offline;
         }
@@ -201,10 +202,15 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     // Runs after the command admission and snapshot pin have been released.
     private async ValueTask<Exception> AbortStorageFailureAsync(Exception error)
     {
-        if (error is DatabaseCorruptionException or DatabaseException { InnerException: StorageIOException or System.IO.IOException }
+        if (DatabaseFailure.IsStorageFailure(error)
             && CurrentTransaction is { } transaction)
         {
-            await transaction.AbortForFailedStatementAsync(error).ConfigureAwait(false);
+            try { await transaction.AbortForFailedStatementAsync(error).ConfigureAwait(false); }
+            catch (Exception abortFailure)
+            {
+                // Undo must not replace the statement's coded cause.
+                return DatabaseFailure.WithCleanupFailure(error, abortFailure);
+            }
         }
         return error;
     }

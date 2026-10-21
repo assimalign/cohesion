@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -113,11 +114,17 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
         return cause;
     }
 
-    internal ValueTask AbortStorageFailureAsync()
+    internal async ValueTask AbortStorageFailureAsync(Exception? cleanupFailure = null)
     {
         var cause = _storageFailure;
         _storageFailure = null;
-        return cause is null ? ValueTask.CompletedTask : AbortAsync(cause);
+        if (cause is null) { return; }
+        try { await AbortAsync(cause).ConfigureAwait(false); }
+        catch (Exception abortFailure)
+        {
+            cleanupFailure = cleanupFailure is null ? abortFailure : new AggregateException(cleanupFailure, abortFailure);
+        }
+        if (cleanupFailure is not null) { throw DatabaseFailure.WithCleanupFailure(cause, cleanupFailure); }
     }
 
     /// <inheritdoc />
@@ -199,7 +206,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     private Exception Translate(Exception error) => error switch
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
-        _ when _database.TranslateOffline(error) is var offline && !ReferenceEquals(offline, error) => offline,
+        _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,

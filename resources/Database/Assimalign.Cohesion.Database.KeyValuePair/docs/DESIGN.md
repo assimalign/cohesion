@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Wrapped child failures and abort evidence (#1364)
+
+Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
+and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes. Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and
+`COHDBK005`; other index failures use `COHDBK005`. Begin, command, commit and rollback share
+classification. Create and open also code child failures before publication; known format
+refusals retain their authored messages, source diagnostics and inner causes. A failed command aborts an explicit transaction after releasing admission.
+If that abort also fails, the original coded diagnostics remain primary and both causes are
+retained in an inner aggregate. Transaction refusals keep their own code. Real device-read
+regressions cover slot, journal and storage-transaction failures through both wrapper shapes,
+and a failed deferred-undo notification proves an abort cannot replace the read diagnosis.
+
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.

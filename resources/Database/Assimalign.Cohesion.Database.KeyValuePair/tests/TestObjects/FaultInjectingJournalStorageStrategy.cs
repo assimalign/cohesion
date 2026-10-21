@@ -126,8 +126,11 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     }
 
     /// <inheritdoc />
+    internal Func<bool, Exception?>? CreateFailure { get; set; }
+
     public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
     {
+        if (CreateFailure?.Invoke(catalog) is { } failure) { throw failure; }
         string key = Key(databaseName, catalog);
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)

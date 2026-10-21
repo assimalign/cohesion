@@ -1,5 +1,20 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Wrapped child failures and abort evidence (#1364)
+
+Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
+and aggregate causes, use `COHSQLE041`. Offline and format refusals retain their specific codes. Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and
+`COHSQLE041`; other index failures use `COHSQLE041`. Begin, statement, commit and rollback
+share classification. Create and open also code wrapped child failures before publication.
+Existing format refusals retain their authored type, message and source diagnostic; a second
+model wrapper never hides the specific format diagnosis. Failed-statement snapshot release
+and transaction abort each preserve
+the coded statement cause; cleanup failures are retained alongside it in an inner aggregate.
+Transaction refusals keep their own code. Real device-read regressions cover slot, journal and
+storage-transaction failures through both wrapper shapes, plus a failed abort notification.
+All added work is on error paths; successful-statement allocation behavior is unchanged.
+
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.

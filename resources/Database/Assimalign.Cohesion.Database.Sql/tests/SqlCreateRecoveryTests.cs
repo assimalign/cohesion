@@ -68,7 +68,9 @@ public sealed class SqlCreateRecoveryTests
         await using var first = SqlDatabaseEngine.Create("interrupted", new SqlDatabaseEngineOptions { StorageStrategy = strategy });
 
         // Act
-        await Should.ThrowAsync<IOException>(() => first.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseException>(() => first.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
+        failure.InnerException.ShouldBeOfType<IOException>().Message.ShouldBe("Injected create interruption.");
         await using var next = SqlDatabaseEngine.Create("next", new SqlDatabaseEngineOptions { StorageStrategy = crashed.ShouldNotBeNull() });
         var recovered = await next.CreateDatabaseAsync("sales", CancellationToken.None);
 

@@ -140,8 +140,11 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     }
 
     /// <inheritdoc />
+    internal Func<bool, Exception?>? CreateFailure { get; set; }
+
     public override SqlStorage CreateStorage(string databaseName, bool catalog)
     {
+        if (CreateFailure?.Invoke(catalog) is { } failure) { throw failure; }
         string key = Key(databaseName, catalog);
         var files = new Files(new FaultInjectingDataStream(this), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)

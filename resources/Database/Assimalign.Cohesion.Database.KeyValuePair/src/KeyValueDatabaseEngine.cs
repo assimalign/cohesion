@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
@@ -436,6 +437,31 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <inheritdoc />
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
+        try { return CreateDatabaseFiles(name, cancellationToken); }
+        catch (Exception error) when (StorageCorruptionException.Find(error) is null
+            && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } corruption)
+        {
+            throw DatabaseCorruptionException.Create(name, corruption, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+        }
+        catch (Exception error) when (error is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
+            && StorageCorruptionException.Find(error) is null && StorageOfflineException.Find(error) is { } offline)
+        {
+            throw offline.CommitRecordWritten
+                ? DatabaseTransactionCommitUnconfirmedException.Create(KeyValueDatabase.OfflineCode, name, offline)
+                : DatabaseOfflineException.Create(KeyValueDatabase.OfflineCode, name, offline);
+        }
+        catch (Exception error) when (StorageCorruptionException.Find(error) is null && DatabaseFailure.IsStorageFailure(error)
+            && error is not DatabaseException { Diagnostics.Count: > 0 })
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreationFailed, name, error.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = message, Severity = Types.DiagnosticSeverity.Error }], error);
+        }
+    }
+
+    private ValueTask<DatabaseInstance> CreateDatabaseFiles(DatabaseName name, CancellationToken cancellationToken)
+    {
         ValidateName(name);
         lock (_syncRoot)
         {
@@ -490,8 +516,23 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
         try { return OpenDatabase(name, cancellationToken); }
-        catch (Exception exception) when (exception is StorageIOException or IOException
-            || exception is DatabaseException { Diagnostics.Count: 0, InnerException: StorageIOException or IOException })
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+            && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
+        {
+            var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            throw refusal;
+        }
+        catch (Exception exception) when (exception is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
+            && StorageCorruptionException.Find(exception) is null && StorageOfflineException.Find(exception) is { } offline)
+        {
+            throw offline.CommitRecordWritten
+                ? DatabaseTransactionCommitUnconfirmedException.Create(KeyValueDatabase.OfflineCode, name, offline)
+                : DatabaseOfflineException.Create(KeyValueDatabase.OfflineCode, name, offline);
+        }
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+            && DatabaseFailure.IsStorageFailure(exception)
+            && exception is not DatabaseException { Diagnostics.Count: > 0 })
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.DatabaseOpenFailed, name, exception.Message);
@@ -599,7 +640,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <param name="storageName">The file set's storage name.</param>
     /// <param name="exception">The storage's refusal.</param>
     private static DatabaseException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
-        => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
+    {
+        string message = $"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}";
+        return new DatabaseException(message, [new Types.Diagnostic
+        { Code = StorageFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+    }
 
     // The area's one name rule, in the create, open and drop cores, after the base's checks of an
     // empty name, disposal and the token: a database's files live in a directory named for it under

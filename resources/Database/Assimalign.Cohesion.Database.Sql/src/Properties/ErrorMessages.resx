@@ -211,4 +211,5 @@
   <data name="ViewDependent" xml:space="preserve"><value>COHSQLD002: Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
 
   <data name="ViewDropDependent" xml:space="preserve"><value>COHSQLD002: Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
+  <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
 </root>

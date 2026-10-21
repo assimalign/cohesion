@@ -55,4 +55,23 @@ public sealed class StorageOpenFailureTests
         }
         count.ShouldBe(1);
     }
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Create: wrapped storage subclasses carry the model code before publication")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateDatabaseAsync_WrappedStorageFailure_ShouldCodeAndLeaveUnpublished(bool catalog)
+    {
+        // Arrange
+        var cause = new AggregateException(new InvalidOperationException("Other failure."), new StorageTransactionException("Injected create failure."));
+        var strategy = new FaultInjectingJournalSqlStorageStrategy { CreateFailure = isCatalog => isCatalog == catalog ? cause : null };
+        await using var engine = SqlDatabaseEngine.Create("create-failures", new() { StorageStrategy = strategy });
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("test", CancellationToken.None).AsTask());
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
+        failure.InnerException.ShouldBeSameAs(cause);
+        engine.TryGetDatabase("test", out _).ShouldBeFalse();
+    }
+
 }

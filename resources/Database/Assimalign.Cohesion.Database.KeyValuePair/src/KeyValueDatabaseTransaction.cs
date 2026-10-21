@@ -163,7 +163,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     private Exception Translate(Exception error) => error switch
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
-        _ when _database.TranslateOffline(error) is var offline && !ReferenceEquals(offline, error) => offline,
+        _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,

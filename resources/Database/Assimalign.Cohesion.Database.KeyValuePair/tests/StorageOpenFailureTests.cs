@@ -47,4 +47,23 @@ public sealed class StorageOpenFailureTests
         var entry = (await reopened.GetAsync(reader, "key"u8.ToArray(), CancellationToken.None)).ShouldNotBeNull();
         entry.Value.ToArray().ShouldBe("acknowledged"u8.ToArray());
     }
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Create: wrapped storage subclasses carry the model code before publication")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateDatabaseAsync_WrappedStorageFailure_ShouldCodeAndLeaveUnpublished(bool catalog)
+    {
+        // Arrange
+        var cause = new AggregateException(new InvalidOperationException("Other failure."), new StorageTransactionException("Injected create failure."));
+        var strategy = new FaultInjectingJournalStorageStrategy { CreateFailure = isCatalog => isCatalog == catalog ? cause : null };
+        await using var engine = KeyValueDatabaseEngine.Create("create-failures", new() { StorageStrategy = strategy });
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("test", CancellationToken.None).AsTask());
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+        failure.InnerException.ShouldBeSameAs(cause);
+        engine.TryGetDatabase("test", out _).ShouldBeFalse();
+    }
+
 }

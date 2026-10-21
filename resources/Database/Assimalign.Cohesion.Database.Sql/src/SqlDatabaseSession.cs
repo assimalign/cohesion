@@ -177,7 +177,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
         {
             throw offline;
         }
@@ -467,7 +467,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
         {
             // Refused before the statement wrote anything, a self-committing one included.
             throw offline;
@@ -583,8 +583,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // already has a non-generic ValueTask awaiter, so this adds no field per successful statement.
     private async ValueTask ReleaseFailedStatementAsync(TransactionContext? snapshotPin, SqlDatabaseTransaction transaction)
     {
+        Exception? cleanupFailure = null;
         try { await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false); }
-        finally { await transaction.AbortStorageFailureAsync().ConfigureAwait(false); }
+        catch (Exception failure) { cleanupFailure = failure; }
+        await transaction.AbortStorageFailureAsync(cleanupFailure).ConfigureAwait(false);
     }
 
     /// <summary>

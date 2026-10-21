@@ -173,6 +173,21 @@ public sealed class KeyValueIndexReadIntegrityTests
     [InlineData(0, true, true)]
     [InlineData(1, true, true)]
     [InlineData(2, true, true)]
+    [InlineData(3, false, false)]
+    [InlineData(3, true, false)]
+    [InlineData(3, true, true)]
+    [InlineData(4, false, false)]
+    [InlineData(4, true, false)]
+    [InlineData(4, true, true)]
+    [InlineData(5, false, false)]
+    [InlineData(5, true, false)]
+    [InlineData(5, true, true)]
+    [InlineData(6, false, false)]
+    [InlineData(6, true, false)]
+    [InlineData(6, true, true)]
+    [InlineData(7, false, false)]
+    [InlineData(7, true, false)]
+    [InlineData(7, true, true)]
     public async Task Execute_ReadFailure_ShouldCodeAbortAndKeepWireSession(int failureKind, bool explicitTransaction, bool readCommitted)
     {
         // Arrange
@@ -192,8 +207,16 @@ public sealed class KeyValueIndexReadIntegrityTests
         faults.RottenPage = pageId;
         if (failureKind != 0)
         {
-            faults.WrapCorruption = _ => failureKind == 1
-                ? new StorageIOException("Injected storage read failure.") : new IOException("Injected device read failure.");
+            faults.WrapCorruption = _ => failureKind switch
+            {
+                1 => new StorageIOException("Injected storage read failure."),
+                2 => new IOException("Injected device read failure."),
+                3 => new SlottedPageException("Injected slot failure."),
+                4 => new JournalException("Injected journal failure."),
+                5 => new StorageTransactionException("Injected storage transaction failure."),
+                6 => new InvalidOperationException("Wrapped read.", new StorageTransactionException("Injected storage transaction failure.")),
+                _ => new AggregateException(new InvalidOperationException("Other branch."), new IOException("Injected device read failure.")),
+            };
         }
         try
         {
@@ -221,6 +244,52 @@ public sealed class KeyValueIndexReadIntegrityTests
         await client.ExpectAsync(ProtocolMessageType.ResultRow);
         await client.ExpectAsync(ProtocolMessageType.ResultComplete);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Abort: rollback failure retains the coded read cause and both inner failures")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptCleanup)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = CreateEngine(strategy);
+        var database = await engine.CreateDatabaseAsync("abort-failure", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: CancellationToken.None);
+        var transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+        await database.PutAsync(session, Bytes("pending"), Bytes("two"), cancellationToken: CancellationToken.None);
+        var pageId = database.DataStorage.GetOwnerPages(KeyValueOperationExecutor.KeySpaceObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        var faults = strategy.Faults("abort-failure");
+        faults.RottenPage = pageId;
+        faults.WrapCorruption = _ => new StorageIOException("Injected read failure.");
+        int aborts = 0;
+        var original = database.Coordinator.OnUndoDeferred;
+        Exception abortFailure = corruptCleanup ? new StorageCorruptionException(pageId, "Injected cleanup corruption.")
+            : new InvalidOperationException("Injected abort notification failure.");
+        database.Coordinator.OnUndoDeferred = () => { Interlocked.Increment(ref aborts); throw abortFailure; };
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(() => database.GetAsync(session, Bytes("alpha"), CancellationToken.None).AsTask());
+
+            // Assert
+            aborts.ShouldBe(1);
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+            var causes = failure.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions;
+            causes[0].ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
+            if (corruptCleanup) { StorageCorruptionException.Find(causes[1]).ShouldBeSameAs(abortFailure); }
+            else { causes[1].ShouldBeSameAs(abortFailure); }
+            transaction.State.ShouldBe(TransactionState.Faulted);
+        }
+        finally
+        {
+            faults.Clear();
+            database.Coordinator.OnUndoDeferred = original;
+        }
+        await transaction.RollbackAsync(CancellationToken.None);
     }
 
     private static KeyValueDatabaseEngine CreateEngine(FaultInjectingJournalStorageStrategy? strategy)

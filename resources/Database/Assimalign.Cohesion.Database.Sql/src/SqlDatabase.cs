@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -482,6 +483,12 @@ public sealed class SqlDatabase : DatabaseInstance
             return DatabaseCorruptionException.Create(Name, corruption);
         }
 
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHSQLE041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+        }
+
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || StorageOfflineException.Find(error) is not { } offline)
         {
@@ -493,20 +500,21 @@ public sealed class SqlDatabase : DatabaseInstance
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
     }
 
-    internal static bool IsStorageFailure(Exception error)
-        => StorageOfflineException.Find(error) is null
-            && (error is StorageIOException or System.IO.IOException or DatabaseCorruptionException
-                || StorageCorruptionException.Find(error) is not null);
+    internal static bool IsStorageFailure(Exception error) => DatabaseFailure.IsStorageFailure(error);
 
     // Offline/unconfirmed and area-wide corruption classifications take precedence over I/O.
     internal Exception TranslateFailure(Exception error, bool selfCommitted = false)
     {
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBS003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
         if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLT005" }, ..] }) { return error; }
+        if (DatabaseFailure.HasCleanupFailure(error)) { return error; }
         var translated = TranslateOffline(error, selfCommitted);
-        return !ReferenceEquals(translated, error) ? translated : error switch
+        if (!ReferenceEquals(translated, error)) { return translated; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLE041" }, ..] }) { return error; }
+        return error switch
         {
-            StorageIOException or IOException => new DatabaseException(error.Message, [new Types.Diagnostic
+            _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "COHSQLE041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
             _ => error,
         };
