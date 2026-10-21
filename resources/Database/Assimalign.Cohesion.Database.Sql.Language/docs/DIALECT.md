@@ -335,6 +335,20 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
+## Unique-build failure order (#1444)
+
+CREATE UNIQUE INDEX and UNIQUE/PRIMARY KEY constraint backing builds construct the whole
+tree before checking adjacent live keys for duplicates. This also applies to deferred index
+and constraint builds. An oversized encoded key (COHSQLE042) encountered during construction
+can take precedence over a duplicate (COHSQLE037) that occurs earlier in storage order.
+
+Inline CREATE UNIQUE INDEX reports the smallest duplicated live key in encoded index order,
+rather than the first duplicate in storage order. A safe scalar offending value, when included,
+comes from that key. PostgreSQL likewise checks equality in sorted unique builds before the
+row-reference tiebreaker (`src/backend/utils/sort/tuplesortvariants.c:1655-1698`); dead tuples
+are excluded from its uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`).
+The existing rule that NULL components compare equal in UNIQUE keys is unchanged.
+
 ## Persisted read-only views (#1124)
 
 `CREATE [OR REPLACE] VIEW [schema.]name [(column, ...)] AS query` stores a

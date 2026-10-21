@@ -3657,8 +3657,16 @@ description + exported registrations), the engine binds them.
   `BTreeIndex.MaxKeyLength` bytes), its continuation/descent fences and the previous owned key,
   independent of row count. Existing pool and spillable pre-image budgets bound physical build
   buffers separately. Duplicate, cancellation and storage failures use the existing unpublished
-  tree cleanup; deferred brackets remain durable before the single publication. The trade-off
-  is an extra tree pass and detecting a duplicate after construction. Full-GC retained-heap
+  tree cleanup; deferred brackets remain durable before the single publication. Deferred
+  CREATE UNIQUE INDEX and UNIQUE/PRIMARY KEY constraint backing builds both construct the whole
+  tree before failing on a duplicate. The trade-off is an extra tree pass and detecting a
+  duplicate after construction. An oversized key encountered during construction can therefore
+  take precedence over an earlier duplicate in storage order. Inline CREATE UNIQUE INDEX reports
+  the smallest duplicated live key in encoded index order, rather than the first duplicate in
+  storage order; its safe scalar diagnostic follows that key. PostgreSQL likewise checks key
+  equality during sorted unique builds before the row-reference tiebreaker
+  (`src/backend/utils/sort/tuplesortvariants.c:1655-1698`) and excludes dead tuples from the
+  uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`). Full-GC retained-heap
   tests use a 4,096-row, 900-character table over a 1 MiB pool and require less than one quarter
   of its decoded bytes. Samples inside the unique-validation cursor walk include its midpoint
   and final key, before any retained keys can be released, for inline and deferred index and
