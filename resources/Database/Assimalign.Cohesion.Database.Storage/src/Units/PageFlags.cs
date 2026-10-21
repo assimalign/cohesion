@@ -17,7 +17,8 @@ public enum PageFlags : byte
     None = 0,
 
     /// <summary>
-    /// The page continues beyond the standard page size (see <see cref="Units.Page.OverflowSize"/>).
+    /// Reserved overflow layout with a body length given by <see cref="Units.Page.OverflowSize"/>.
+    /// The header and body must fit one standard page; multi-page overflow storage is not implemented.
     /// </summary>
     Overflow = 1,
 

@@ -136,6 +136,7 @@ public sealed class LockManager
     // source canceled, with its cause kept beside it, once the storage went offline (Abandon).
     private Func<ulong, bool>? _releaseOwedByManager;
     private CancellationTokenSource? _abandon;
+    private readonly AsyncLocal<TimeSpan> _lockTimeout = new();
     private StorageOfflineException? _abandonCause;
 
     // The storage name the coordinator hands over with the engine mode, for the event source's
@@ -149,6 +150,7 @@ public sealed class LockManager
     // How a lock request's wait ended, as the LockWaitStop event names it.
     private const string WaitGranted = "Granted";
     private const string WaitCancelled = "Cancelled";
+    private const string WaitTimedOut = "Timeout";
     private const string WaitEnded = "Ended";
     private const string WaitAbandoned = "Abandoned";
     private const string WaitDeadlock = "Deadlock";
@@ -164,6 +166,11 @@ public sealed class LockManager
     internal LockManager()
     {
     }
+
+    // Per-manager test seams; all run outside _sync.
+    internal Action<CancellationTokenSource>? WaitTimerArmed { get; set; }
+    internal Action? BeforeWaitOutcome { get; set; }
+    internal Action? BeforeGrantNotification { get; set; }
 
     /// <summary>
     /// Creates a standalone lock manager: a mode-compatibility lock table with a FIFO queue per
@@ -183,6 +190,7 @@ public sealed class LockManager
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>A task that completes when the lock is granted.</returns>
     /// <exception cref="TransactionDeadlockException">Thrown when the request was chosen as a deadlock victim.</exception>
+    /// <exception cref="TransactionLockTimeoutException">The timeout established by <see cref="EnterLockTimeout"/> expired for this wait.</exception>
     /// <exception cref="TransactionAbortedException">
     /// Thrown when <see cref="ReleaseAll"/> ended the owner while the request waited; when the
     /// owner's pending requests were abandoned and the modes it already holds on the resource do
@@ -205,8 +213,8 @@ public sealed class LockManager
     /// </para>
     /// <para>
     /// In the coordinator's engine mode a request the table grants at once costs no more than a
-    /// standalone one. One that has to wait waits on the caller's token and on the storage going
-    /// offline, which fails it (<see cref="Abandon"/>).
+    /// standalone one. One that has to wait observes the caller's token, any scoped lock timeout,
+    /// and the storage going offline, which fails it (<see cref="Abandon"/>).
     /// </para>
     /// </remarks>
     public ValueTask AcquireAsync(
@@ -215,14 +223,36 @@ public sealed class LockManager
         LockMode mode,
         CancellationToken cancellationToken = default)
     {
-        if (_abandon is null)
+        if (_abandon is null && _lockTimeout.Value == TimeSpan.Zero)
         {
-            return AcquireCoreAsync(owner, resource, mode, cancellationToken, cancellationToken);
+            return AcquireCoreAsync(owner, resource, mode, cancellationToken);
         }
 
         return TryAcquire(owner, resource, mode)
             ? ValueTask.CompletedTask
             : WaitAbandonableAsync(owner, resource, mode, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the timeout for each lock wait in the current execution flow until the returned scope
+    /// is disposed. Nested scopes restore the previous value; concurrent flows remain independent.
+    /// Zero disables the timeout. Uncontended grants do not create a timer.
+    /// </summary>
+    /// <param name="timeout">A non-negative duration of at most int.MaxValue milliseconds.</param>
+    /// <returns>A scope disposed on the entering flow, in reverse nesting order.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The timeout is outside the supported range.</exception>
+    /// <remarks>
+    /// The scope covers nested index acquisitions as well as direct requests, in standalone and
+    /// engine modes. A timeout removes the pending request and throws
+    /// <see cref="TransactionLockTimeoutException"/>; grants the owner already holds stay held.
+    /// </remarks>
+    public IDisposable EnterLockTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(timeout, TimeSpan.FromMilliseconds(int.MaxValue));
+        var scope = new LockTimeoutScope(this, _lockTimeout.Value);
+        _lockTimeout.Value = timeout;
+        return scope;
     }
 
     /// <summary>
@@ -288,20 +318,22 @@ public sealed class LockManager
         // and could close a cycle the detector never sees. The executors acquire every lock their
         // apply needs before they take the gate; a request that must wait inside it breaks that
         // order and is refused at once.
-        if (_insideApply!())
+        if (_insideApply?.Invoke() == true)
         {
             throw WaitInsideApply(owner, resource, mode);
         }
 
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abandon!.Token);
-        try
-        {
-            await AcquireCoreAsync(owner, resource, mode, wait.Token, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is { } cause)
-        {
-            throw Abandoned(owner, resource, mode, cause);
-        }
+        // Lock/latch order: wait before the coordinator's apply gate and before storage/index
+        // latches. Timer cancellation only takes _sync; dispose registrations/timers after leaving
+        // _sync, so a callback draining there cannot deadlock with a grant or release.
+        var timeout = _lockTimeout.Value;
+        using var timer = timeout > TimeSpan.Zero ? new CancellationTokenSource(timeout) : null;
+        if (timer is not null) { WaitTimerArmed?.Invoke(timer); }
+        // Separate callbacks carry their cause into the queue arbitration. A later deadline
+        // cannot relabel a completed wait while its continuation is delayed (PostgreSQL
+        // src/backend/tcop/postgres.c:3590-3600 likewise reports the earlier timeout).
+        await AcquireCoreAsync(owner, resource, mode, cancellationToken, timer?.Token ?? default,
+            _abandon?.Token ?? default).ConfigureAwait(false);
     }
 
     private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
@@ -320,14 +352,16 @@ public sealed class LockManager
     /// <param name="owner">The transaction requesting the lock.</param>
     /// <param name="resource">The resource to lock.</param>
     /// <param name="mode">The requested lock mode.</param>
-    /// <param name="cancellationToken">The token the wait observes: the caller's, or in engine mode the caller's linked with the abandonment.</param>
-    /// <param name="callerToken">The caller's own token, which tells a canceled wait from an abandoned one in the diagnostics.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <param name="timeoutToken">The individual lock timer's token.</param>
+    /// <param name="abandonToken">The storage abandonment token.</param>
     private async ValueTask AcquireCoreAsync(
         TransactionSequence owner,
         LockResource resource,
         LockMode mode,
         CancellationToken cancellationToken,
-        CancellationToken callerToken)
+        CancellationToken timeoutToken = default,
+        CancellationToken abandonToken = default)
     {
         Waiter? waiter;
         List<Waiter>? granted = null;
@@ -358,7 +392,7 @@ public sealed class LockManager
                 // requester is the victim. Every edge the request added starts or ends at its
                 // owner, so the search from the owner sees every cycle it closed. Taking it off
                 // again restores the queue as it was, so it unblocks nobody.
-                waiter = new Waiter(this, owner.Value, mode, entry);
+                waiter = new Waiter(this, owner.Value, mode, entry, cancellationToken);
                 EnqueueLocked(waiter, place);
 
                 if (ClosesCycleLocked(owner.Value))
@@ -400,32 +434,33 @@ public sealed class LockManager
             // wait was traced: a late cancellation cannot reach CancelWaiter during a listener's
             // synchronous dispatch. The callback is static and the waiter its state, so a request
             // granted at once allocates no closure for a registration it never makes.
-            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(), waiter);
+            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(WaitCancelled), waiter);
+            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(WaitTimedOut), waiter);
+            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(WaitAbandoned), waiter);
             await waiter.Completion.Task.ConfigureAwait(false);
         }
         finally
         {
+            BeforeWaitOutcome?.Invoke();
             if (TransactionEventSource.Log.IsEnabled())
             {
-                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), startWritten, started);
+                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter), startWritten, started);
             }
         }
     }
 
     /// <summary>
-    /// Names how a finished wait ended: granted; canceled by its caller; failed because its owner's
+    /// Names how a finished wait ended: granted; canceled by its caller; timed out; failed because its owner's
     /// transaction ended (<see cref="FailEnded"/>); chosen as a deadlock victim after a grant
     /// closed a cycle through it (<see cref="FailDeadlocked"/>); or abandoned because the storage
-    /// went offline, which <see cref="WaitAbandonableAsync"/> decides the same way.
+    /// went offline. Cancellation callbacks preserve the cause that removed the request.
     /// </summary>
-    private string WaitOutcome(Waiter waiter, CancellationToken callerToken) => waiter.Completion.Task.Status switch
+    private static string WaitOutcome(Waiter waiter) => waiter.CancellationOutcome ?? (waiter.Completion.Task.Status switch
     {
         TaskStatus.RanToCompletion => WaitGranted,
-        TaskStatus.Canceled when !callerToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is not null => WaitAbandoned,
-        TaskStatus.Canceled => WaitCancelled,
         _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => WaitDeadlock,
         _ => WaitEnded,
-    };
+    });
 
     private static TransactionDeadlockException Deadlock(TransactionSequence owner, LockResource resource, LockMode mode)
         => new($"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
@@ -489,11 +524,11 @@ public sealed class LockManager
     /// <param name="mark">The mark created before the statement acquired locks.</param>
     /// <exception cref="ArgumentException">The mark is default or belongs to another manager.</exception>
     /// <remarks>
-    /// The caller must have applied no writes since the mark and have no pending lock requests.
-    /// Re-grants and upgrades of a resource held at the mark are retained in full; no downgrade
-    /// occurs. An abandoned owner keeps all grants until its deferred undo completes. This
-    /// operation is available in engine mode for unwritten arbitration; written data retains
-    /// transaction-duration locking. To retain a completed arbitration wait's row across
+    /// The caller must have no surviving writes since the mark and no pending lock requests:
+    /// it has not applied, or its failed statement bracket has been fully rolled back physically.
+    /// This operation performs no undo. Re-grants and upgrades of a resource held at the mark are
+    /// retained in full; no downgrade occurs. An abandoned owner keeps all grants until its deferred
+    /// undo completes. In engine mode surviving writes retain transaction-duration locking. To retain a completed arbitration wait's row across
     /// restarts, take a new mark after its grant. Use marks within the same transaction lifetime.
     /// </remarks>
     public void ReleaseSince(LockStatementMark mark)
@@ -639,7 +674,7 @@ public sealed class LockManager
         FailDeadlocked(victims);
     }
 
-    private static void CompleteGranted(List<Waiter>? granted)
+    private void CompleteGranted(List<Waiter>? granted)
     {
         if (granted is null)
         {
@@ -648,6 +683,7 @@ public sealed class LockManager
 
         foreach (var waiter in granted)
         {
+            BeforeGrantNotification?.Invoke();
             waiter.Completion.TrySetResult();
         }
     }
@@ -685,24 +721,40 @@ public sealed class LockManager
         }
     }
 
-    private void CancelWaiter(Waiter waiter)
+    private void CancelWaiter(Waiter waiter, string outcome)
     {
         List<Waiter>? granted = null;
         List<Waiter>? victims = null;
+        bool removed;
 
         lock (_sync)
         {
             // A request already granted, failed or canceled has left its queue. One that leaves
             // it now may unblock the requests queued behind it.
-            if (waiter.Entry.Waiters.Remove(waiter))
+            if (removed = waiter.Entry.Waiters.Remove(waiter))
             {
+                waiter.CancellationOutcome = outcome;
                 UntrackWaitLocked(waiter);
                 LeftLocked(waiter.Entry);
                 WakeScheduledLocked(ref granted, ref victims);
             }
         }
 
-        waiter.Completion.TrySetCanceled();
+        // Grant/end and cancellation arbitrate under _sync. Once a grant removed the waiter,
+        // its completion owns the outcome even if its asynchronous notification has not run.
+        if (removed)
+        {
+            if (outcome == WaitTimedOut)
+            {
+                waiter.Completion.TrySetException(new TransactionLockTimeoutException(new OperationCanceledException()));
+            }
+            else if (outcome == WaitAbandoned)
+            {
+                waiter.Completion.TrySetException(Abandoned(new TransactionSequence(waiter.Owner), waiter.Resource,
+                    waiter.Mode, Volatile.Read(ref _abandonCause)!));
+            }
+            else { waiter.Completion.TrySetCanceled(waiter.CallerToken); }
+        }
         CompleteGranted(granted);
         FailDeadlocked(victims);
     }
@@ -1416,16 +1468,35 @@ public sealed class LockManager
         public bool WakeScheduled { get; set; }
     }
 
+    private sealed class LockTimeoutScope : IDisposable
+    {
+        private LockManager? _manager;
+        private readonly TimeSpan _previous;
+
+        internal LockTimeoutScope(LockManager manager, TimeSpan previous)
+        {
+            _manager = manager;
+            _previous = previous;
+        }
+
+        public void Dispose()
+        {
+            var manager = Interlocked.Exchange(ref _manager, null);
+            if (manager is not null) { manager._lockTimeout.Value = _previous; }
+        }
+    }
+
     private sealed class Waiter
     {
         private readonly LockManager _manager;
 
-        public Waiter(LockManager manager, ulong owner, LockMode mode, LockEntry entry)
+        public Waiter(LockManager manager, ulong owner, LockMode mode, LockEntry entry, CancellationToken callerToken)
         {
             _manager = manager;
             Owner = owner;
             Mode = mode;
             Entry = entry;
+            CallerToken = callerToken;
         }
 
         public ulong Owner { get; }
@@ -1438,9 +1509,14 @@ public sealed class LockManager
         // so this is the table's entry for the resource for as long as the request is queued.
         public LockEntry Entry { get; }
 
+        public CancellationToken CallerToken { get; }
+
+        // Written only by the callback that removes this request under _sync, before completion.
+        public string? CancellationOutcome { get; set; }
+
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // The wait's cancellation callback.
-        public void Cancel() => _manager.CancelWaiter(this);
+        public void Cancel(string outcome) => _manager.CancelWaiter(this, outcome);
     }
 }

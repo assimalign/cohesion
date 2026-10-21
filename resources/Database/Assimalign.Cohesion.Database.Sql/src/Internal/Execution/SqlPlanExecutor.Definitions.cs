@@ -67,7 +67,8 @@ internal sealed partial class SqlPlanExecutor
                 break;
             }
         }
-        _definitions.RefreshDefinitions(cancellationToken);
+        // The catalog committed: mandatory binding must finish and report its durable result.
+        _definitions.RefreshDefinitions(CancellationToken.None);
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 

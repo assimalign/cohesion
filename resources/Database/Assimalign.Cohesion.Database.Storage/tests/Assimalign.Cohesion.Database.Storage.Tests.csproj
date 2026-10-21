@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 <PropertyGroup>
 	<RootNamespace>Assimalign.Cohesion.Database.Storage.Tests</RootNamespace>
@@ -34,6 +34,9 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 
 </Project>

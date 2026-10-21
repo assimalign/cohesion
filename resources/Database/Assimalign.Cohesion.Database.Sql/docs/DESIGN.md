@@ -803,9 +803,8 @@ flowchart TD
   call, failure or not.
 - **Name lookups beside expressions.** An index-driven join reads the inner columns of
   its seek prefix from the plan (`SqlJoinIndexPath.InnerColumns`) instead of finding
-  each by name for every outer row. Foreign-key checks and cascades still find their
-  key columns by name for each row they check; binding those ordinals per table
-  version, beside the CHECK trees, is a follow-up.
+  each by name for every outer row. Foreign-key checks and cascades use the key
+  projections bound beside the CHECK trees in `SqlBoundTable` (#1366).
 - **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
   node without operands and a chain's or call's own operand list, so the walkers that
   visit every node of every statement no longer allocate an iterator per leaf. With the
@@ -1406,7 +1405,16 @@ time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a`
 4.20 MB) while the JIT build allocates 18 KB less: publishing variants pins the difference to
 `src/Internal/Execution/SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
 instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
-allocation decisions) rather than at an allocation the change makes; it is not yet explained.
+allocation decisions); that attribution was a hypothesis, not an identified cause.
+
+**Disposition (#1374, 2026-10-21).** The owner-directed current-tree reproduction after
+#1198/#1366, published Release win-arm64 with ILC mstat/map output, measured Q8 at
+5,592,872 NativeAOT bytes/build and 5,344,232 JIT bytes/build (minimum of three rounds
+after warm-up); it cannot reproduce the historical 4.20/4.36 MB pair because B2 has
+replaced that Build path and table binding now includes foreign keys. The historical
+delta, including the later unexplained −34 KB below, is retired as superseded rather
+than an active allocation target; the maps do not establish an inlining or stack-allocation
+cause, and the original ILC attribution remains unproven.
 
 **The shared call path.** A NativeAOT profile of Q1 after the review put about 3% of the
 statement, some 19 ns per call, on the path every call takes between the row and the function's
@@ -3545,6 +3553,12 @@ running platform.
 
 ## Secondary indexes
 
+The CREATE INDEX memory regression reads storage's existing encoded pre-image accounting at
+commit through test-only UnsafeAccessor methods. An index of at least ten buffer pools must
+keep pre-images below 2% of its fixed 8 KiB page bytes, spill none, and release them after commit;
+with the configured pool this accounts for at most 12% of index bytes in page buffers and
+pre-images. Whole-process live-heap deltas cannot isolate those structures across runtimes.
+
 `CREATE [UNIQUE] INDEX` / `DROP INDEX` are end-to-end: dialect (the DIALECT.md
 matrix), plan nodes, catalog metadata, and B+Tree trees through
 `Database.Indexing`'s manager — **on the same database file set** (index pages
@@ -4092,6 +4106,47 @@ database's deferred undo is retried at least once a backoff besides its own sche
 
 ## The SQL server runtime (`SqlDatabaseServer`)
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close, TerminalDrainLinger or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain. A stop racing the final Ready flush
+retains that notice after authentication, even before the ready loop begins.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
+The SQL TLS variant uses the production Connections.Security decorator over TCP. It remains
+skipped for the Connections owner's #1086: the enabled probe returned Internal while awaiting
+a frame instead of DatabaseNotFound after Database-only fixes. TlsConnection completes its
+SslStream-backed output without completing the inner TCP output, so this area cannot guarantee
+that fatal frame reaches the peer. The complete regression remains available for that owner.
+
+TerminalDrainLinger defaults to two seconds and begins after output completion, including for
+capacity refusals. It bounds only the peer-close wait; ShutdownDrainTimeout remains the outer
+bound starting before any terminal write. An unread idle pooled client therefore cannot occupy
+a MaxSessions slot or hold soft stop until the outer budget. Both options are positive, finite,
+and at most 4,294,967,294 ms, checked at construction in every model. Rejection setup, including
+linked-token creation and CancelAfter, is inside its cleanup boundary: setup failure still
+disposes the transport and completes/removes the registry entry. ObjectDisposedException while
+draining input means the transport closed, including a TLS reader closed by output completion;
+it is not SessionCleanupFailed.
+
+StopCoreAsync intentionally joins all session and rejection completions after hard abort,
+without another timeout. Abort must release transport I/O, and teardown must join that I/O
+before disposing its token sources, transport and engine session. Abandoning the final join
+would release resources still owned by pending I/O. A transport or execution that ignores abort
+can therefore delay the final join; ShutdownDrainTimeout bounds graceful work, not an unsafe
+abandonment of cleanup. The controlled unwind gate verifies this ordering with the 20 s safety
+token, without elapsed-time margins.
+
+TerminalDrainTimedOut warns when the outer terminal deadline aborts a session. Event 26 carries
+sessionId, drainTimeoutMilliseconds and suppressedCount, at most once per second per source.
+The total-terminal-drain-timeouts counter counts every expiry, including suppressed warnings.
+Normal peer-close linger expiry and a server hard abort do not emit this event.
+
 The SQL model ships its own wire-protocol server: `SqlDatabaseServer`, a sealed
 leaf of the area root's `DatabaseServer` base fronting exactly
 one `SqlDatabaseEngine` (`Create(engine, options)`, options in
@@ -4247,6 +4302,60 @@ use the existing `Execute` payload); no
 TLS/transport policy — transport configuration stays in `libraries/Connections`
 drivers, while the server owns bind-through-release lifecycle.
 
+## Server-side statement and lock timeouts (#1231)
+
+SqlDatabaseEngineOptions.StatementTimeout and LockTimeout default to zero (disabled).
+SqlDatabaseSession exposes nullable overrides: null inherits the engine snapshot, zero disables
+it, and a positive duration applies to subsequent statements. Both accept up to int.MaxValue
+milliseconds; negative or larger values are refused before execution. Session configuration,
+like statement execution, is single-threaded. SQL SET syntax is deferred.
+The provisioner's private schema sessions explicitly set both timeouts to zero. Provisioning,
+including deferred index builds, follows its caller/lifecycle cancellation instead of OLTP budgets.
+
+The statement timer links cancellation into execution, including deferred-table admission,
+planning, materialized reads, LIKE matching, application functions, cascades and physical applies.
+It starts for each request after text parsing; cancellation remains cooperative. It disarms the timer before auto-commit and never supplies
+a token to that commit, and SQL transaction-control requests do not arm either timer. A completed
+execution or self-committing DDL retains #1246's commit/mandatory-cleanup boundary and delivers
+its result even if a timer expires there. An explicit transaction's later commit has no statement
+timer. Timer cancellation becomes SqlTimeoutException with COHSQLE043 / SQLSTATE 57014 only
+when the caller did not cancel; caller cancellation remains OperationCanceledException and
+retains its existing locking behavior.
+Mandatory post-self-commit binding, including CREATE/DROP FUNCTION and DOMAIN refreshes, uses
+CancellationToken.None. Unindexed DELETE and both UPDATE apply loops poll every 64 rows, so a
+deadline during eviction rolls back the existing physical bracket. Index registration cleanup
+covers build and catalog publication and stops once publication commits; deferred builds track
+registration before their creation bracket ends. UNIQUE/PRIMARY KEY publication follows the same rule.
+
+LockManager.EnterLockTimeout scopes a duration to the execution flow, so nested BTreeIndex
+unique-key acquisitions use the same policy. Each contended wait arms a fresh timer; granted
+requests allocate no timer. Lock expiration becomes SqlTimeoutException with COHSQLE044 /
+SQLSTATE 55P03. Both errors carry a statement location and a public SqlState; existing negotiated
+wire diagnostics carry the COHSQLE code and ExecutionFailure without a wire-format change.
+The kernel's LockWaitStop outcome is Timeout for a lock timer, Cancelled for a statement token.
+The cause that removes a queued wait fixes its exception and event outcome. A later statement
+deadline cannot overwrite an earlier lock timeout while a continuation is delayed (PostgreSQL
+src/backend/tcop/postgres.c:3590-3600).
+
+A failed timed statement rolls back its physical bracket before returning. In an explicit
+transaction the session then releases resources first granted since its statement mark; earlier
+grants and upgrades of earlier resources remain held, as ReleaseSince specifies. Offline and
+abandoned writers retain their grants for recovery/deferred undo. The transaction remains active
+and usable. Auto-commit failure rolls back its entire context and releases all its locks.
+No deletion-set ceiling is added: operators can bound a cascade by time. Graph, Documents,
+KeyValuePair and Blob engine/session options are follow-ups; their ordinary lock waits remain
+unlimited. The shared lock manager's scope is available without any visibility grant or interface.
+
+The zero defaults and per-wait timing follow PostgreSQL guc_parameters.dat:1617-1625,2907-2915
+and src/backend/storage/lmgr/proc.c:1407-1425. Error mapping and lock cleanup follow
+src/backend/tcop/postgres.c:3599-3612. SQL deliberately keeps its own statement-atomic transaction
+contract rather than PostgreSQL's failed-transaction state. SqlTimeoutConformanceTests covers
+a cascade blocked by TimeoutProbeFunction, row/unique-key waits, caller cancellation, typed/text
+execution, overrides and durable success across late expiration. SqlTimeoutRegressionTests covers
+definition self-commits, 600-row unindexed apply evictions, publication timeout/retry, provisioning
+and delayed lock continuations. LockTimeoutTests deterministically cancels between grant dequeue
+and notification until its interleaving and outcome counters move, with a time ceiling.
+
 ## SQL transaction control and the B7 seam
 
 Automatic commit follows the same cancellation boundary as every other engine (#1246):
@@ -4374,6 +4483,59 @@ statement after it ran in auto-commit, and a commit of an ended transaction said
 transaction in state '…'".
 
 ## Integrity constraints
+
+Incoming references are cached by parent ObjectId in shared statement state (#1198),
+once per table reached; cascade frames share that list. Outgoing parent resolution and
+adjacent-table intent-lock batches are shared too, including SET NULL/SET DEFAULT fan-out.
+Discovery costs O(reached tables × catalog definitions), independently of deleted row count.
+The deterministic catalog-visit counters in `SqlCascadeCatalogTests` cover cascade
+and restrict paths at 1 and 200 tables; wall time is supplementary output only.
+
+Cache validity follows the object locks: preparation tries adjacent IS in ObjectId
+order before own IX. A contended preparation releases its new grants before waiting,
+then rebuilds the live graph and retries; earlier transaction and row grants stay held.
+This prevents new preparation grants from cycling with FK DDL's own-X/parent-X order.
+Catalog generation is validated under own IX, rebuilding incoming edges if publication
+preceded that grant. Adding an incoming FK requires X on its referenced parent
+(`LockReferencedTablesAsync`); removing or changing one requires X on its child. Adjacent
+ADD COLUMN, FK removal and child DROP during a wait therefore refresh the graph and
+continue before any row is read. A changed target definition invalidates the bound plan
+and returns retryable `DatabaseTransactionAbortedException` with structured `COHSQLT006`;
+retry in a fresh transaction. This code is reserved for target-plan invalidation, not
+adjacent cache refresh.
+
+| Code | Meaning | Retry |
+| --- | --- | --- |
+| `COHSQLT006` | The statement's target definition was changed, dropped or replaced during lock preparation | Retry in a fresh transaction |
+
+Neither locked endpoint can change until transaction end. Row locks,
+then sorted unique-key locks, precede the apply gate and storage/index latches; a cascade
+locks a discovered row before preparing its adjacent tables, and no latch crosses a wait.
+The cache expires at statement end even inside an explicit transaction. Snapshot's
+BEGIN-time catalog image serves metadata relations; integrity checks use the live,
+lock-protected definitions and latest-state row checks, never that older image.
+
+Foreign-key child ordinals bind when their owning `SqlBoundTable` is built; referenced
+ordinals and effective collations bind lazily in the parent's bound version (#1366).
+The immutable constraint's column-list identity keys each projection, with weak keys
+so replaced child constraints cannot accumulate in a long-lived parent. Parent and
+child version changes invalidate their own projections independently, including an
+unrelated DROP COLUMN that shifts logical ordinals. Concurrent first users publish
+one projection under a private binding lock; it is released before any row lookup.
+Statement edges request both projections lazily, after preparation has validated
+the locked definitions; discovery and unused children bind no keys. They carry them
+through cascade frames, final-state UPDATE checks, ON CONFLICT and SET actions. Index choice, reordered equality-prefix mappings
+and live-index version wrappers are prepared once per statement/table or key;
+seek encoding uses the bound index ordinals. Lookups and tombstones retain the unchecked
+key builder; keys actually written still pass the checked builder (#1266).
+
+The local ARM64 NativeAOT proxy deletes 2,000 indexed chain rows after warm-up,
+using minimum allocation across three rounds: QC1 fell from 12,090 to 7,719 bytes
+per deleted row and QC200 from 158,395 to 7,724. The extra catalog now contributes
+one discovery pass per reached table, rather than a pass per row. These are local
+proxies; the program's SF10 gate remains in cohesion-benchmarks (#1511). The post-lock-order
+NativeAOT rerun reproduced the pre-fix head's Q8 Build allocation and remained below the
+retained baseline, so no allocation redesign was needed.
 
 ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121).
 Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate
@@ -5593,6 +5755,7 @@ bounded peer-sent names) are in the area's
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
+| 26 | TerminalDrainTimedOut | Warning | — | sessionId, drainTimeoutMilliseconds, suppressedCount |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
 | 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |

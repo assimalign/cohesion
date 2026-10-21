@@ -62,14 +62,14 @@ public sealed class SqlAlterTableRecoveryTests
         newCount.ShouldBeGreaterThan(0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER lock waits: stale DML refuses instead of using old metadata")]
-    [InlineData("RENAME TO renamed", "Table 'dbo.t' does not exist.")]
-    [InlineData("RENAME v TO renamed", "changed while the statement was waiting")]
-    [InlineData("ALTER v SET DEFAULT 9", "changed while the statement was waiting")]
-    [InlineData("ALTER v DROP DEFAULT", "changed while the statement was waiting")]
-    [InlineData("ALTER v SET NOT NULL", "changed while the statement was waiting")]
-    [InlineData("ALTER v DROP NOT NULL", "changed while the statement was waiting")]
-    public async Task ExecuteAsync_WriterWaitingBehindAlter_ShouldRefuseStaleDefinition(string action, string message)
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ALTER lock waits: stale DML returns a coded retry instead of using old metadata")]
+    [InlineData("RENAME TO renamed")]
+    [InlineData("RENAME v TO renamed")]
+    [InlineData("ALTER v SET DEFAULT 9")]
+    [InlineData("ALTER v DROP DEFAULT")]
+    [InlineData("ALTER v SET NOT NULL")]
+    [InlineData("ALTER v DROP NOT NULL")]
+    public async Task ExecuteAsync_WriterWaitingBehindAlter_ShouldReturnCodedRetry(string action)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("rename-wait", new SqlDatabaseEngineOptions());
@@ -91,7 +91,9 @@ public sealed class SqlAlterTableRecoveryTests
             await coordinator.CommitAsync(context, TestTimeout.Token());
 
             // Assert
-            (await Should.ThrowAsync<DatabaseException>(async () => await waiting)).Message.ShouldContain(message, Case.Sensitive);
+            var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await waiting);
+            failure.Diagnostics.Count.ShouldBe(1);
+            failure.Diagnostics[0].Code.ShouldBe("COHSQLT006");
         }
         finally
         {

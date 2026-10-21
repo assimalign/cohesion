@@ -51,6 +51,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<!-- Lifecycle symmetry is proven against a real fixed TCP endpoint. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<!-- TLS terminal-close conformance uses the production decorator over TCP. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
 	</ItemGroup>
 
 </Project>

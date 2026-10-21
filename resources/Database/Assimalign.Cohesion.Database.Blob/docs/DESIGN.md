@@ -670,6 +670,41 @@ The wire family widened no engine type, and the builder verb references only the
 
 ## Server lifecycle and failure semantics
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close, TerminalDrainLinger or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain. A stop racing the final Ready flush
+retains that notice after authentication, even before the ready loop begins.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
+TerminalDrainLinger defaults to two seconds and begins after output completion, including for
+capacity refusals. It bounds only the peer-close wait; ShutdownDrainTimeout remains the outer
+bound starting before any terminal write. An unread idle pooled client therefore cannot occupy
+a MaxSessions slot or hold soft stop until the outer budget. Both options are positive, finite,
+and at most 4,294,967,294 ms, checked at construction in every model. Rejection setup, including
+linked-token creation and CancelAfter, is inside its cleanup boundary: setup failure still
+disposes the transport and completes/removes the registry entry. ObjectDisposedException while
+draining input means the transport closed, including a TLS reader closed by output completion;
+it is not SessionCleanupFailed.
+
+StopCoreAsync intentionally joins all session and rejection completions after hard abort,
+without another timeout. Abort must release transport I/O, and teardown must join that I/O
+before disposing its token sources, transport and engine session. Abandoning the final join
+would release resources still owned by pending I/O. A transport or execution that ignores abort
+can therefore delay the final join; ShutdownDrainTimeout bounds graceful work, not an unsafe
+abandonment of cleanup. The controlled unwind gate verifies this ordering with the 20 s safety
+token, without elapsed-time margins.
+
+TerminalDrainTimedOut warns when the outer terminal deadline aborts a session. Event 15 carries
+sessionId, drainTimeoutMilliseconds and suppressedCount, at most once per second per source.
+The total-terminal-drain-timeouts counter counts every expiry, including suppressed warnings.
+Normal peer-close linger expiry and a server hard abort do not emit this event.
+
 `BlobDatabaseServer` owns one generic `IDuplexConnectionListener` and a concurrent session table.
 It follows the SQL/Graph per-model server placement rather than depending on a shared server
 implementation, and since phase 4 of the concrete-types plan its lifecycle is the root
@@ -751,8 +786,7 @@ is available between requests. Soft shutdown stops acceptance and idle/handshake
 exchange may finish, including transaction publication and its acknowledgement. Once
 ShutdownDrainTimeout expires (or the Stop token is canceled after shutdown starts), the server
 cancels active operations and aborts every remaining connection, then awaits cleanup before
-releasing its listener. All three timeout options accept Timeout.InfiniteTimeSpan. An infinite
-shutdown drain intentionally waits indefinitely for active work.
+releasing its listener. Authentication and idle timers may be infinite; shutdown drain and peer-close linger must be positive and finite.
 An unexpected accept-loop failure is rethrown by Stop only after accepted sessions and rejection
 work have drained or been aborted and the listener has been released.
 
@@ -1092,6 +1126,7 @@ four servers.
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
+| 15 | TerminalDrainTimedOut | Warning | — | sessionId, drainTimeoutMilliseconds, suppressedCount |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit` or `EngineRefused`), `activeSessions`, `maxSessions` |
 | 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |

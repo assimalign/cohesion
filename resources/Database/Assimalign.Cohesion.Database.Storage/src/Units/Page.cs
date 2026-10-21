@@ -19,8 +19,24 @@ public readonly unsafe struct Page
     /// Initializes a new <see cref="Page"/> over an existing buffer pointer.
     /// </summary>
     /// <param name="pointer">A pointer to the start of an 8KB buffer.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="pointer"/> is null.</exception>
     public Page(byte* pointer)
+        : this(pointer, Size)
     {
+    }
+
+    /// <summary>Initializes a page over caller-owned memory with an explicit buffer length.</summary>
+    /// <param name="pointer">A pointer kept valid by the caller for this page's lifetime.</param>
+    /// <param name="bufferLength">The accessible byte count, at least <see cref="Size"/>; extra bytes are not part of the page.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="pointer"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="bufferLength"/> is less than <see cref="Size"/>.</exception>
+    public Page(byte* pointer, int bufferLength)
+    {
+        if (pointer == null)
+        {
+            throw new ArgumentNullException(nameof(pointer));
+        }
+        ArgumentOutOfRangeException.ThrowIfLessThan(bufferLength, Size);
         Pointer = pointer;
     }
 
@@ -137,7 +153,7 @@ public readonly unsafe struct Page
     }
 
     /// <summary>
-    /// Gets or sets the overflow size in bytes beyond the standard page size.
+    /// Gets or sets the body length for the reserved overflow layout, within this fixed-size page.
     /// Only meaningful when <see cref="IsOverflow"/> is <c>true</c>.
     /// </summary>
     public int OverflowSize
@@ -172,22 +188,52 @@ public readonly unsafe struct Page
 
     /// <summary>
     /// Returns the page buffer as a <see cref="Span{T}"/> of bytes.
-    /// For overflow pages, the span includes the overflow area.
+    /// For the reserved overflow layout, the span contains the header and its declared body.
     /// </summary>
     /// <returns>A span over the full page buffer.</returns>
+    /// <exception cref="StorageCorruptionException">The overflow body length does not fit the page.</exception>
+    /// <exception cref="InvalidOperationException">This is an uninitialized page.</exception>
     public Span<byte> AsSpan()
     {
-        return new Span<byte>(Pointer, IsOverflow ? OverflowSize + HeaderSize : Size);
+        return new Span<byte>(Pointer, HeaderSize + GetValidatedBodySize());
     }
 
     /// <summary>
     /// Returns the page body (data area after the header) as a <see cref="Span{T}"/> of bytes.
     /// </summary>
     /// <returns>A span over the page body.</returns>
+    /// <exception cref="StorageCorruptionException">The overflow body length does not fit the page.</exception>
+    /// <exception cref="InvalidOperationException">This is an uninitialized page.</exception>
     public Span<byte> AsBodySpan()
     {
-        int bodySize = (IsOverflow ? OverflowSize + HeaderSize : Size) - HeaderSize;
+        int bodySize = GetValidatedBodySize();
         return new Span<byte>(Pointer + HeaderSize, bodySize);
+    }
+
+    // Pool loads use the physical page id for the diagnostic; callers use the header id.
+    // Snapshot and validate the size once: a second header read after checking could race
+    // a caller's header change and manufacture an unbounded span (#1162).
+    internal int GetValidatedBodySize(PageId? pageId = null)
+    {
+        if (Pointer == null)
+        {
+            throw new InvalidOperationException(ErrorMessages.PageBufferUninitialized);
+        }
+
+        var header = (Header*)Pointer;
+        if ((header->Flags & PageFlags.Overflow) == 0)
+        {
+            return Size - HeaderSize;
+        }
+
+        int bodySize = header->OverflowSize;
+        if ((uint)bodySize > Size - HeaderSize)
+        {
+            var id = pageId ?? (PageId)header->PageId;
+            throw new StorageCorruptionException(id, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.PageOverflowOutOfBounds, (long)id, bodySize, Size));
+        }
+        return bodySize;
     }
 
     /// <summary>
@@ -243,7 +289,7 @@ public readonly unsafe struct Page
         public ushort FreeDataEnd;
 
         /// <summary>
-        /// Overflow size in bytes beyond the standard page (4 bytes).
+        /// Body length for the reserved overflow layout, bounded by the fixed page (4 bytes).
         /// </summary>
         [FieldOffset(28)]
         public int OverflowSize;

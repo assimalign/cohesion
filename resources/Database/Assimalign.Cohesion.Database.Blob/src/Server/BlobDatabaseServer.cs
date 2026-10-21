@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -57,7 +58,7 @@ public sealed class BlobDatabaseServer : DatabaseServer
     private readonly IDuplexConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
     private readonly ConcurrentDictionary<Guid, BlobDatabaseServerSession> _sessions = new();
-    private readonly ConcurrentDictionary<Guid, Task> _rejections = new();
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _rejections = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
     // close at the next frame boundary; hard abort cancels in-flight executions
@@ -84,7 +85,9 @@ public sealed class BlobDatabaseServer : DatabaseServer
 
         ValidateTimeout(options.AuthenticationTimeout, nameof(options.AuthenticationTimeout));
         ValidateTimeout(options.IdleTimeout, nameof(options.IdleTimeout));
-        ValidateTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
+        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
+        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+
         _engine = engine;
         _options = options;
         _listener = options.Listener;
@@ -116,8 +119,8 @@ public sealed class BlobDatabaseServer : DatabaseServer
     /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An authentication or idle timer is invalid, or the drain timeout or peer-close linger is not positive and finite within the runtime timer range.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown when a timeout is neither positive and supported nor infinite.</exception>
     public static BlobDatabaseServer Create(BlobDatabaseEngine engine, BlobDatabaseServerOptions options)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -198,9 +201,11 @@ public sealed class BlobDatabaseServer : DatabaseServer
                     acceptFailure = ExceptionDispatchInfo.Capture(exception);
                 }
 
+                // Order: root lifecycle gate -> join accept -> join pumps and rejections.
+                // Pumps and rejection cleanup never acquire the lifecycle gate.
                 // Graceful drain: session pumps never fault (they own their
                 // errors), so awaiting their completions cannot throw.
-                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).Concat(_rejections.Values).ToArray());
+                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).Concat(_rejections.Values.Select(completion => completion.Task)).ToArray());
                 Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
 
                 if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
@@ -293,10 +298,9 @@ public sealed class BlobDatabaseServer : DatabaseServer
                 }
 
                 Guid rejectionId = Guid.NewGuid();
-                Task rejection = RejectAsync(connection, hardAbort);
-                _rejections.TryAdd(rejectionId, rejection);
-                _ = rejection.ContinueWith(completed => _rejections.TryRemove(rejectionId, out _),
-                    CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _rejections.TryAdd(rejectionId, completion);
+                _ = RejectAsync(connection, rejectionId, completion, hardAbort);
                 continue;
             }
 
@@ -317,33 +321,59 @@ public sealed class BlobDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
+    internal async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken hardAbort)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(hardAbort);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        using CancellationTokenRegistration abort = timeout.Token.Register(static state =>
+        CancellationTokenSource? deadline = null;
+        CancellationTokenRegistration abort = default;
+        int abortRequested = 0;
+        void AbortConnection()
         {
-            try { ((IDuplexConnection)state!).Abort(new ConnectionAbortedException("The rejected connection is closing.")); }
+            // Cancellation can resume cooperative I/O inline before this callback runs.
+            // Claim once before entering the transport; cleanup also calls this on expiry.
+            if (Interlocked.Exchange(ref abortRequested, 1) != 0) { return; }
+            try { connection.Abort(); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
-        }, connection);
+        }
         try
         {
+            deadline = CancellationTokenSource.CreateLinkedTokenSource(hardAbort, connection.ConnectionClosed);
+            abort = deadline.Token.Register(AbortConnection);
+            deadline.CancelAfter(_options.ShutdownDrainTimeout);
             var stream = connection.AsStream();
             await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is unavailable or at its session limit.");
 
-            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), timeout.Token).ConfigureAwait(false);
-            await writer.FlushAsync(timeout.Token).ConfigureAwait(false);
+            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), deadline.Token).ConfigureAwait(false);
+            await writer.FlushAsync(deadline.Token).ConfigureAwait(false);
+            // Complete output before disposal can abort the send pump. One deadline covers
+            // write, flush, completion and peer drain; its callback releases tokenless I/O.
+            await connection.Output.CompleteAsync().ConfigureAwait(false);
+            using var linger = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            linger.CancelAfter(_options.TerminalDrainLinger);
+            while (true)
+            {
+                ReadResult result = await connection.Input.ReadAsync(linger.Token).ConfigureAwait(false);
+                connection.Input.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted || result.IsCanceled) { break; }
+            }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // Best effort: the peer may already be gone; rejection must never
-            // take the accept loop down.
+            // Best effort: the peer may already be gone; rejection never faults the accept loop.
         }
         finally
         {
+            if (deadline?.IsCancellationRequested == true) { AbortConnection(); }
+            // Join cancellation callbacks before releasing the transport they can abort.
+            await abort.DisposeAsync().ConfigureAwait(false);
+            deadline?.Dispose();
             try { await connection.DisposeAsync().ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
+            finally
+            {
+                completion.TrySetResult();
+                _rejections.TryRemove(id, out _);
+            }
         }
     }
 
@@ -353,6 +383,12 @@ public sealed class BlobDatabaseServer : DatabaseServer
         {
             throw new ArgumentOutOfRangeException(name, "A timeout must be positive or infinite.");
         }
+    }
+
+    private static void ValidateDrainTimeout(TimeSpan value, string name)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
     }
 
     internal void OnSessionCompleted(BlobDatabaseServerSession session)

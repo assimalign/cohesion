@@ -48,6 +48,11 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>COHSQLT005</c>.
 /// </para>
 /// <para>
+/// A target table definition changed during a lock wait invalidates the bound statement plan.
+/// Execution throws <see cref="DatabaseTransactionAbortedException"/> with diagnostic
+/// <c>COHSQLT006</c>; retry in a fresh transaction. Adjacent FK changes rebuild before row reads.
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
 /// base, <see cref="DatabaseLanguageSession{TRequest}"/> over <see cref="SqlQueryRequest"/>, with an
 /// internal constructor; <see cref="SqlDatabase.CreateSessionAsync"/> creates it. The session
@@ -69,6 +74,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
     private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
+    private TimeSpan? _statementTimeout;
+    private CancellationTokenSource? _statementTimer;
+    private CancellationToken _statementCallerToken;
+    private TimeSpan? _lockTimeout;
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -115,7 +124,45 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// </summary>
     internal SqlStatementMetrics? LastStatementMetrics => _lastStatementMetrics;
 
+    /// <summary>
+    /// Gets or sets this session's statement execution timeout override. Null inherits the engine
+    /// option; zero disables it. Changes apply to subsequent statements. A started commit always
+    /// completes. Like execution, setting this property requires single-threaded session use.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
+    public TimeSpan? StatementTimeout
+    {
+        get => _statementTimeout;
+        set
+        {
+            if (value is { } timeout) { SqlTimeoutSettings.Validate(timeout, nameof(value)); }
+            _statementTimeout = value;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets this session's timeout override for each individual lock wait, including
+    /// unique-index waits. Null inherits the engine option; zero disables it. Changes apply to
+    /// subsequent statements and require single-threaded session use.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
+    public TimeSpan? LockTimeout
+    {
+        get => _lockTimeout;
+        set
+        {
+            if (value is { } timeout) { SqlTimeoutSettings.Validate(timeout, nameof(value)); }
+            _lockTimeout = value;
+        }
+    }
+
     internal Action<long, long?>? ProvisioningProgress { get; set; }
+
+    // Test-only observation of the real timer token, so commit-boundary proofs await its expiry.
+    internal Action<CancellationToken>? StatementTimerArmed { get; set; }
+
+    // Move the real timer's deadline to a deterministic apply/publication boundary in tests.
+    internal void ExpireStatementTimerForTest() => _statementTimer!.CancelAfter(TimeSpan.FromMilliseconds(1));
 
     /// <summary>
     /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
@@ -205,7 +252,42 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
         => ExecuteRequestAsync(request, cancellationToken, receipt);
 
-    private async ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
+    {
+        var statementTimeout = StatementTimeout ?? _database.Engine.EngineOptions.StatementTimeout;
+        var lockTimeout = LockTimeout ?? _database.Engine.EngineOptions.LockTimeout;
+        return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
+            ? ExecuteUntimedRequestAsync(request, cancellationToken, scriptReceipt)
+            : ExecuteTimedRequestAsync(request, statementTimeout, lockTimeout, cancellationToken, scriptReceipt);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteTimedRequestAsync(SqlQueryRequest request, TimeSpan statementTimeout,
+        TimeSpan lockTimeout, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
+    {
+        using var timer = statementTimeout == TimeSpan.Zero ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timer?.CancelAfter(statementTimeout);
+        using var lockScope = lockTimeout == TimeSpan.Zero ? null : _coordinator.LockManager.EnterLockTimeout(lockTimeout);
+        try
+        {
+            _statementTimer = timer;
+            _statementCallerToken = cancellationToken;
+            if (timer is not null) { StatementTimerArmed?.Invoke(timer.Token); }
+            // Only execution receives the linked token. Auto-commit and self-committing DDL
+            // retain #1246's uncancellable commit/cleanup boundary and deliver their result.
+            return await ExecuteUntimedRequestAsync(request, timer?.Token ?? cancellationToken, scriptReceipt).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timer?.IsCancellationRequested == true)
+        {
+            throw SqlTimeoutException.Statement(exception, request.Statement.SqlExpression.Location);
+        }
+        catch (TransactionLockTimeoutException exception)
+        {
+            throw SqlTimeoutException.Lock(exception, request.Statement.SqlExpression.Location);
+        }
+        finally { _statementTimer = null; _statementCallerToken = default; }
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteUntimedRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
         _database.ThrowIfOffline();
         // The statement's own metrics are the ones set after this point; a statement that fails
@@ -414,6 +496,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 }
 
                 TransactionContext? snapshotPin = null;
+                var lockMark = _coordinator.LockManager.MarkStatement(transaction.Context.Sequence);
 
                 try
                 {
@@ -439,6 +522,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     // retryable by construction — roll the transaction back and
                     // re-attempt. The session stays usable.
                     throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+                }
+                catch (Exception exception) when (exception is TransactionLockTimeoutException
+                    || (exception is OperationCanceledException && _statementTimer?.IsCancellationRequested == true
+                        && !_statementCallerToken.IsCancellationRequested))
+                {
+                    // The executor has rolled back any failed physical bracket before this catch.
+                    // Ordinary caller cancellation retains its prior locking contract.
+                    // Preserve grants from earlier statements, and never release an offline or
+                    // abandoned writer's locks while recovery/deferred undo still owns its data.
+                    if (!_database.IsOffline) { _coordinator.LockManager.ReleaseSince(lockMark); }
+                    throw;
                 }
                 catch (TransactionAbortedException exception)
                 {
@@ -483,6 +577,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 await CompleteScriptStatementAsync(result, context, receipt, cancellationToken).ConfigureAwait(false);
             }
+            // Execution is complete: disarm the statement deadline before entering commit.
+            // The linked caller token is also absent from the commit, as #1246 requires.
+            _statementTimer?.CancelAfter(Timeout.InfiniteTimeSpan);
             // Catalog DDL has already committed and finished its mandatory cleanup.
             // Deliver that result even if the caller canceled after the durable commit.
             // Execution completed: auto-commit owns the end from here, as in every model.

@@ -277,6 +277,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or white space.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="SqlDatabaseEngineOptions.StatementTimeout"/> or <see cref="SqlDatabaseEngineOptions.LockTimeout"/>
+    /// is negative or exceeds int.MaxValue milliseconds;
     /// <see cref="SqlDatabaseEngineOptions.ExpressionNestingLimit"/> is outside
     /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/>..<see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>;
     /// <see cref="SqlDatabaseEngineOptions.BufferPoolCapacity"/> is not a whole number of 8 KiB pages of at
@@ -347,6 +349,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="Create"/>.</exception>
     internal static void ValidateOptions(string name, SqlDatabaseEngineOptions options)
     {
+        SqlTimeoutSettings.Validate(options.StatementTimeout, nameof(options.StatementTimeout));
+        SqlTimeoutSettings.Validate(options.LockTimeout, nameof(options.LockTimeout));
+
         // Checked before the constructor spawns the worker threads; the base refuses a blank name
         // too, after the leaf's fields were created.
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

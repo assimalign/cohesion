@@ -7,6 +7,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 

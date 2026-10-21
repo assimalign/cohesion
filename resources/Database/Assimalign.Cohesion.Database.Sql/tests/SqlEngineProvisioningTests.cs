@@ -564,6 +564,8 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             StorageStrategy = strategy,
             Durability = Assimalign.Cohesion.Database.Storage.StorageCommitDurability.None,
             GroupCommitWindow = TimeSpan.FromMilliseconds(7),
+            StatementTimeout = TimeSpan.FromSeconds(11),
+            LockTimeout = TimeSpan.FromMilliseconds(222),
             CheckpointInterval = TimeSpan.FromMinutes(9),
             CheckpointJournalSize = 3 * 1024 * 1024,
             WorkerFailureWindow = TimeSpan.FromSeconds(42),
@@ -586,6 +588,8 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         engine.Name.ShouldBe("every-option");
         copy.Durability.ShouldBe(options.Durability);
         copy.GroupCommitWindow.ShouldBe(options.GroupCommitWindow);
+        copy.StatementTimeout.ShouldBe(options.StatementTimeout);
+        copy.LockTimeout.ShouldBe(options.LockTimeout);
         copy.CheckpointInterval.ShouldBe(options.CheckpointInterval);
         copy.CheckpointJournalSize.ShouldBe(options.CheckpointJournalSize);
         copy.WorkerFailureWindow.ShouldBe(options.WorkerFailureWindow);
@@ -604,10 +608,10 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Every property, the internal ones included: an option added to either set fails here
         // until Snapshot copies it and this test checks it.
-        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(13);
+        typeof(SqlDatabaseEngineOptions).GetProperties().Length.ShouldBe(15);
         typeof(SqlDatabaseEngineOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(16);
+            .Length.ShouldBe(18);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Provisioning: a name that breaks the database-name rule is refused at the declaration")]

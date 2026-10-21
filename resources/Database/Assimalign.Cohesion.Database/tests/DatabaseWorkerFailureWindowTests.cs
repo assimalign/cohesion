@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,6 +26,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 /// <see cref="DatabaseEngine.HasEngineWideFailure"/>). The model engines' suites pin the same
 /// through real storages.
 /// </summary>
+[Collection(nameof(DatabaseWorkerFailureWindowCollection))]
 public sealed class DatabaseWorkerFailureWindowTests
 {
     private const string EngineName = "test-engine";
@@ -65,18 +65,17 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(Window / 2);
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(50);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var beforeTheWindow = engine.GiveUps;
         clock.Advance(Window / 2);
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1, cause is null ? TimeSpan.FromMilliseconds(200) : Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: b is never touched; a goes offline on the third failed pass.
         beforeTheWindow.ShouldBeEmpty();
         counts.ShouldBe([1, 2, 3]);
         if (cause is { } expected)
         {
-            taken.ShouldBeTrue();
             var giveUp = engine.GiveUps.ShouldHaveSingleItem();
             giveUp.Name.ShouldBe("a");
             giveUp.Cause.ShouldBe(expected);
@@ -90,7 +89,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         }
         else
         {
-            taken.ShouldBeFalse();
+            engine.TakenOffline.ShouldBeEmpty();
             engine.GiveUps.ShouldBeEmpty();
             worker.ConsecutiveFailures.ShouldBe(3);
         }
@@ -127,19 +126,19 @@ public sealed class DatabaseWorkerFailureWindowTests
             worker.RunIteration(CancellationToken.None);
         }
 
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var underTheWindow = engine.GiveUps;
         int consecutive = worker.ConsecutiveFailures;
 
         // The fifty-first, 100 s after the first, reaches the window.
         clock.Advance(TimeSpan.FromSeconds(2));
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         underTheWindow.ShouldBeEmpty();
         consecutive.ShouldBe(50);
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("51 passes in a row over 100 s", Case.Sensitive);
     }
 
@@ -167,16 +166,16 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(Window * 2);
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var underTheMinimum = engine.GiveUps;
 
         // The third reaches the minimum.
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         underTheMinimum.ShouldBeEmpty();
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("3 passes in a row over 200 s", Case.Sensitive);
     }
 
@@ -234,11 +233,11 @@ public sealed class DatabaseWorkerFailureWindowTests
             }
         }
 
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         DatabaseEngine.DefaultWorkerFailureWindow.ShouldBe(Window);
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain($"{passes} passes in a row over {seconds} s", Case.Sensitive);
     }
 
@@ -284,15 +283,14 @@ public sealed class DatabaseWorkerFailureWindowTests
             clock.Advance(delay);
         }
 
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var beforeTheGivingUpRetry = engine.GiveUps;
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         afterEachRetry.ShouldAllBe(count => count == 0);
         beforeTheGivingUpRetry.ShouldBeEmpty();
-        taken.ShouldBeTrue();
         var giveUp = engine.GiveUps.ShouldHaveSingleItem();
         giveUp.Name.ShouldBe("a");
         giveUp.Cause.ShouldBe(StorageOfflineCause.VersionPurgeFailures);
@@ -326,17 +324,17 @@ public sealed class DatabaseWorkerFailureWindowTests
             worker.RunIteration(CancellationToken.None);
         }
 
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var underTheWindow = engine.GiveUps;
 
         // At 210 s the new streak has lasted the window.
         clock.Advance(TimeSpan.FromSeconds(5));
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         underTheWindow.ShouldBeEmpty();
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("5 passes in a row over 100 s", Case.Sensitive);
     }
 
@@ -384,16 +382,15 @@ public sealed class DatabaseWorkerFailureWindowTests
         fail = true;
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(50);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var underTheMinimum = engine.GiveUps;
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: the busy stretch kept the streak and its clock; the third failure gives up.
         busy.ShouldBe((true, 1));
         underTheMinimum.ShouldBeEmpty();
-        taken.ShouldBeTrue();
         engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("3 passes in a row over 202 s", Case.Sensitive);
     }
@@ -447,16 +444,15 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Act: one pass, the window, a second pass.
         worker.RunIteration(CancellationToken.None);
         clock.Advance(Window);
-        await Task.Delay(50);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var afterOne = engine.GiveUps;
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: two passes, not four reports, reach the minimum. (The second pass's second report
         // may already find the record the give-up ended, so it is not asserted.)
         afterOne.ShouldBeEmpty();
         counts.GetRange(0, 3).ShouldBe([1, 1, 2]);
-        taken.ShouldBeTrue();
         engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps[0].Cause.ShouldBe(StorageOfflineCause.PageWriteBackFailures);
         engine.GiveUps[0].Reason.ShouldContain("2 passes in a row", Case.Sensitive);
@@ -504,18 +500,17 @@ public sealed class DatabaseWorkerFailureWindowTests
         var results = new List<bool> { worker.RunIteration(CancellationToken.None) };
         clock.Advance(TimeSpan.FromSeconds(1));
         results.Add(worker.RunIteration(CancellationToken.None));
-        bool askedOnce = await Eventually(() => engine.GiveUps.Count == 1);
-        bool askedAgain = await Eventually(() =>
-        {
-            results.Add(worker.RunIteration(CancellationToken.None));
-            return engine.GiveUps.Count >= 2;
-        });
+        await engine.WaitForGiveUpAsync("missing").WaitAsync(Timeout);
+        int askedOnce = engine.GiveUps.Count;
+        results.Add(worker.RunIteration(CancellationToken.None));
+        await engine.WaitForGiveUpAsync("missing").WaitAsync(Timeout);
 
         // Assert: asked again, refused each time; the failed passes are the worker's own, and the
         // record the leaf's refusal left keeps counting.
         results.ShouldAllBe(succeeded => !succeeded);
-        askedOnce.ShouldBeTrue();
-        askedAgain.ShouldBeTrue();
+        askedOnce.ShouldBe(1);
+        engine.GiveUps.Count.ShouldBe(2);
+        engine.TakeOfflineCalls.ShouldBe(2);
         engine.GiveUps.ShouldAllBe(giveUp => !giveUp.Taken);
         engine.TakenOffline.ShouldBeEmpty();
         worker.ConsecutiveFailures.ShouldBe(results.Count);
@@ -540,7 +535,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
         engine.GiveUps.ShouldBeEmpty();
@@ -562,18 +557,18 @@ public sealed class DatabaseWorkerFailureWindowTests
         Should.Throw<ArgumentException>(() => worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, " ", failure));
         Should.Throw<ArgumentNullException>(() => worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "the cap", null!));
         bool queued = worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "its journal passed the cap", failure);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
-        // A second give-up is queued once the first ended (until then the call queues nothing).
-        bool again = await Eventually(() => worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "its journal passed the cap", failure));
-        bool refused = await Eventually(() => engine.GiveUps.Count == 2);
+        // Completion releases the request slot, so the next give-up can be queued at once.
+        bool again = worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "its journal passed the cap", failure);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: the leaf takes the database offline once and refuses it after.
         deviceCause.ParamName.ShouldBe("cause");
         queued.ShouldBeTrue();
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         again.ShouldBeTrue();
-        refused.ShouldBeTrue();
+        engine.GiveUps.Count.ShouldBe(2);
         var giveUp = engine.GiveUps[0];
         giveUp.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
         giveUp.Reason.ShouldBe("its journal passed the cap");
@@ -650,21 +645,20 @@ public sealed class DatabaseWorkerFailureWindowTests
         try
         {
             bool returned = passesDone.Wait(TimeSpan.FromSeconds(10));
-            bool entered = await Eventually(() => engine.TakeOfflineCalls == 1);
+            await engine.TakeOfflineEntered.WaitAsync(Timeout);
             var takenWhileBlocked = engine.TakenOffline;
 
             gate.Set();
-            bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+            await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
             // Assert: the passes returned while the core was blocked, b was visited by every pass,
             // the second pass's failure of a queued nothing, and a went offline once, on another
             // thread.
             returned.ShouldBeTrue();
             passFailure.ShouldBeNull();
-            entered.ShouldBeTrue();
             takenWhileBlocked.ShouldBeEmpty();
             Volatile.Read(ref bVisits).ShouldBe(3);
-            taken.ShouldBeTrue();
+            engine.TakenOffline.ShouldBe(["a"]);
             engine.TakeOfflineCalls.ShouldBe(1);
             engine.GiveUps.ShouldHaveSingleItem().Taken.ShouldBeTrue();
             lock (engine.TakeOfflineThreads)
@@ -709,7 +703,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         clock.Advance(Window);
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1 && worker.Fault is null);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var state = engine.State;
         bool failing = engine.HasFailingWorker("a");
         int consecutive = worker.ConsecutiveFailures;
@@ -719,10 +713,10 @@ public sealed class DatabaseWorkerFailureWindowTests
         clock.Advance(Window);
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
-        taken.ShouldBeTrue();
+        engine.TakenOffline.ShouldBe(["a"]);
         state.ShouldBe(EngineState.Running);
         failing.ShouldBeFalse();
         consecutive.ShouldBe(0);
@@ -765,7 +759,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         await engine.OpenDatabaseAsync("a");
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(100);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: four failures over the window, never three in a row on one instance.
         faulted.ShouldBe(EngineState.Faulted);
@@ -784,22 +778,38 @@ public sealed class DatabaseWorkerFailureWindowTests
     /// failed as a whole. Nothing escapes the thread-pool thread, and the database's next failure
     /// asks again.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database] - Worker failure window: a give-up the leaf fails is recorded on the worker, and the next failure asks again")]
-    public async Task GiveUp_LeafThrows_ShouldRecordTheFailureOnTheWorker()
+    [Theory(DisplayName = "Cohesion Test [Database] - Worker failure window: a give-up the leaf fails is recorded on the worker, and the next failure asks again")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GiveUp_LeafThrows_ShouldRecordTheFailureOnTheWorker(bool completeDuringPass)
     {
         // Arrange
         var leafFailure = new InvalidOperationException("the leaf could not take the database offline");
+        using var gate = new ManualResetEventSlim(false);
         var clock = new ManualTimeProvider();
         await using var engine = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
         {
             TakeOfflineFailure = leafFailure,
+            TakeOfflineGate = completeDuringPass ? null : gate,
         };
         await engine.CreateDatabaseAsync("a");
-        var worker = new ScriptedWorker((self, _) =>
+        Task completion = Task.CompletedTask;
+        bool completedDuringPass = false;
+        var worker = new ScriptedWorker((self, pass) =>
         {
             if (self.Begin("a"))
             {
                 self.Fail("a", new InvalidOperationException("checkpoint failed"), TimeSpan.Zero);
+            }
+
+            if (pass == 2)
+            {
+                completion = engine.WaitForGiveUpAsync("a");
+                if (completeDuringPass)
+                {
+                    // Force the pool's failure record to precede settlement of the queuing pass.
+                    completedDuringPass = completion.Wait(Timeout);
+                }
             }
         }, name: WorkerName);
         engine.Attach(worker);
@@ -809,26 +819,28 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        bool recorded = await Eventually(() => ReferenceEquals(worker.Fault, leafFailure));
+        gate.Set();
+        await completion.WaitAsync(Timeout);
+        var fault = worker.Fault;
         var state = engine.State;
         bool engineWide = engine.HasEngineWideFailure;
         bool failing = engine.HasFailingWorker("a");
         engine.TakeOfflineFailure = null;
-        var watch = Stopwatch.StartNew();
-        while (engine.TakenOffline.Count == 0 && watch.Elapsed < Timeout)
-        {
-            worker.RunIteration(CancellationToken.None);
-            await Task.Delay(10);
-        }
+        worker.RunIteration(CancellationToken.None);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert
-        recorded.ShouldBeTrue();
+        completedDuringPass.ShouldBe(completeDuringPass);
+        fault.ShouldBeSameAs(leafFailure);
         state.ShouldBe(EngineState.Faulted);
         engineWide.ShouldBeFalse();
         failing.ShouldBeTrue();
         engine.TakenOffline.ShouldBe(["a"]);
-        engine.TakeOfflineCalls.ShouldBeGreaterThanOrEqualTo(2);
+        engine.TakeOfflineCalls.ShouldBe(2);
         engine.GiveUps.ShouldHaveSingleItem().Taken.ShouldBeTrue();
+        worker.Fault.ShouldBeNull();
+        engine.HasFailingWorker("a").ShouldBeFalse();
+        engine.State.ShouldBe(EngineState.Running);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Engine: the worker failure window and minimum are the constructor's, 100 s and three passes by default")]
@@ -938,22 +950,5 @@ public sealed class DatabaseWorkerFailureWindowTests
         online.ShouldBeNull();
         empty.ParamName.ShouldBe("name");
         engine.OfflineErrorLookups.ShouldBe(["a"]);
-    }
-
-    // Polls a condition the engine's queued give-up makes true, for at most the timeout.
-    private static async Task<bool> Eventually(Func<bool> condition, TimeSpan? timeout = null)
-    {
-        var watch = Stopwatch.StartNew();
-        while (!condition())
-        {
-            if (watch.Elapsed > (timeout ?? Timeout))
-            {
-                return false;
-            }
-
-            await Task.Delay(10);
-        }
-
-        return true;
     }
 }

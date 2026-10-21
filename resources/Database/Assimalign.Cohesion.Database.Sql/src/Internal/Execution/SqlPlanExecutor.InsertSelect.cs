@@ -52,13 +52,8 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlProjection>? returning = null, IReadOnlyList<SqlBoundExpression[]>? valueRows = null,
         SqlOnConflictPlan? onConflict = null)
     {
-        await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
-        if (onConflict?.DoUpdate == true)
-        { await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false); }
-        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
-            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-        EnsureCurrentDefinition(table);
-        var indexes = GetLiveIndexes(table);
+        await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, incoming: onConflict?.DoUpdate == true).ConfigureAwait(false);
+        var indexes = GetLiveIndexes(table, statement);
         EnsureUpsertIndexes(table, indexes, onConflict);
         var bound = _definitions.Get(table, cancellationToken);
         var defaults = bound.DefaultValues;

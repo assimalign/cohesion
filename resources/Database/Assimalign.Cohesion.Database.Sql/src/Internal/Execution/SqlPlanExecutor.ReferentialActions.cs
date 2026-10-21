@@ -32,18 +32,19 @@ internal sealed partial class SqlPlanExecutor
     // Constraint validation sees the statement's final row set. Lookups still use the
     // existing indexes and snapshot; pending replacements contribute their final keys.
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> FinalConstraintRows(
-        SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, SqlStatementContext statement,
+        SqlBoundConstraintKey projection, object?[] keys, SqlStatementContext statement,
         CancellationToken cancellationToken,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions,
         SqlConstraintUpdates? updates, TransactionSnapshot? snapshot = null)
     {
-        foreach (var row in FindConstraintRows(table, columns, keys, statement, cancellationToken, snapshot))
+        var table = projection.Table;
+        foreach (var row in FindConstraintRows(projection, keys, statement, cancellationToken, snapshot))
         {
             var key = (table.ObjectId, SqlRecordLocation.Pack(row.Location.PageId, row.Location.SlotIndex));
             if (deletions?.ContainsKey(key) != true && updates?.ContainsKey(key) != true) { yield return row; }
         }
         if (updates is null) { yield break; }
-        foreach (var row in updates.Find(table, columns, keys, _catalog.DefaultCollation, statement.Metrics, cancellationToken))
+        foreach (var row in updates.Find(projection, keys, statement.Metrics, cancellationToken))
         {
             yield return row;
         }
@@ -55,7 +56,7 @@ internal sealed partial class SqlPlanExecutor
     {
         private readonly Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> _rows;
         private readonly Dictionary<ulong, SqlConstraintUpdate[]> _tables;
-        private readonly Dictionary<(ulong ObjectId, string Columns), Dictionary<object?[], List<((PageId PageId, int SlotIndex) Location, object?[] Values)>>> _indexes = [];
+        private readonly Dictionary<SqlBoundConstraintKey, Dictionary<object?[], List<((PageId PageId, int SlotIndex) Location, object?[] Values)>>> _indexes = [];
 
         internal SqlConstraintUpdates(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> rows)
         {
@@ -67,18 +68,16 @@ internal sealed partial class SqlPlanExecutor
         internal bool ContainsKey((ulong ObjectId, ulong Location) key) => _rows.ContainsKey(key);
 
         internal IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Find(
-            SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, Collation defaultCollation, SqlStatementMetrics metrics, CancellationToken cancellationToken)
+            SqlBoundConstraintKey projection, object?[] keys, SqlStatementMetrics metrics, CancellationToken cancellationToken)
         {
-            if (!_tables.TryGetValue(table.ObjectId, out var rows)) { return []; }
-            var projection = (table.ObjectId, string.Join("\0", columns));
+            if (!_tables.TryGetValue(projection.Table.ObjectId, out var rows)) { return []; }
             if (!_indexes.TryGetValue(projection, out var index))
             {
-                int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                index = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? defaultCollation).ToArray(), metrics));
+                index = new(new GroupKeyComparer(projection.Collations, metrics));
                 foreach (var row in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    object?[] key = ordinals.Select(ordinal => row.NewValues[ordinal]).ToArray();
+                    object?[] key = projection.Read(row.NewValues);
                     if (!index.TryGetValue(key, out var matches)) { index.Add(key, matches = []); }
                     matches.Add((row.Location, row.NewValues));
                 }
@@ -90,18 +89,19 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        HashSet<ulong> scannedTables, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var updates = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
         foreach (var deletion in deletions.Values)
         {
-            foreach (var (child, constraint) in IncomingReferences(deletion.Table))
+            foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
             {
+                var (child, constraint) = reference;
                 cancellationToken.ThrowIfCancellationRequested();
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
-                var keys = constraint.ReferencedColumns!.Select(column => deletion.Values[FindColumnOrdinal(deletion.Table, column)]).ToArray();
+                var keys = reference.ParentKey.Read(deletion.Values);
                 if (keys.Any(value => value is null)) { continue; }
-                var matches = FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
+                var matches = FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
                     ConstraintCurrentSnapshot(statement)).ToList();
                 var bound = _definitions.Get(child, cancellationToken);
                 foreach (var match in matches)
@@ -114,15 +114,17 @@ internal sealed partial class SqlPlanExecutor
                         await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken).ConfigureAwait(false);
                         EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
                             constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
-                        await AcquireIncomingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
-                        await AcquireOutgoingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
-                        EnsureCurrentDefinition(child);
+                        if (scannedTables.Add(child.ObjectId))
+                        {
+                            EnsureCurrentDefinition(child);
+                            await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
+                        }
                         update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
                         updates.Add(key, update);
                     }
-                    foreach (string name in constraint.Columns)
+                    foreach (int ordinal in reference.ChildKey.Ordinals)
                     {
-                        int ordinal = FindColumnOrdinal(child, name);
+                        string name = child.Columns[ordinal].Name;
                         if (constraint.OnDelete == SqlCatalogReferentialAction.SetDefault && child.Columns[ordinal].Identity is { IsAlways: true })
                         {
                             throw SqlPlanningException.IdentityViolation(name, ErrorMessages.IdentityUpdateForbidden);
@@ -163,7 +165,7 @@ internal sealed partial class SqlPlanExecutor
         // All row and reference locks precede unique-key locks and the physical bracket.
         foreach (var group in updates.Values.GroupBy(update => update.Table).OrderBy(group => group.Key.ObjectId))
         {
-            var indexes = GetLiveIndexes(group.Key);
+            var indexes = GetLiveIndexes(group.Key, statement);
             var hashes = new List<ulong>();
             foreach (var update in group)
             {

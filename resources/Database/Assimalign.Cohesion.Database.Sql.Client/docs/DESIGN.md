@@ -1,5 +1,17 @@
 # Database.Sql.Client — Design
 
+## Terminal TCP conformance (#1087)
+
+The real SqlClient and model server run missing-database handshakes on InMemory and
+loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
+tests assert DatabaseNotFound and ConnectionFailure kind and reuse a one-slot pool to expose leaked failed rentals.
+TCP also covers 200 authentication and capacity refusals through the typed client, 200
+unsupported-major handshakes through the public protocol (production clients send Current),
+and 200 idle and graceful-stop notices surfaced by the next concrete-client operation.
+An in-memory regression returns an authenticated rental to its pool and leaves the client open
+and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
+abort, and idle eviction must release the sole session slot for a fresh client after linger.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
@@ -303,6 +315,11 @@ Column DEFAULT expressions also admit Stable/Volatile functions since #1121.
 The cancellation wire theories cover that sequence and verify its committed state from a second
 connection, as well as checking the token on every planning and execution callback.
 
+Definition DDL's mandatory post-commit refresh uses CancellationToken.None (#1231). Caller
+cancellation cannot undo that publication or turn its in-process result into failure. A wire
+disconnect can lose the response while the definition remains committed. Later function/domain
+execution receives its own statement token; pre-commit table/default binding remains cancellable.
+
 A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
 `ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
 "Lifecycle and errors"). The mapper translates it like a handshake rejection, to
@@ -500,4 +517,6 @@ the session on both InMemory and TCP. Its regression holds a hook inside Match,
 asserts entry, waits for the server lifetime token after disconnect, then releases
 matching. Reverting LIKE token routing must produce StatementStop Error instead of
 Cancelled. The test uses AOT-compatible UnsafeAccessor seams without a public API
-or friend-assembly grant. No client API or protocol format changes are needed.
+or friend-assembly grant. Event assertions wait for the matching SessionClosed and StatementStop
+records with a hang guard: removal from the server's session table precedes close-event publication.
+No client API or protocol format changes are needed.

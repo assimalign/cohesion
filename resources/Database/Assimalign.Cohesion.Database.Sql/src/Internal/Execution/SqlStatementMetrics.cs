@@ -56,6 +56,19 @@ internal sealed class SqlStatementMetrics
     /// <summary>Scalar key comparisons performed by constraint lookups, including hash collisions.</summary>
     internal long ConstraintKeyComparisons { get; set; }
 
+    /// <summary>Catalog tables visited while discovering incoming references.</summary>
+    internal long ReferenceCatalogTableVisits { get; set; }
+
+    /// <summary>Incoming reference lists built for distinct tables in this statement.</summary>
+    internal int IncomingReferenceBuilds { get; set; }
+
+    internal int ReferenceIntentLockBatches { get; set; }
+
+    internal int ConstraintLookupBuilds { get; set; }
+    internal int LiveIndexBuilds { get; set; }
+
+    internal SqlStatementReferences? References { get; set; }
+
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
     /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for

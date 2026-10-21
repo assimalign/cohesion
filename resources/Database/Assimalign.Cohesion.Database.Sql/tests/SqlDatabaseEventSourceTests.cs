@@ -696,6 +696,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
         await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await client.ReadAsync()).ShouldBeNull();
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
 

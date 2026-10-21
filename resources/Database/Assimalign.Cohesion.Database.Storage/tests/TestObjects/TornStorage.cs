@@ -19,8 +19,8 @@ internal sealed class TornStorage : Storage
     private readonly CrashSimulationStream _data;
     private readonly CrashSimulationStream _journal;
 
-    private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity)
-        : this(data, journal, new FlushFaultingHandle(data), new FlushFaultingHandle(journal), poolCapacity)
+    private TornStorage(CrashSimulationStream data, CrashSimulationStream journal, int poolCapacity, DeviceFaults? faults = null)
+        : this(data, journal, new FlushFaultingHandle(faults is null ? data : faults.WrapData(data)), new FlushFaultingHandle(journal), poolCapacity)
     {
     }
 
@@ -121,9 +121,10 @@ internal sealed class TornStorage : Storage
         CrashSimulationStream journal,
         bool checkpointOnOpen = false,
         int poolCapacity = 8,
-        bool consistencyChecks = false)
+        bool consistencyChecks = false,
+        DeviceFaults? faults = null)
     {
-        var storage = new TornStorage(data, journal, poolCapacity);
+        var storage = new TornStorage(data, journal, poolCapacity, faults);
         if (consistencyChecks)
         {
             storage.EnableConsistencyChecks();

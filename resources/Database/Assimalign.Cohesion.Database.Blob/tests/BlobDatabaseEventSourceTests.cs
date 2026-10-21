@@ -344,6 +344,7 @@ public sealed class BlobDatabaseEventSourceTests
         await client.ExpectAsync(ProtocolMessageType.Authenticate);
         await client.SendAsync(ProtocolMessageType.AuthenticateResponse);
         var error = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await client.ReadAsync()).ShouldBeNull();
         Guid sessionId = await AcceptedSessionAsync(recorder, engineName);
         await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
 
@@ -479,6 +480,8 @@ public sealed class BlobDatabaseEventSourceTests
         worker.RunIteration(TestTimeout.Token(30));
         await served.SendAsync(BlobProtocolMessageType.List, new BlobListMessage(BlobServerHarness.ContainerName, "").Encode());
         var exchangeRefusal = ProtocolErrorMessage.Decode((await served.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await refused.ReadAsync()).ShouldBeNull();
+        (await served.ReadAsync()).ShouldBeNull();
         await recorder.WaitForAsync(e => IsFor(e, 5, refusedSession), TestTimeout.Token(30));
         await recorder.WaitForAsync(e => IsFor(e, 5, servedSession), TestTimeout.Token(30));
 
@@ -514,6 +517,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Act
         await accepted.SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, BlobServerHarness.DatabaseName, "ada").Encode());
         var handshakeRefusal = ProtocolErrorMessage.Decode((await accepted.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        (await accepted.ReadAsync()).ShouldBeNull();
         await recorder.WaitForAsync(e => IsFor(e, 5, sessionId), TestTimeout.Token(30));
         await using var rejected = await harness.DialAsync();
         var acceptRefusal = ProtocolErrorMessage.Decode((await rejected.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
