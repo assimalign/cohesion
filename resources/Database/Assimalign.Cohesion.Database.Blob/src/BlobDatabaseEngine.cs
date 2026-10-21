@@ -691,7 +691,14 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
-                throw new DatabaseException(message, exception);
+                throw new DatabaseException(message, [new Types.Diagnostic
+                { Code = "COHDBB005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+            }
+            catch (Blob.Catalog.BlobCatalogException exception)
+            {
+                storage?.Dispose();
+                throw new DatabaseException(exception.Message, [new Types.Diagnostic
+                { Code = "COHDBB006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {

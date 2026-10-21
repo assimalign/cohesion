@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -66,7 +67,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         ShouldBeExpectedFailure(error, failure);
-        refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         if (error is OperationCanceledException)
         {
             // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
@@ -124,7 +125,7 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.ShouldAllBe(error => error.Message.StartsWith("COHDBB001", StringComparison.Ordinal));
+        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "COHDBB001"));
         (await ReadAsync(files, "keep")).ShouldBe("original");
         await using (var next = await session.BeginTransactionAsync())
         {
@@ -153,7 +154,8 @@ public sealed class BlobTransactionFailureTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         error.Message.ShouldEndWith("Cause: " + failure.Message, Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -195,7 +197,7 @@ public sealed class BlobTransactionFailureTests
         // COMMIT keeps its coded error after the transaction ended, so its outcome never depends on
         // whether the caller's commit or the session's teardown ran first.
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
-        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         commit.InnerException.ShouldBeSameAs(failure);
     }
 
@@ -303,7 +305,7 @@ public sealed class BlobTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await NamesAsync(container)).ShouldBe(["blocker"]);
@@ -366,7 +368,7 @@ public sealed class BlobTransactionFailureTests
         // Assert
         faultedState.ShouldBe(TransactionState.Faulted);
         refusedRead.Message.ShouldNotStartWith("COHDBB001", Case.Sensitive);
-        refused.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         // A canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -433,7 +435,8 @@ public sealed class BlobTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         if (failure is null)
         {
             error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
@@ -475,7 +478,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert: a blob session has no execute member, so only its container and blob operations
         // validate here.
-        rejections.ShouldAllBe(error => !error.Message.StartsWith("COHDBB001", StringComparison.Ordinal));
+        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "COHDBB001"));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         (await NamesAsync(container)).ShouldBe(["pending"]);
@@ -595,7 +598,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         write.Message.ShouldBe("The session is closed.");
-        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         commit.Message.ShouldEndWith("Cause: The blob session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(container, "keep")).ShouldBe("original");
@@ -748,7 +751,7 @@ public sealed class BlobTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         beginAfterRollback.ShouldNotBeNull();
         session.CurrentTransaction.ShouldBeNull();
     }

@@ -23,6 +23,7 @@ internal sealed class BlobOperation
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
+    private bool _isUpload;
 
     /// <summary>Initializes a new instance of the <see cref="BlobOperation"/> class.</summary>
     /// <param name="database">The database the operation runs on.</param>
@@ -54,6 +55,8 @@ internal sealed class BlobOperation
         }
     }
 
+    internal void MarkUpload() => _isUpload = true;
+
     internal void EnsureActive()
     {
         _database.EnsureNotDisposed();
@@ -64,7 +67,8 @@ internal sealed class BlobOperation
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
-            throw new DatabaseException("The blob operation's transaction is no longer active.");
+            if (_isUpload) { throw _database.TranslateFailure(new BlobUploadException(ErrorMessages.UploadTransactionInactive)); }
+            throw new DatabaseException(ErrorMessages.OperationTransactionInactive);
         }
     }
 

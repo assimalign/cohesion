@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -567,7 +568,27 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     protected override ValueTask<DatabaseInstance> CreateDatabaseCoreAsync(DatabaseName name, object? creationState, CancellationToken cancellationToken)
     {
         Collation collation = (Collation?)creationState ?? Collation.Binary;
-        return CreateDatabaseWithCollationAsync(name, collation, cancellationToken);
+        try { return CreateDatabaseWithCollationAsync(name, collation, cancellationToken); }
+        catch (Exception error) when (StorageCorruptionException.Find(error) is null
+            && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } corruption)
+        {
+            throw DatabaseCorruptionException.Create(name, corruption, [new Diagnostic
+            { Code = "COHSQLE041", Message = error.Message, Severity = DiagnosticSeverity.Error }]);
+        }
+        catch (Exception error) when (error is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
+            && StorageCorruptionException.Find(error) is null && StorageOfflineException.Find(error) is { } offline)
+        {
+            throw offline.CommitRecordWritten
+                ? DatabaseTransactionCommitUnconfirmedException.Create(SqlDatabase.OfflineCode, name, offline)
+                : DatabaseOfflineException.Create(SqlDatabase.OfflineCode, name, offline);
+        }
+        catch (Exception error) when (StorageCorruptionException.Find(error) is null && DatabaseFailure.IsStorageFailure(error)
+            && error is not DatabaseException { Diagnostics.Count: > 0 })
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreationFailed, name, error.Message);
+            throw new DatabaseException(message, [new Diagnostic
+            { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }], error);
+        }
     }
 
     private ValueTask<DatabaseInstance> CreateDatabaseWithCollationAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken)
@@ -641,6 +662,35 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
     private ValueTask<DatabaseInstance> OpenDatabaseInternal(DatabaseName name, CancellationToken cancellationToken,
         bool creating = false, Collation? defaultCollation = null)
+    {
+        try { return OpenDatabaseFiles(name, cancellationToken, creating, defaultCollation); }
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+            && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
+        {
+            var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Diagnostic
+            { Code = "COHSQLE041", Message = exception.Message, Severity = DiagnosticSeverity.Error }]);
+            throw refusal;
+        }
+        catch (Exception exception) when (exception is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
+            && StorageCorruptionException.Find(exception) is null && StorageOfflineException.Find(exception) is { } offline)
+        {
+            throw offline.CommitRecordWritten
+                ? DatabaseTransactionCommitUnconfirmedException.Create(SqlDatabase.OfflineCode, name, offline)
+                : DatabaseOfflineException.Create(SqlDatabase.OfflineCode, name, offline);
+        }
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+            && DatabaseFailure.IsStorageFailure(exception)
+            && exception is not DatabaseException { Diagnostics.Count: > 0 })
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.DatabaseOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Diagnostic
+            { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+        }
+    }
+
+    private ValueTask<DatabaseInstance> OpenDatabaseFiles(DatabaseName name, CancellationToken cancellationToken,
+        bool creating, Collation? defaultCollation)
     {
         ValidateName(name);
         lock (_syncRoot)

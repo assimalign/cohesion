@@ -1,17 +1,26 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
-
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
+
+using EventRecorder = Assimalign.Cohesion.Testing.EventSourceRecorder;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;
 
@@ -22,6 +31,7 @@ using static KeyValueTestHarness;
 /// checksum made its keys disappear from Get, and a Put over such a key resolved it as missing and
 /// failed with a retryable write-write conflict that no retry could clear.
 /// </summary>
+[Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueIndexReadIntegrityTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Index reads: a Get over an entry page that fails its checksum fails instead of reading the key as missing (#1342)")]
@@ -155,6 +165,144 @@ public sealed class KeyValueIndexReadIntegrityTests
         // Assert
         failure.PageId.ShouldBe(damaged.PageId);
         Text(bravo.ShouldNotBeNull().Value).ShouldBe("two");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Wire: storage failures abort transactions and preserve the session (#1364)")]
+    [InlineData(0, false, false)]
+    [InlineData(1, false, false)]
+    [InlineData(2, false, false)]
+    [InlineData(0, true, false)]
+    [InlineData(1, true, false)]
+    [InlineData(2, true, false)]
+    [InlineData(0, true, true)]
+    [InlineData(1, true, true)]
+    [InlineData(2, true, true)]
+    [InlineData(3, false, false)]
+    [InlineData(3, true, false)]
+    [InlineData(3, true, true)]
+    [InlineData(4, false, false)]
+    [InlineData(4, true, false)]
+    [InlineData(4, true, true)]
+    [InlineData(5, false, false)]
+    [InlineData(5, true, false)]
+    [InlineData(5, true, true)]
+    [InlineData(6, false, false)]
+    [InlineData(6, true, false)]
+    [InlineData(6, true, true)]
+    [InlineData(7, false, false)]
+    [InlineData(7, true, false)]
+    [InlineData(7, true, true)]
+    public async Task Execute_ReadFailure_ShouldCodeAbortAndKeepWireSession(int failureKind, bool explicitTransaction, bool readCommitted)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.StorageStrategy = strategy);
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
+        await using var embedded = await database!.CreateSessionAsync(CancellationToken.None);
+        await database.PutAsync(embedded, Bytes("alpha"), Bytes("one"), cancellationToken: CancellationToken.None);
+        var pageId = database.DataStorage.GetOwnerPages(KeyValueOperationExecutor.KeySpaceObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        var engineSession = serverSession.DatabaseSession.ShouldBeOfType<KeyValueDatabaseSession>();
+        var transaction = explicitTransaction ? await engineSession.BeginTransactionAsync(readCommitted ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, CancellationToken.None) : null;
+        var faults = strategy.Faults(KeyValueServerHarness.DatabaseName);
+        faults.RottenPage = pageId;
+        if (failureKind != 0)
+        {
+            faults.WrapCorruption = _ => failureKind switch
+            {
+                1 => new StorageIOException("Injected storage read failure."),
+                2 => new IOException("Injected device read failure."),
+                3 => new SlottedPageException("Injected slot failure."),
+                4 => new JournalException("Injected journal failure."),
+                5 => new StorageTransactionException("Injected storage transaction failure."),
+                6 => new InvalidOperationException("Wrapped read.", new StorageTransactionException("Injected storage transaction failure.")),
+                _ => new AggregateException(new InvalidOperationException("Other branch."), new IOException("Injected device read failure.")),
+            };
+        }
+        try
+        {
+            // Act
+            await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("GET @key", new Dictionary<string, byte[]> { ["key"] = DatabaseValueCodec.EncodeComponent(Bytes("alpha")) }).Encode());
+            var failure = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+
+            // Assert
+            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            failure.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHDBK005: ", Case.Sensitive);
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
+            if (transaction is not null)
+            {
+                transaction.State.ShouldBe(TransactionState.Faulted);
+                var refusal = await Should.ThrowAsync<DatabaseException>(() => database.GetAsync(engineSession, Bytes("alpha"), CancellationToken.None).AsTask());
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK001");
+                refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
+                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHDBK005");
+            }
+        }
+        finally { faults.Clear(); }
+        if (transaction is not null) { await transaction.RollbackAsync(CancellationToken.None); }
+        await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("GET @key", new Dictionary<string, byte[]> { ["key"] = DatabaseValueCodec.EncodeComponent(Bytes("alpha")) }).Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultHeader);
+        await client.ExpectAsync(ProtocolMessageType.ResultRow);
+        await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Abort: rollback failure preserves the exact coded read cause and emits cleanup evidence")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptRead, bool corruptCleanup)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = CreateEngine(strategy);
+        var database = await engine.CreateDatabaseAsync("abort-failure", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await database.PutAsync(session, Bytes("alpha"), Bytes("one"), cancellationToken: CancellationToken.None);
+        var transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+        await database.PutAsync(session, Bytes("pending"), Bytes("two"), cancellationToken: CancellationToken.None);
+        var pageId = database.DataStorage.GetOwnerPages(KeyValueOperationExecutor.KeySpaceObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        var faults = strategy.Faults("abort-failure");
+        faults.RottenPage = pageId;
+        if (!corruptRead) { faults.WrapCorruption = _ => new StorageIOException("Injected read failure."); }
+        int aborts = 0;
+        var original = database.Coordinator.OnUndoDeferred;
+        Exception abortFailure = corruptCleanup ? new StorageCorruptionException(pageId, "Injected cleanup corruption.")
+            : new InvalidOperationException("Injected abort notification failure.");
+        database.Coordinator.OnUndoDeferred = () => { Interlocked.Increment(ref aborts); throw abortFailure; };
+        using var recorder = new EventRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Warning);
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(() => database.GetAsync(session, Bytes("alpha"), CancellationToken.None).AsTask());
+
+            // Assert
+            aborts.ShouldBe(1);
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHDBK005");
+            if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
+            transaction.CreateCommandRefusal().InnerException.ShouldBeSameAs(failure);
+            var cleanup = recorder.Events.Where(item => item.EventId == 11).ShouldHaveSingleItem();
+            cleanup.EventName.ShouldBe("TransactionCleanupFailed");
+            cleanup.Level.ShouldBe(EventLevel.Warning);
+            cleanup.PayloadNames.ShouldNotBeNull().ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+            cleanup.Payload.ShouldNotBeNull()[0].ShouldBe(transaction.Id.ToString());
+            cleanup.Payload[1].ShouldBe(corruptCleanup ? typeof(DatabaseCorruptionException).FullName : typeof(InvalidOperationException).FullName);
+            cleanup.Payload[2].ShouldBeOfType<string>().ShouldContain(abortFailure.Message, Case.Sensitive);
+            recorder.Events.ShouldNotContain(item => item.EventId == 0);
+            transaction.State.ShouldBe(TransactionState.Faulted);
+        }
+        finally
+        {
+            faults.Clear();
+            database.Coordinator.OnUndoDeferred = original;
+        }
+        await transaction.RollbackAsync(CancellationToken.None);
     }
 
     private static KeyValueDatabaseEngine CreateEngine(FaultInjectingJournalStorageStrategy? strategy)

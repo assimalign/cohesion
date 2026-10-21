@@ -1,5 +1,21 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Wrapped child failures and abort evidence (#1364)
+
+Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
+and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHDBK005`;
+other index failures use `COHDBK005`. Begin, command, commit and rollback share classification.
+Create and open also code child failures before publication. Known format refusals retain their
+authored messages, source diagnostics and inner causes. A failed command aborts an explicit
+transaction after releasing admission. If that abort also fails, the exact coded exception
+remains primary, including its corruption type; the model EventSource records the cleanup
+failure as `TransactionCleanupFailed`. Transaction refusals retain their own code. Real
+device-read regressions cover slot, journal and storage-transaction failures through both
+wrapper shapes. A failed deferred-undo notification proves an abort cannot replace the read
+diagnosis or its exception type.
+
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
@@ -707,6 +723,21 @@ leak), repaired by re-bootstrapping on the next open.
 
 ## Error model
 
+Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
+diagnostic COHDBK005 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
+The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
+member is introduced. These failures abort an explicit transaction, retain the coded cause,
+and require rollback before further statements. In autocommit the next statement can run.
+The wire returns ExecutionFailure and preserves the session. Offline/unconfirmed commit
+classification retains its existing precedence and outcome. Open failures in either the data
+or catalog file set carry the I/O code, release opened resources and permit a later retry.
+
+This follows PostgreSQL's ERROR corruption report in src/backend/storage/buffer/bufmgr.c:8866-8868,
+and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.c:4612,4629.
+The implementation uses static type checks and the existing transaction abort mechanism.
+
+
 Storage corruption is `COHDBS003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
@@ -735,11 +766,12 @@ retryable) for a commit whose record was written but whose fsync failed, and
 `DatabaseOfflineException` (`COHDBK002`, → `Unavailable` on the wire) for every operation
 after it ("Storage operations").
 
-An entry page the command cannot read fails the command with the storage library's own
-error: `StorageCorruptionException` (carrying the page id) for a page that fails its
-checksum or whose slot geometry is malformed, `StorageIOException` for a page cut short or
-a pool with every frame pinned, and the device's `IOException`. The engine does not wrap
-I/O failures yet; corruption is translated to `DatabaseCorruptionException` (`COHDBS003`). Every command resolves its key by a primary-index seek, and the seek fetches the
+An entry page the command cannot read fails the command. Storage reports
+StorageCorruptionException (with the page id) for checksum or slot geometry damage,
+StorageIOException for a cut-short page or a pool whose frames are all pinned, and
+IOException for device failures. The engine translates corruption to DatabaseCorruptionException
+(COHDBS003), and I/O to DatabaseException with COHDBK005. Every command resolves its key by a
+primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
 or reallocated) reads as absence, and anything else that stops the read fails the command.
@@ -968,8 +1000,8 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   transaction base owns the whole end state machine; the server base owns the
   lifecycle. The model supplies its vocabulary: `COHDBK001` and `COHDBK002`, the
   kernel calls and the translation of the kernel's exceptions. It keeps its
-  per-command rule (the owner's 2026-10-04 decision): a failed command never aborts
-  the transaction, so the session never calls the base's `AbortAsync`, and commands do
+  per-command rule for ordinary errors (the owner's 2026-10-04 decision); storage corruption
+  and I/O failures abort through the base's `AbortAsync` (#1364). Commands do
   not take the session's operation hold.
 - **What changed for a caller** (plan §6.4): BEGIN on an active session fails with
   "A transaction or operation is already active on this session." (was "A transaction
@@ -1034,6 +1066,7 @@ bounded peer-sent names) are in the area's
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
 | 10 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code`, `exceptionType`, `suppressedCount` (int) |
+| 11 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 Event 10 reports a wire command that failed to parse before the typed execution member ran.
 It writes only the exception type and code, never command text or the parse message. It is

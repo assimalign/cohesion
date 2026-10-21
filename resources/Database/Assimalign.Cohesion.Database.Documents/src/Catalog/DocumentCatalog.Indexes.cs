@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -106,7 +107,7 @@ public sealed partial class DocumentCatalog
         {
             if (FindIndex(collectionId, name, context.Snapshot) is not null)
             {
-                throw new DocumentCatalogException($"Index '{name}' already exists.");
+                throw new DocumentCatalogException("COHDOC024", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexAlreadyExists, name));
             }
         }
         var metadata = new DocumentIndexMetadata(collectionId, name, paths, isUnique, (ulong)_storage.ReserveTransactionSequence());
@@ -176,7 +177,7 @@ public sealed partial class DocumentCatalog
         }
         if (previous is null)
         {
-            throw new DocumentCatalogException($"Index '{name}' does not exist.");
+            throw new DocumentCatalogException("COHDOC025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
         }
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
@@ -328,7 +329,7 @@ public sealed partial class DocumentCatalog
         var key = DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)), metadata, out distinct);
         if (key is { Length: > 1024 })
         {
-            throw new DocumentCatalogException("Indexed scalar encodes beyond the shared B+Tree 1024-byte key limit.");
+            throw new DocumentCatalogException("COHDOC026", ErrorMessages.IndexKeyTooLarge);
         }
         return key;
     }

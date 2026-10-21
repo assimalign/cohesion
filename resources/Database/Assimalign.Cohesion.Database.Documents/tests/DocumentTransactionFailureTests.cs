@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -60,7 +61,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refused.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
         refused.Message.ShouldContain(error.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(error);
         faultedState.ShouldBe(TransactionState.Faulted);
@@ -110,7 +111,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.ShouldAllBe(error => error.Message.StartsWith("COHDBD001", StringComparison.Ordinal));
+        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "COHDBD001"));
         (await collection.GetAsync(session, "keep")).ShouldNotBeNull();
         await using (var next = await session.BeginTransactionAsync())
         {
@@ -139,7 +140,8 @@ public sealed class DocumentTransactionFailureTests
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert: every commit reports the cause, as the model's own state machine did.
-        error.Message.ShouldStartWith("COHDBD001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
         repeated.Message.ShouldBe(error.Message);
         repeated.InnerException.ShouldBeSameAs(failure);
@@ -303,7 +305,7 @@ public sealed class DocumentTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await IdsAsync(waiting)).ShouldBe(["blocker"]);
@@ -365,7 +367,8 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBD001: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         if (failure is null)
         {
             error.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
@@ -410,7 +413,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.CommitAsync();
 
         // Assert
-        rejections.ShouldAllBe(error => !error.Message.StartsWith("COHDBD001", StringComparison.Ordinal));
+        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "COHDBD001"));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         (await IdsAsync(session)).ShouldBe(["pending"]);
@@ -527,7 +530,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         statement.ShouldNotBeOfType<TimeoutException>();
-        commit.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
         commit.Message.ShouldEndWith("Cause: The document session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
@@ -672,7 +675,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Message.ShouldStartWith("COHDBD001", Case.Sensitive);
+        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         text.ShouldNotBeNull();
         canceledRequest.CancellationToken.ShouldBe(canceled.Token);

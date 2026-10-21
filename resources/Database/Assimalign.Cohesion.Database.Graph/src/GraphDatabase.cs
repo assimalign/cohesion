@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
@@ -217,6 +218,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException

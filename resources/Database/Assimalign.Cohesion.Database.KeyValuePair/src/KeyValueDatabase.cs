@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
@@ -132,7 +134,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
         catch (IndexFormatException exception)
         {
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            string message = $"Database '{name}' cannot be opened. {exception.Message}";
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = IndexFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
 
         if (recover)
@@ -440,6 +444,12 @@ public sealed class KeyValueDatabase : DatabaseInstance
             return DatabaseCorruptionException.Create(Name, corruption);
         }
 
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+        }
+
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || StorageOfflineException.Find(error) is not { } offline)
         {
@@ -449,6 +459,23 @@ public sealed class KeyValueDatabase : DatabaseInstance
         return offline.CommitRecordWritten
             ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
+    }
+
+    // Offline/unconfirmed and area-wide corruption classifications take precedence over I/O.
+    internal Exception TranslateFailure(Exception error)
+    {
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBS003" }, ..] }) { return error; }
+        // A transaction refusal owns its diagnostic even when its cause is storage corruption.
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK001" }, ..] }) { return error; }
+        var translated = TranslateOffline(error);
+        if (!ReferenceEquals(translated, error)) { return translated; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK005" }, ..] }) { return error; }
+        return error switch
+        {
+            _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            _ => error,
+        };
     }
 
     /// <summary>

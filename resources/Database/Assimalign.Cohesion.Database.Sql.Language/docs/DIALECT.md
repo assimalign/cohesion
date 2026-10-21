@@ -14,7 +14,13 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 A read that detects storage corruption fails with `COHDBS003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
-The error is an execution failure over the wire; the connection remains usable. A
+The error is an execution failure over the wire; the connection remains usable.
+StorageException subclasses (including slot, journal and storage-transaction failures),
+IndexException and IOException become COHSQLE041; I/O has SQLSTATE 58030. Classification
+searches wrappers and aggregate branches. Attached-index corruption instead retains
+COHDBI002 alongside the common COHDBS003 and model diagnostic. COHDBS003 maps to
+XX001. Either failure aborts an explicit transaction, whose caller must roll back before
+executing another statement. In autocommit the next statement runs immediately (#1364). A
 legitimately reclaimed location retains its existing absence semantics. The engine's
 storage-integrity conformance tests cover corrupted media through the executing language.
 
@@ -3078,6 +3084,7 @@ pin in the same change.
 | `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 | `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
+| `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |

@@ -1,4 +1,6 @@
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Indexing;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -30,7 +32,10 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
     /// <param name="message">The refusal: the database, the format found, the format supported and the remedy.</param>
     /// <param name="inner">The component's refusal.</param>
     public SqlDataStorageFormatException(string message, System.Exception inner)
-        : base(message, inner)
+        : base(message, [new Diagnostic
+        { Code = inner is StorageFormatException ? StorageFormatException.ErrorCode :
+            inner is IndexFormatException ? IndexFormatException.ErrorCode : "COHSQLE041",
+            Message = message, Severity = DiagnosticSeverity.Error }], inner)
     {
     }
     internal SqlDataStorageFormatException(string message, string code)

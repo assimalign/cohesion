@@ -76,9 +76,9 @@ public sealed class BlobTransactionFailureWireTests
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         error.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
-        repeated.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
     }
@@ -116,7 +116,7 @@ public sealed class BlobTransactionFailureWireTests
         // active on this session.".
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldContain("A transaction or operation is already active on this session.", Case.Sensitive);
-        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
         commit.Message.ShouldContain(failure.Message, Case.Sensitive);
         repeated.Message.ShouldBe(commit.Message);
