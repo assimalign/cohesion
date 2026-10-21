@@ -39,7 +39,8 @@ internal sealed class ScriptedWorker : DatabaseEngineWorker
 
     public int Fail(string database, Exception exception) => ReportFailure(database, exception);
 
-    public int Fail(string database, Exception exception, TimeSpan retryAfter) => ReportFailure(database, exception, retryAfter);
+    public int Fail(string database, Exception exception, TimeSpan retryAfter, bool countsTowardOffline = true)
+        => ReportFailure(database, exception, retryAfter, countsTowardOffline);
 
     public void Unfinished(string database) => ReportUnfinished(database);
 

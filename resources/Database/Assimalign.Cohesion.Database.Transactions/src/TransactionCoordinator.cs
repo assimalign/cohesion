@@ -822,7 +822,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             _log.CheckpointUnderGate(_storage);
             Volatile.Write(ref _checkpointDeferred, 0);
         }
-        catch (StorageTransactionException)
+        catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
         {
             // A storage bracket outside the apply gate is open; the next statement to end, or
             // the worker's next look, retries.

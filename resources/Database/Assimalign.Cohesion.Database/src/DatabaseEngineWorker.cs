@@ -403,8 +403,8 @@ public abstract class DatabaseEngineWorker
     /// <param name="database">The database's name.</param>
     /// <param name="exception">The failure.</param>
     /// <returns>
-    /// How many passes in a row have failed on the database, this one included: what the engine's
-    /// minimum of passes is compared with.
+    /// The number of failed passes in the current episode, including report-only failures; only
+    /// offline-capable failures count toward the engine's minimum.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="database"/> or <paramref name="exception"/> is null.</exception>
     /// <exception cref="InvalidOperationException">No pass is running.</exception>
@@ -422,9 +422,13 @@ public abstract class DatabaseEngineWorker
     /// <param name="database">The database's name.</param>
     /// <param name="exception">The failure.</param>
     /// <param name="retryAfter">How long later passes skip the database.</param>
+    /// <param name="countsTowardOffline">
+    /// Whether this failure counts toward the offline window and minimum. False reports a persistent
+    /// refusal for observation only; later operational failures start their own offline window.
+    /// </param>
     /// <returns>
-    /// How many passes in a row have failed on the database, this one included: what the engine's
-    /// minimum of passes is compared with.
+    /// The number of failed passes in the current episode, including report-only failures; the offline minimum counts only failures
+    /// reported with countsTowardOffline true.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="database"/> or <paramref name="exception"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="retryAfter"/> is negative.</exception>
@@ -447,7 +451,7 @@ public abstract class DatabaseEngineWorker
     /// later, and its failure record backs it off until then.
     /// </para>
     /// </remarks>
-    protected int ReportFailure(string database, Exception exception, TimeSpan retryAfter)
+    protected int ReportFailure(string database, Exception exception, TimeSpan retryAfter, bool countsTowardOffline = true)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(exception);
@@ -457,6 +461,7 @@ public abstract class DatabaseEngineWorker
         // and gives up on nothing.
         var engine = Volatile.Read(ref _owner);
         int failures;
+        int offlineFailures;
         TimeSpan persisted;
         DatabaseFailure? record;
         lock (_sync)
@@ -475,6 +480,11 @@ public abstract class DatabaseEngineWorker
                 record.Failures++;
             }
 
+            if (countsTowardOffline)
+            {
+                record.CountOfflineFailure(_pass);
+            }
+
             record.Order = ++_order;
             record.VisitedPass = _pass;
             record.FailedPass = _pass;
@@ -482,21 +492,22 @@ public abstract class DatabaseEngineWorker
             double delay = retryAfter.TotalSeconds * Stopwatch.Frequency;
             record.RetryAt = delay >= long.MaxValue - now ? long.MaxValue : now + (long)delay;
             failures = record.Failures;
-            persisted = record.Persisted;
+            offlineFailures = record.OfflineFailures;
+            persisted = record.OfflinePersisted;
             _passReported = true;
             Volatile.Write(ref _fault, exception);
         }
 
         DatabaseEventSource.Log.WorkerFailed(this, database, exception, failures);
 
-        if (engine is not null
-            && failures >= engine.WorkerFailureMinimumPasses
+        if (countsTowardOffline && engine is not null
+            && offlineFailures >= engine.WorkerFailureMinimumPasses
             && persisted >= engine.WorkerFailureWindow
             && GetFailureCause(_kind) is { } cause)
         {
             string reason = string.Create(
                 CultureInfo.InvariantCulture,
-                $"the engine's {Describe(_kind)} worker '{_name}' failed on database '{database}' on {failures} passes in a row over {persisted.TotalSeconds:0.###} s, at least the engine's window of {engine.WorkerFailureWindow.TotalSeconds:0.###} s");
+                $"the engine's {Describe(_kind)} worker '{_name}' failed on database '{database}' on {offlineFailures} passes in a row over {persisted.TotalSeconds:0.###} s, at least the engine's window of {engine.WorkerFailureWindow.TotalSeconds:0.###} s");
 
             // Only while the streak that reached the window is still recorded. A give-up an earlier
             // report of this streak queued may have run since the lock above was released, taken
@@ -742,6 +753,9 @@ public abstract class DatabaseEngineWorker
 
     private bool RunPass(CancellationToken cancellationToken, out bool threw)
     {
+        // Lock order: pass gate -> failure-record monitor (briefly), then the model's apply
+        // gate -> storage/page locks with the failure-record monitor released. Reporting takes
+        // that monitor only after model work has unwound; no reverse acquisition holds it.
         lock (_passGate)
         {
             long pass;
@@ -997,14 +1011,16 @@ public abstract class DatabaseEngineWorker
     /// </summary>
     private sealed class DatabaseFailure
     {
-        // The clock the streak is timed on, and its reading at the streak's first failed pass
+        // The clock the offline streak is timed on, and its first offline-capable failure
         // (owner decision 42): the owning engine's, kept with the record so a record a free worker
         // started is timed on the clock it started on.
         private readonly TimeProvider _clock;
-        private readonly long _firstFailedAt;
+        private long _firstOfflineFailedAt;
+        private long _offlineFailedPass;
 
         public Exception Fault = null!;
         public int Failures;
+        public int OfflineFailures;
         public long Order;
         public long RetryAt;
         public long VisitedPass;
@@ -1014,12 +1030,26 @@ public abstract class DatabaseEngineWorker
         public DatabaseFailure(TimeProvider clock)
         {
             _clock = clock;
-            _firstFailedAt = clock.GetTimestamp();
         }
 
         /// <summary>
-        /// Gets how long the streak has lasted: the time since its first failed pass.
+        /// Gets the time since the first offline-capable failure; report-only failures do not start it.
         /// </summary>
-        public TimeSpan Persisted => _clock.GetElapsedTime(_firstFailedAt);
+        public TimeSpan OfflinePersisted => OfflineFailures == 0 ? TimeSpan.Zero : _clock.GetElapsedTime(_firstOfflineFailedAt);
+
+        public void CountOfflineFailure(long pass)
+        {
+            if (_offlineFailedPass == pass)
+            {
+                return;
+            }
+
+            if (OfflineFailures++ == 0)
+            {
+                _firstOfflineFailedAt = _clock.GetTimestamp();
+            }
+
+            _offlineFailedPass = pass;
+        }
     }
 }

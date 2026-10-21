@@ -940,6 +940,44 @@ public sealed class DatabaseWorkerFailureWindowTests
         engine.OfflineErrorLookups.ShouldBe(["a"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: a report-only refusal contributes neither passes nor elapsed time to the offline window")]
+    public async Task ReportFailure_ObservationPrecedesOperationalFailures_ShouldStartANewOfflineWindowAndCount()
+    {
+        // Arrange
+        var clock = new ManualTimeProvider();
+        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await engine.CreateDatabaseAsync("a", CancellationToken.None);
+        bool observation = true;
+        var failure = new InvalidOperationException("Injected worker failure.");
+        var worker = new ScriptedWorker((self, _) =>
+        {
+            if (self.Begin("a")) { self.Fail("a", failure, TimeSpan.Zero, countsTowardOffline: observation == false); }
+        }, name: WorkerName, kind: DatabaseEngineWorkerKind.VersionPurge);
+        engine.Attach(worker);
+
+        // Act: several report-only passes span the window; no successful pass clears the record.
+        for (int pass = 0; pass < 4; pass++)
+        {
+            worker.RunIteration(CancellationToken.None);
+            clock.Advance(Window);
+        }
+        observation = false;
+        worker.RunIteration(CancellationToken.None);
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(Window / 2);
+        worker.RunIteration(CancellationToken.None);
+        await Task.Delay(50);
+        var beforeTheWindow = engine.GiveUps;
+        clock.Advance(Window / 2);
+        worker.RunIteration(CancellationToken.None);
+        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+
+        // Assert: both the operational minimum and its own elapsed window apply.
+        beforeTheWindow.ShouldBeEmpty();
+        taken.ShouldBeTrue();
+        engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("4 passes in a row over 100 s", Case.Sensitive);
+    }
+
     // Polls a condition the engine's queued give-up makes true, for at most the timeout.
     private static async Task<bool> Eventually(Func<bool> condition, TimeSpan? timeout = null)
     {

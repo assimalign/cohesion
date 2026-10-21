@@ -436,6 +436,14 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   that throws or returns before its engine stopped it, and reports `Faulted` until disposal,
   but the base's loop lets nothing escape, so no worker reaches that frame (the hosting
   health description no longer names the case).
+Persistent purge refusals use the same per-database failure record and WorkerFailed event,
+but report with countsTowardOffline false (#1277, owner default). Their observational fault
+clears with completed work; they never start the offline window or increment its minimum-pass
+count. Subsequent operational failures start their own count and window, while ordinary
+ReportFailure callers retain the existing give-up policy. The shared checkpointer and the
+statement-deferred checkpoint hand-off treat ForeignStorage as an operational failure; only
+ordinary storage transaction contention is retried as busy.
+
 - **A worker failure never ends a worker, and one database's failure slows no other
   (#1268 and its review).** `DatabaseEngineWorker.Run` is a non-virtual loop over the
   non-virtual pass `RunIteration` and the protected `void RunIterationCore`. A pass

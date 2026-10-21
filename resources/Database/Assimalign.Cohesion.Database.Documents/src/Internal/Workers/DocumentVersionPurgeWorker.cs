@@ -79,6 +79,11 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
     // wait, which can run beside a pass a test runs.
     private long _nextFullPassRetry = long.MaxValue;
 
+    // Only passes touch this state: DatabaseEngineWorker serializes RunIteration before entering
+    // the coordinator's apply gate and storage/page locks. The failure-record monitor never spans them.
+    private readonly Dictionary<DocumentDatabase, (ulong Writer, string Refusal, long LastLsn, int Passes, bool Reported)> _busy = new(ReferenceEqualityComparer.Instance);
+    private const int busyPassLimit = 3;
+
     internal DocumentVersionPurgeWorker(DocumentDatabaseEngine engine)
         : base(engine.Name + "/version-purge", DatabaseEngineWorkerKind.VersionPurge, engine.EngineOptions.MaintenanceInterval)
     {
@@ -161,6 +166,11 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                 }
             }
 
+            foreach (var gone in _busy.Keys.Where(database => !_engine.IsOpen(database) || database.IsOffline).ToArray())
+            {
+                _busy.Remove(gone);
+            }
+
             foreach (DocumentDatabase database in _engine.GetInstanceSnapshot())
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -178,6 +188,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                 if (database.IsClosed || database.IsOffline)
                 {
                     _fullPassFailed.Remove(database);
+                    _busy.Remove(database);
                     continue;
                 }
 
@@ -189,8 +200,10 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                 // The engine's full pass, or the retry of a full pass that failed on this database
                 // once the backoff has passed (owner decision 46).
                 bool full = fullPass || (_fullPassFailed.TryGetValue(database, out long retryAt) && now >= retryAt);
+                long beforePassLsn = 0;
                 try
                 {
+                    beforePassLsn = database.DataStorage.WriteAheadJournal.LastLsn;
                     if (full)
                     {
                         BeforeFullPass?.Invoke(database);
@@ -202,15 +215,30 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                         database.Coordinator.RetryDeferredUndo(cancellationToken);
                     }
 
+                    if (full || (database.Coordinator.NextDeferredUndoRetry is null
+                        && _busy.TryGetValue(database, out var busy) && busy.Writer != 0))
+                    {
+                        _busy.Remove(database);
+                    }
+
                     // A deferred undo still waiting, or a failed full pass this retry did not redo,
                     // keeps the database's failure recorded until a pass leaves nothing over.
-                    if (database.Coordinator.NextDeferredUndoRetry is not null || _fullPassFailed.ContainsKey(database))
+                    if (database.Coordinator.NextDeferredUndoRetry is not null || _fullPassFailed.ContainsKey(database) || _busy.ContainsKey(database))
                     {
                         ReportUnfinished(database.Name);
                     }
                 }
-                catch (StorageTransactionException)
+                catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
                 {
+                    // A close/offline transition can win after this pass began. Do not inspect its
+                    // disposed coordinator or create a new failure record after the engine forgot it.
+                    if (database.IsClosed || database.IsOffline || !_engine.IsOpen(database))
+                    {
+                        _fullPassFailed.Remove(database);
+                        _busy.Remove(database);
+                        continue;
+                    }
+
                     // A storage bracket is active on this database; retry next pass. A failed full
                     // pass found busy is retried a backoff later, so the retry does not spin.
                     if (full && _fullPassFailed.ContainsKey(database))
@@ -218,12 +246,14 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                         ScheduleRetry(database);
                     }
 
+                    ReportBusy(database, exception, beforePassLsn);
                     ReportUnfinished(database.Name);
                 }
                 catch (ObjectDisposedException) when (!_engine.IsOpen(database))
                 {
                     // The snapshot can race a database drop or close; nothing left to purge.
                     _fullPassFailed.Remove(database);
+                    _busy.Remove(database);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -236,6 +266,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                     // and every other database keeps its maintenance. A database that went offline
                     // during the pass (#1243) is skipped by the next pass instead. A failed full
                     // pass is retried a backoff later (owner decision 46).
+                    _busy.Remove(database);
                     if (!database.IsOffline)
                     {
                         ReportFailure(database.Name, exception, TimeSpan.Zero);
@@ -251,6 +282,29 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
         {
             PublishNextRetry();
         }
+    }
+
+    // The refusal message identifies the locked page and its owning bracket. Use it only as a
+    // progress token, never to classify errors: changing owners under sustained writes reset the
+    // bound. WAL activity between attempts also resets the count (our own retry appends are
+    // excluded). The oldest pending writer changes when undo makes progress. A successful full
+    // pass (or completed deferred undo) ends the episode; not-due retries do not count or reset it.
+    private void ReportBusy(DocumentDatabase database, StorageTransactionException exception, long beforePassLsn)
+    {
+        ulong writer = database.Coordinator.VersionStore.PendingAbortedPurges.DefaultIfEmpty().Min();
+        var prior = _busy.GetValueOrDefault(database);
+        bool sameWork = prior.Writer == writer && prior.Refusal == exception.Message;
+        int passes = sameWork && prior.LastLsn == beforePassLsn ? prior.Passes + 1 : 1;
+        bool reported = sameWork && prior.Reported;
+        if (!reported && passes >= busyPassLimit)
+        {
+            // Owner default (#1277): a persistent refusal is observable, but never contributes
+            // to taking the database offline. Operational errors retain the usual give-up path.
+            ReportFailure(database.Name, exception, TimeSpan.Zero, countsTowardOffline: false);
+            reported = true;
+        }
+
+        _busy[database] = (writer, exception.Message, database.DataStorage.WriteAheadJournal.LastLsn, Math.Min(passes, busyPassLimit), reported);
     }
 
     // Retries the database's full pass a backoff from now, on the engine's clock.

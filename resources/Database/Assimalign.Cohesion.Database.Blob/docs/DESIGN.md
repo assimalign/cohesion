@@ -885,6 +885,17 @@ pool. The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint 
 If history maintenance fails after a failed purge pass, both exceptions are retained in an
 AggregateException with the purge failure first; cleanup never replaces the original failure.
 
+Persistent storage refusals (#1277) are reported once through the worker's per-database
+failure path after three refused attempts against the same blocked page/bracket and oldest
+pending writer without intervening WAL progress. Not-due retries do not count; changing lock
+owners or WAL activity between attempts reset the bound, so sustained writes remain ordinary
+busy work. Completion, close, drop or replacement ends the episode. This report sets the
+observational worker fault until the work completes, but never starts the offline window or
+increments its minimum-pass count (owner default). A foreign-storage refusal is an operational error
+and is reported immediately through the normal offline-capable failure path. The shared
+checkpoint worker makes the same distinction; a statement-deferred foreign-storage checkpoint
+failure reaches the next checkpoint call rather than being swallowed as busy.
+
 Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
 assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
 the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
