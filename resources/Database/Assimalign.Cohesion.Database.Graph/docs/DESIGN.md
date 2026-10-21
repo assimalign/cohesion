@@ -678,9 +678,10 @@ Each hop selects direction and catalog type IDs before decoding relationships or
 path states, including quantified bodies and TraverseAsync. Relationship bindings/properties and
 safe target-node constraints still run before a viable descent, with deferred references retaining
 their existing final checks. The statement ExpansionBudget has separate physical and viable
-counters: physical includes visited anchor candidates and selected relationship candidates as DFS
-visits them, after type/direction selection from storage or the overlay; loading a range charges
-nothing. Viable counts hops passing trail, binding, relationship and safe node
+counters: physical includes visited anchor candidates and selected relationship candidates,
+including heads required to initialize the identity-ordered merge, after type/direction selection
+from storage or the overlay. A discovered type and its first stream head share one charge;
+returning a primed head does not charge it again. Viable counts hops passing trail, binding, relationship and safe node
 checks before copying state. Physical work keeps the 1,000,000 safety cap, including dead ends.
 Its COHDBG004 message includes actual physical and viable totals; no EventSource counters are added.
 The 100,000-binding and 64-hop caps remain. Public TraverseAsync uses the filtered lookup without
@@ -696,9 +697,14 @@ across a commit between directions and independently running reader/writer loops
 counters. B+Tree cursors now copy bounded batches and observe cancellation while acquiring the
 latch and reading entries (#1542). DFS merges selected type/direction streams and the statement
 overlay in relationship identity order, retaining one head per range instead of a full incident
-list. Candidate charging occurs as DFS consumes that stream, preserving physical/viable totals
-and deterministic sibling order. Exhaustion, budget refusal, cancellation and evaluation/storage
-errors dispose every active parent stream in the frontier; their cursors retain no page or latch
+list. Incident types are discovered lazily with one-entry B+Tree probes. The merge opens each
+stream only when it needs its head and charges before decoding that head, so a small remaining
+budget bounds initialization even with hundreds of distinct incident types. Only pending head
+identities are retained for charge deduplication, including self-loops; no degree-sized visited
+set is built. Deterministic tests cover 500 incident types and wildcard first-hop allocation
+across twelve types with different degrees. Exhaustion, budget refusal, cancellation and evaluation/storage
+errors dispose every active parent stream in the frontier, attempting all disposals and retaining
+the first disposal exception; their cursors retain no page or latch
 between moves. The store's mutation-gate entry documents
 lock and latch order; no new lock, friend grant or public interface is introduced.
 

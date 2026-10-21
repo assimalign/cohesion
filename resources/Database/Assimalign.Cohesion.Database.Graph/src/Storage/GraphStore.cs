@@ -226,12 +226,11 @@ public sealed partial class GraphStore
 
     // Discover only the types present at this endpoint. Jump past each whole type run
     // instead of enumerating its degree or probing every type in the database catalog.
-    internal async ValueTask<IReadOnlyList<Guid>> GetIncidentTypesAsync(ulong nodeId, GraphIncidentDirection direction,
-        TransactionSnapshot snapshot, CancellationToken cancellationToken)
+    internal async IAsyncEnumerable<(Guid Type, ulong HeadId)> GetIncidentTypesAsync(ulong nodeId, GraphIncidentDirection direction,
+        TransactionSnapshot snapshot, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { return []; }
-        var result = new List<Guid>();
+        if (!_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { yield break; }
         var low = AdjacencyKey(nodeId, direction, Guid.Empty, 0);
         var high = AdjacencyKey(nodeId, direction, _maximumTypeId, ulong.MaxValue);
         bool inclusive = true;
@@ -240,12 +239,12 @@ public sealed partial class GraphStore
             cancellationToken.ThrowIfCancellationRequested();
             await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, inclusive, true),
                 cancellationToken: cancellationToken);
-            if (!await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false)) { return result; }
+            if (!await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false)) { yield break; }
             var key = cursor.CurrentKey.Encoded.Span;
             if (key.Length != 33) { throw new StorageCorruptionException(ErrorMessages.AdjacencyKeyInvalid); }
             Guid type = new(key.Slice(9, 16), bigEndian: true);
-            result.Add(type);
-            if (type == _maximumTypeId) { return result; }
+            yield return (type, BinaryPrimitives.ReadUInt64BigEndian(key.Slice(25)));
+            if (type == _maximumTypeId) { yield break; }
             low = AdjacencyKey(nodeId, direction, type, ulong.MaxValue);
             inclusive = false;
         }
@@ -266,6 +265,14 @@ public sealed partial class GraphStore
     public async IAsyncEnumerable<StoredGraphRelationship> GetIncidentAsync(ulong nodeId, GraphIncidentDirection direction,
         IReadOnlyCollection<Guid>? typeIds, TransactionSnapshot snapshot,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var edge in StreamIncidentRangeAsync(nodeId, direction, typeIds, snapshot, null, cancellationToken).ConfigureAwait(false))
+        { yield return edge; }
+    }
+
+    internal async IAsyncEnumerable<StoredGraphRelationship> StreamIncidentRangeAsync(ulong nodeId, GraphIncidentDirection direction,
+        IReadOnlyCollection<Guid>? typeIds, TransactionSnapshot snapshot, Action<ulong>? reserve,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!Enum.IsDefined(direction)) { throw new ArgumentOutOfRangeException(nameof(direction)); }
@@ -289,6 +296,8 @@ public sealed partial class GraphStore
                     var key = cursor.CurrentKey.Encoded.Span;
                     if (key.Length != 33) { throw new StorageCorruptionException(ErrorMessages.AdjacencyKeyInvalid); }
                     ulong id = BinaryPrimitives.ReadUInt64BigEndian(key.Slice(25));
+                    reserve?.Invoke(id); // Charge the head before record decoding, including merge initialization.
+                    cancellationToken.ThrowIfCancellationRequested();
                     var found = ReadAt(cursor.CurrentEntryReference, snapshot,
                         direction == GraphIncidentDirection.Both && selected == GraphIncidentDirection.Incoming ? nodeId : null);
                     if (found?.Record.Relationship is not { } edge) { continue; }

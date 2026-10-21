@@ -157,7 +157,7 @@ internal static partial class GraphPlanExecutor
                         case EdgeTask edgeTask:
                             var incident = operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
                                 GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
-                                operation.Updates.SelectTypes(edgeTask.Pattern), token).GetAsyncEnumerator(token);
+                                operation.Updates.SelectTypes(edgeTask.Pattern), token, budget).GetAsyncEnumerator(token);
                             incidents.Add(incident);
                             frontier.Push(state with { Task = new IncidentTask(edgeTask, incident) });
                             break;
@@ -171,8 +171,6 @@ internal static partial class GraphPlanExecutor
                                 break;
                             }
                             frontier.Push(state);
-                            budget.VisitCandidate();
-                            budget.Consume();
                             var edge = cursor.Edges.Current;
                             var hop = cursor.Hop;
                             ulong from = state.Current.Id.Value;
@@ -208,7 +206,7 @@ internal static partial class GraphPlanExecutor
             {
                 // Parent incident cursors remain in the DFS frontier while a child runs.
                 // Budget refusal, cancellation and evaluation/storage errors close them all.
-                foreach (var incident in incidents) { await incident.DisposeAsync().ConfigureAwait(false); }
+                await GraphUpdates.DisposeIncidentStreamsAsync(incidents).ConfigureAwait(false);
             }
         }
     }

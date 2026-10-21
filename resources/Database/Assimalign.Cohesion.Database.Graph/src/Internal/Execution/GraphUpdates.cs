@@ -194,7 +194,7 @@ internal sealed class GraphUpdates
     // Merge one head per range and the statement overlay so DFS can stop at its budget
     // without loading the incident list. Directory reads finish before tree reads.
     internal async IAsyncEnumerable<StoredGraphRelationship> StreamIncidentAsync(ulong id, GraphIncidentDirection direction,
-        IReadOnlyCollection<Guid>? typeIds, [EnumeratorCancellation] CancellationToken token)
+        IReadOnlyCollection<Guid>? typeIds, [EnumeratorCancellation] CancellationToken token, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         token.ThrowIfCancellationRequested();
         var snapshot = _operation.Context.Snapshot;
@@ -203,24 +203,28 @@ internal sealed class GraphUpdates
             ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction };
         var streams = new List<IAsyncEnumerator<StoredGraphRelationship>>();
         var pending = new PriorityQueue<IAsyncEnumerator<StoredGraphRelationship>, ulong>();
+        var reserved = new HashSet<ulong>(); // Only merge heads, never the degree-sized visited set.
+        ulong? returned = null;
         try
         {
             foreach (var selected in directions)
             {
-                var rangeTypes = selectedTypes ?? await _database.Store.GetIncidentTypesAsync(id, selected, snapshot, token).ConfigureAwait(false);
-                foreach (Guid type in rangeTypes)
+                if (selectedTypes is not null)
                 {
-                    token.ThrowIfCancellationRequested();
-                    var stream = _database.Store.GetIncidentAsync(id, selected, [type], snapshot, token)
-                        .GetAsyncEnumerator(token);
-                    streams.Add(stream);
-                    if (await stream.MoveNextAsync().ConfigureAwait(false)) { pending.Enqueue(stream, stream.Current.Id); }
+                    foreach (Guid type in selectedTypes) { await PrimeAsync(selected, type).ConfigureAwait(false); }
+                }
+                else
+                {
+                    await foreach (var head in _database.Store.GetIncidentTypesAsync(id, selected, snapshot, token).ConfigureAwait(false))
+                    {
+                        Reserve(head.HeadId); // Discovery and its stream head share one budget charge.
+                        await PrimeAsync(selected, head.Type).ConfigureAwait(false);
+                    }
                 }
             }
             var overlay = CreatedIncident().GetAsyncEnumerator(token);
             streams.Add(overlay);
             if (await overlay.MoveNextAsync().ConfigureAwait(false)) { pending.Enqueue(overlay, overlay.Current.Id); }
-            ulong? returned = null;
             while (pending.TryDequeue(out var stream, out ulong edgeId))
             {
                 token.ThrowIfCancellationRequested();
@@ -228,6 +232,7 @@ internal sealed class GraphUpdates
                 {
                     var edge = stream.Current;
                     returned = edgeId; // self-loops occur in both direction ranges
+                    reserved.Remove(edgeId);
                     yield return _relationships.TryGetValue(edgeId, out var updated)
                         ? new StoredGraphRelationship(edgeId, updated.From.Value, updated.To.Value, updated.Type, updated.Properties) : edge;
                 }
@@ -236,7 +241,23 @@ internal sealed class GraphUpdates
         }
         finally
         {
-            foreach (var stream in streams) { await stream.DisposeAsync().ConfigureAwait(false); }
+            await DisposeIncidentStreamsAsync(streams).ConfigureAwait(false);
+        }
+
+        void Reserve(ulong edgeId)
+        {
+            if (returned == edgeId || !reserved.Add(edgeId)) { return; }
+            budget?.VisitCandidate();
+            budget?.Consume();
+            token.ThrowIfCancellationRequested();
+        }
+
+        async ValueTask PrimeAsync(GraphIncidentDirection selected, Guid type)
+        {
+            token.ThrowIfCancellationRequested();
+            var stream = _database.Store.StreamIncidentRangeAsync(id, selected, [type], snapshot, Reserve, token).GetAsyncEnumerator(token);
+            streams.Add(stream);
+            if (await stream.MoveNextAsync().ConfigureAwait(false)) { pending.Enqueue(stream, stream.Current.Id); }
         }
 
         async IAsyncEnumerable<StoredGraphRelationship> CreatedIncident()
@@ -255,9 +276,20 @@ internal sealed class GraphUpdates
             foreach (ulong edgeId in ids.Order())
             {
                 token.ThrowIfCancellationRequested();
-                if (_relationships.ContainsKey(edgeId)) { yield return FindRelationship(edgeId)!.Value; }
+                if (_relationships.ContainsKey(edgeId)) { Reserve(edgeId); yield return FindRelationship(edgeId)!.Value; }
             }
         }
+    }
+
+    internal static async ValueTask DisposeIncidentStreamsAsync(IEnumerable<IAsyncEnumerator<StoredGraphRelationship>> streams)
+    {
+        Exception? first = null;
+        foreach (var stream in streams)
+        {
+            try { await stream.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) { first ??= exception; } // Cleanup must attempt every owned stream.
+        }
+        if (first is not null) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw(); }
     }
 
     internal async ValueTask ApplyAsync(GqlStage stage, List<Dictionary<string, object?>> bindings,
