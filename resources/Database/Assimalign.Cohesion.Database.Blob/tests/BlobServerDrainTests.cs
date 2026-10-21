@@ -17,6 +17,44 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 [Collection(nameof(BlobDatabaseEventSourceCollection))]
 public sealed class BlobServerDrainTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Soft stop during the final Ready flush still sends its terminal notice")]
+    public async Task RunAsync_SoftStopDuringReadyFlush_ShouldDeliverUnavailable()
+    {
+        // Arrange: Authenticate uses flushes 1/2; Ready is delivered by flush 3, then
+        // its explicit flush 4 waits cooperatively for the soft-stop cancellation.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var listener = new BlockingOutputListener(-4);
+        await using var engine = BlobDatabaseEngine.Create("ready-drain", new());
+        await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var server = BlobDatabaseServer.Create(engine, new()
+        {
+            Listener = listener, ShutdownDrainTimeout = TimeSpan.FromSeconds(2),
+        });
+        await server.StartAsync(timeout.Token);
+        await using var peer = await listener.Factory.ConnectAsync(listener.EndPoint, timeout.Token);
+        var accepted = await listener.Accepted.WaitAsync(timeout.Token);
+        await using var channel = new ProtocolChannel(peer.AsStream(), BlobProtocol.Family, leaveOpen: true);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup,
+            new ProtocolStartupMessage(ProtocolVersion.Current, "db", "tester").Encode()), timeout.Token);
+        (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty), timeout.Token);
+        (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+        await accepted.Blocked.WaitAsync(timeout.Token);
+
+        // Act
+        Task stopped = server.StopAsync(timeout.Token);
+        var terminal = (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull();
+
+        // Assert
+        terminal.Type.ShouldBe(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(terminal.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
+        await peer.DisposeAsync();
+        await stopped;
+        accepted.PendingOperations.ShouldBe(0);
+        accepted.Disposals.ShouldBe(1);
+        server.Sessions.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Blob] - Terminal errors abort blocked writes, flushes and output completion within one drain budget")]
     [InlineData(1)] // The complete frame write flushes the pipe.
     [InlineData(2)] // The explicit flush after the complete frame write.

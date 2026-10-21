@@ -155,6 +155,14 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             // cancellation the server did not request. That is a transport outcome (plan D9).
             _closeReason = BlobDatabaseEventSource.CloseReason.TransportFailed;
         }
+        catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && _databaseSession is not null)
+        {
+            // Ready can reach the peer before its explicit flush resumes. If soft stop
+            // cancels that final handshake flush, the authenticated peer still needs its
+            // terminal notice, just as one already inside the ready loop does.
+            _closeReason = BlobDatabaseEventSource.CloseReason.Shutdown;
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+        }
         catch (OperationCanceledException)
         {
             // The server stopped or aborted the session mid-frame.

@@ -4097,7 +4097,8 @@ write. The pump flushes the complete frame, completes connection Output, consume
 peer input until close or deadline, then disposes. Deadline and hard-abort callbacks abort the
 transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
 before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
-no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain.
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain. A stop racing the final Ready flush
+retains that notice after authentication, even before the ready loop begins.
 Capacity refusals follow the same rule without creating a session. They enter the rejection
 registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
 attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;

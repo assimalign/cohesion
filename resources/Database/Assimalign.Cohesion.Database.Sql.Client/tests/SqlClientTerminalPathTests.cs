@@ -26,7 +26,7 @@ public sealed class SqlClientTerminalPathTests
         await using var harness = await SqlClientTestHarness.StartAsync(configureServer: options =>
         {
             options.ShutdownDrainTimeout = TimeSpan.FromSeconds(2);
-            options.MaxSessions = 1;
+            options.MaxSessions = capacity ? 1 : 100;
             if (!capacity) { options.Authenticator = new TerminalRejectingAuthenticator(); }
         }, tcp: true);
         await using var holder = capacity ? await harness.Client.ConnectAsync(timeout.Token) : null;
