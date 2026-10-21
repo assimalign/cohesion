@@ -769,9 +769,11 @@ bound-variable identity and its own property checks (including deferred maps)
 raises COHDBG004 before testing its endpoint. Failed filters do not trigger the hop cap, and
 LIMIT cannot suppress it. AddBinding and the shared statement ExpansionBudget also apply to
 every repeated branch. The internal per-budget OnConsume test hook cancels deterministically
-after expansion begins; tests assert the consumed count. The isolated high-fan-out allocation test
-samples live bytes after incident loading to pin bounded retained search state for fixed and
-quantified edges. No partial wire output precedes failure.
+after expansion begins; tests assert the consumed count. The high-fan-out regression observes
+all pending DFS states through a per-budget hook: 20,000 successful one-hop descents must retain
+only the parent cursor plus one child, for fixed and quantified edges. This structural bound is
+independent of whole-process heap accounting, JIT liveness and async thread hops.
+No partial wire output precedes failure.
 
 EXPLAIN emits Expand details `quantifier={min,max}; body_hops=n; trail=True` (empty max means
 unbounded). The existing Path frame represents every length, including one node with no edges.

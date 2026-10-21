@@ -159,6 +159,12 @@ public sealed class SqlPredicateWireTests
         while (harness.Server.Sessions.Count != 0) { await Task.Delay(1, timeout.Token); }
         // Assert: the matcher entered and the server observed cancellation.
         admission.Entries.ShouldBe(1);
+        // Removal from Sessions precedes SessionClosed publication. Wait for the correlated
+        // event itself; an empty session table alone is not a completion signal.
+        while (!sqlEvents.Events.Any(item => item.EventName == "SessionClosed" && Equals(item.Payload![0], serverSession.Id)))
+        { await Task.Delay(10, timeout.Token); }
+        while (!rootEvents.Events.Any(item => item.EventName == "StatementStop"))
+        { await Task.Delay(10, timeout.Token); }
         var closed = sqlEvents.Events.Single(item => item.EventName == "SessionClosed" && Equals(item.Payload![0], serverSession.Id));
         closed.Payload![1].ShouldBe("TransportFailed");
         rootEvents.Events.Single(item => item.EventName == "StatementStop").Payload![2].ShouldBe("Cancelled");

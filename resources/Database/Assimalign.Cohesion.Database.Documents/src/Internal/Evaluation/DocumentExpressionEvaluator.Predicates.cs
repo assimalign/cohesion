@@ -126,6 +126,9 @@ internal sealed partial class DocumentExpressionEvaluator
         return tokens.ToArray();
     }
 
+    // Test-only checkpoint observer; cancellation is still checked by the real matcher.
+    internal static Action<int>? OnLikeMatchProbe { get; set; }
+
     private bool MatchLike(string input, int[] tokens)
     {
         const int many = -1;
@@ -137,7 +140,11 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             // PostgreSQL src/backend/utils/adt/like_match.c:302 checks interrupts
             // within matching. Bound cancellation latency even for a long literal suffix.
-            if ((iterations++ & 1023) == 0) { _cancellationToken.ThrowIfCancellationRequested(); }
+            if ((iterations++ & 1023) == 0)
+            {
+                OnLikeMatchProbe?.Invoke(iterations);
+                _cancellationToken.ThrowIfCancellationRequested();
+            }
             if (token < tokens.Length && tokens[token] == many)
             {
                 percent = token++;

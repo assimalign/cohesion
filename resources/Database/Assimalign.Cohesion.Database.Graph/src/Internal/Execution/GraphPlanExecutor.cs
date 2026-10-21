@@ -431,6 +431,8 @@ internal static partial class GraphPlanExecutor
         private int _viable;
         private int _candidates;
         internal int Consumed => _physical;
+        // Observe every pending DFS state before it is popped, including parents and children.
+        internal Action<int>? OnFrontier { get; init; }
         // Sampling at each consumed candidate includes the bounded incident read buffers.
         internal Action<int>? OnCandidate { get; init; }
         internal void VisitCandidate() => OnCandidate?.Invoke(++_candidates);
