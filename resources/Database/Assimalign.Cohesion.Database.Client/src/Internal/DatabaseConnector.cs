@@ -245,9 +245,11 @@ internal sealed class DatabaseConnector
     {
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            // An admitted exchange owns cancellation on an open, empty transport (#1313).
+            // Do not bypass its core and cancellation hooks on that normal path.
             if (!IsOpen || _connection!.ConnectionClosed.IsCancellationRequested || HasBufferedResponse())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 ProtocolFrame? terminal;
                 try { terminal = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false); }
                 catch (InvalidOperationException exception)
