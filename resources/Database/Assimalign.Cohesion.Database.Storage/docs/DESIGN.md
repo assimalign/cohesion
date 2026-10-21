@@ -643,7 +643,7 @@ object ids, so a table scan stops decoding the whole database.
   restores an empty page still belonging to the chain — a safe leak the owner's
   next insert reuses.
 - **Chain release (`FreeOwnerPages`) is transactional with commit-deferred
-  reuse.** Each page is retyped `Free` under the transaction (a rollback restores the chain
+  reuse.** Each page is retyped `Reclaimed` under the transaction (a rollback restores the chain
   bytes from the pre-image, and recovery redoes the release only once it committed), but the pages
   re-enter the free-space map and leave the directory only when the transaction
   **commits**. Freeing eagerly would let the allocator hand a page to a new owner
