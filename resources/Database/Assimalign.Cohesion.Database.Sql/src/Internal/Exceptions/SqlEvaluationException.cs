@@ -183,6 +183,9 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The copy.</returns>
     internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException, _location, IsBooleanRequired);
 
+    /// <summary>Discards the location of a persisted expression's synthetic parser carrier.</summary>
+    internal SqlEvaluationException WithoutLocation() => new(Code, _detail, InnerException ?? this, booleanRequired: IsBooleanRequired);
+
     /// <summary>Attaches the offending node's location to a planning failure.</summary>
     internal SqlEvaluationException At(Location? location) => _location is not null || location is null
         ? this : new(Code, _detail, InnerException, location, IsBooleanRequired);

@@ -120,7 +120,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_tables.TryGetValue((expected.Schema, expected.Name), out var original) || !ReferenceEquals(original.Table, expected))
             {
-                throw new SqlCatalogException("COHSQLE051", $"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
+                throw new SqlCatalogException("COHSQLE064", $"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
             }
             EnsureNoViewReads(expected, columnName, rename: true);
             if (columnName is null)

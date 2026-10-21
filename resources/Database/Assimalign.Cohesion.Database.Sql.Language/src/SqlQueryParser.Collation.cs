@@ -20,20 +20,14 @@ public sealed partial class SqlQueryParser
 
     private string ParseCollationName(ref TokenLexer lexer)
     {
-        if (IsAtEnd(ref lexer) || !IsIdentifierOrKeyword(ref lexer))
+        if (IsAtEnd(ref lexer) || !IsNameToken(ref lexer))
         {
             AddSyntaxDiagnostic(ref lexer, "Expected a collation name after COLLATE.");
             return string.Empty;
         }
 
-        int position = lexer.Current.Position;
-        string name = CurrentText(ref lexer).ToLowerInvariant();
+        string name = CurrentIdentifierText(ref lexer).ToLowerInvariant();
         Advance(ref lexer);
-        if (name is not ("binary" or "case_insensitive" or "case_accent_insensitive" or "invariant"))
-        {
-            AddUnsupportedSurfaceDiagnostic(position, position + name.Length,
-                $"Collation '{name}' is not supported. Use binary, case_insensitive, case_accent_insensitive, or invariant; culture-aware and user-defined collations are deferred to #1026.");
-        }
         return name;
     }
 }

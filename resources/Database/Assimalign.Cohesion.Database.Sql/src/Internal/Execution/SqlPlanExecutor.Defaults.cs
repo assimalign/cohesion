@@ -181,10 +181,10 @@ internal sealed partial class SqlPlanExecutor
             return BindDefault(column, value);
         }
         var scope = new SqlExpressionEvaluator([], null, defaultCollation: collation, functions: functions, cancellationToken: cancellationToken, foldConstants: false);
-        SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
         try
         {
-            SqlPersistedExpression.Bind(expression, scope);
+            SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
+            SqlPersistedExpression.Bind(expression, scope, declaring);
             if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
             {
                 throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultSignaturesUnresolved, string.Join(", ", column.DefaultFunctionCalls)));
@@ -212,7 +212,7 @@ internal sealed partial class SqlPlanExecutor
         catch (DatabaseException failure) when (!declaring)
         {
             throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLoadFailed, subject, failure.Message, SqlPersistedExpression.DamagedCatalogHint),
-                SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode), failure);
+                SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
         }
     }
 
@@ -230,6 +230,12 @@ internal sealed partial class SqlPlanExecutor
             return value;
         }
         catch (SqlEvaluationException failure)
+        {
+            throw failure.WithContext(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type));
+        }
+        catch (SqlExecutionException failure) when (failure.Diagnostics[0].Code is SqlExecutionException.InvalidDatetimeCode
+            or SqlExecutionException.DatetimeOverflowCode or SqlExecutionException.IntervalOverflowCode)
         {
             throw failure.WithContext(string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type));
@@ -272,10 +278,13 @@ internal sealed partial class SqlPlanExecutor
     /// <returns>The value.</returns>
     private static object? DefaultValue(SqlBoundExpression bound, CancellationToken cancellationToken = default, DateTimeOffset? transactionStart = null)
     {
-        object? value = bound.Kind == SqlBoundExpressionKind.Constant
-            ? SqlBinaryValue.CopyShared(((SqlBoundConstant)bound).Value)
-            : SqlExpressionEvaluator.ForExecution(null, cancellationToken, transactionStart: transactionStart).Evaluate(bound, [], copySharedBinary: true);
-        return value;
+        try
+        {
+            return bound.Kind == SqlBoundExpressionKind.Constant
+                ? SqlBinaryValue.CopyShared(((SqlBoundConstant)bound).Value)
+                : SqlExpressionEvaluator.ForExecution(null, cancellationToken, transactionStart: transactionStart).Evaluate(bound, [], copySharedBinary: true);
+        }
+        catch (DatabaseException failure) { throw SqlExecutionException.FromPersisted(failure); }
     }
 
     private static SqlFunctionVolatility DefaultVolatility(SqlExpression expression, SqlExpressionEvaluator scope)
@@ -385,7 +394,7 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultValueStorageFailed, column.Name, column.Type.Type, exception.Message),
                 exception is DatabaseException coded ? SqlExecutionException.DiagnosticsOf(coded) : new SqlExecutionException(
-                    SqlExecutionException.ConversionCode(column.Type.Type, exception), exception.Message).Diagnostics, exception);
+                    SqlExecutionException.ConversionCode(exception), exception.Message).Diagnostics, exception);
         }
     }
 

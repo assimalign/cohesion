@@ -326,7 +326,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // async state machine and allocates another eight bytes on every statement.
             if (exception is DatabaseException && exception is not SqlEvaluationException { Code: SqlEvaluationException.StatementTooComplexCode })
             {
-                ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression.Location);
+                ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression);
                 throw;
             }
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
@@ -343,7 +343,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 throw SqlEvaluationException.StatementTooComplex((InsufficientExecutionStackException)exception).At(request.Statement.SqlExpression.Location);
             }
-            ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression.Location);
+            ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression);
             throw;
         }
         finally
@@ -367,10 +367,25 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     // Kept outside the async state machine: locating failures adds no successful-statement fields
     // or allocations. Preserve concrete exception contracts and any more specific expression span.
-    private static void ThrowLocatedFailure(DatabaseException failure, Location? location)
+    private static void ThrowLocatedFailure(DatabaseException failure, SqlQueryExpression expression)
     {
+        var original = failure;
+        var location = expression.Location;
+        if (expression.Text is { } text)
+        {
+            if (location is not null && (location.Start < 0 || location.End < location.Start || location.End > text.Length))
+            { location = Location.Create(1, 1 + text.Count(character => character == '\n'), 0, text.Length); }
+            if (failure.Diagnostics.Any(diagnostic =>
+                diagnostic.Start is { } start && (start < 0 || start > text.Length || diagnostic.End is not { } end || end < start || end > text.Length)
+                || diagnostic.Start is null && diagnostic.End is not null))
+            {
+                // Persisted boundaries discard their own locations. This final bound also refuses
+                // malformed locations supplied by application code, without clipping a foreign span.
+                failure = SqlExecutionException.FromPersisted(failure);
+            }
+        }
         var located = LocateFailure(failure, location);
-        if (!ReferenceEquals(located, failure)) { throw located; }
+        if (!ReferenceEquals(located, original)) { throw located; }
     }
 
     private static DatabaseException LocateFailure(DatabaseException failure, Location? location)
@@ -388,7 +403,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // Child failures already translated by the preceding catch keep their authored type.
         if (failure is not (SqlCatalogException or DatabaseObjectLockedException) && failure.GetType() != typeof(DatabaseException)) { return failure; }
         var diagnostics = failure.Diagnostics.Count == 0
-            ? new[] { new Diagnostic { Code = failure is DatabaseObjectLockedException ? SqlExecutionException.UnsupportedCode : SqlExecutionException.InternalErrorCode,
+            ? new[] { new Diagnostic { Code = failure is DatabaseObjectLockedException ? SqlExecutionException.InsufficientPrivilegeCode : SqlExecutionException.InternalErrorCode,
                 Message = failure.Message, Severity = DiagnosticSeverity.Error } }
             : failure.Diagnostics;
         var located = diagnostics.Select(diagnostic => diagnostic.Start is not null || location is null ? diagnostic : new Diagnostic

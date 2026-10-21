@@ -3164,7 +3164,7 @@ pin in the same change.
 | `COHSQLE013` | Error | Invalid statement, expression, DDL or query shape for the executor |
 | `COHSQLE014` | Error | Table does not exist |
 | `COHSQLE015` | Error | Unknown or ambiguous column |
-| `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary |
+| `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary (SQLSTATE 42883, undefined_function) |
 | `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
 | `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
 | `COHSQLE019` | Error | Duplicate target column, key constraint column, PRIMARY KEY declaration, table binding or ambiguous output alias |
@@ -3179,7 +3179,7 @@ pin in the same change.
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 | `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
-| `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
+| `COHSQLE042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
 | `COHSQLE043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
 | `COHSQLE044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as COHSQLE043 (#1231) |
 | `COHSQLE045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
@@ -3368,14 +3368,14 @@ bounds and NOT NULL apply on writes and CAST. SQL definitions persist as canonic
 DROP refuses dependencies in other function/domain bodies, CHECK, DEFAULT, casts and domain
 columns. Ordinary DDL cannot drop Schema-owned objects. Engine registrations cannot be dropped.
 DROP FUNCTION checks the requested normalized signature: an engine-registered overload is
-COHSQLD003; an absent overload is COHSQLD001 even when the engine registers another overload
+COHSQLD003; an absent overload is COHSQLE009 (42883) even when the engine registers another overload
 with the same name. Type aliases and function-name casing do not change that identity.
 
 Column defaults admit variable-free scalar expressions with Immutable, Stable or Volatile calls. Domain, typed DefaultSql and SDK defaults remain literal-only. ADD COLUMN freezes a nonvolatile expression once into the independent missing-value literal; volatile defaults on live rows report COHSQLE027 naming the column because table rewrites are tracked by #1447. SET/DROP DEFAULT changes only the insert default. Canonical expression text and resolved call identities survive reopen through the persisted-definition ceiling parser.
 
 | Code | Meaning |
 | --- | --- |
-| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; absent function/domain requested by DROP. |
+| COHSQLD001 | Invalid, recursive or volatility-incompatible SQL definition; absent domain requested by DROP. Duplicate functions use COHSQLE065 (42723); missing/unresolved functions use COHSQLE009 (42883). |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
 | COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
@@ -3433,7 +3433,7 @@ quoted names to match uppercase vocabulary entries.
 | --- | --- | --- |
 | `COHSQLE015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
 | `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
-| `COHSQLE022` | A CAST input or stored-column assignment has invalid text representation | 22P02 |
+| `COHSQLE022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
 | `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
@@ -3446,36 +3446,44 @@ Execution-time diagnostic work #1653 now treats NOT NULL as done; `COHSQLE023` b
 
 Execution and DDL diagnostic completion (#1653) uses the following additional mappings.
 Codes are separate from in-process message text; wire errors compose `CODE: message` once.
-Unlocated execution failures receive the statement span; a more precise expression span is
-preserved. These are the parser's existing locations: SELECT query tails can extend beyond
+Unlocated execution failures receive the statement span; a more precise current-statement expression span is
+preserved. Locations from persisted CHECK/DEFAULT/function text and synthetic provisioning carriers are discarded
+before the statement fallback, even when their numeric offsets happen to fit inside the statement. These are the parser's existing locations: SELECT query tails can extend beyond
 the root location (parser span completion remains separate work). Failures during database open have no statement text. DEFAULT wrappers retain
 the original diagnostic carrier and cause. The live execution conformance corpus covers these
-families in process and over the wire, including transaction and connection reuse.
+families in process and over the wire, including transaction and connection reuse. Previously uncoded
+execution failures now visibly begin with `COHSQLE0xx:` in wire error text. Framing is unchanged;
+the diagnostic fixes introduce no persisted-format change beyond #1422's format-26/v8 fence.
 
 | Code | Meaning | PostgreSQL SQLSTATE |
 | --- | --- | --- |
 | `COHSQLE046` | Scalar subquery returns more than one row | 21000 (`cardinality_violation`) |
-| `COHSQLE047` | Invalid temporal text in a stored-column assignment or DEFAULT | 22007 (`invalid_datetime_format`) |
-| `COHSQLE048` | Temporal store-assignment or DEFAULT range overflow | 22008 (`datetime_field_overflow`) |
-| `COHSQLE049` | Table name already exists, including provisioning collisions | 42P07 (`duplicate_table`) |
-| `COHSQLE050` | Constraint, index or SQL definition name already exists | 42710 (`duplicate_object`) |
-| `COHSQLE051` | Missing or replaced table during execution/DDL | 42P01 (`undefined_table`) |
-| `COHSQLE052` | Missing constraint, index or catalog object | 42704 (`undefined_object`) |
+| `COHSQLE047` | Malformed temporal text in assignment, DEFAULT or CAST | 22007 (`invalid_datetime_format`) |
+| `COHSQLE048` | Calendar, clock or offset field out of range in assignment, DEFAULT or CAST | 22008 (`datetime_field_overflow`) |
+| `COHSQLE049` | Table or index name already exists, including provisioning collisions | 42P07 (`duplicate_table`) |
+| `COHSQLE050` | Constraint or non-function SQL definition name already exists | 42710 (`duplicate_object`) |
+| `COHSQLE051` | Missing table during execution/DDL | 42P01 (`undefined_table`) |
+| `COHSQLE052` | Missing constraint, index, collation or other catalog object; missing schemas retain COHSQLE028 / 3F000 | 42704 (`undefined_object`) |
 | `COHSQLE053` | Invalid table definition, including nullable primary key or dropping the last column | 42P16 (`invalid_table_definition`) |
 | `COHSQLE054` | Invalid FOREIGN KEY column lists or referenced key is not unique | 42830 (`invalid_foreign_key`) |
-| `COHSQLE055` | Incompatible store value, DEFAULT, FOREIGN KEY column type/collation, CHECK function result or compared values | 42804 (`datatype_mismatch`) |
-| `COHSQLE056` | DDL refused because constraints or indexes depend on the object | 2BP01 (`dependent_objects_still_exist`) |
-| `COHSQLE057` | Unsupported execution/DDL operation or compiled-schema ownership refusal | 0A000 (`feature_not_supported`) |
-| `COHSQLE058` | Damaged or incompatible persisted expression or missing-value literal | XX001 (`data_corrupted`) |
+| `COHSQLE055` | Incompatible store value, DEFAULT, FOREIGN KEY column type, CHECK function result or compared values | 42804 (`datatype_mismatch`) |
+| `COHSQLE056` | DDL refused because constraints or indexes depend on the object; namespace RESTRICT retains COHSQLE030 | 2BP01 (`dependent_objects_still_exist`) |
+| `COHSQLE057` | Unsupported execution/DDL operation, including a subquery encountered by CHECK admission | 0A000 (`feature_not_supported`) |
+| `COHSQLE058` | Damaged or incompatible loaded persisted expression or missing-value literal | XX001 (`data_corrupted`) |
 | `COHSQLE059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
-| `COHSQLE060` | Executor/catalog invariant failure, including unavailable constraint indexes | XX000 (`internal_error`) |
+| `COHSQLE060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
 | `COHSQLE061` | Column already exists | 42701 (`duplicate_column`) |
+| `COHSQLE062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
+| `COHSQLE063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
+| `COHSQLE064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
+| `COHSQLE065` | Function signature already exists | 42723 (`duplicate_function`) |
+| `COHSQLE066` | Compiled-schema ownership refuses session DDL | 42501 (`insufficient_privilege`) |
 
 Definition dependency refusals retain `COHSQLD002` (2BP01), and engine-registered
 function/type drops retain `COHSQLD003` (0A000), now carried as structured diagnostics.
 The mappings follow PostgreSQL `src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500`.
 
-CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
+Numeric CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
 uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic
 use `COHSQLE003` (42804). Unsupported evaluator nodes/operators use `COHSQLE013`.
 The carrier retains an available expression span at runtime and during LIMIT/OFFSET
@@ -3496,15 +3504,20 @@ is a retryable transaction abort; retry the statement in a fresh transaction.
 
 ### Text conversion diagnostics and persisted defaults (#1422)
 
-Plain-string TIME, INTERVAL, REAL and DOUBLE assignments and DEFAULTs use CAST's readers and
-failure translation. Malformed text uses COHSQLE022/22P02 and overflow uses COHSQLE002/22003.
-The established temporal CAST contract keeps malformed and out-of-range TIME fields in
-COHSQLE022; PostgreSQL datetime.c:4247-4290 uses 22007 for bad format, 22008 for datetime field
-overflow and 22015 for interval overflow. Cohesion retains its mapping for CAST compatibility.
-Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
+Temporal assignment, DEFAULT and CAST use one reader classification: COHSQLE047 / 22007 for
+bad format, COHSQLE048 / 22008 for calendar, clock or offset fields outside range, and
+COHSQLE062 / 22015 for interval duration overflow. The reader records the reason explicitly;
+SQL does not infer it from a CLR exception type. This follows PostgreSQL datetime.c:4247-4290.
+REAL and DOUBLE text retain COHSQLE022 / 22P02 for malformed input and COHSQLE002 / 22003
+for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
 Catalog format 26 and compiled-schema v8 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries COHSQLE041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,
 recreate, rebuild and reapply the declaration (#1152); no compatibility reader is provided.
+
+Unknown COLLATE names are syntactically valid identifiers and fail during binding with
+COHSQLE052 / 42704, including declarations with DEFAULT context. A missing collation in loaded
+persisted text retains COHSQLE058 / XX001. Culture-aware and user-defined collation creation
+remain unsupported. Quoted names use the ordinary delimited-identifier decoding.

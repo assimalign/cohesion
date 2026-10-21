@@ -258,7 +258,7 @@ internal sealed partial class SqlPlanExecutor
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation,
                 functions: _definitions.Functions, cancellationToken: cancellationToken);
             SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
-            SqlPersistedExpression.Bind(expression, scope);
+            SqlPersistedExpression.Bind(expression, scope, declaring: true);
             var volatility = DefaultVolatility(expression, scope);
             if (volatility == SqlFunctionVolatility.Volatile &&
                 Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())

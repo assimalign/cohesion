@@ -599,10 +599,12 @@ internal sealed partial class SqlPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
-                    object? result = evaluator.Evaluate(check.Bound, row);
+                    object? result;
+                    try { result = evaluator.Evaluate(check.Bound, row); }
+                    catch (DatabaseException failure) { throw SqlExecutionException.FromPersisted(failure); }
                     if (result is not null and not bool)
                     {
-                        throw SqlEvaluationException.BooleanRequired("CHECK", SqlExpressionEvaluator.OperandTypeName(result)).At(check.Predicate.Location);
+                        throw SqlEvaluationException.BooleanRequired("CHECK", SqlExpressionEvaluator.OperandTypeName(result));
                     }
                     if (result is false)
                     {
@@ -1167,7 +1169,7 @@ internal sealed partial class SqlPlanExecutor
                     && (table.Columns[childOrdinal].Collation ?? _catalog.DefaultCollation)
                         != (parent.Columns[parentOrdinal].Collation ?? _catalog.DefaultCollation))
                 {
-                    throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnCollations, name));
+                    throw new SqlExecutionException(SqlExecutionException.CollationMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnCollations, name));
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||
@@ -1240,7 +1242,8 @@ internal sealed partial class SqlPlanExecutor
             if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression
                 or SqlInExpression { Subquery: not null } || (_declaring && expression is SqlCastExpression))
             {
-                throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.CheckExpressionInvalid);
+                throw new SqlExecutionException(expression is SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
+                    ? SqlExecutionException.UnsupportedCode : SqlExecutionException.InvalidDefinitionCode, ErrorMessages.CheckExpressionInvalid);
             }
 
             // Declaration-only qualifier check: persisted predicates retain the older binding
@@ -1468,7 +1471,8 @@ internal sealed partial class SqlPlanExecutor
             }
             if (function is SqlExpressionFunction { Unresolved: { } reason })
             {
-                throw SqlDefinitionBinder.Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).", call.Location);
+                throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.SqlFunctionUnresolved, function.Name, reason), call.Location);
             }
 
             return function;

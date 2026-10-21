@@ -52,7 +52,8 @@ public sealed class SqlDefinitionDiagnosticTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
 
         // Assert
-        AssertDiagnostic(failure, location);
+        AssertDiagnostic(failure, location, sql.StartsWith("DROP FUNCTION", StringComparison.Ordinal) ? "COHSQLE009"
+            : sql.StartsWith("CREATE FUNCTION native_echo", StringComparison.Ordinal) ? "COHSQLE065" : "COHSQLD001");
         database.Catalog.Tables.ShouldBeEmpty();
     }
 
@@ -157,7 +158,7 @@ public sealed class SqlDefinitionDiagnosticTests
         });
 
         // Assert
-        AssertDiagnostic(failure, expression.Location!);
+        AssertDiagnostic(failure, expression.Location!, "COHSQLE009");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Definitions: persisted call vector rejections carry the expression span")]
@@ -206,7 +207,7 @@ public sealed class SqlDefinitionDiagnosticTests
         var failure = Should.Throw<DatabaseException>(() => SqlDefinitionBinder.Dependencies(expression, scope, SqlFunctionVolatility.Immutable));
 
         // Assert
-        AssertDiagnostic(failure, expression.Location!);
+        AssertDiagnostic(failure, expression.Location!, "COHSQLE009");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Definitions: unresolved signature domains carry declaration locations")]
@@ -224,7 +225,7 @@ public sealed class SqlDefinitionDiagnosticTests
         var failure = Should.Throw<DatabaseException>(() => SqlDefinitionBinder.Declare(create, environment, Collation.Binary, null));
 
         // Assert
-        AssertDiagnostic(failure, create.Location!);
+        AssertDiagnostic(failure, create.Location!, "COHSQLE009");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Definitions: deferred unavailable-domain binding first raises a located definition diagnostic")]
@@ -254,7 +255,7 @@ public sealed class SqlDefinitionDiagnosticTests
         finally { AppDomain.CurrentDomain.FirstChanceException -= Capture; }
 
         // Assert
-        AssertDiagnostic(captured.ShouldNotBeNull(), location);
+        AssertDiagnostic(captured.ShouldNotBeNull(), location, "COHSQLE009");
         bound.Unresolved.ShouldNotBeNull();
     }
 
@@ -271,16 +272,16 @@ public sealed class SqlDefinitionDiagnosticTests
         return new SqlFunctionEnvironment(functions.Freeze(), default, new SqlTypeCatalog(SqlTypeCatalog.Standard.Append(domain), SqlTypeCatalog.Standard.Casts));
     }
 
-    private static void AssertDiagnostic(DatabaseException failure, Location location)
+    private static void AssertDiagnostic(DatabaseException failure, Location location, string code = "COHSQLD001")
     {
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLD001");
+        diagnostic.Code.ShouldBe(code);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
         diagnostic.Start.ShouldBe(location.Start);
         diagnostic.End.ShouldBe(location.End);
         diagnostic.Line.ShouldBe(location.StartLine);
         diagnostic.Message.ShouldBe(failure.Message);
-        failure.Message.ShouldNotContain("COHSQLD001:", Case.Sensitive);
+        failure.Message.ShouldNotContain(code + ":", Case.Sensitive);
     }
 }

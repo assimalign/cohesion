@@ -5296,26 +5296,35 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
 SqlExecutionException covers cardinality, store assignment, DDL admission, persisted-expression
-damage and executor invariants; scalar evaluation keeps SqlEvaluationException. COHSQLE046–061
+damage and executor invariants; scalar evaluation keeps SqlEvaluationException. COHSQLE046–066
 and their PostgreSQL SQLSTATE mappings are listed in the SQL dialect. Invalid store text reuses
 COHSQLE022, numeric overflow keeps COHSQLE002, and NOT NULL keeps COHSQLE024. Catalog DDL
 guards use the same codes without depending on engine-layer types. An otherwise uncoded catalog
 or plain DatabaseException escaping statement execution receives COHSQLE060 (XX000); ownership
-refusals receive COHSQLE057 (0A000), preserving DatabaseObjectLockedException metadata.
+refusals receive COHSQLE066 (42501), preserving DatabaseObjectLockedException metadata.
 The session uses its existing catch slot to attach the enclosing statement span to unlocated
-diagnostics, retaining a more precise expression span and concrete constraint/catalog/ownership
+diagnostics, retaining a more precise current-statement expression span and concrete constraint/catalog/ownership
 exception types. Already translated storage failures and aborted-transaction refusals retain
 their exact exception identity and recorded cause (#1364). Open-time failures have no statement span. DEFAULT wrappers retain the inner
-carrier and cause. Definition dependency/native-drop codes COHSQLD002/003 move from message
+carrier and cause. Persisted CHECK/DEFAULT bindings and evaluations discard synthetic offsets before
+statement fallback, as does compiled CHECK provisioning; numeric containment alone cannot establish provenance.
+Definition dependency/native-drop codes COHSQLD002/003 move from message
 prefixes into the carrier, so the wire composes one prefix. Successful statements allocate no
 diagnostics or additional async state. Messages at the changed executor sites use generated
 resources; the remaining SQL resource migration is left to #1470.
+Namespace failures retain COHSQLE028/030 without embedded resource prefixes. Catalog script
+receipt refusals likewise carry their existing COHSQLS001 separately, so the generic statement
+fallback cannot prepend an unrelated code; oversized receipts use COHSQLE042.
 The mappings follow PostgreSQL src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500;
 no reference implementation code was copied. There is no public API, visibility-grant, storage
 format or wire-format change.
 
 Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHSQLE042`,
 mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
+Catalog definition records and exhausted catalog DDL generations use the same code. Index-name
+collisions use 42P07, constraint names retain 42710, and FK collation mismatches use COHSQLE063 /
+42P21. A replaced table uses COHSQLE064 / 40001. Unknown declaration collations use 42704;
+only loaded persisted collation failures imply XX001. Fresh CREATE VIEW rendering failures use XX000.
 `SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,
 including script receipts. Referential SET NULL/SET DEFAULT records are encoded only after all
 assignments to their final rows are collected, before the apply bracket. The checked index-key
@@ -6150,7 +6159,7 @@ domain dependencies, including column domain names. Definition DDL excludes
 other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
 DROP (COHSQLD002) and invalid declarations (COHSQLD001). Native DROP classification matches the
 requested normalized name and parameter signature, not every overload sharing that name;
-an unknown signature is COHSQLD001. No interface, new project reference,
+an unknown function signature is COHSQLE009 (42883); a duplicate function is COHSQLE065 (42723). No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
 Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, publication)`
@@ -7193,11 +7202,13 @@ SqlDataStorageFormatException carries the existing storage-failure code COHSQLE0
 schema artifacts and recreate old databases with their writing engine's export; there is no
 upgrade path or legacy reader (#1152). Sql.Schema DESIGN records the schema-hash change.
 
-TIME and INTERVAL assignment, DEFAULT and CAST share readers and CastValueFailed translation.
-Established CAST diagnostics stay COHSQLE022 (22P02) for malformed or out-of-range clock fields
-and COHSQLE002 (22003) for duration overflow. PostgreSQL datetime.c:4247-4290 instead uses 22007
-for bad temporal format, 22008 for datetime field overflow, and 22015 for interval overflow;
-the existing CAST mappings are retained. Literal readers use generated resx messages.
+Temporal assignment, DEFAULT and CAST share SqlTemporalReader's explicit format/field-range/interval-overflow
+reason through the existing Sql.Language shared-source link. Each assembly owns a reader and its
+generated resource messages; private reader failures never cross an assembly boundary. Public
+SqlLiteralText translates them to its documented FormatException/OverflowException contract, while SQL
+uses COHSQLE047 / 22007, COHSQLE048 / 22008 and COHSQLE062 / 22015 respectively. There is
+no CLR-exception-type inference or duplicate temporal conversion path. PostgreSQL datetime.c:4247-4290
+provides the classifications; no reference implementation code was copied.
 Floating text assignment calls CAST's ParseReal/ParseFloat, rejecting grouping, overflow and
 underflow. DATE and timestamp assignment retain their established SqlTemporalText grammar.
 

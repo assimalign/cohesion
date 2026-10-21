@@ -332,7 +332,7 @@ internal static class Program
             "SELECT CAST('1:02' AS TIME), CAST('13:45:00.' AS TIME), CAST('10:00Z' AS TIME), CAST('1 2 hours' AS INTERVAL), CAST('@ 1 day 2 hours ago' AS INTERVAL)"),
             [[new TimeOnly(1, 2), new TimeOnly(13, 45), new TimeOnly(10, 0), TimeSpan.FromHours(26), TimeSpan.FromHours(-26)]]);
         CheckFailure("in process: temporal assignment diagnostics", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "COHSQLE022");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "COHSQLE048");
         CheckFailure("in process: floating assignment grouping", await FailureAsync(async () =>
             await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "COHSQLE022");
         CheckFailure("in process: floating assignment overflow", await FailureAsync(async () =>

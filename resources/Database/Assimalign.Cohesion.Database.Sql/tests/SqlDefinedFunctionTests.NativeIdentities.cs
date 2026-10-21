@@ -75,7 +75,7 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION native_gate(BIGINT)"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE009");
         failure.Message.ShouldNotContain("COHSQLD003");
     }
 

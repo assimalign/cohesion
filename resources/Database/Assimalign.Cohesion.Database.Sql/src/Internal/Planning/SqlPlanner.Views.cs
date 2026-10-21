@@ -29,7 +29,7 @@ internal sealed partial class SqlPlanner
         if (_catalog.TryGetTable(schema, create.View.TableName, out _)) { throw ViewError(ErrorMessages.ViewTargetIsTable); }
         if (_catalog.TryGetView(schema, create.View.TableName, out var existing) && !create.OrReplace) { throw ViewError(ErrorMessages.ViewAlreadyExists); }
         string text = SqlExpressionRenderer.Render(create.Query);
-        var query = SqlPersistedExpression.LoadQuery(text, "view " + create.View.TableName);
+        var query = SqlPersistedExpression.LoadQuery(text, "view " + create.View.TableName, declaring: true);
         if (!SqlPersistedExpression.SameQuery(create.Query, query)) { throw ViewError(ErrorMessages.ViewRoundTrip); }
         if (SqlViewQuery.Nodes(query).Any(node => node is SqlParameterExpression)) { throw ViewError(ErrorMessages.ViewParameters); }
         var binding = new ViewBinding();
@@ -40,9 +40,9 @@ internal sealed partial class SqlPlanner
         if (output.Select(column => column.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != output.Count) { throw ViewError(ErrorMessages.ViewDuplicateColumns); }
         var expanded = new StringBuilder(text);
         foreach (var edit in binding.Edits.OrderByDescending(pair => pair.Key)) { expanded.Remove(edit.Key, edit.Value.Length).Insert(edit.Key, edit.Value.Text); }
-        var frozen = SqlPersistedExpression.LoadQuery(expanded.ToString(), "view " + create.View.TableName);
+        var frozen = SqlPersistedExpression.LoadQuery(expanded.ToString(), "view " + create.View.TableName, declaring: true);
         string canonical = SqlExpressionRenderer.Render(frozen);
-        if (!SqlPersistedExpression.SameQuery(frozen, SqlPersistedExpression.LoadQuery(canonical, "view " + create.View.TableName))) { throw ViewError(ErrorMessages.ViewRoundTrip); }
+        if (!SqlPersistedExpression.SameQuery(frozen, SqlPersistedExpression.LoadQuery(canonical, "view " + create.View.TableName, declaring: true))) { throw ViewError(ErrorMessages.ViewRoundTrip); }
         // Resolve after expansion too: traversal positions and call identities now describe
         // exactly the canonical persisted tree, including aggregates and nested queries.
         var finalBinding = new ViewBinding();

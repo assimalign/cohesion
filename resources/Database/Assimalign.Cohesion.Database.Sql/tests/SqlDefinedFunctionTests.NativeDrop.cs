@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlDefinedFunctionTests
 {
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - DROP classifies native ownership by the requested normalized signature")]
-    [InlineData("native_echo(TEXT)", "COHSQLD001")]
+    [InlineData("native_echo(TEXT)", "COHSQLE009")]
     [InlineData("NATIVE_ECHO(INT8)", "COHSQLD003")]
     [InlineData("native_echo(BIGINT)", "COHSQLD003")]
     public async Task ExecuteAsync_DropNativeOverload_ShouldClassifyRequestedSignature(string signature, string code)

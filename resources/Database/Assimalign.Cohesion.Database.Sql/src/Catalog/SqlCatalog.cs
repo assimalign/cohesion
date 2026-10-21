@@ -947,10 +947,14 @@ public sealed partial class SqlCatalog
             var table = FindTableByObjectId(index.TableObjectId)
                 ?? throw new SqlCatalogException("COHSQLE051", $"No table with object id {index.TableObjectId} exists.");
 
-            if (_indexes.ContainsKey((index.TableObjectId, index.Name)) ||
-                table.Constraints.Any(constraint => string.Equals(constraint.Name, index.Name, StringComparison.OrdinalIgnoreCase)))
+            if (_indexes.ContainsKey((index.TableObjectId, index.Name)))
             {
-                throw new SqlCatalogException("COHSQLE050", $"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
+                throw new SqlCatalogException("COHSQLE049", $"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
+            }
+            if (table.Constraints.Any(constraint => string.Equals(constraint.Name, index.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new SqlCatalogException("COHSQLE050", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.ConstraintNameExists, index.Name, table.Name));
             }
 
             foreach (string column in index.ColumnNames)
@@ -1385,15 +1389,15 @@ public sealed partial class SqlCatalog
                     try
                     {
                         var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
-                            ?? throw new SqlCatalogException("COHSQLS001: Malformed declared script receipt.");
+                            ?? throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptMalformed);
                         if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
                         {
-                            throw new SqlCatalogException("COHSQLS001: Malformed or duplicate declared script receipt.");
+                            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptDuplicate);
                         }
                     }
                     catch (Exception failure) when (failure is JsonException or ArgumentException)
                     {
-                        throw new SqlCatalogException($"COHSQLS001: Malformed declared script receipt: {failure.Message}");
+                        throw new SqlCatalogException("COHSQLS001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptReceiptReadFailed, failure.Message), failure);
                     }
                     break;
                 }
@@ -1543,7 +1547,7 @@ public sealed partial class SqlCatalog
     {
         if (_ddlGeneration == ulong.MaxValue)
         {
-            throw new SqlCatalogException("COHSQLE060", "The catalog DDL generation is exhausted.");
+            throw new SqlCatalogException("COHSQLE042", "The catalog DDL generation is exhausted.");
         }
         if (publication is not null)
         {
@@ -1637,7 +1641,7 @@ public sealed partial class SqlCatalog
     {
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException("COHSQLE057",
+            throw new SqlCatalogException("COHSQLE042",
                 $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold." +
                 (remedy is null ? string.Empty : " " + remedy));
         }

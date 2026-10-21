@@ -1,4 +1,7 @@
 using System;
+using System.Collections;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -10,6 +13,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -17,19 +22,104 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlExecutionDiagnosticTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Diagnostics: coded resources never carry a second code prefix (#1653)")]
+    public void Resources_CodedCarrierMessages_ShouldHaveNoCodePrefix()
+    {
+        // Arrange / Act
+        var messages = ErrorMessages.ResourceManager.GetResourceSet(CultureInfo.InvariantCulture, true, true)!;
+
+        // Assert: script-history messages still owned by their legacy uncoded path are outside this migration.
+        foreach (DictionaryEntry entry in messages)
+        {
+            if (entry.Key is string name && name != nameof(ErrorMessages.ScriptNamespaceTypedObjects) && entry.Value is string message)
+            {
+                Regex.IsMatch(message, @"^COH[A-Z]+\d+:\s").ShouldBeFalse(name);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Provisioning: synthetic CHECK locations never escape schema validation (#1653)")]
+    public void BindDeclaredChecks_InvalidPredicate_ShouldDiscardCarrierLocations()
+    {
+        // Arrange
+        var schema = SqlSchema.Compile("app", builder => builder.Table<ProvisionedRow>("t",
+            table => { table.Column(row => row.Value); table.Check("ck", "1 IS TRUE"); }));
+
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => SqlSchemaProvisioner.BindDeclaredChecks(schema,
+            Collation.Binary, SqlFunctionEnvironment.Standard, new SqlQueryParserOptions()));
+
+        // Assert
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE003");
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+        diagnostic.Location.ShouldBeNull();
+        diagnostic.Line.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - View reload: new rendering is an invariant failure; loaded text is corruption (#1653)")]
+    [InlineData(false, "COHSQLE058")]
+    [InlineData(true, "COHSQLE060")]
+    public void LoadQuery_InvalidText_ShouldClassifyItsOrigin(bool declaring, string code)
+    {
+        // Arrange / Act
+        var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadQuery("SELECT 1 +", "view v", declaring));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Persisted CHECK: synthetic offsets are discarded even inside the statement bounds (#1653)")]
+    [InlineData(false, "t")]
+    [InlineData(true, "t")]
+    [InlineData(false, "long_statement_diagnostic_target")]
+    [InlineData(true, "long_statement_diagnostic_target")]
+    public async Task ExecuteAsync_PersistedCheckFailure_ShouldUseStatementSpan(bool wire, string table)
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out var database).ShouldBeTrue();
+        await using var session = await database!.CreateSessionAsync(TestTimeout.Token());
+        await session.ExecuteAsync($"CREATE TABLE {table} (v INT CHECK(1 / v > 0))", cancellationToken: TestTimeout.Token());
+        await using var client = SqlClient.Create(new SqlClientOptions
+        {
+            Settings = new DatabaseConnectionSettings { Database = ServerTestHarness.DatabaseName, Principal = "diagnostics", EndPoint = harness.Listener.EndPoint },
+            ConnectionFactory = harness.Listener.CreateFactory(),
+        });
+        await using var connection = await client.ConnectAsync(TestTimeout.Token());
+        string sql = $"INSERT INTO {table} VALUES (0)";
+
+        // Act
+        var diagnostics = wire
+            ? (await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()))).Diagnostics
+            : (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()))).Diagnostics;
+
+        // Assert
+        var diagnostic = diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("COHSQLE001");
+        diagnostic.Start.ShouldBe(0);
+        diagnostic.End.ShouldBe(sql.Length);
+        diagnostic.Line.ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Persisted failures: damaged definitions and default wrappers retain codes and statement spans (#1653)")]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_PersistedFailure_ShouldKeepCarrier(bool wire, bool defaultConversion)
+    [InlineData(false, "qty >", "COHSQLE058")]
+    [InlineData(true, "qty >", "COHSQLE058")]
+    [InlineData(false, "'bad'", "COHSQLE022")]
+    [InlineData(true, "'bad'", "COHSQLE022")]
+    [InlineData(false, "1 IS TRUE", "COHSQLE003")]
+    [InlineData(true, "1 IS TRUE", "COHSQLE003")]
+    [InlineData(false, "'a' COLLATE \"nope\"", "COHSQLE058")]
+    [InlineData(true, "'a' COLLATE \"nope\"", "COHSQLE058")]
+    public async Task ExecuteAsync_PersistedFailure_ShouldKeepCarrier(bool wire, string literal, string code)
     {
         // Arrange: use the engine's existing test grant to publish a definition SQL DDL refuses.
         await using var harness = await ServerTestHarness.StartAsync();
         harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out var database).ShouldBeTrue();
         await database!.Catalog.CreateTableAsync("dbo", "broken",
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)),
-             new SqlCatalogColumn("v", new DatabaseTypeInfo(DatabaseType.Guid), defaultLiteral: defaultConversion ? "'bad'" : "qty >")],
+             new SqlCatalogColumn("v", new DatabaseTypeInfo(DatabaseType.Guid), defaultLiteral: literal)],
             [], TestTimeout.Token());
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         await using var client = SqlClient.Create(new SqlClientOptions
@@ -39,7 +129,6 @@ public sealed class SqlExecutionDiagnosticTests
         });
         await using var connection = await client.ConnectAsync(TestTimeout.Token());
         const string sql = "INSERT INTO broken(id) VALUES (1)";
-        string code = defaultConversion ? "COHSQLE022" : "COHSQLE058";
 
         // Act
         var diagnostics = wire
@@ -202,9 +291,27 @@ public sealed class SqlExecutionDiagnosticTests
         failure.OwningSchema.ShouldBe("model");
         failure.Operation.ShouldBe("DROP TABLE");
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE057");
+        diagnostic.Code.ShouldBe("COHSQLE066");
         diagnostic.Start.ShouldBe(0);
         diagnostic.End.ShouldBe(sql.Length);
         diagnostic.Message.ShouldBe(failure.Message);
+
+        await using var listener = new InMemoryConnectionListener();
+        await using var server = SqlDatabaseServer.Create(engine, new SqlDatabaseServerOptions { Listener = listener });
+        await server.StartAsync(TestTimeout.Token());
+        await using var client = SqlClient.Create(new SqlClientOptions
+        {
+            Settings = new DatabaseConnectionSettings { Database = "app", Principal = "diagnostics", EndPoint = listener.EndPoint },
+            ConnectionFactory = listener.CreateFactory(),
+        });
+        await using var connection = await client.ConnectAsync(TestTimeout.Token());
+        var remote = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql, cancellationToken: TestTimeout.Token()));
+        remote.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE066");
+        remote.Diagnostics[0].Start.ShouldBe(0);
+        remote.Diagnostics[0].End.ShouldBe(sql.Length);
+        remote.Message.ShouldBe("COHSQLE066: " + failure.Message);
+        remote.ConnectionUsable.ShouldBeTrue();
     }
+
+    private sealed record ProvisionedRow(int Value);
 }

@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         throw new SqlExecutionException(SqlDefinitionBinder.NativeCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NativeFunctionDrop, signature));
                     }
-                    throw SqlDefinitionBinder.Refuse($"Function '{signature}' does not exist.", drop.Location);
+                    throw new SqlExecutionException(SqlEvaluationException.UnregisteredFunctionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionMissing, signature), location: drop.Location);
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents("F:" + signature);
@@ -78,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (owner == DatabaseObjectOwner.Schema && !string.Equals(schema, statement.ProvisioningSchema, StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseObjectLockedException(name, schema!, "DROP", new Diagnostic { Code = SqlExecutionException.UnsupportedCode });
+            throw new DatabaseObjectLockedException(name, schema!, "DROP", new Diagnostic { Code = SqlExecutionException.InsufficientPrivilegeCode });
         }
         if (owner == DatabaseObjectOwner.Adhoc && statement.ProvisioningSchema is not null)
         {

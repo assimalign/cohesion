@@ -1278,11 +1278,16 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteCreateIndexAsync(SqlCreateIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.Table.Constraints.Any(constraint => constraint.Name.Equals(plan.IndexName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SqlExecutionException(SqlExecutionException.DuplicateObjectCode, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ConstraintNameExists, plan.IndexName, plan.Table.Name));
+        }
         if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
         {
             if (statement.ProvisioningSchema is not null)
             {
-                throw new SqlExecutionException(SqlExecutionException.DuplicateObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexProvisioningCollision, plan.IndexName, plan.Table.Schema, plan.Table.Name));
+                throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexProvisioningCollision, plan.IndexName, plan.Table.Schema, plan.Table.Name));
             }
 
             if (plan.IfNotExists)
@@ -1290,7 +1295,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlExecutionException(SqlExecutionException.DuplicateObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexExists, plan.IndexName, plan.Table.Schema, plan.Table.Name));
+            throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexExists, plan.IndexName, plan.Table.Schema, plan.Table.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1440,7 +1445,7 @@ internal sealed partial class SqlPlanExecutor
         if (owner == DatabaseObjectOwner.Schema &&
             !string.Equals(statement.ProvisioningSchema, owningSchema, StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseObjectLockedException(objectName, owningSchema!, operation, new Diagnostic { Code = SqlExecutionException.UnsupportedCode });
+            throw new DatabaseObjectLockedException(objectName, owningSchema!, operation, new Diagnostic { Code = SqlExecutionException.InsufficientPrivilegeCode });
         }
     }
 
@@ -1460,7 +1465,7 @@ internal sealed partial class SqlPlanExecutor
         // drop/recreate during the wait must never authorize changes to the new object.
         if (expected.ObjectId != current.ObjectId)
         {
-            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode,
+            throw new SqlExecutionException(SqlExecutionException.SerializationFailureCode,
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableIdentityReplaced, expected.Schema, expected.Name));
         }
     }
@@ -1779,7 +1784,7 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Date => value switch
                 {
                     DateOnly date => date,
-                    string text => SqlTemporalText.ParseDate(text),
+                    string text => SqlTemporalText.ParseAssignmentDate(text),
                     DateTime dateTime => DateOnly.FromDateTime(dateTime),
                     DateTimeOffset instant => DateOnly.FromDateTime(instant.UtcDateTime),
                     _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DateConversionUnsupported, value.GetType().Name)),
@@ -1788,27 +1793,27 @@ internal sealed partial class SqlPlanExecutor
                 {
                     TimeOnly time => time,
                     DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
-                    string text => SqlLiteralText.ParseTime(text),
+                    string text => SqlTemporalText.ParseTime(text),
                     _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimeConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.DateTime => value switch
                 {
                     DateTime dateTime => DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified),
                     DateTimeOffset instant => DateTime.SpecifyKind(instant.UtcDateTime, DateTimeKind.Unspecified),
-                    string text => SqlTemporalText.ParseTimestamp(text),
+                    string text => SqlTemporalText.ParseAssignmentTimestamp(text),
                     _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimestampConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.DateTimeOffset => value switch
                 {
                     DateTimeOffset dateTimeOffset => dateTimeOffset,
                     DateTime timestamp => new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified), TimeSpan.Zero),
-                    string text => SqlTemporalText.ParseTimestampTz(text),
+                    string text => SqlTemporalText.ParseAssignmentTimestampTz(text),
                     _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimestampTzConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.TimeSpan => value switch
                 {
                     TimeSpan timeSpan => timeSpan,
-                    string text => SqlCastText.ParseInterval(text),
+                    string text => SqlTemporalText.ParseInterval(text),
                     _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IntervalConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.Guid => value switch
@@ -1825,8 +1830,13 @@ internal sealed partial class SqlPlanExecutor
         {
             throw exception.WithContext($"Column '{column.Name}'{(column.DomainName is null ? string.Empty : $" (domain '{column.DomainName}')")}");
         }
+        catch (SqlExecutionException exception)
+        {
+            throw exception.WithContext(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ColumnConversionFailed, value, column.Name, column.Type.Type));
+        }
         catch (Exception exception) when (value is string
-            && column.Type.Type is DatabaseType.Time or DatabaseType.TimeSpan or DatabaseType.Float32 or DatabaseType.Float64
+            && column.Type.Type is DatabaseType.Float32 or DatabaseType.Float64
             && exception is FormatException or OverflowException or InvalidCastException)
         {
             throw SqlEvaluationException.CastValueFailed(string.Format(CultureInfo.CurrentCulture,
@@ -1842,7 +1852,7 @@ internal sealed partial class SqlPlanExecutor
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException or ArgumentOutOfRangeException)
         {
-            throw new SqlExecutionException(SqlExecutionException.ConversionCode(column.Type.Type, exception),
+            throw new SqlExecutionException(SqlExecutionException.ConversionCode(exception),
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnConversionFailed, value, column.Name, column.Type.Type), exception);
         }
     }

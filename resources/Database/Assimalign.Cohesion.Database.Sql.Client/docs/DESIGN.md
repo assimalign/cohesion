@@ -45,8 +45,8 @@ parameters and explicit transactions; failed writes preserve rows. No protocol c
 ## Constraint diagnostics (#1666)
 
 Execution, conversion, persisted-expression and DDL failures also retain structured diagnostics
-(#1653): COHSQLE046–061, existing COHSQLE022/024 and definition COHSQLD002/003. The engine
-attaches the statement span when no expression span exists; the wire composes the code prefix
+(#1653): COHSQLE046–066, existing COHSQLE022/024 and definition COHSQLD002/003. The engine
+discards persisted-expression offsets before attaching the statement span; the wire composes the code prefix
 once. Both transports cover execution and DDL refusals; engine-owned wire regressions also
 include a damaged stored DEFAULT and a default-conversion wrapper, preserving the carrier,
 ExecutionFailure and a reusable connection. SQLSTATE mappings

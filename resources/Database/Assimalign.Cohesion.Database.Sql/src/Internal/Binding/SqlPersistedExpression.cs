@@ -29,18 +29,18 @@ internal static class SqlPersistedExpression
     // required to be exactly that predicate (no other clause may ride along).
     private const string carrierTable = "__persisted";
 
-    internal static SqlQueryBodyExpression LoadQuery(string text, string subject)
+    internal static SqlQueryBodyExpression LoadQuery(string text, string subject, bool declaring = false)
     {
         try
         {
             var request = SqlQueryRequest.FromSql(text, null, SqlQueryRequest.CeilingParserOptions);
             if (request.Statement.SqlExpression is not SqlQueryBodyExpression query)
-            { throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewLoadInvalid, subject, DamagedCatalogHint)); }
+            { throw new SqlExecutionException(declaring ? SqlExecutionException.InternalErrorCode : SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewLoadInvalid, subject, DamagedCatalogHint)); }
             return query;
         }
         catch (DatabaseParseException failure)
         {
-            throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, failure.Message, failure);
+            throw new SqlExecutionException(declaring ? SqlExecutionException.InternalErrorCode : SqlExecutionException.DamagedDefinitionCode, failure.Message, failure);
         }
     }
 
@@ -211,7 +211,7 @@ internal static class SqlPersistedExpression
     /// <param name="evaluator">The evaluator over the row shape the expression binds to.</param>
     /// <exception cref="DatabaseException">A column or collation does not resolve, or the expression is not a row expression.</exception>
     /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>COHSQLE006</c>).</exception>
-    internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator, bool declaring = false)
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(evaluator);
@@ -225,7 +225,7 @@ internal static class SqlPersistedExpression
             case SqlCollateExpression collate:
                 try { Collation.FromName(collate.CollationName); }
                 catch (DatabaseTypeException failure)
-                { throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, failure.Message, failure); }
+                { throw new SqlExecutionException(declaring ? SqlExecutionException.UndefinedObjectCode : SqlExecutionException.DamagedDefinitionCode, failure.Message, failure); }
                 break;
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
@@ -238,7 +238,7 @@ internal static class SqlPersistedExpression
 
         foreach (var child in SqlPlanner.Children(expression))
         {
-            Bind(child, evaluator);
+            Bind(child, evaluator, declaring);
         }
 
         // After the arguments, as the planner resolves a call (SqlPlanner.ValidateFunctionCalls).

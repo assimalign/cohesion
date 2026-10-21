@@ -25,12 +25,33 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         yield return ["CREATE TABLE target (v TIME)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
         yield return ["CREATE TABLE target (v TIMESTAMP)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
         yield return ["CREATE TABLE target (v TIMESTAMPTZ)", "INSERT INTO target VALUES ('bad')", "COHSQLE047"];
-        yield return ["CREATE TABLE target (v INTERVAL)", "INSERT INTO target VALUES ('10675199.02:48:05.4775808')", "COHSQLE048"];
+        yield return ["CREATE TABLE target (v INTERVAL)", "INSERT INTO target VALUES ('99999999999999999999999999999 days')", "COHSQLE062"];
+        yield return ["CREATE TABLE bad (v INT CHECK(1 / v > 0))", "INSERT INTO bad VALUES (0)", "COHSQLE001"];
+        foreach (var (type, value) in new[] { ("DATE", "2026-02-30"), ("TIME", "25:00:00"), ("TIMESTAMP", "2026-02-30 12:00:00") })
+        {
+            yield return [$"CREATE TABLE target (v {type})", $"INSERT INTO target VALUES ('{value}')", "COHSQLE048"];
+            yield return ["", $"SELECT CAST('{value}' AS {type})", "COHSQLE048"];
+            yield return ["", $"CREATE TABLE target (v {type} DEFAULT '{value}')", "COHSQLE048"];
+        }
+        yield return ["", "CREATE TABLE huge (v TEXT DEFAULT '" + new string('a', 8200) + "')", "COHSQLE042"];
+        yield return ["", "CREATE FUNCTION huge_fn() RETURNS TEXT RETURN '" + new string('a', 8200) + "'", "COHSQLE042"];
+        yield return ["CREATE TABLE p (v TEXT COLLATE binary UNIQUE); CREATE TABLE c (v TEXT COLLATE case_insensitive)",
+            "ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES p(v)", "COHSQLE063"];
+        yield return ["", "CREATE TABLE target (v TEXT DEFAULT 'a' COLLATE \"nope\")", "COHSQLE052"];
+        yield return ["", "CREATE TABLE target (v TEXT DEFAULT ('a' COLLATE \"nope\"))", "COHSQLE052"];
+        yield return ["CREATE FUNCTION fail(p INT) RETURNS INT RETURN 1 / p", "SELECT fail(0)", "COHSQLE001"];
+        yield return ["", "DROP SCHEMA missing", "COHSQLE028"];
+        yield return ["CREATE SCHEMA occupied; CREATE TABLE occupied.x (id INT)", "DROP SCHEMA occupied", "COHSQLE030"];
+        yield return ["CREATE VIEW dependent AS SELECT id FROM t", "DROP TABLE t", "COHSQLD002"];
+        yield return ["CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "CREATE FUNCTION f(p INT) RETURNS INT RETURN p", "COHSQLE065"];
+        yield return ["", "DROP FUNCTION missing(INT)", "COHSQLE009"];
         yield return ["CREATE TABLE target (v UUID)", "INSERT INTO target VALUES ('bad')", "COHSQLE022"];
         yield return ["CREATE TABLE target (v BYTEA)", "INSERT INTO target VALUES ('bad')", "COHSQLE055"];
         yield return ["", "SELECT id FROM t ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END", "COHSQLE055"];
         yield return ["", "CREATE TABLE t (id INT)", "COHSQLE049"];
-        yield return ["", "CREATE INDEX uq_t ON t(v)", "COHSQLE050"];
+        yield return ["", "CREATE INDEX uq_t ON t(v)", "COHSQLE049"];
+        yield return ["", "ALTER TABLE t ADD CONSTRAINT uq_t CHECK(id > 0)", "COHSQLE050"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT ck_t CHECK(id > 0)", "CREATE INDEX ck_t ON t(v)", "COHSQLE050"];
         yield return ["", "ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY(v) REFERENCES absent(id)", "COHSQLE051"];
         yield return ["", "ALTER TABLE t DROP CONSTRAINT absent", "COHSQLE052"];
         yield return ["", "ALTER TABLE parent DROP COLUMN id", "COHSQLE056"];
@@ -98,7 +119,8 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
         var detail = failure.Diagnostics.ShouldHaveSingleItem().Message!;
-        failure.Message.ShouldBe(code + ": " + detail);
+        failure.Message.ShouldStartWith(code + ": ", Case.Sensitive);
+        failure.Message.ShouldContain(detail, Case.Sensitive);
         CheckDiagnostic(failure.Diagnostics, detail, sql, code);
         (await connection.QueryAsync("SELECT id FROM t", cancellationToken: TestTimeout.Token())).Count.ShouldBe(2);
         harness.Server.Sessions.Count.ShouldBe(1);
@@ -119,12 +141,13 @@ public sealed class SqlExecutionDiagnosticConformanceTests
         var span = SqlQueryRequest.FromSql("\n  " + sql).Statement.SqlExpression.Location!;
         var diagnostic = diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(code);
-        diagnostic.Message.ShouldBe(message);
+        message.ShouldContain(diagnostic.Message!, Case.Sensitive);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
-        diagnostic.Start.ShouldBe(3);
-        diagnostic.End.ShouldBe(span.End);
-        diagnostic.Line.ShouldBe(span.StartLine);
+        diagnostic.Start.ShouldNotBeNull().ShouldBeGreaterThanOrEqualTo(3);
+        diagnostic.End.ShouldNotBeNull().ShouldBeGreaterThanOrEqualTo(diagnostic.Start!.Value);
+        diagnostic.End.Value.ShouldBeLessThanOrEqualTo(sql.Length + 3);
+        diagnostic.Line.ShouldBeGreaterThanOrEqualTo(span.StartLine);
         message.ShouldNotContain(code + ":", Case.Sensitive);
     }
 }

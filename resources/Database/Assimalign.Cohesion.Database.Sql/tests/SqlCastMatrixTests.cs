@@ -209,7 +209,7 @@ public sealed class SqlCastMatrixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: invalid strict text, exactness and range fail as database errors")]
-    [InlineData("CAST('2024-02-30' AS DATE)", "COHSQLE022")]
+    [InlineData("CAST('2024-02-30' AS DATE)", "COHSQLE048")]
     [InlineData("CAST('1e400' AS DOUBLE PRECISION)", "COHSQLE002")]
     [InlineData("CAST('1e-400' AS DOUBLE PRECISION)", "COHSQLE002")]
     [InlineData("CAST('1e-50' AS REAL)", "COHSQLE002")]
@@ -243,10 +243,10 @@ public sealed class SqlCastMatrixTests
     [InlineData("CAST(CAST('1e-29' AS DOUBLE) AS NUMERIC)", "COHSQLE002")]
     [InlineData("CAST(INTERVAL '25 hours' AS TIME)", "COHSQLE011")]
     [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)", "COHSQLE011")]
-    [InlineData("CAST('1 year' AS INTERVAL)", "COHSQLE022")]
-    [InlineData("CAST('12.34.56' AS INTERVAL)", "COHSQLE022")]
-    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "COHSQLE022")]
-    [InlineData("CAST('00:00:00.12345678' AS TIME)", "COHSQLE022")]
+    [InlineData("CAST('1 year' AS INTERVAL)", "COHSQLE047")]
+    [InlineData("CAST('12.34.56' AS INTERVAL)", "COHSQLE047")]
+    [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "COHSQLE047")]
+    [InlineData("CAST('00:00:00.12345678' AS TIME)", "COHSQLE047")]
     [InlineData("CAST('\\xZZ' AS BYTEA)", "COHSQLE022")]
     [InlineData("CAST('\\x0' AS BYTEA)", "COHSQLE022")]
     [InlineData("CAST('a\\b' AS BYTEA)", "COHSQLE022")]

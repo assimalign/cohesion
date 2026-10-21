@@ -261,9 +261,9 @@
 
   <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
 
-  <data name="NamespaceMissing" xml:space="preserve"><value>COHSQLE028: Schema '{0}' does not exist.</value></data>
+  <data name="NamespaceMissing" xml:space="preserve"><value>Schema '{0}' does not exist.</value></data>
 
-  <data name="NamespaceDependentObjects" xml:space="preserve"><value>COHSQLE030: Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
+  <data name="NamespaceDependentObjects" xml:space="preserve"><value>Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
 
   <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
 
@@ -281,9 +281,9 @@
 
   <data name="ViewCycle" xml:space="preserve"><value>A view cannot depend on itself, directly or indirectly.</value></data>
 
-  <data name="ViewDependent" xml:space="preserve"><value>COHSQLD002: Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
+  <data name="ViewDependent" xml:space="preserve"><value>Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
 
-  <data name="ViewDropDependent" xml:space="preserve"><value>COHSQLD002: Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
+  <data name="ViewDropDependent" xml:space="preserve"><value>Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
   <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
@@ -293,4 +293,28 @@
   <data name="StatementTableChanged" xml:space="preserve"><value>Table '{0}.{1}' changed while the statement was waiting. Retry the statement in a fresh transaction.</value></data>
   <data name="ResultHeaderTooLarge" xml:space="preserve"><value>The encoded result header is {0} bytes, exceeding the wire payload limit of {1} bytes.</value></data>
   <data name="ColumnTextConversionFailed" xml:space="preserve"><value>Column '{0}': cannot store text as {1}. {2}</value></data>
+  <data name="TemporalDateTextInvalid" xml:space="preserve"><value>DATE text must be a valid ISO 8601 date, yyyy-mm-dd.</value></data>
+  <data name="TemporalTimestampTextInvalid" xml:space="preserve"><value>TIMESTAMP text requires yyyy-mm-dd and an optional time.</value></data>
+  <data name="TemporalTimestampSeparatorInvalid" xml:space="preserve"><value>TIMESTAMP requires a space or T before the time.</value></data>
+  <data name="TemporalTimestampZoneRequired" xml:space="preserve"><value>TIMESTAMPTZ requires timestamp text.</value></data>
+  <data name="TemporalTimestampOffsetInvalid" xml:space="preserve"><value>An offset must be +/-HH:mm.</value></data>
+  <data name="TemporalTimestampOffsetRange" xml:space="preserve"><value>An offset must be within +/-14:00.</value></data>
+  <data name="TemporalTimestampRangeInvalid" xml:space="preserve"><value>TIMESTAMPTZ is outside its supported range.</value></data>
+  <data name="TemporalIntervalYearMonthUnsupported" xml:space="preserve"><value>Year-month INTERVAL literals are not supported.</value></data>
+  <data name="TemporalTimeTextInvalid" xml:space="preserve"><value>TIME requires a valid clock within 00:00:00 through 23:59:59.9999999, optionally with AM/PM and a supported zone.</value></data>
+  <data name="TemporalIntervalTextInvalid" xml:space="preserve"><value>Invalid day-time INTERVAL literal.</value></data>
+  <data name="SqlFunctionMissing" xml:space="preserve">
+    <value>Function '{0}' does not exist.</value>
+  </data>
+  <data name="SqlFunctionUnresolved" xml:space="preserve">
+    <value>Function '{0}' has an unresolved SQL definition ({1}).</value>
+  </data>
+  <data name="ScriptReceiptMalformed" xml:space="preserve"><value>Malformed declared script receipt.</value></data>
+  <data name="ScriptReceiptDuplicate" xml:space="preserve"><value>Malformed or duplicate declared script receipt.</value></data>
+  <data name="ScriptReceiptReadFailed" xml:space="preserve"><value>Malformed declared script receipt: {0}</value></data>
+  <data name="ScriptParameterCountMismatch" xml:space="preserve"><value>The requested parameter count does not match the function being removed.</value></data>
+  <data name="ScriptIdentityChanged" xml:space="preserve"><value>A declared script checksum, statement count or typed schema identity changed.</value></data>
+  <data name="ScriptPrefixRegressed" xml:space="preserve"><value>A declared script checksum, statement count or original generation changed, or its completed prefix regressed.</value></data>
+  <data name="ScriptReceiptTooLarge" xml:space="preserve"><value>Declared script receipt exceeds the catalog record limit.</value></data>
+  <data name="ScriptPublicationMismatch" xml:space="preserve"><value>The statement target, script identity or expected preceding receipt state does not match this publication.</value></data>
 </root>
