@@ -24,8 +24,9 @@ public sealed class CheckpointLatencyProbeTests
         _output = output;
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Checkpoint probe: report reader p99 over physical files and a 32 MiB pool (#1269)")]
-    public async Task Checkpoint_PhysicalFiles_ShouldReportReaderLatency()
+    [DatabaseProbeTheory(DisplayName = "Cohesion Test [Database.Transactions] - Checkpoint probe: report reader p99 over physical files and a 32 MiB pool (#1269)")]
+    [InlineData(5)]
+    public async Task Checkpoint_PhysicalFiles_ShouldReportReaderLatency(int minimumCheckpoints)
     {
         // Arrange: this reports latency, never asserts a machine-dependent time limit.
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-checkpoint-" + Guid.NewGuid().ToString("N"));
@@ -92,7 +93,7 @@ public sealed class CheckpointLatencyProbeTests
                     Interlocked.Increment(ref checkpointEpoch);
                     checkpoints++;
                 }
-                while (!stop.IsCancellationRequested && (checkpoints < 5 ||
+                while (!stop.IsCancellationRequested && (checkpoints < minimumCheckpoints ||
                     elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || Volatile.Read(ref overlappingReads) == 0));
             }
             finally
@@ -102,7 +103,7 @@ public sealed class CheckpointLatencyProbeTests
             }
 
             // Assert: the workload ran; percentile values are evidence for controlled runs.
-            checkpoints.ShouldBeGreaterThanOrEqualTo(5);
+            checkpoints.ShouldBeGreaterThanOrEqualTo(minimumCheckpoints);
             reads.ShouldBeGreaterThan(0);
             latencies.Count.ShouldBeGreaterThan(0);
             latencies.Sort();

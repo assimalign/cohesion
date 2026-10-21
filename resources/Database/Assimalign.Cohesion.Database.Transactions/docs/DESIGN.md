@@ -983,6 +983,10 @@ the reader fast path needs no checkpoint gate. A blocked-data-I/O test completes
 begins, cached pins and mixed commit/rollback ends while both checkpoint gates remain held,
 then promotes a reader reserved above the captured header floor and verifies crash recovery.
 
+The physical-file checkpoint latency probe is opt-in via `COHESION_DB_PROBES=1`, using the
+same `DatabaseProbeTheoryAttribute` convention as Blob's growth probes; default suites
+report it as skipped. Its latency percentiles remain measurements without timing thresholds.
+
 A reader's sequence number may be reissued after a crash: allocation resumes above the
 maximum sequence in the surviving journal and the persisted storage sequence floor, which
 may not include that reader's reservation. This is harmless because readers stamp no versions
