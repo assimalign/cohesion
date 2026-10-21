@@ -34,6 +34,7 @@ internal sealed partial class SqlSchemaProvisioner
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private string? _validatedHash;
+    private bool _validatedQualifiers;
     private string? _formatCheckedStateDocument;
     private string? _formatCheckedPendingDocument;
 
@@ -478,9 +479,10 @@ internal sealed partial class SqlSchemaProvisioner
     /// <param name="defaultCollation">The collation of the database the schema is for.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="parserOptions">The engine's parser options.</param>
+    /// <param name="validateQualifiers">True for a new or changed schema hash; false before the catalog is known or when the hash was already applied.</param>
     /// <exception cref="DatabaseException">A declared DEFAULT or CHECK does not bind; the message names its table and column or constraint.</exception>
     internal static void BindDeclaredChecks(SqlCompiledSchema schema, Collation defaultCollation, SqlFunctionEnvironment functions,
-        SqlQueryParserOptions parserOptions)
+        SqlQueryParserOptions parserOptions, bool validateQualifiers = true)
     {
         foreach (CompiledSchemaTable table in schema.Tables)
         {
@@ -523,7 +525,7 @@ internal sealed partial class SqlSchemaProvisioner
                 {
                     var predicate = SqlPersistedExpression.ParseDeclaration(constraint.Expression?.CanonicalText ?? string.Empty, parserOptions);
                     SqlPlanner.ValidateDeclaredCalls(predicate, functions.Catalog);
-                    SqlPlanExecutor.ValidateCheck(predicate, shape, defaultCollation, functions);
+                    SqlPlanExecutor.ValidateCheck(predicate, shape, defaultCollation, functions, validateQualifiers: validateQualifiers);
                 }
                 catch (DatabaseException exception)
                 {
@@ -988,7 +990,8 @@ internal sealed partial class SqlSchemaProvisioner
 
     private void ValidateSupportedSchema(SqlCompiledSchema schema)
     {
-        if (string.Equals(_validatedHash, schema.Hash, StringComparison.Ordinal))
+        bool validateQualifiers = !string.Equals(_catalog.SchemaState?.ContentHash, schema.Hash, StringComparison.Ordinal);
+        if (string.Equals(_validatedHash, schema.Hash, StringComparison.Ordinal) && (!validateQualifiers || _validatedQualifiers))
         {
             return;
         }
@@ -1005,23 +1008,23 @@ internal sealed partial class SqlSchemaProvisioner
                 $"{Describe()}: SQL schema '{schema.Name}' declares {unsupported}.");
         }
 
-        // The checks the engine's build makes before any file is touched, for an apply that did not
-        // come through a build: a declared CHECK must bind before any step runs. The schema the
-        // engine declares for this database was bound by the build's phase 3, against the same
-        // frozen catalog and parser options, and the build refused a database whose collation
-        // differs from the declared one, so an equal hash has nothing left to bind.
-        if (_database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
+        // Phase 3 bound all declaration rules except qualifier identity. An already-applied
+        // hash keeps the older qualifier contract, just like its stored CHECK predicates.
+        // A new or changed hash must pass the strict rules before any migration step runs.
+        if (!validateQualifiers && _database.Engine.FindDeclaration(_database.Name) is { Schema: { } declared } &&
             string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
         {
             _validatedHash = schema.Hash;
+            _validatedQualifiers = false;
             return;
         }
 
         try
         {
             BindDeclaredTypes(schema, _database.Definitions.Functions.Types);
-            BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions);
+            BindDeclaredChecks(schema, _catalog.DefaultCollation, _database.Definitions.Functions, _database.Engine.ParserOptions, validateQualifiers);
             _validatedHash = schema.Hash;
+            _validatedQualifiers = validateQualifiers;
         }
         catch (DatabaseException invalid)
         {

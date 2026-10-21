@@ -161,6 +161,8 @@
   <data name="ListaggRequiresWithinGroup" xml:space="preserve"><value>LISTAGG requires WITHIN GROUP (ORDER BY keys) and does not accept an inner ORDER BY.</value></data>
   <data name="ViewColumnChanged" xml:space="preserve"><value>View '{0}.{1}' cannot be bound because a recorded column identity changed.</value></data>
   <data name="ReturningAggregate" xml:space="preserve"><value>Aggregate functions are not allowed in RETURNING.</value></data>
+  <data name="DuplicateConstraintColumn" xml:space="preserve"><value>Column '{0}' appears more than once in constraint '{1}'.</value></data>
+  <data name="MultiplePrimaryKeys" xml:space="preserve"><value>PRIMARY KEY constraint '{0}' cannot be declared because table '{1}' already has a PRIMARY KEY declaration.</value></data>
   <data name="DuplicateAssignment" xml:space="preserve"><value>Column '{0}' is assigned more than once.</value></data>
   <data name="UpsertLiveRowDamaged" xml:space="preserve"><value>The live index entry for table '{0}.{1}' points to an unreadable row in slot {2} of page {3}.</value></data>
   <data name="CreationRestartUnavailable" xml:space="preserve"><value>This storage strategy cannot restart an incomplete creation.</value></data>

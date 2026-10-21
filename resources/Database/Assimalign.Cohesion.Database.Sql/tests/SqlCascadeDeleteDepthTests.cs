@@ -36,8 +36,8 @@ public sealed class SqlCascadeDeleteDepthTests
     // The depth the issue reported overflowing the stack.
     private const int reportedDepth = 20_000;
 
-    // A multi-row INSERT checks each self-reference against the rest of its rows, so seeding goes
-    // in batches small enough to keep that check cheap.
+    // Bound each seed statement's SQL text and transient row set. Self-reference validation
+    // hashes the batch's parent keys once; it does not search the batch for every child.
     private const int seedBatch = 200;
 
     // The deep statements get a generous bound, so a slow machine fails an assertion, not the run.

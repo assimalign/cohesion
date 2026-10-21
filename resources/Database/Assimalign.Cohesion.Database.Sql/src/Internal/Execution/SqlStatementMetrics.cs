@@ -47,6 +47,15 @@ internal sealed class SqlStatementMetrics
     /// </summary>
     internal long RecordsExamined { get; set; }
 
+    /// <summary>Candidate rows visited while building self-reference key sets.</summary>
+    internal long SelfReferenceCandidateVisits { get; set; }
+
+    /// <summary>Self-reference key-set membership probes, including misses.</summary>
+    internal long SelfReferenceProbes { get; set; }
+
+    /// <summary>Scalar key comparisons performed by constraint lookups, including hash collisions.</summary>
+    internal long ConstraintKeyComparisons { get; set; }
+
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
     /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for

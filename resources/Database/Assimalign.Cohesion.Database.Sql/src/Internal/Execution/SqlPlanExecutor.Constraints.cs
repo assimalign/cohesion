@@ -368,14 +368,17 @@ internal sealed partial class SqlPlanExecutor
         }
         int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
         return candidates.Where(row => ordinals.Select((ordinal, i) => ValuesEqual(row.Values[ordinal], keys[i],
-            table.Columns[ordinal].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
+            table.Columns[ordinal].Collation ?? _catalog.DefaultCollation, statement.Metrics)).All(equal => equal));
     }
 
     private static bool SameConstraintColumns(IReadOnlyList<string> left, IReadOnlyList<string> right)
         => left.Count == right.Count && left.All(column => right.Contains(column, StringComparer.OrdinalIgnoreCase));
 
-    private static bool ValuesEqual(object? left, object? right, Collation? collation = null)
-        => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
+    private static bool ValuesEqual(object? left, object? right, Collation? collation = null, SqlStatementMetrics? metrics = null)
+    {
+        if (metrics is not null) { metrics.ConstraintKeyComparisons++; }
+        return left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
+    }
 
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
@@ -505,10 +508,11 @@ internal sealed partial class SqlPlanExecutor
             if (parent.ObjectId == table.ObjectId)
             {
                 int[] ordinals = constraint.ReferencedColumns!.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray()));
+                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray(), statement.Metrics));
                 foreach (var candidate in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    statement.Metrics.SelfReferenceCandidateVisits++;
                     selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
                 }
             }
@@ -521,6 +525,7 @@ internal sealed partial class SqlPlanExecutor
                     continue; // MATCH SIMPLE
                 }
 
+                if (selfKeys is not null) { statement.Metrics.SelfReferenceProbes++; }
                 if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
@@ -561,11 +566,11 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i],
-                table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).Any(value => value);
+                table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation, statement.Metrics)).Any(value => value);
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
             if (changed && updates?.Find(table, constraint.ReferencedColumns!, keys,
-                _catalog.DefaultCollation, cancellationToken).Any() == true) { continue; }
+                _catalog.DefaultCollation, statement.Metrics, cancellationToken).Any() == true) { continue; }
             if (changed && FinalConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
                 deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {
@@ -922,15 +927,16 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="bindingContext">Whether the named slots are table columns or domain VALUE.</param>
+    /// <param name="validateQualifiers">Whether to apply declaration-only qualifier rules; deferred until schema application knows the recorded hash.</param>
     /// <returns>The resolved identities of its function calls, in expression preorder.</returns>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
     internal static IReadOnlyList<string> ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table)
+        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table, bool validateQualifiers = true)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions,
             bindingContext: bindingContext);
         SqlPlanner.ValidateExpression(expression, scope);
-        new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
+        new SqlCheckSyntax(table, scope, declaring: true, validateQualifiers).Validate(expression, requireBoolean: true);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
 
@@ -964,7 +970,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
-        => definition.Name ?? $"{definition.Kind}_{table.Name}_{string.Join('_', definition.Columns)}_{ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 
     private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions)
     {
@@ -975,10 +981,17 @@ internal sealed partial class SqlPlanExecutor
             names.Add(index.Name);
         }
 
+        bool hasPrimaryKeyDeclaration = false;
         for (int i = 0; i < definitions.Count; i++)
         {
             var definition = definitions[i];
             string name = ConstraintName(table, definition, i);
+            if (definition.Kind == SqlConstraintKind.PrimaryKey)
+            {
+                if (hasPrimaryKeyDeclaration) { throw SqlConstraintDeclaration.MultiplePrimaryKeys(table.Name, name); }
+                hasPrimaryKeyDeclaration = true;
+            }
+            SqlConstraintDeclaration.ValidateColumns(definition, name);
             if (!names.Add(name))
             {
                 throw new DatabaseException($"Constraint or index '{name}' already exists on '{table.Name}'.");
@@ -1083,6 +1096,7 @@ internal sealed partial class SqlPlanExecutor
         private readonly SqlCatalogTable _table;
         private readonly SqlExpressionEvaluator _scope;
         private readonly bool _declaring;
+        private readonly bool _validateQualifiers;
 
         /// <summary>Initializes the check of one predicate.</summary>
         /// <param name="table">The table version the predicate constrains.</param>
@@ -1092,11 +1106,13 @@ internal sealed partial class SqlPlanExecutor
         /// rules against casts and functions that are not immutable; <see langword="false"/> when
         /// the catalog's persisted predicate binds.
         /// </param>
-        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring)
+        /// <param name="validateQualifiers">Whether to enforce qualifier identity for a new or changed schema.</param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true)
         {
             _table = table;
             _scope = scope;
             _declaring = declaring;
+            _validateQualifiers = validateQualifiers;
         }
 
         /// <summary>Checks one node.</summary>
@@ -1110,6 +1126,18 @@ internal sealed partial class SqlPlanExecutor
                 or SqlInExpression { Subquery: not null } || (_declaring && expression is SqlCastExpression))
             {
                 throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
+            }
+
+            // Declaration-only qualifier check: persisted predicates retain the older binding
+            // contract. Sql.Language owns AST construction, so use the catalog's identity here
+            // without manufacturing a relation node or widening the language boundary.
+            if (_declaring && _validateQualifiers && expression is SqlColumnReferenceExpression { TableAlias: not null } qualifiedColumn &&
+                (!string.Equals(qualifiedColumn.TableAlias, _table.Name, StringComparison.OrdinalIgnoreCase) ||
+                 qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
+            {
+                string name = string.Join('.', new[] { qualifiedColumn.SchemaName, qualifiedColumn.TableAlias, qualifiedColumn.ColumnName }.Where(part => part is not null));
+                throw new SqlPlanningException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingFromClauseEntry, name), qualifiedColumn.Location);
             }
 
             // A call's arguments were matched against its overloads when the statement was planned

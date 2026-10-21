@@ -51,6 +51,42 @@ commit/delivery and carry the direct affected count; ordinary query sets retain 
 ResultComplete already carries that value. No new plan wrapper, public interface,
 visibility grant, persisted text, storage version or protocol change is needed.
 
+## CHECK qualifier declarations (#1191)
+
+New CHECK declarations resolve table and schema qualifiers against the constrained table,
+using the same case-insensitive identity as query binding. An unknown qualifier fails DDL
+validation with located COHSQLE015, before publication, including CREATE, ADD CONSTRAINT and
+ADD COLUMN. Bare, table-qualified and schema-qualified column names remain valid. The CHECK
+syntax walk validates this against catalog identity locally; it needs no new language AST
+constructor or shipped-assembly visibility grant. BindPersistedCheck retains its older lenient
+qualifier contract, so previously accepted stored predicates still open and enforce their checks.
+Declared and imperative schemas with an already-applied hash also retain that qualifier contract.
+Engine build binds other declaration rules before I/O, then provisioning validates qualifiers only
+for a new or changed hash, after reading the catalog and before any migration step. The validation
+cache tracks strict qualifier validation separately, so a previously lenient bind cannot authorize
+a later application of that hash after another schema replaces it.
+Stored-table query conformance covers SELECT, WHERE, GROUP BY, HAVING, ORDER BY, alias hiding
+and nested references alongside the existing join, correlation and DML suites.
+
+## Invalid statement declarations (#1192)
+
+UPDATE binds each target ordinal only once and rejects repeated assignments with COHSQLE019,
+including DEFAULT and empty inputs. A shared internal declaration validator rejects repeated
+columns in PRIMARY KEY, UNIQUE and FOREIGN KEY child lists before key deduplication, catalog
+publication or index construction, for CREATE and ALTER ADD CONSTRAINT. It uses the same
+case-insensitive identity as column binding and names the column and constraint. A second
+PRIMARY KEY declaration is refused with COHSQLE019, including mixed inline/table declarations
+and ALTER ADD CONSTRAINT or ADD COLUMN on an existing primary key, or repeated PRIMARY KEY
+clauses on one added column. PostgreSQL rewriteHandler.c:1166 uses 42601 for repeated
+whole-column assignments; parse_utilcmd.c:2773-2779 uses 42701 for repeated PK/UNIQUE
+columns, and :2378 uses 42P16 for multiple primary keys. Repeated FK child columns are
+rejected more strictly than PostgreSQL; repeated referenced columns are also refused with
+COHSQLE019 (PostgreSQL tablecmds.c:13982-13989 uses 42830). CREATE TABLE IF NOT EXISTS
+skips declaration checks when the table exists, preserving it unchanged (PostgreSQL
+parse_utilcmd.c:202). The live invalid-statement conformance corpus checks both execution
+boundaries, statement atomicity, connection usability, existing SQL0005 type limits and
+COHSQLE017 aggregate placement. No public API or persisted representation changes.
+
 ## Identity execution (#1123)
 
 CREATE and ADD column planning validate the identity mode, integer type, nonzero increment,
@@ -1156,12 +1192,13 @@ flowchart LR
 - **Declared CHECKs bind before any file** (part 2, design §5.2 phase 3). A compiled
   schema's `table.Check(name, sql)` (`Sql.Schema`) carries its SQL text as written. The
   engine builder's phase 3, after the catalog is frozen and before the engine exists, binds
-  every declared CHECK as the DDL that applies it will (`SqlSchemaProvisioner.BindDeclaredChecks`):
+  every declared CHECK (`SqlSchemaProvisioner.BindDeclaredChecks`), deferring qualifier identity
+  until provisioning knows the recorded schema hash:
   the text must parse, under the engine's nesting limit, as exactly one expression, so no
   text can close the constraint's parentheses and declare more than the schema shows, and
   must parse as one inside the parentheses the DDL embeds it in, so a trailing `-- comment`
   or an unterminated `/*` cannot swallow the closing one and fail after files exist
-  (`SqlPersistedExpression.ParseDeclaration`); every name must resolve, every call's count
+  (`SqlPersistedExpression.ParseDeclaration`); every column and function must resolve, every call's count
   and types must match an overload (`SqlPlanner.ValidateDeclaredCalls`, then
   `ValidateCheck` over a table shaped from the compiled columns); and every function must
   be `Immutable`. A refusal is `COHSQLP001` naming the engine, the database, the table and
@@ -1170,8 +1207,10 @@ flowchart LR
   it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build. Nothing was
   opened or written.`). An imperative `SqlDatabase.ApplySchemaAsync` binds the same way
   before any step runs and refuses with `COHSQLP005`; the apply or verify a build runs
-  skips that bind when the schema's hash is the one the engine declares for the database,
-  which phase 3 already bound against the same catalog and parser options. The SDK reads the text without
+  skips that bind when the schema's hash is both already applied and the one the engine declares
+  for the database. New or changed hashes validate qualifiers before any step; already-applied
+  hashes bind qualifiers leniently like stored predicates (#1191). Phase 3 already bound the
+  remaining rules against the same catalog and parser options. The SDK reads the text without
   parsing it (it references no SQL parser and never sees the engine's functions), so a
   CHECK that names a registered function compiles into the artifact and is validated here.
 - **A stored definition that names an unregistered function** (part 2, decision 65,
@@ -4327,6 +4366,16 @@ referential updates validate parents through current visibility after waiting fo
 the fixed-snapshot crosscheck. Pending replacements are grouped once by table ObjectId and
 indexed lazily by constraint key using SQL equality and collation. Self-reference candidate
 keys are hashed once per constraint, so validation is linear in the candidate rows.
+SqlConstraintTimingTests guards ADD CONSTRAINT, ADD COLUMN REFERENCES and one INSERT SELECT
+at 10,000 and 50,000 rows (#1197). Internal statement metrics count self-reference candidate
+visits and membership probes where they occur, plus scalar constraint-key comparisons in
+hash equality and stored-key matching. Each statement must perform n candidate visits, n probes
+and at most 2n key comparisons. Both DDL variants materialize their rows, then validate per row
+through the existing primary-key index: n child reads plus n-1 parent seeks and a constraint-seek
+access path, giving O(n log n) index work; INSERT uses the batch hash set. Forward references
+and a last-key ADD COLUMN default expose repeated linear searches. Equal-row-count process-CPU
+ratios (five 10,000-row statements versus one 50,000-row statement, minimum of three rounds
+after warm-up) are supplementary output only. Setup and verification are outside those blocks.
 Collection, validation and physical replacement loops observe statement cancellation. Re-keying
 a referenced child retains UPDATE's incoming-reference restriction. All old index entries
 and row versions are tombstoned before replacement versions and indexes are inserted in
