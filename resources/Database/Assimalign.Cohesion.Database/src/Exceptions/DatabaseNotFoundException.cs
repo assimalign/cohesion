@@ -24,7 +24,7 @@ public class DatabaseNotFoundException : DatabaseException
     /// Initializes a new instance of <see cref="DatabaseNotFoundException"/> with a message and inner exception.
     /// </summary>
     /// <param name="message">The error message.</param>
-    /// <param name="innerException">The underlying cause.</param>
+    /// <param name="innerException">The underlying cause. Structured diagnostics are preserved when it is a <see cref="DatabaseException"/>.</param>
     public DatabaseNotFoundException(string message, Exception? innerException)
-        : base(message, innerException) { }
+        : base(message, (innerException as DatabaseException)?.Diagnostics ?? [], innerException) { }
 }

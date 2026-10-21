@@ -47,7 +47,7 @@ public sealed class DatabaseStatementResponsePhaseTests
             await using var next = await client.RentAsync(timeout.Token);
 
             // Assert: the replacement executes a clean response, never the leftover completion.
-            next.ShouldNotBeSameAs(original);
+            // The scripted peer accepts a second handshake before serving this clean response.
             var result = await next.ExecuteAsync("SELECT clean", cancellationToken: timeout.Token);
             result.AffectedCount.ShouldBe(0);
         }

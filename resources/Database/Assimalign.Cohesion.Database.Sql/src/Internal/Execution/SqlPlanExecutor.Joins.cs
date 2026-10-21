@@ -75,9 +75,17 @@ internal sealed partial class SqlPlanExecutor
         // Every earlier step is retained by a later loop. Only the final index inner
         // is a fresh read for each delivered pair. Delivery detaches selected binary cells only.
         Array.Fill(sharedColumns, true);
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        var inputEvaluator = ExecutionEvaluator(null, cancellationToken);
+        var inputIndexes = new BTreeIndex?[plan.Bindings.Count];
+        for (int i = 0; i < plan.Inputs.Count; i++)
+        {
+            if (plan.Inputs[i].Access is SqlIndexSeekPath seek &&
+                TryResolveSeekTree(plan.Bindings[i].Source.Table!, seek.Index, out var tree)) { inputIndexes[i] = tree; }
+        }
         if (plan.Steps.Count == 0)
         {
-            foreach (var row in ReadRelation(plan.Bindings[0].Source, statement, cancellationToken, derivedRows)) { yield return row; }
+            foreach (var row in ReadInput(0)) { yield return row; }
             yield break;
         }
         var accesses = new SqlJoinIndexPath?[plan.Steps.Count];
@@ -86,8 +94,7 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < plan.Steps.Count; i++)
         {
             var access = plan.Steps[i].Access;
-            if (access is not null && _indexManager.TryGetIndex(plan.Bindings[access.InnerBinding].Source.Table!.ObjectId,
-                access.Index.Name, out var index))
+            if (access is not null && TryResolveSeekTree(plan.Bindings[access.InnerBinding].Source.Table!, access.Index, out var index))
             {
                 accesses[i] = access;
                 indexes[i] = index;
@@ -100,9 +107,8 @@ internal sealed partial class SqlPlanExecutor
             var fresh = plan.Bindings[last.InnerBinding];
             Array.Fill(sharedColumns, false, fresh.Offset, fresh.Source.Columns.Count);
         }
-        bool reversed = accesses[0]?.InnerBinding == 0;
+        bool reversed = plan.FirstBinding == 1;
         var initial = plan.Bindings[reversed ? 1 : 0];
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var buffered = new List<object?[]>?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
         var matched = new bool[plan.Steps.Count];
@@ -110,7 +116,7 @@ internal sealed partial class SqlPlanExecutor
         var rows = new object?[plan.Steps.Count + 1][];
         try
         {
-            foreach (var first in ReadRelation(initial.Source, statement, cancellationToken, derivedRows))
+            foreach (var first in ReadInput(reversed ? 1 : 0))
             {
                 rows[0] = new object?[plan.Columns.Count];
                 first.CopyTo(rows[0], initial.Offset);
@@ -133,22 +139,23 @@ internal sealed partial class SqlPlanExecutor
                         continue;
                     }
                     var step = plan.Steps[level];
-                    var inner = plan.Bindings[level == 0 && reversed ? 0 : step.Binding];
+                    int innerBinding = level == 0 && reversed ? 0 : step.Binding;
+                    var inner = plan.Bindings[innerBinding];
                     var outer = rows[level];
                     if (cursors[level] is null)
                     {
                         IEnumerable<object?[]> candidates;
                         if (accesses[level] is not { } access)
                         {
-                            buffered[level] ??= ReadRelation(inner.Source, statement, cancellationToken, derivedRows).ToList();
+                            buffered[level] ??= ReadInput(innerBinding).ToList();
                             candidates = buffered[level]!;
                         }
                         else
                         {
                             var values = JoinProbeValues(access, outer);
-                            candidates = values is null ? [] : SeekRows(inner.Source.Table!,
+                            candidates = values is null ? [] : FilterInput(SeekRows(inner.Source.Table!,
                                 new SqlIndexSeekPath(access.Index, values, null, null), indexes[level]!, statement, cancellationToken)
-                                .Select(row => row.Values);
+                                .Select(row => row.Values), innerBinding);
                         }
                         cursors[level] = candidates.GetEnumerator();
                         matched[level] = false;
@@ -181,6 +188,33 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
+        }
+
+        IEnumerable<object?[]> ReadInput(int binding)
+        {
+            var source = plan.Bindings[binding].Source;
+            var rows = inputIndexes[binding] is { } tree && plan.Inputs[binding].Access is SqlIndexSeekPath seek
+                ? SeekRows(source.Table!, seek, tree, statement, cancellationToken).Select(row => row.Values)
+                : ReadRelation(source, statement, cancellationToken, derivedRows);
+            return FilterInput(rows, binding);
+        }
+
+        IEnumerable<object?[]> FilterInput(IEnumerable<object?[]> candidates, int binding)
+        {
+            var filter = plan.Inputs.Count == 0 ? null : plan.Inputs[binding].Filter;
+            // One scratch frame per enumeration, never one joined-row clone per rejected pair.
+            // Filters retain the original bound ordinals, including merged USING expressions.
+            var frame = filter is null ? null : new object?[plan.Columns.Count];
+            foreach (var candidate in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (frame is not null)
+                {
+                    candidate.CopyTo(frame, plan.Bindings[binding].Offset);
+                    if (!inputEvaluator.Matches(filter, frame)) { continue; }
+                }
+                yield return candidate;
+            }
         }
     }
 

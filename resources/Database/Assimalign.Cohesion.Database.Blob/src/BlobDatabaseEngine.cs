@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -11,6 +12,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Blob;
 
@@ -64,6 +67,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class BlobDatabaseEngine : DatabaseEngine
 {
+    private const string interruptedCreationCode = "COHDBB004";
+
     // How the model's messages start: "Blob engine '{name}' …".
     internal const string ModelName = "Blob";
 
@@ -357,6 +362,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
     /// the close still running waits for it to end first. Until that decision the engine refused
     /// the reopen with <see cref="ObjectDisposedException"/> until the database was dropped.
+    /// A missing journal or backup file is refused with a coded error and is never recreated. Incomplete data files receive a coded
+    /// refusal with recovery instructions; a directory without its data file remains not found.
     /// </remarks>
     public new async ValueTask<BlobDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => (BlobDatabase)await base.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
@@ -451,6 +458,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             {
                 if (Directory.Exists(directory))
                 {
+                    // Remove the database identity before deleting sidecars: no partial drop may reopen.
+                    File.Delete(DatabaseFileNames.GetFiles(directory, DataFileSet).Data);
                     Directory.Delete(directory, recursive: true);
                 }
             }
@@ -602,11 +611,29 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             // the directory, so one already there refuses it; an open needs the data file, as
             // listing does, so a directory an interrupted create or drop left is not found.
             var directory = GetDirectory(name);
+            if (_options.StorageStrategy is null && directory is not null && Directory.Exists(directory))
+            {
+                var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
+                if (!HasDataFile(directory))
+                {
+                    var refusal = RefuseInterruptedCreation(name);
+                    if (!create)
+                    {
+                        // Preserve absence semantics for a directory without its data file.
+                        throw new DatabaseNotFoundException(refusal.Message, refusal);
+                    }
+                    throw refusal;
+                }
+                long dataLength = new FileInfo(files.Data).Length;
+                if (!File.Exists(files.Journal) || !File.Exists(files.Backup)
+                    || dataLength <= Page.Size)
+                {
+                    throw RefuseInterruptedCreation(name, preserve: dataLength > Page.Size);
+                }
+            }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException(_options.StorageStrategy is null && directory is not null && !HasDataFile(directory)
-                    ? DatabaseFileNames.GetLeftoverRefusal(name, directory)
-                    : $"Database '{name}' already exists.");
+                throw new DatabaseException($"Database '{name}' already exists.");
             }
 
             if (!create && !HasDatabase(name, directory))
@@ -628,6 +655,8 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 {
                     throw new InvalidOperationException("The storage strategy returned null.");
                 }
+                // Recovery may retain a partial tail described only by uncommitted work.
+                // Storage ignores it until the next allocation overwrites it.
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
 
@@ -642,6 +671,29 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
+            }
+            catch (StorageCorruptionException exception)
+            {
+                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+            }
+            catch (DatabaseException exception) when (exception.Diagnostics.Count == 0
+                && exception.InnerException is StorageCorruptionException)
+            {
+                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+            }
+            catch (Exception exception) when (exception is StorageIOException or IOException
+                || exception is DatabaseException { InnerException: StorageIOException or IOException })
+            {
+                string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
+                storage?.Dispose();
+                throw new DatabaseException(message, exception);
             }
             catch (StorageFormatException exception)
             {
@@ -683,13 +735,19 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 var mode = create ? FileMode.CreateNew : FileMode.Open;
                 var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
                 data = StorageStream.FromFile(files.Data, mode, FileShare.Read);
-                journal = StorageStream.FromFile(files.Journal, mode, FileShare.Read);
-                backup = StorageStream.FromFile(files.Backup, mode, FileShare.Read);
+                journal = StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                backup = StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
             }
 
             return create ? BlobStorage.Create(data!, journal!, backup!, name, durability) : BlobStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
+    }
+
+    private static DatabaseException RefuseInterruptedCreation(string name, bool preserve = false)
+    {
+        string message = string.Format(CultureInfo.CurrentCulture, preserve ? ErrorMessages.DatabaseFilesUnrecoverable : ErrorMessages.DatabaseFilesIncomplete, name);
+        return new DatabaseException(message, [new Diagnostic { Code = interruptedCreationCode, Message = message, Severity = DiagnosticSeverity.Error }]);
     }
 
     // Whether a database's storage exists, for a create, which claims it, and a drop, which removes

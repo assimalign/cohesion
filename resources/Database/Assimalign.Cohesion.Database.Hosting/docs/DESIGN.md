@@ -81,7 +81,19 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
 
+## Command identity (#1421)
+
+The add-database handler validates command keys and tracks the databases it created with
+OrdinalIgnoreCase, matching DatabaseName identity. Replaying or deleting the declaration
+under a different case retains the same ownership; it cannot claim an unrelated existing
+database. The handshake policy for invalid database names is unchanged.
+
 ## Provisioning (B1 of the engine extensibility design)
+
+SQL completes an interrupted empty creation during its engine build and through the
+add-database command (#1158). The model validates the empty data/catalog state and
+finishes dbo and the format marker before publication; Hosting keeps the same model-neutral
+create call and command ownership checks. A catalog with user data and no marker is refused.
 
 Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting reads the root
 `DatabaseInstance.Provisioning` observation without referencing SQL: operation/object,
@@ -198,7 +210,8 @@ extra inventory pass, semaphore, timer or async wrapper. A paired allocation tes
 real public check and that same core against a real SQL engine, taking the minimum of three
 warmed 100-call rounds and requiring zero added bytes in Debug and Release. The transition
 tests pause a real deferred CHECK, race health polls for at least 150 ms and 32 completed calls,
-assert exact payloads and no event 0, reenter from a listener, then test completion, failure
+assert exact payloads and no event 0, reenter from a listener, capture the gated database before
+releasing the worker (an open after failure schedules another attempt), then test completion, failure
 and offline/reopen transitions. Review coverage also checks disposal, empty and late cancellation,
 exception identity, same-name replacements, reentrant batches and overlapping observations.
 An identical public-path probe against archived `95d3a7d56` covers empty, healthy and offline
@@ -232,7 +245,10 @@ silent. Disabled lifecycle, command and admin hooks allocate zero bytes and read
 
 No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, commands, disposal and admin bind failure, exact payloads, and disabled-write allocations. The disabled-cost checks also drive real Execute
 and Delete command dispatch against an in-memory SQL engine, comparing each warmed path with its
-unchanged core baseline using the minimum of three allocation rounds. The internal handler exposes
+unchanged core baseline using the minimum of three allocation rounds. The test project disables
+tiered compilation in Debug and Release so paired measurements use one JIT tier under
+CPU pressure; time-based warmup cannot ensure the background compiler has finished.
+The internal handler exposes
 those cores only within its assembly and to its owning tests; no public diagnostics seam is added.
 
 The public static `CreateBuilder(name)` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model's sealed engine builder (`SqlDatabaseEngineBuilder`, …), whose `AddServer` and `AddWorker` factories receive the model's engine typed, since phase 4 of the concrete-types plan, and whose `Options` and `AddDatabase` are the same on every model since B3. Configuration and service reads still occur in the hosting callback, outside the model package.
@@ -256,3 +272,10 @@ standalone admin listener previously accepted remote control-plane requests with
 Use a loopback connection for standalone development or a gateway identity for remote management.
 
 Model server factories supply `IDuplexConnectionListener` instances to their model options. Each server owns accepted `IDuplexConnection` sessions and closes them during its drain; listener disposal does not transfer connection ownership to the hosting module.
+
+## Database command key comparison (#1158)
+
+Command keys and ResolveEngine use OrdinalIgnoreCase for the engine segment, matching the
+existing command ownership dictionary. Database names use the same comparison required by
+the area name rule. An engine selected by a case variant therefore resolves consistently
+with key validation and replay ownership.

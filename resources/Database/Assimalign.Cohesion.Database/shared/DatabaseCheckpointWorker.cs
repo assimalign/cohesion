@@ -247,13 +247,14 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
         }
 
         bool begun = BeginDatabase(name);
+        bool unfinishedReported = false;
         if (state == DatabaseCheckpointLanes.LaneState.Ended)
         {
             // A checkpoint an earlier pass left running ended: settled as that pass would have.
-            // Only a finished one lets this pass check the database again, so a journal that
-            // reached its size meanwhile is not left to the poll.
-            Settle(database, name, ended, cancellationToken);
-            if (!ended.Finished || ended.Failure is not null)
+            // A deferred outcome also lets this pass check due work again, so a journal that
+            // reached its size meanwhile is not left to the poll. Failures keep their retry delay.
+            Settle(database, name, ended, cancellationToken, ref unfinishedReported);
+            if (ended.Failure is not null)
             {
                 return;
             }
@@ -276,7 +277,10 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
             if (!_lanes.Run(database, () => Checkpoint(database, interval, cancellationToken), CheckpointNeededSignal, wait, cancellationToken, out outcome))
             {
                 // Left running on its lane; a later pass collects it.
-                ReportUnfinished(name);
+                if (!unfinishedReported)
+                {
+                    ReportUnfinished(name);
+                }
                 return;
             }
         }
@@ -285,10 +289,10 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
             outcome = new DatabaseCheckpointLanes.Outcome(false, exception);
         }
 
-        Settle(database, name, outcome, cancellationToken);
+        Settle(database, name, outcome, cancellationToken, ref unfinishedReported);
     }
 
-    private void Settle(TDatabase database, string name, DatabaseCheckpointLanes.Outcome outcome, CancellationToken cancellationToken)
+    private void Settle(TDatabase database, string name, DatabaseCheckpointLanes.Outcome outcome, CancellationToken cancellationToken, ref bool unfinishedReported)
     {
         switch (outcome.Failure)
         {
@@ -297,13 +301,11 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
 
             case null:
                 // Deferred to the statement holding the apply gate, which runs it as it ends.
-                ReportUnfinished(name);
-                return;
+                break;
 
             case StorageTransactionException:
                 // A transaction is active on this storage; retry on the next pass.
-                ReportUnfinished(name);
-                return;
+                break;
 
             case ObjectDisposedException when !IsOpen(database):
                 // The snapshot can race a database drop; nothing left to checkpoint.
@@ -331,6 +333,12 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
                 }
 
                 return;
+        }
+
+        if (!unfinishedReported)
+        {
+            ReportUnfinished(name);
+            unfinishedReported = true;
         }
     }
 

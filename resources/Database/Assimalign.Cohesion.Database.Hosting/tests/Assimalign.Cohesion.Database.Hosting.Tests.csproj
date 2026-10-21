@@ -2,6 +2,8 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Hosting.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
+		<!-- Paired allocation baselines must use one JIT tier under CPU pressure. -->
+		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

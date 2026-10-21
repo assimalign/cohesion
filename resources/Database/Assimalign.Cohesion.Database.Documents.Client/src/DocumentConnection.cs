@@ -14,14 +14,20 @@ namespace Assimalign.Cohesion.Database.Documents.Client;
 public sealed class DocumentConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
+    // Operation diagnostics may finish after disposal has returned the shared lease.
+    private readonly string _database;
     private readonly object _operationLock = new();
     private Task? _disposeTask;
     private int _disposed;
 
-    internal DocumentConnection(DatabaseConnection connection) => _connection = connection;
+    internal DocumentConnection(DatabaseConnection connection)
+    {
+        _connection = connection;
+        _database = connection.Database;
+    }
 
     /// <summary>Gets the database selected at the handshake.</summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>Gets whether this rental is open.</summary>
     public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;

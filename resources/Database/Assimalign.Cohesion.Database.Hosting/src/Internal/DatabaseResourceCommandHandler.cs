@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
-    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DatabaseEngine> _createdDatabases = new(StringComparer.OrdinalIgnoreCase);
 
     internal DatabaseResourceCommandHandler(string kind, IDatabaseApplicationContext context)
     {
@@ -64,7 +64,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         string expectedKey = payload.TryGetProperty("engine", out JsonElement engineName) && engineName.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") + "/" + database : database;
-        if (command.Key != expectedKey)
+        if (!string.Equals(command.Key, expectedKey, StringComparison.OrdinalIgnoreCase))
         {
             throw new ResourceCommandRejectedException($"database.add-database key '{command.Key}' must match database key '{expectedKey}'.");
         }
@@ -158,7 +158,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         string? name = payload.TryGetProperty("engine", out JsonElement configured) && configured.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") : null;
-        DatabaseEngine[] candidates = engines.Where(engine => name is null || engine.Name == name).ToArray();
+        DatabaseEngine[] candidates = engines.Where(engine => name is null || string.Equals(engine.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
         return candidates.Length == 1 ? candidates[0] : throw new ResourceCommandRejectedException(
             $"database.add-database requires exactly one matching engine; engine '{name ?? "(unspecified)"}' matched {candidates.Length}. Specify a registered engine name.");
     }

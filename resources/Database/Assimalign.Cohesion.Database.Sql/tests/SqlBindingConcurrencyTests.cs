@@ -39,7 +39,7 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? independent = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
 
                 // Act
                 independent = new SqlBindingCaller(() => QueryAsync(second, refresh
@@ -80,9 +80,9 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? waiter = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
                 waiter = new SqlBindingCaller(() => QueryAsync(second, sql, cancellation.Token));
-                waiter.WaitUntilBlocked().ShouldBeTrue();
+                (await waiter.WaitUntilBlockedAsync()).ShouldBeTrue();
                 waiter.Completion.IsCompleted.ShouldBeFalse();
 
                 // Act
@@ -150,16 +150,16 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? canceledWaiter = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
                 waiter = new SqlBindingCaller(() => QueryAsync(second, sql));
-                waiter.WaitUntilBlocked().ShouldBeTrue();
+                (await waiter.WaitUntilBlockedAsync()).ShouldBeTrue();
                 waiter.Completion.IsCompleted.ShouldBeFalse();
                 gate.Calls.ShouldBe(1);
 
                 if (failureMode is "cancel" or "throw")
                 {
                     canceledWaiter = new SqlBindingCaller(() => QueryAsync(third, sql, waiterCancellation.Token));
-                    canceledWaiter.WaitUntilBlocked().ShouldBeTrue();
+                    (await canceledWaiter.WaitUntilBlockedAsync()).ShouldBeTrue();
                     canceledWaiter.Completion.IsCompleted.ShouldBeFalse();
 
                     // Act
@@ -226,9 +226,9 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? independent = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
                 waiter = new SqlBindingCaller(() => QueryAsync(second, "INSERT INTO cold (id) VALUES (2)", cancellation.Token));
-                waiter.WaitUntilBlocked().ShouldBeTrue();
+                (await waiter.WaitUntilBlockedAsync()).ShouldBeTrue();
                 waiter.Completion.IsCompleted.ShouldBeFalse();
 
                 // Act
@@ -281,13 +281,13 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? independent = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
                 waiter = new SqlBindingCaller(() =>
                 {
                     database.Definitions.FindUnresolved(cancellation.Token);
                     return Task.CompletedTask;
                 });
-                waiter.WaitUntilBlocked().ShouldBeTrue();
+                (await waiter.WaitUntilBlockedAsync()).ShouldBeTrue();
                 waiter.Completion.IsCompleted.ShouldBeFalse();
 
                 // Act
@@ -336,7 +336,7 @@ public sealed class SqlBindingConcurrencyTests
             SqlBindingCaller? refreshing = null;
             try
             {
-                gate.WaitUntilEntered().ShouldBeTrue();
+                await gate.WaitUntilEnteredAsync();
 
                 // Act
                 refreshing = new SqlBindingCaller(async () =>

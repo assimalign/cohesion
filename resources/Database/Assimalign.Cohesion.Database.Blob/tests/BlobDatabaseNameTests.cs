@@ -3,10 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
@@ -166,9 +170,11 @@ public sealed class BlobDatabaseNameTests : IDisposable
         var created = await engine.CreateDatabaseAsync("Sales", TestTimeout.Token());
 
         // Assert: not found rather than a missing file, refused with the remedy, then cleared.
-        open.Message.ShouldBe("Database 'SALES' does not exist.");
+        open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        open.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
         listed.ShouldBeEmpty();
         create.ShouldNotBeOfType<DatabaseNotFoundException>();
+        create.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
         create.Message.ShouldContain("without a database in it", Case.Sensitive);
         afterDrop.ShouldBeEmpty();
         created.Name.ToString().ShouldBe("Sales");
@@ -191,6 +197,286 @@ public sealed class BlobDatabaseNameTests : IDisposable
         // Assert: no such database is ever open, so the lookup is a miss, not a refusal.
         found.ShouldBeFalse();
         database.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Missing sidecars: open and declared provisioning refuse unchanged files (#1158)")]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task OpenDatabaseAsync_MissingSidecars_ShouldRefuseWithoutWriting(int missing, bool declared)
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true))
+        {
+            await first.CreateDatabaseAsync("Sales", CancellationToken.None);
+        }
+        string directory = Path.Combine(_rootPath, "sales");
+        if ((missing & 1) != 0) { File.Delete(Path.Combine(directory, "blob.log")); }
+        if ((missing & 2) != 0) { File.Delete(Path.Combine(directory, "blob.bak")); }
+        var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        var builder = BlobDatabaseEngine.CreateBuilder("recovery");
+        builder.Options.RootPath = _rootPath;
+        if (declared) { builder.AddDatabase("SALES"); }
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
+        {
+            await using var recovered = await builder.BuildAsync(CancellationToken.None);
+            await recovered.OpenDatabaseAsync("SALES", CancellationToken.None);
+        });
+
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+        foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Interrupted create: explicit create reports the recovery action without claiming existing files (#1421)")]
+    public async Task CreateDatabaseAsync_MissingJournal_ShouldReportCodedRecoveryAction()
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true))
+        {
+            await first.CreateDatabaseAsync("Sales", CancellationToken.None);
+        }
+        string directory = Path.Combine(_rootPath, "sales");
+        string data = Path.Combine(directory, "blob.dat");
+        byte[] before = await File.ReadAllBytesAsync(data, CancellationToken.None);
+        File.Delete(Path.Combine(directory, "blob.log"));
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        refusal.Message.ShouldContain("OpenDatabaseAsync", Case.Sensitive);
+        (await File.ReadAllBytesAsync(data, CancellationToken.None)).ShouldBe(before);
+        File.Exists(Path.Combine(directory, "blob.log")).ShouldBeFalse();
+        (await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask()))
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Interrupted create: truncated data and leftover directories have coded, actionable refusals (#1421)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuildAsync_IncompleteFiles_ShouldReportCodedRecoveryAction(bool truncatedData)
+    {
+        // Arrange
+        string directory = Path.Combine(_rootPath, "sales");
+        Directory.CreateDirectory(directory);
+        if (truncatedData) { await File.WriteAllBytesAsync(Path.Combine(directory, "blob.dat"), [], CancellationToken.None); }
+        var builder = BlobDatabaseEngine.CreateBuilder("recovery");
+        builder.Options.RootPath = _rootPath;
+        builder.AddDatabase("sales");
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => builder.BuildAsync(CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        refusal.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
+        File.Exists(Path.Combine(directory, "blob.log")).ShouldBeFalse();
+        await using var engine = CreateEngine(onDisk: true);
+        if (truncatedData)
+        {
+            var open = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        }
+        else
+        {
+            var open = await Should.ThrowAsync<DatabaseNotFoundException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Partial drop: no subset of removed files can reopen (#1158)")]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public async Task OpenDatabaseAsync_PartialDrop_ShouldNeverReopen(int removed)
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string directory = Path.Combine(_rootPath, "sales");
+        string[] extensions = ["dat", "log", "bak"];
+        for (int index = 0; index < extensions.Length; index++)
+        {
+            if ((removed & (1 << index)) != 0) { File.Delete(Path.Combine(directory, "blob." + extensions[index])); }
+        }
+        var before = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
+        foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Crash after a checkpoint: a lost journal is refused, a torn page recovers acknowledged data (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_CommittedCrashImage_ShouldPreserveAcknowledgedData(bool loseJournal)
+    {
+        // Arrange: retain files before orderly close can checkpoint the acknowledged write.
+        await using var first = CreateEngine(onDisk: true);
+        var database = await first.CreateDatabaseAsync("sales", CancellationToken.None);
+        database.DataStorage.Checkpoint();
+        var identity = await WriteAsync(database, "acknowledged");
+        string directory = Path.Combine(_rootPath, "sales");
+        var crash = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        await first.DisposeAsync();
+        foreach (var file in crash) { File.WriteAllBytes(Path.Combine(directory, file.Key!), file.Value); }
+        if (loseJournal) { File.Delete(Path.Combine(directory, "blob.log")); }
+        else
+        {
+            using var data = new FileStream(Path.Combine(directory, "blob.dat"), FileMode.Open, FileAccess.Write);
+            data.SetLength(data.Length - 1);
+        }
+        await using var reopened = CreateEngine(onDisk: true);
+
+        // Act / Assert
+        if (loseJournal)
+        {
+            var before = File.ReadAllBytes(Path.Combine(directory, "blob.dat"));
+            var refusal = await Should.ThrowAsync<DatabaseException>(() => reopened.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+            File.ReadAllBytes(Path.Combine(directory, "blob.dat")).ShouldBe(before);
+            File.Exists(Path.Combine(directory, "blob.log")).ShouldBeFalse();
+        }
+        else
+        {
+            (await ReadAsync(await reopened.OpenDatabaseAsync("sales", CancellationToken.None), identity)).ShouldBe("acknowledged");
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Unrecoverable data: the coded refusal preserves files and never advises dropping data (#1158)")]
+    public async Task OpenDatabaseAsync_ChecksumDamage_ShouldRefuseWithoutDropAdvice()
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string directory = Path.Combine(_rootPath, "sales");
+        string path = Path.Combine(directory, "blob.dat");
+        byte[] damaged = File.ReadAllBytes(path);
+        damaged[Page.Size + Page.HeaderSize] ^= 1;
+        File.WriteAllBytes(path, damaged);
+        var before = File.ReadAllBytes(path);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
+        File.ReadAllBytes(path).ShouldBe(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Recovery: an uncommitted extension torn at the tail preserves committed data (#1158)")]
+    public async Task OpenDatabaseAsync_UncommittedExtensionTornAtTail_ShouldPreserveCommittedData()
+    {
+        // Arrange: steal an extension page before its physical transaction commits.
+        await using var first = CreateEngine(onDisk: true);
+        var database = await first.CreateDatabaseAsync("sales", CancellationToken.None);
+        var identity = await WriteAsync(database, "acknowledged");
+        database.DataStorage.Checkpoint();
+        string directory = Path.Combine(_rootPath, "sales");
+        Dictionary<string, byte[]> crash;
+        long extension;
+        using (var transaction = database.DataStorage.BeginTransaction())
+        {
+            using (var page = database.DataStorage.AllocatePageForWrite(transaction, PageType.Index))
+            {
+                extension = (long)page.Page.Id;
+            }
+            database.DataStorage.PageManager.FlushAll();
+            crash = Directory.GetFiles(directory).ToDictionary(path => Path.GetFileName(path)!, ReadFile);
+        }
+        await first.DisposeAsync();
+        foreach (var file in crash) { File.WriteAllBytes(Path.Combine(directory, file.Key), file.Value); }
+        using (var data = new FileStream(Path.Combine(directory, "blob.dat"), FileMode.Open, FileAccess.Write))
+        {
+            data.Length.ShouldBe((extension + 1) * Page.Size);
+            data.SetLength(data.Length - 1);
+        }
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var recovered = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        (await ReadAsync(recovered, identity)).ShouldBe("acknowledged");
+        var container = await AutocommitContainer.GetAsync(recovered, "files", CancellationToken.None);
+        await BlobEngineTests.WriteAsync(container, "next", Encoding.UTF8.GetBytes("after recovery"));
+        (await ReadAsync(recovered, "next")).ShouldBe("after recovery");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Open: a full pinned buffer pool asks for retry and preserves committed data (#1158)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenDatabaseAsync_BufferPoolFull_ShouldAllowRetryWithoutDataLossAdvice(bool wrapped)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using var engine = BlobDatabaseEngine.Create("transient", new BlobDatabaseEngineOptions { StorageStrategy = strategy });
+        var database = await engine.CreateDatabaseAsync("sales", CancellationToken.None);
+        var identity = await WriteAsync(database, "acknowledged");
+        await database.DisposeAsync();
+        var full = new StorageIOException("Buffer pool is full and all pages are pinned.");
+        strategy.OpenFailure = wrapped ? new DatabaseException("Open failed.", full) : full;
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        strategy.OpenFailure = null;
+        var reopened = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
+
+        // Assert
+        refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
+        refusal.Message.ShouldNotContain("restore");
+        refusal.Message.ShouldNotContain("drop");
+        refusal.Diagnostics.ShouldBeEmpty();
+        (await ReadAsync(reopened, identity)).ShouldBe("acknowledged");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - One-page creation: the suggested drop and create completes (#1158)")]
+    public async Task CreateDatabaseAsync_OnePageFile_ShouldReportIncompleteAndAllowRecreation()
+    {
+        // Arrange
+        await using (var first = CreateEngine(onDisk: true)) { await first.CreateDatabaseAsync("sales", CancellationToken.None); }
+        string path = Path.Combine(_rootPath, "sales", "blob.dat");
+        using (var data = new FileStream(path, FileMode.Open, FileAccess.Write)) { data.SetLength(Page.Size); }
+        var before = File.ReadAllBytes(path);
+        await using var engine = CreateEngine(onDisk: true);
+
+        // Act
+        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        var createRefusal = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
+
+        // Assert: both operations agree, and the recommended action completes.
+        refusal.Message.ShouldBe(createRefusal.Message);
+        refusal.Message.ShouldContain("Creation never completed", Case.Sensitive);
+        refusal.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
+        refusal.Message.ShouldNotContain("restore");
+        File.ReadAllBytes(path).ShouldBe(before);
+        await engine.DropDatabaseAsync("sales", CancellationToken.None);
+        await engine.CreateDatabaseAsync("sales", CancellationToken.None);
+    }
+
+    private static byte[] ReadFile(string path)
+    {
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var copy = new MemoryStream();
+        input.CopyTo(copy);
+        return copy.ToArray();
     }
 
     private BlobDatabaseEngine CreateEngine(bool onDisk)

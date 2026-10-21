@@ -13,7 +13,9 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 internal sealed class DatabaseDownloadStream : Stream
 {
     private const int chunkSize = 64 * 1024;
+    // Retain the rental lease, never its pooled connector. Late cleanup cannot reach a later rent.
     private readonly DatabaseConnection _connection;
+    private readonly string _database;
     private readonly bool _ownsConnection;
     private readonly CancellationTokenSource _operation;
     private readonly CancellationToken _cancellationToken;
@@ -36,6 +38,7 @@ internal sealed class DatabaseDownloadStream : Stream
     private DatabaseDownloadStream(DatabaseConnection connection, CancellationToken cancellationToken, bool ownsConnection)
     {
         _connection = connection;
+        _database = connection.Database;
         _ownsConnection = ownsConnection;
         _operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _cancellationToken = _operation.Token;
@@ -227,7 +230,7 @@ internal sealed class DatabaseDownloadStream : Stream
                 {
                     // The diagnostic remains the exchange failure if returning its broken lease fails;
                     // the event source keeps the release failure visible.
-                    DatabaseClientEventSource.Log.DownloadReleaseFailed(_connection, releaseFailure);
+                    DatabaseClientEventSource.Log.DownloadReleaseFailed(_database, releaseFailure);
                 }
             }
             Volatile.Write(ref _failure, ExceptionDispatchInfo.Capture(exception));

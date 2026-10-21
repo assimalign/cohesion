@@ -384,6 +384,163 @@ public sealed class SqlJoinExecutionTests
         MetricsOf(session).RecordsExamined.ShouldBe(5);
     }
 
+    /// <summary>A selective order key bounds stored reads independently of the total order count.</summary>
+    /// <param name="size">The number of orders, each with three lines.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - JOIN: selective order key seeks both inputs (#1521)")]
+    [InlineData(64)]
+    [InlineData(512)]
+    public async Task Join_SelectiveOrderKey_ShouldExamineOnlyOrderAndLines(int size)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("join");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE orders (id INT PRIMARY KEY);");
+        await ExecuteAsync(session, "CREATE TABLE lines (order_id INT, line INT);");
+        for (int start = 0; start < size; start += 64)
+        {
+            await ExecuteAsync(session, "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(start, 64).Select(id => $"({id})")));
+            await ExecuteAsync(session, "INSERT INTO lines VALUES " + string.Join(",", Enumerable.Range(start, 64)
+                .SelectMany(id => Enumerable.Range(1, 3).Select(line => $"({id},{line})"))));
+        }
+        await ExecuteAsync(session, "CREATE INDEX ix_lines_order ON lines(order_id);");
+
+        // Act
+        var rows = await RowsAsync(session,
+            "SELECT o.id, l.line FROM orders o JOIN lines l ON o.id = l.order_id WHERE o.id = @id ORDER BY l.line;",
+            new Dictionary<string, object?> { ["id"] = 7 });
+        var metrics = MetricsOf(session);
+
+        // Assert
+        rows.Select(row => string.Join("|", row)).ShouldBe(["7|1", "7|2", "7|3"]);
+        metrics.JoinAccessPaths.ShouldBe(["join-seek:ix_lines_order"]);
+        metrics.RecordsExamined.ShouldBe(4);
+    }
+
+    /// <summary>Unindexed input restrictions prevent Cartesian pair evaluation and allocation.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: unindexed restrictions filter before constructing pairs (#1521)")]
+    public async Task Join_UnindexedRestrictions_ShouldEvaluateOnlyFilteredPairs()
+    {
+        // Arrange
+        int pairs = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("join-filter-pairs");
+        builder.Functions.Add(SqlScalarFunction.Create("pair_seen", (long left, long right) =>
+        {
+            pairs++;
+            return left + right;
+        }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("join", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT)");
+        string values = string.Join(",", Enumerable.Range(0, 64).Select(id => $"({id})"));
+        await ExecuteAsync(session, "INSERT INTO a VALUES " + values);
+        await ExecuteAsync(session, "INSERT INTO b VALUES " + values);
+
+        // Act
+        var rows = await RowsAsync(session,
+            "SELECT a.id,b.id FROM a JOIN b ON pair_seen(a.id,b.id) >= 0 WHERE a.id = 7 AND b.id = 7");
+
+        // Assert
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { 7, 7 });
+        pairs.ShouldBe(1);
+        MetricsOf(session).RecordsExamined.ShouldBe(128);
+    }
+
+    /// <summary>A WHERE unique seek can drive the first INNER pair in either written direction.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: WHERE unique seek drives the first pair and appears in EXPLAIN (#1521)")]
+    public async Task Join_UniqueRestrictionOnSecondInput_ShouldReverseDriver()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("join");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE orders (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "CREATE TABLE lines (order_id INT, line INT)");
+        await ExecuteAsync(session, "INSERT INTO orders VALUES (1),(2)");
+        await ExecuteAsync(session, "INSERT INTO lines VALUES (1,10),(1,11),(2,20)");
+        await ExecuteAsync(session, "CREATE INDEX ix_lines ON lines(order_id)");
+        const string sql = "SELECT o.id,l.line FROM lines l JOIN orders o ON l.order_id=o.id WHERE o.id=1 ORDER BY l.line";
+        var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+
+        // Act
+        var rows = await RowsAsync(session, sql);
+        await using var description = SqlPlanner.Describe(plan);
+        var described = await ReadRowsAsync(description);
+
+        // Assert
+        plan.FirstBinding.ShouldBe(1);
+        plan.Inputs[1].Access.ShouldBeOfType<SqlIndexSeekPath>().EqualityValues.ShouldBe(new object?[] { 1 });
+        rows.Select(row => string.Join("|", row)).ShouldBe(["1|10", "1|11"]);
+        MetricsOf(session).RecordsExamined.ShouldBe(3);
+        described.ShouldContain(row => Equals(row[1], 0) && Equals(row[2], "IndexSeek") &&
+            Equals(row[3], SqlPlanner.DefaultSchema + ".orders") && Equals(row[5], "id = 1"));
+    }
+
+    /// <summary>Nullable-side WHERE cannot manufacture unmatched rows by removing existing matches.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: LEFT separates nullable WHERE from nullable ON restrictions (#1521)")]
+    public async Task Join_LeftRestrictions_ShouldPreserveNullExtensionBoundary()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        var database = await engine.CreateDatabaseAsync("join");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT, marker TEXT)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1),(2),(3)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (1,'keep'),(2,'other')");
+        await ExecuteAsync(session, "CREATE INDEX ix_b ON b(id)");
+        const string where = "SELECT a.id,b.marker FROM a LEFT JOIN b ON a.id=b.id WHERE b.marker='keep' OR b.id IS NULL ORDER BY a.id";
+        const string on = "SELECT a.id,b.marker FROM a LEFT JOIN b ON a.id=b.id AND b.marker='keep' WHERE a.id>=2 ORDER BY a.id";
+        SqlJoinPlan Plan(string sql) => new SqlPlanner(database.Catalog, null)
+            .Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+
+        // Act
+        var whereRows = await RowsAsync(session, where);
+        var onRows = await RowsAsync(session, on);
+        var laterInner = await RowsAsync(session,
+            "SELECT a.id FROM a LEFT JOIN b ON a.id=b.id JOIN a c ON b.id IS NULL AND c.id=a.id ORDER BY a.id");
+
+        // Assert
+        Plan(where).Inputs[1].Filter.ShouldBeNull();
+        Plan(on).Inputs[1].Filter.ShouldNotBeNull();
+        Plan(on).Inputs[0].Access.ShouldBeOfType<SqlIndexSeekPath>().Lower.ShouldNotBeNull();
+        whereRows.Select(row => string.Join("|", row)).ShouldBe(["1|keep", "3|"]);
+        onRows.Select(row => string.Join("|", row)).ShouldBe(["2|", "3|"]);
+        laterInner.ShouldHaveSingleItem().ShouldBe(new object?[] { 3 });
+    }
+
+    /// <summary>Volatile predicates retain joined-row cardinality; subquery predicates remain above the join.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: volatile and subquery predicates retain their evaluation level (#1521)")]
+    public async Task Join_VolatileAndSubqueryRestrictions_ShouldRemainResidual()
+    {
+        // Arrange
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("join-volatile");
+        builder.Functions.Add(SqlScalarFunction.Create("visit", (long value) => { calls++; return value; }));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var database = await engine.CreateDatabaseAsync("join", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id BIGINT)");
+        await ExecuteAsync(session, "CREATE TABLE b (id BIGINT)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1),(2)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (1),(2),(3)");
+        const string subquery = "SELECT a.id FROM a CROSS JOIN b WHERE a.id = (SELECT MAX(id) FROM a)";
+        var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(subquery).Statement.SqlExpression)
+            .ShouldBeOfType<SqlSubqueryPlan>().Input.ShouldBeOfType<SqlJoinPlan>();
+
+        // Act
+        var volatileRows = await RowsAsync(session, "SELECT a.id FROM a CROSS JOIN b WHERE COALESCE(visit(a.id),0)>0");
+        var subqueryRows = await RowsAsync(session, subquery);
+
+        // Assert
+        volatileRows.Count.ShouldBe(6);
+        calls.ShouldBe(6);
+        plan.Inputs.ShouldAllBe(input => input.Filter == null && input.Access is SqlScanPath);
+        subqueryRows.Select(row => row[0]).ShouldBe(new object?[] { 2L, 2L, 2L });
+    }
+
     private static SqlDatabaseEngine CreateEngine()
         => SqlDatabaseEngine.Create("join-tests", new SqlDatabaseEngineOptions());
 

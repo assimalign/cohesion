@@ -51,6 +51,15 @@ all open databases. It attempts every database close even if one fails. Synchron
 commit modes both wait for durable commit; grouped commits use the engine's flush signal and
 the kernel's bounded self-help window.
 
+The shared checkpoint worker rechecks due work when it collects a deferred lane (#1283),
+closing a consumed-wake retry gap without imposing a journal bound. The four-writer growth
+measurement is opt-in (`COHESION_DB_PROBES=1`); deterministic lane and outside-bracket controls
+remain in default CI. It reports existing `BracketOpen` skips and test-only process-wide
+first-chance `StorageTransactionException` counts. Affinity is enforced for the Windows process
+only: Linux affinity is per-thread, so no workload CPU limit is claimed there. Blob chunk and
+metadata writes use the coordinator's apply gate; the observed 544 MB growth remains unattributed
+and #1283 remains open.
+
 A worker failure never ends a worker (#1268). Each worker catches per database: a failed
 checkpoint, page write-back or group flush of one database is reported
 (`DatabaseEngineWorker.ReportFailure`, the worker's `Fault`), the pass goes on to the next
@@ -181,6 +190,24 @@ A file set in another storage format (#1251) is refused by the storage before it
 read, and the engine names the database: "Database 'x' cannot be opened. COHDBS001: …", the
 storage's `StorageFormatException` as its inner exception, the files byte-identical
 (`BlobEngineTests`).
+
+### Interrupted creation (#1421)
+
+Missing journals and backups are refused with COHDBB004 in DatabaseException.Diagnostics,
+including the DatabaseNotFoundException for a directory without its data file. A complete
+header proves sidecars existed at creation; their absence can mean an interrupted drop or
+lost acknowledged commits. No sidecar is silently recreated, even beside an empty closed
+database. Preserve ambiguous files and restore a complete backup. This follows Neo4j's
+missing-log refusal (community/configuration/src/main/java/org/neo4j/configuration/GraphDatabaseSettings.java:697-698;
+community/kernel/src/main/java/org/neo4j/kernel/recovery/Recovery.java:1146-1153).
+Drop explicitly deletes the data file before recursively removing the remaining files.
+A file no larger than one page is incomplete creation: create flushes two pages before returning.
+Its refusal names DropDatabaseAsync followed by CreateDatabaseAsync, which can complete. A partial
+final data page proceeds through WAL recovery. Recovery may leave an uncommitted extension torn
+at the tail; storage ignores that tail and overwrites it at the next allocation, preserving all
+committed data. Only corruption is classified as unrecoverable damage. Transient storage I/O
+failures, including a full pinned buffer pool, ask callers to retry open after the condition is
+resolved, without drop or backup advice. No record or storage format changes.
 
 ## Chunk chain and disk compatibility
 
@@ -964,6 +991,10 @@ behind its `Open` factory.
   which a disposal through the engine now awaits asynchronously.
 
 ## Diagnostics
+
+| Code | Meaning |
+| --- | --- |
+| `COHDBB004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
 
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and

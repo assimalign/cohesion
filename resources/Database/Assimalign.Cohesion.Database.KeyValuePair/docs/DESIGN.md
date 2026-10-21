@@ -1073,3 +1073,10 @@ Model statement, parameter-name and result-header strings use that same shared s
 ## Shared startup negotiation (#1105)
 
 The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes COHKV001–018 and fallback COHKV019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.
+
+## Interrupted drop and missing sidecars (#1158)
+
+Drop explicitly deletes keyvalue.dat, then the remaining *.dat files, before recursively
+removing the directory. Open requires each existing file set's original journal and backup;
+missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
+all files and restore the complete backup, since a lost journal may hold acknowledged commits.

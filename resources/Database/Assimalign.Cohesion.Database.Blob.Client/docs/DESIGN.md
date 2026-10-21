@@ -56,6 +56,10 @@ return is stronger: it confirms receipt of the matching publication acknowledgem
 
 ## Streaming downloads and bounded memory
 
+The typed connection captures its immutable database name when it receives the shared lease
+(#1313). Diagnostics can finish after streaming cleanup returns that lease, whose members then
+refuse access. The cached name preserves diagnostics without reaching a disposed rental.
+
 Downloads derive from `DatabaseStreamingExchange`. Its `OpenCoreAsync` phase sends the Blob read
 request and validates `TransferStart`; `DownloadAsync` returns only after that validation,
 so errors before startup fail the method itself. Its `CopyToCoreAsync` phase passes the metadata,

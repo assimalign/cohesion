@@ -1729,6 +1729,26 @@ runs it as it ends, before it releases the gate, and the worker moves on. A boun
 trade the busy database against the others (a short one rarely catches the end of a long
 statement, a long one lets the others overshoot); the deferral needs no trade.
 
+**Concurrent-writer attribution (#1283).** The load measurement in `BlobCheckpointGrowthTests`
+is skipped by default; `COHESION_DB_PROBES=1` enables three counter-driven rounds with and without
+CPU competition. Windows constrains the process to up to three CPUs; Linux affinity is per-thread,
+so this probe enforces and claims no workload affinity there. Existing events show Blob overshoot
+with no `BracketOpen` skips, while an outside-bracket control
+verifies that signal on normal, failed and cancelled statement exits. A deterministic lane control
+now guards the consumed size wake: collecting a deferred lane outcome rechecks whether the journal
+is due in that pass and attempts at most one new checkpoint, while failures and busy-storage
+outcomes retain their retry delay. The observed 544 MB growth remains unattributed and #1283 stays
+open: an outside-gate raw bracket can prevent truncation until it ends, and checkpoint flush time
+is another investigation path. The model remains a sharp checkpoint with a soft trigger; choosing
+a bounded admission pause or a fuzzy checkpoint remains a later owner decision.
+
+Normal Blob chunk writes and metadata updates use the coordinator's apply gate; the suspected raw
+outside bracket was not found on that path. SQL's background table reclamation does open raw data
+brackets outside the gate, and SQL and KeyValuePair catalog writes use independent raw brackets;
+these remain investigation paths. The opt-in Blob listener also counts process-wide first-chance
+`StorageTransactionException` occurrences, since a busy checkpoint throws before `CheckpointStart`;
+this is test-only measurement, alongside the existing deferred `BracketOpen` event.
+
 **A checkpoint stalls its database.** While it runs, every statement waits for the apply gate,
 and every reader and writer that appends a lifecycle record waits for the coordinator's log gate,
 which the checkpoint holds across its whole flush; `FlushAll` also holds the pool's lock across

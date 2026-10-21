@@ -28,16 +28,19 @@ public sealed class BlobConnection : IAsyncDisposable
     private const string ListOperation = "List";
 
     private readonly DatabaseConnection _connection;
+    // Diagnostics finish after a failed stream has returned its shared lease.
+    private readonly string _database;
     private int _disposed;
     private int _returned;
 
     internal BlobConnection(DatabaseConnection connection)
     {
         _connection = connection;
+        _database = connection.Database;
     }
 
     /// <summary>Gets the database selected at handshake.</summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>Gets whether the connection remains open and usable.</summary>
     public bool IsOpen => Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _returned) == 0 && _connection.IsOpen;

@@ -21,4 +21,5 @@
   <data name="ParameterReferenceExpected" xml:space="preserve"><value>Expected a parameter reference (@name) but found '{0}'.</value></data>
   <data name="ParameterMissing" xml:space="preserve"><value>The command references parameter '@{0}' but no value was bound for it.</value></data>
   <data name="CommandArityInvalid" xml:space="preserve"><value>{0} takes the form: {1}.</value></data>
+  <data name="CreationSidecarMissing" xml:space="preserve"><value>Database '{0}' is missing a required data, journal or backup file. Preserve all files and restore the complete file set from backup; a missing sidecar cannot safely be replaced.</value></data>
 </root>

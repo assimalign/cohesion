@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
 {
-    private const int namespaceRecordKind = 15;
+    private const int namespaceRecordKind = SqlCatalogCreation.NamespaceRecordKind;
     private readonly Dictionary<string, DefinitionSlot<SqlCatalogNamespace>> _namespaces = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<SqlCatalogNamespace>? _namespaceCapture;
 

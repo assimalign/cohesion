@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Internal;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Shouldly;
 using Xunit;
@@ -143,6 +144,177 @@ public sealed class SqlJoinIndexSemanticsTests
         PlanOf(database, mandatoryEquality).Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix_key");
         (await ReadPairsAsync(session, mandatoryEquality)).ShouldBe(new[] { (1, 10), (2, 30) });
         MetricsOf(session).JoinAccessPaths.ShouldBe(["join-seek:ix_key"]);
+    }
+
+    /// <summary>A retained plan never probes a replacement index with the previous key shape.</summary>
+    /// <param name="replaced">Whether the dropped name is reused for a different key.</param>
+    /// <param name="reverse">Whether the indexed input is written first and the plan swaps it.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - JOIN: detached and replaced indexes fall back to the full residual (#1521)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Join_DetachedOrReplacedIndex_ShouldPreserveMatches(bool replaced, bool reverse)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-replaced", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT, marker INT)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1), (NULL)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (1, 0), (1, 0), (2, 0), (NULL, 0)");
+        await ExecuteAsync(session, "CREATE INDEX ix ON b(id)");
+        var plan = PlanOf(database, reverse
+            ? "SELECT a.id, b.id FROM b JOIN a ON a.id = b.id"
+            : "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id");
+        plan.FirstBinding.ShouldBe(reverse ? 1 : 0);
+        plan.Steps[0].Access.ShouldNotBeNull().Index.Name.ShouldBe("ix");
+        await ExecuteAsync(session, "DROP INDEX ix ON b");
+        if (replaced) { await ExecuteAsync(session, "CREATE INDEX ix ON b(marker)"); }
+        var transaction = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try
+        {
+            var statement = new SqlStatementContext(transaction, database.Coordinator);
+            var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
+
+            // Act
+            await using var result = (await executor.ExecuteAsync(plan, statement, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+            var pairs = new List<(int, int)>();
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+            {
+                pairs.Add((row.GetValue(0).ShouldBeOfType<int>(), row.GetValue(1).ShouldBeOfType<int>()));
+            }
+
+            // Assert
+            pairs.ShouldBe([(1, 1), (1, 1)]);
+            statement.Metrics.JoinAccessPaths.ShouldBe(["join-scan"]);
+            statement.Metrics.RecordsExamined.ShouldBe(6);
+        }
+        finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
+    }
+
+    /// <summary>Exact constants cross numeric equijoins without rounding, NULL matches or lost duplicates.</summary>
+    /// <param name="key">The bound decimal key; null exercises SQL UNKNOWN.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - JOIN: propagated constants preserve mixed numeric and NULL semantics (#1521)")]
+    [InlineData("1.000")]
+    [InlineData("1.5")]
+    [InlineData(null)]
+    public async Task Join_PropagatedNumericConstant_ShouldPreserveScanDigest(string? key)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-constants", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT, k DECIMAL)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT, k INT)");
+        await ExecuteAsync(session, "CREATE TABLE c (id INT, k BIGINT)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1,1.000),(2,1.5),(3,NULL)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (10,1),(11,1),(20,2),(30,NULL)");
+        await ExecuteAsync(session, "INSERT INTO c VALUES (100,1),(101,1),(200,2),(300,NULL)");
+        await ExecuteAsync(session, "CREATE INDEX ix_b ON b(k)");
+        await ExecuteAsync(session, "CREATE INDEX ix_c ON c(k)");
+        var parameters = new Dictionary<string, object?> { ["key"] = key is null ? null : decimal.Parse(key, System.Globalization.CultureInfo.InvariantCulture) };
+        const string sql = "SELECT b.id,c.id FROM a JOIN b ON a.k=b.k JOIN c ON b.k=c.k WHERE a.k=@key ORDER BY b.id,c.id";
+        var request = SqlQueryRequest.FromSql(sql, parameters);
+        var plan = new SqlPlanner(database.Catalog, parameters).Plan(request.Statement.SqlExpression).ShouldBeOfType<SqlJoinPlan>();
+
+        // Act
+        var seek = await PairsAsync();
+        await ExecuteAsync(session, "DROP INDEX ix_b ON b");
+        await ExecuteAsync(session, "DROP INDEX ix_c ON c");
+        var scan = await PairsAsync();
+
+        // Assert
+        seek.ShouldBe(scan);
+        if (key == "1.000")
+        {
+            seek.ShouldBe([(10,100),(10,101),(11,100),(11,101)]);
+            plan.Inputs[1].Access.ShouldBeOfType<SqlIndexSeekPath>().EqualityValues.ShouldBe(new object?[] { 1 });
+            plan.Inputs[2].Access.ShouldBeOfType<SqlIndexSeekPath>().EqualityValues.ShouldBe(new object?[] { 1L });
+        }
+        else
+        {
+            seek.ShouldBeEmpty();
+            plan.Inputs[1].Access.ShouldBeOfType<SqlScanPath>();
+        }
+
+        async Task<(int, int)[]> PairsAsync()
+        {
+            await using var result = (await ExecuteAsync(session, sql, parameters)).ShouldBeAssignableTo<DatabaseResultSet>();
+            var rows = new List<(int, int)>();
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+            {
+                rows.Add((row.GetValue(0).ShouldBeOfType<int>(), row.GetValue(1).ShouldBeOfType<int>()));
+            }
+            return rows.ToArray();
+        }
+    }
+
+    /// <summary>Text constants cannot cross incompatible equality collations.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: collation boundaries keep constant inference conservative (#1521)")]
+    public async Task Join_DifferentCollations_ShouldPreserveCaseInsensitiveMatches()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-collation-constants", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT, k TEXT COLLATE binary)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT, k TEXT COLLATE binary)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1,'a')");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (10,'A'),(11,'a')");
+        await ExecuteAsync(session, "CREATE INDEX ix_b ON b(k)");
+        const string sql = "SELECT a.id,b.id FROM a JOIN b ON a.k=b.k COLLATE case_insensitive WHERE a.k='a' ORDER BY b.id";
+
+        // Act
+        var plan = PlanOf(database, sql);
+        var pairs = await ReadPairsAsync(session, sql);
+
+        // Assert
+        pairs.ShouldBe([(1,10),(1,11)]);
+        plan.Inputs[1].Access.ShouldBeOfType<SqlScanPath>();
+        plan.Inputs[1].Filter.ShouldBeNull();
+    }
+
+    /// <summary>A constant seek on the driver obeys the same catalog identity guard as a correlated seek.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: replaced driving index falls back without losing rows (#1521)")]
+    public async Task Join_ReplacedDrivingIndex_ShouldPreserveMatches()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-replaced-driver", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE a (id INT, marker INT)");
+        await ExecuteAsync(session, "CREATE TABLE b (id INT)");
+        await ExecuteAsync(session, "INSERT INTO a VALUES (1,0),(2,0)");
+        await ExecuteAsync(session, "INSERT INTO b VALUES (1),(1),(2)");
+        await ExecuteAsync(session, "CREATE UNIQUE INDEX ix ON a(id)");
+        var plan = PlanOf(database, "SELECT a.id,b.id FROM a JOIN b ON a.id=b.id WHERE a.id=1");
+        plan.FirstBinding.ShouldBe(0);
+        plan.Inputs[0].Access.ShouldBeOfType<SqlIndexSeekPath>();
+        await ExecuteAsync(session, "DROP INDEX ix ON a");
+        await ExecuteAsync(session, "CREATE INDEX ix ON a(marker)");
+        var transaction = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try
+        {
+            var statement = new SqlStatementContext(transaction, database.Coordinator);
+            var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
+
+            // Act
+            await using var result = (await executor.ExecuteAsync(plan, statement, CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
+            int count = 0;
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+            {
+                row.GetValue(0).ShouldBe(1);
+                row.GetValue(1).ShouldBe(1);
+                count++;
+            }
+
+            // Assert
+            count.ShouldBe(2);
+            statement.Metrics.RecordsExamined.ShouldBe(5);
+        }
+        finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
 
     private static async Task AssertUnsafeEqualityScansAsync(string type, object left, object right, bool equal = true)

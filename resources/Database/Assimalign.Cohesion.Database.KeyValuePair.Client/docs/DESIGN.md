@@ -51,6 +51,10 @@ Unconditional put returns its new etag directly.
 
 ## Errors, lifecycle, and telemetry
 
+The typed connection captures its immutable database name when it receives the shared lease
+(#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
+refuse access. The cached name keeps diagnostics independent of the returned rental.
+
 `KeyValueClientException : DatabaseException` maps wire codes to model error
 kinds and preserves the code. `MalformedResult` identifies a completed response
 that does not match the typed operation's values; no unread frames remain.
@@ -153,8 +157,8 @@ The package has no public interface left and no `Abstractions/` folder
   forward to another observer instance: outside this assembly the hooks are protected (CS1540),
   so an application that needs several sinks fans out inside one subclass (plan §7, "P5, as
   landed", owner review 38).
-- **Disposal is final for the instance.** The pool rents the same core `DatabaseConnection` to
-  the next caller, so `KeyValueConnection` keeps its own disposed flag, as `GraphConnection` and
+- **Disposal is final for the instance.** The pool now reuses an internal connector behind a new core lease on
+  every rent (#1313); `KeyValueConnection` keeps its own disposed flag, as `GraphConnection` and
   `BlobConnection` do: after `DisposeAsync` every command throws `ObjectDisposedException` before
   the observer runs, and a second dispose does nothing. Before the P5 review a stale
   `KeyValueConnection` ran its commands on whichever caller had rented the session next, and a

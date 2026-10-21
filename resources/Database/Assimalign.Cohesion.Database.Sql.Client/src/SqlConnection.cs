@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// Connections are not thread-safe: one command at a time, mirroring the engine-session contract. A
 /// connection rented from a <see cref="SqlClient"/> returns to its pool on dispose (with its
 /// authenticated session intact when it is still healthy).
+/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
+/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
 /// </para>
 /// <para>
 /// Disposal is final for this instance: the pool may rent the session to another caller, so every
@@ -32,19 +34,22 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 public sealed class SqlConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
+    // Operation diagnostics may finish after disposal has returned the shared lease.
+    private readonly string _database;
     private readonly SqlClientObserver? _observer;
     private int _disposed;
 
     internal SqlConnection(DatabaseConnection connection, SqlClientObserver? observer)
     {
         _connection = connection;
+        _database = connection.Database;
         _observer = observer;
     }
 
     /// <summary>
     /// Gets the database this connection is bound to.
     /// </summary>
-    public string Database => _connection.Database;
+    public string Database => _database;
 
     /// <summary>
     /// Gets a value indicating whether the connection is open and usable. A
