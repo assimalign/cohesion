@@ -47,6 +47,9 @@ internal sealed class SqlStatementMetrics
     /// </summary>
     internal long RecordsExamined { get; set; }
 
+    /// <summary>Peak ordered candidate rows retained by any SELECT collector in this statement.</summary>
+    internal int PeakOrderedRows { get; set; }
+
     /// <summary>Candidate rows visited while building self-reference key sets.</summary>
     internal long SelfReferenceCandidateVisits { get; set; }
 

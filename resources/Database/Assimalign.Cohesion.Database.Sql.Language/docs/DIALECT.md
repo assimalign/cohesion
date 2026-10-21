@@ -1430,6 +1430,34 @@ over the SQL wire protocol (#1100). Negative and non-integer counts retain the
 `<clause> requires a non-negative integer.`
 diagnostics.
 
+For non-DISTINCT queries without ORDER BY, execution stops output evaluation after
+OFFSET + LIMIT qualifying rows; LIMIT 0 evaluates no output rows (#1523). Stored-table
+and system-view scans also stop reading input. Grouped queries still consume their
+aggregate input, but stop group projection and HAVING evaluation at the window;
+correlated queries stop outer-row evaluation. Join inputs/results and set operands
+still materialize, while their final projection stops at the window. Unvisited
+projections and HAVING predicates raise no errors and make no volatile function
+calls, following PostgreSQL's Limit node (`src/backend/executor/nodeLimit.c:82-124`).
+Non-DISTINCT ORDER BY + LIMIT
+with fixed ordering collations evaluates every input and retains only the best
+OFFSET + LIMIT rows, with stable input order for ties and the same collation/NULL
+placement as a full sort. Deferred collations keep full sorting, using the last
+qualifying row's resolved collations even when later rows fail WHERE or HAVING.
+DISTINCT still completes
+before pagination. Results remain fully evaluated before delivery; ordered index
+access and spillable sorting are separate work.
+
+For ordinary SELECT ordering without output-alias or ordinal dependencies,
+nonvolatile projections and keys evaluate together in input order, projection
+first. This can change which projection/key error appears first compared with
+sorting all source rows before projection. Independent volatile projections retain
+the full-sort fallback: keys evaluate in input order, then projections evaluate in
+sorted output order before pagination, including without LIMIT. This preserves
+the previous call order and count; PostgreSQL likewise postpones independent volatile
+outputs (`src/backend/optimizer/plan/planner.c:6649-6662`). When ordering references
+outputs, projections still evaluate once per input before keys. Grouped and correlated
+projections retain their existing evaluation before sorting.
+
 ## VALUES and counts have no column scope (#1165)
 
 A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL

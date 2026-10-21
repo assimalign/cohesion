@@ -10,9 +10,9 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// A materialized result set: typed columns and fully-evaluated rows. The MVP
-/// executor materializes SELECT and DML RETURNING results before delivery;
-/// streaming plans arrive with the cost-based planner.
+/// A materialized result set: typed columns and fully-evaluated output rows.
+/// SELECT filters, projects and selects bounded windows during execution, but
+/// completes before delivery so statement resources never escape into enumeration.
 /// </summary>
 internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 {
