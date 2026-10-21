@@ -49,6 +49,7 @@ public sealed partial class GraphStoreTests
     [Theory(DisplayName = "Cohesion Test [Graph.Storage] - Format: earlier graph formats are refused with the recreation remedy (#1532)")]
     [InlineData(1)]
     [InlineData(2)]
+    [InlineData(3)]
     public async Task Open_EarlierFormat_ShouldRefuseBeforeRecovery(byte version)
     {
         // Arrange
@@ -69,7 +70,7 @@ public sealed partial class GraphStoreTests
 
         // Act / Assert
         Should.Throw<StorageCorruptionException>(() => GraphStore.EnsureIndexFormat(fixture.Storage)).Message.ShouldContain("recreate the database", Case.Sensitive);
-        Should.Throw<StorageCorruptionException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).Message.ShouldContain("format 3", Case.Sensitive);
+        Should.Throw<StorageCorruptionException>(() => GraphStore.Open(fixture.Storage, fixture.Coordinator)).Message.ShouldContain("format 4", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Update: endpoint property changes do not conflict with relationship insertion (#1149)")]

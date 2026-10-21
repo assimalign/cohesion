@@ -129,6 +129,11 @@ endpoint adjacency, MVCC label postings and secondary node-property indexes. Fil
 node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
 compatible, and uses explicit binary codecs without reflection.
 
+Graph record and tree-registration format 4 adds catalog label GUIDs and label postings to
+format 3, which shipped with #1532's typed adjacency and entity revisions. Opening an earlier
+format fails with COHDBG017 before logical recovery scrub writes; recreate the database with
+this engine. There is no upgrade path.
+
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,
 checksums and physical recovery to `Database.Storage`. Construct a `TransactionCoordinator`
 from its `WriteAheadJournal` and `Records`, then use `GraphStore.Open` to obtain the sealed

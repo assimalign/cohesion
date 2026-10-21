@@ -72,7 +72,7 @@ public sealed partial class GraphStore
     }
 
     /// <summary>
-    /// Checks graph record format 3 and that every index tree the storage registers is in the B-tree page format
+    /// Checks graph record format 4 and that every index tree the storage registers is in the B-tree page format
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is

@@ -95,7 +95,7 @@ public sealed partial class GraphStoreTests
         await fixture.Coordinator.RollbackAsync(read, timeout.Token);
         await fixture.Coordinator.RollbackAsync(old, timeout.Token);
         fixture.Coordinator.RunVersionPurgePass(timeout.Token).ShouldBeGreaterThan(0);
-        // Open reconstructs the directories and attaches the same version-3 registrations.
+        // Open reconstructs the directories and attaches the same version-4 registrations.
         var reopened = GraphStore.Open(fixture.Storage, fixture.Coordinator);
         var current = await fixture.Begin();
         (await SelectedAsync(reopened, node.Id, direction, [type], current.Snapshot, timeout.Token)).Single().Properties["x"].ShouldBe(2);

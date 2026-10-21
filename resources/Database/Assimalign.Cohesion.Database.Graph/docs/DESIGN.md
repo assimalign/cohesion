@@ -91,8 +91,8 @@ Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the dire
 `<RootPath>/<storage name>` when it is file-backed (see "Database names and directories" below).
 All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
-kind, byte 17 is format version 3, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
-26–33 hold the entity's increasing revision. Formats 1 and 2 are refused before record recovery writes,
+kind, byte 17 is format version 4, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
+26–33 hold the entity's increasing revision. Formats 1, 2 and 3 are refused before logical recovery scrub,
 with COHDBG017 and the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
@@ -1140,7 +1140,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
@@ -2086,12 +2086,12 @@ protection against a duplicate-key lower-bound seek starting in a later leaf aft
 shared B+Tree split. A regression creates 240 incident edges, forces splits, reopens the
 file set, and checks all edges. There is no kernel change.
 
-#### Storage: Version 3 record format
+#### Storage: Version 4 record format
 
 All multibyte fixed-width values below are little-endian unless a key explicitly says
 otherwise. Every slotted record starts with the shared 16-byte stamp prefix: writer
 sequence at offsets 0-7, deleter sequence at offsets 8-15. Zero deleter means live.
-Graph records have kind at offset 16, format version `3` at offset 17 and a nonzero
+Graph records have kind at offset 16, format version `4` at offset 17 and a nonzero
 64-bit logical identity at offsets 18-25 and a UInt64 revision at offsets 26-33. Revision starts at zero and increases with each replacement. The remaining payload is:
 
 | Kind | Meaning | Payload after identity |
@@ -2132,18 +2132,20 @@ replacement even when the supplied values equal the visible version. The engine 
 whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
 records whose nonzero identities the caller reserves from the backing storage's durable sequence;
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
-changes before first publication. Formats 1 and 2 are refused before recovery scrub with COHDBG017
+changes before first publication. Formats 1, 2 and 3 are refused before logical recovery scrub with COHDBG017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
 StorageCorruptionException carries the code in its message; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
-The graph record and tree-registration version is 3; catalog and B-tree page formats are unchanged.
+The graph record and tree-registration version is 4; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
-The owner-directed #1532 bump is shared with #1534: the label GUID payload and label-postings
-tree extend version 3 without another bump, backfill, upgrade path or legacy reader. Existing
-pre-index development files must be recreated. Open reconstructs label-name/token mappings
+Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
+catalog GUID after each node label and a label-postings tree; format-3 databases must be recreated.
+The version fence refuses the old labeled-node layout with COHDBG017 before scrub can write,
+leaving a cleanly closed file set byte-identical. There is no backfill, upgrade path or legacy reader.
+Open reconstructs label-name/token mappings
 and advisory posting counts from retained records and attaches persisted trees.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
-kind `4`, version `3`, UInt64 object ID, and Int64 root page ID. Every tree is named
+kind `4`, version `4`, UInt64 object ID, and Int64 root page ID. Every tree is named
 `graph`; its object ID distinguishes it. A tree's root page stays fixed through splits
 (#1159), so a registration changes only when a tree is created; every mutation bracket
 still saves changed registrations as a backstop, and registrations are reloaded after
