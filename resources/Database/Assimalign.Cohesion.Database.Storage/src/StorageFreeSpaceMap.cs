@@ -27,6 +27,9 @@ public sealed class StorageFreeSpaceMap
     private readonly object _sync = new();
     private readonly Queue<long> _freeQueue = new();
     private readonly HashSet<long> _freeSet = new();
+    // Retain a page's generation across reuse: allocated -> free -> allocated must
+    // invalidate a writer that observed the earlier allocation (#1273).
+    private readonly Dictionary<long, long> _freeGenerations = new();
     private long _nextPageId;
 
     internal StorageFreeSpaceMap()
@@ -116,6 +119,7 @@ public sealed class StorageFreeSpaceMap
             added = _freeSet.Add(id);
             if (added)
             {
+                _freeGenerations[id] = _freeGenerations.GetValueOrDefault(id) + 1;
                 _freeQueue.Enqueue(id);
             }
         }
@@ -138,6 +142,31 @@ public sealed class StorageFreeSpaceMap
         lock (_sync)
         {
             return id < _nextPageId && !_freeSet.Contains(id);
+        }
+    }
+
+    /// <summary>Captures an allocated page's free generation before a writer pins it.</summary>
+    internal bool TryGetAllocationGeneration(PageId pageId, out long generation)
+    {
+        long id = (long)pageId;
+        lock (_sync)
+        {
+            generation = _freeGenerations.GetValueOrDefault(id);
+            return id < _nextPageId && !_freeSet.Contains(id);
+        }
+    }
+
+    /// <summary>
+    /// Confirms the allocation a writer observed still exists. Storage calls this under
+    /// its transaction lock, which also guards commit-time frees and write-lock grants.
+    /// </summary>
+    internal bool IsAllocationCurrent(PageId pageId, long generation)
+    {
+        long id = (long)pageId;
+        lock (_sync)
+        {
+            return id < _nextPageId && !_freeSet.Contains(id)
+                && _freeGenerations.GetValueOrDefault(id) == generation;
         }
     }
 
@@ -179,6 +208,7 @@ public sealed class StorageFreeSpaceMap
 
             if (_freeSet.Add(id))
             {
+                _freeGenerations[id] = _freeGenerations.GetValueOrDefault(id) + 1;
                 _freeQueue.Enqueue(id);
             }
         }

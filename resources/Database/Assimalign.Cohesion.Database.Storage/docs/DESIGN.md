@@ -670,7 +670,20 @@ object ids, so a table scan stops decoding the whole database.
   write-locked by transaction T" (the concurrency suite on CI runners). A page
   one transaction releases twice (its last record deleted, then its chain released) is
   freed once: a second free could return it to the list after another allocation took
-  it, and hand it to a second owner. PostgreSQL guards the same edge from the
+  it, and hand it to a second owner. A writer also captures the page's free generation
+  before pinning and rechecks it under the transaction lock before taking a write lock
+  (#1273). A commit between the pin and registration invalidates that touch, even if
+  an allocator already reused the id: checking only `IsAllocated` would miss reuse.
+  A stale owner-chain insert allocates a fresh page; an explicit write open reports
+  "not allocated". Refusal releases the pin without a lock, pre-image or page record.
+  The map retains one generation per page ever freed, across reuse, for the storage's
+  lifetime; generations are in memory only and do not change the storage format.
+  Lock order is structure latch, pin with the pool monitor released, then transaction
+  lock and free-map lock; the free-map lock is never held across a pin or a wait for
+  the transaction lock. Deterministic pin/free rendezvous tests and a non-parallel
+  stress test verify reuse and commit, rollback and disposal cleanup; the stress test
+  runs for a minimum duration and until every scenario counter reaches its milestone,
+  with a timeout that fails the test. PostgreSQL guards the same edge from the
   allocating side, using a page the FSM reports only if its buffer lock is free
   (`_bt_allocbuf`, `src/backend/access/nbtree/nbtpage.c`).
 - **Why release is O(pages), not O(1).** Page logging prices a transactional free at one

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -1772,13 +1773,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         // The current write page may have been freed since the last insert.
-        if (currentWritePage is null || !_freeSpaceMap.IsAllocated(currentWritePage.Value))
+        if (currentWritePage is null || !TryTouchPage(owner, currentWritePage.Value, out var currentHandle))
         {
             handle = AllocateDataPage(owner, ownerId, out slotted);
         }
         else
         {
-            handle = TouchPage(owner, currentWritePage.Value);
+            handle = currentHandle;
             slotted = new SlottedPage(handle.Page);
 
             if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != ownerId || !slotted.CanFit(data.Length))
@@ -1788,13 +1789,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             }
         }
 
-        int slotIndex = slotted.InsertSlot(data);
-        handle.MarkDirty();
-
-        var pageId = handle.Id;
-        handle.Dispose();
-
-        return (pageId, slotIndex);
+        using (handle)
+        {
+            int slotIndex = slotted.InsertSlot(data);
+            handle.MarkDirty();
+            return (handle.Id, slotIndex);
+        }
     }
 
     /// <summary>
@@ -3000,16 +3000,43 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private StoragePageHandle TouchPage(StorageTransaction transaction, PageId pageId)
     {
-        var handle = _pageManager!.GetPage(pageId);
+        if (!TryTouchPage(transaction, pageId, out var handle))
+        {
+            throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.PageNotAllocated, (long)pageId));
+        }
+
+        return handle;
+    }
+
+    // Test rendezvous after the pin, before the allocation is revalidated and locked.
+    // No map or pool monitor is held; a handler may complete a different bracket.
+    internal Action<PageId>? PagePinnedForWrite;
+
+    private bool TryTouchPage(StorageTransaction transaction, PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle)
+    {
+        handle = null;
+        if (!_freeSpaceMap.TryGetAllocationGeneration(pageId, out long generation)
+            || !_pageManager!.TryGetPage(pageId, out var pinned))
+        {
+            return false;
+        }
 
         try
         {
-            RegisterTouch(transaction, handle);
-            return handle;
+            PagePinnedForWrite?.Invoke(pageId);
+            if (!RegisterTouch(transaction, pinned, generation))
+            {
+                pinned.Dispose();
+                return false;
+            }
+
+            handle = pinned;
+            return true;
         }
         catch
         {
-            handle.Dispose();
+            pinned.Dispose();
             throw;
         }
     }
@@ -3043,20 +3070,30 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
-    private unsafe void RegisterTouch(StorageTransaction transaction, StoragePageHandle handle)
+    private unsafe bool RegisterTouch(StorageTransaction transaction, StoragePageHandle handle, long? freeGeneration = null)
     {
         long pageId = (long)handle.Id;
         bool locked = false;
 
         // First-touch order: any structure latch -> page pin (pool monitor released) ->
-        // _transactionLock. This path and bracket completion never acquire a structure
-        // latch under that monitor. Completion takes _ownerLock -> free-map lock inside it;
+        // _transactionLock -> free-map lock (generation recheck). Never hold the map
+        // lock across a pin or a wait for _transactionLock. Neither first touch nor
+        // bracket completion takes a structure latch under _transactionLock.
+        // Completion takes _ownerLock -> free-map lock inside it;
         // page lookup/allocation releases those locks before it comes here. Checkpoint's
         // separate, idle-only transaction -> header -> pool -> journal order is documented
         // at Checkpoint. Lock owners are bracket identities, including their Storage,
         // never per-storage sequence numbers (#1286).
         lock (_transactionLock)
         {
+            // Commit frees under this same lock. Check before granting even when a new
+            // owner has already reallocated the id: IsAllocated alone misses that ABA.
+            // Allocation callers register a new reservation without a prior page lookup.
+            if (freeGeneration is long generation && !_freeSpaceMap.IsAllocationCurrent(handle.Id, generation))
+            {
+                return false;
+            }
+
             if (_pageWriteLocks.TryGetValue(pageId, out var owner))
             {
                 if (!ReferenceEquals(owner, transaction))
@@ -3074,14 +3111,15 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (transaction.HasTouched(pageId))
         {
-            return;
+            return true;
         }
 
         var page = handle.Page;
         var current = new ReadOnlySpan<byte>(page.Pointer, Page.Size);
-        byte[] scratch = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumRunsLength);
+        byte[]? scratch = null;
         try
         {
+            scratch = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumRunsLength);
             // The pre-image, encoded as the page's non-zero byte runs: a freshly allocated page or
             // one with a large free gap costs a few hundred bytes, not 8 KiB.
             int length = PageImageCodec.EncodeImage(current, scratch);
@@ -3117,11 +3155,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     transaction.RecordSpilledPreImage(pageId, location);
                     Interlocked.Increment(ref _spilledPreImages);
                     StorageEventSource.Log.CountPreImageSpilled();
-                    return;
+                    return true;
                 }
 
                 AccountPreImage(transaction.RecordPreImage(pageId, runs.ToArray(), lsn));
-                return;
+                return true;
             }
 
             // The page already has its image in the journal: nothing is journaled now, and its
@@ -3129,6 +3167,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // what recovery rebuilds at that LSN.
             _consistency?.CheckUnimagedTouch(pageId, current);
             AccountPreImage(transaction.RecordPreImage(pageId, runs.ToArray(), page.Lsn));
+            return true;
         }
         catch
         {
@@ -3148,7 +3187,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(scratch);
+            if (scratch is not null)
+            {
+                ArrayPool<byte>.Shared.Return(scratch);
+            }
         }
     }
 
