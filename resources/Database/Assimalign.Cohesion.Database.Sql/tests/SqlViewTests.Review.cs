@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Shouldly;

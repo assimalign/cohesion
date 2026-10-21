@@ -17,7 +17,7 @@ The explicit interface Build forwards to the concrete member with no token, so i
 observe `CancellationToken.None`. There is no added interface, model-shaped root member, or
 default interface implementation.
 
-The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
+The area root (architecture: [docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 The lifecycle and composition bases serve all five data models. Execution capability
 bases serve their real variant sets: four typed models and three language models.
 Model requests, parsers and servers belong in their model packages. Hosting composes
@@ -1109,3 +1109,12 @@ within each equal-start group and among unlocated entries is stable.
 DatabaseNotFoundException preserves structured diagnostics from an inner DatabaseException.
 An incomplete file set can therefore keep precise absence semantics for provisioning while
 its allocated model diagnostic remains available through Diagnostics.
+
+
+## Model architecture test support
+
+The root test project owns the stateless ModelArchitecture helper, linked into the five implemented model test assemblies by the Database-scoped ModelArchitecture.targets. Cache has no component source and no architecture test until implementation. Each model build exports actual compiler inputs, including generated sources, references and conditional symbols; the test reconstructs a complete Roslyn compilation and rejects Storage-to-Catalog/engine and Catalog-to-engine symbol references by source folder. Manifest copying asks the referenced model project for its evaluated IntermediateOutputPath, so configuration, RID and custom intermediate paths are respected.
+
+The guard checks owner.ContainingAssembly against per-layer external allowlists seeded with git show from the retired satellite csprojs at a64426436. Storage permits Database.Storage, Transactions and Indexing; Catalog also permits the Database root and Types. The BCL allowance is the exact assembly-name set in the compiler's Microsoft.NETCore.App reference-pack inputs, never a System.* wildcard. Graph Storage additionally permits Types for index-key encoding, already in its old Indexing reference closure. Protocol assemblies remain disallowed in both constrained layers; the current Protocol imports in Documents Catalog resolve no used types. Current model symbol checks validate these limits; engine code is unrestricted. The seed Storage projects referenced shared Storage (all five), Transactions (Blob/Documents/Graph) and Indexing (Graph); Catalog referenced the root and model/shared Storage, plus Transactions (Blob/Documents/Graph), Types (Sql/KeyValuePair/Documents/Graph) and Indexing (Sql/KeyValuePair/Documents). The layer-wide sets preserve this kernel vocabulary without admitting the root's other transitive dependencies.
+
+Engine-owned strategies and catalog-aware persistence composition live under Internal/Engine/Storage. Every TransactionRecordSpace implementation and physical location-packing helper belongs to Storage, including nested adapters; the test enforces adapter and strategy placement. Resource accessors and assembly metadata are common infrastructure. Negative probes cover aliases, generic arguments, inheritance, member calls, a disallowed external assembly with a System namespace in both constrained layers, unrestricted engine usage, and misplaced adapters/strategies. This is test-only support and adds no model dependency to the shipped root assembly.

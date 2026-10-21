@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Documents.Internal;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>Serves OQL, document CRUD and collection operations for one database per connection.</summary>

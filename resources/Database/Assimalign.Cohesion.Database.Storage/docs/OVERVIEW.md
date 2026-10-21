@@ -60,8 +60,9 @@ representation — model-specific layouts live in `{Model}.Storage` projects, ne
 
 ## Dependencies
 
-None — this is a leaf kernel project. Consumers: `Database.Transactions` (WAL binding),
-`Database.Indexing` (index pages), every `{Model}.Storage` project.
+`Assimalign.Cohesion.FileSystem` and `.FileSystem.Physical` provide file handles.
+Consumers include `Database.Transactions` (WAL binding), `Database.Indexing` (index pages),
+and the Storage components inside each `Database.{Model}` engine assembly.
 
 ## Usage
 

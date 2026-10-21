@@ -1,5 +1,44 @@
 # Cohesion Data Platform — Area Design
 
+## Remote client and model wire ownership
+
+The five independently consumable Database.Sql.Protocol, Graph.Protocol, Documents.Protocol,
+KeyValuePair.Protocol and Blob.Protocol assemblies own the model messages, family singletons,
+codecs and transferred values. SQL and KeyValuePair move five public types each, Graph thirteen,
+Documents fourteen and Blob fifteen. Each engine references its Protocol sibling; each remote
+client references that sibling plus shared Database.Client, Protocol, Types and Connections.
+Documents.Client additionally references model-neutral Execution. Database.Client itself
+references Protocol, Types and Connections. Cache.Client remains an empty placeholder.
+
+The arrows show the contract ownership shared by the two peers:
+
+```mermaid
+flowchart LR
+    Engine["Model engine"] --> Wire["Model.Protocol"]
+    Client["Model.Client"] --> Wire
+    Client --> Core["Database.Client"]
+    Core --> Shared["Database.Protocol / Types"]
+    Wire --> Shared
+```
+
+Graph's public GraphValueCodec facade lives only in Graph.Protocol. Its stateless internal
+encoding algorithm is linked explicitly into both assemblies, with local immutable resource
+messages and no linked family singleton or event source. Documents' JSON/wire helpers and Blob's
+payload helper live with their codecs. Catalog, storage, requests, planners and servers remain engines.
+
+All six client exceptions derive directly from System.Exception. Their locally owned Diagnostics
+remain non-null read-only snapshots, stably ordered by source offset with unlocated entries last;
+SQL/Graph copy the actual shared-client inner exception. Catching DatabaseException no longer
+catches remote failures. All 52 moved public types intentionally change namespace and assembly
+identity, including engine/client signatures. No forwarders, duplicate DTOs or disk/wire format
+changes accompany the move.
+
+COHDBCLIENT001 rejects model and shared engine dependencies from every shipped Database client,
+first by evaluated project references (including build-order-only references), then by actual
+resolved assembly identity. Only repository-relative tests/examples/samples/fixtures path segments
+exempt harnesses. Embedded and Studio intentionally compose engines and lie outside the rule's
+client-name scope. The client-only sample checks the reference closure before trim/AOT publishing.
+
 **Status:** scaffold-complete, engines in build-out · **Owner:** Chase Crawford · **Scope:** everything under `resources/Database/`, plus the `Assimalign.Cohesion.Sdk.Database` build tooling under `sdks/` and the `App.Database` framework family.
 
 This document is the durable architecture record for the multi-model OLTP database engine. It captures the requirements, the project decomposition, the dependency directions, and the reasoning behind them. Sequencing and work-item tracking live in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../programs/DATABASE_PROGRAM_PLAN.md) (temporary program scaffolding); this file is what survives after the backlog drains.
@@ -97,9 +136,10 @@ These are permanent commitments, not MVP scoping — features that contradict th
 │                    requirement)                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Model engines      Sql · Documents · Graph · Blob · KeyValuePair    │
-│  (per model)       {Model} (engine + {Model}DatabaseServer)         │
-│                    {Model}.Language · {Model}.Storage               │
-│                    {Model}.Catalog · {Model}.Client · {Model}.Security
+│  (per model)       {Model}: engine, server, Catalog, Storage          │
+│                    and future security                              │
+│                    {Model}.Language* · {Model}.Client                │
+│                    Sql.Schema · optional Sql.Tcp                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Kernel (shared)    Database (contracts; rolls up the child roots)   │
 │                    Database.Execution · Database.Transactions       │
@@ -110,7 +150,7 @@ These are permanent commitments, not MVP scoping — features that contradict th
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Dependency direction is strictly downward. Model engines depend on kernel projects; kernel projects never depend on a model. The shared service surface (`Database.Client`) depends on the root contracts and is model-agnostic; each model's wire-protocol server lives in its model package, derives from the root's `DatabaseServer` base, and carries its **own copy** of the server machinery (per-model duplication, owner decision 2026-07-14 — decision log).
+Dependency direction is strictly downward. Model engines depend on kernel projects; kernel projects never depend on a model. The shared service surface (`Database.Client`) depends on shared Protocol, Types and Connections and is model-agnostic; each typed client references its model Protocol. Each model's wire-protocol server lives in its engine package, derives from the root's `DatabaseServer` base, and carries its **own copy** of the server machinery (per-model duplication, owner decision 2026-07-14 — decision log).
 
 **The root rolls up the child roots** (2026-07-13 inversion — decision log). `Assimalign.Cohesion.Database` references its eight child roots — `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Indexing`, `Protocol`, `Security` (the `Governance` placeholder was deleted with #1257) — and **no child root references the root**. A database has a vast base-component surface; the child roots break it out for separation of concerns and testability, and stay independently consumable precisely because the arrow points root → child. Child-to-child references are fine (`Transactions → Storage`, `Execution → Types`, `Language → Types`); each child owns its own vocabulary (`ProtocolVersion` in `Protocol`, `TransactionId`/`TransactionState` in `Transactions`) and its own exception root (`StorageException`, `ProtocolException`, `TransactionAbortedException`, `IndexException`, … inherit `Exception` directly — `DatabaseException` covers the root and everything built *above* it). `Database.Indexing` joined the child roots on 2026-07-13 (owner direction) once its only root coupling — `DatabaseException` ancestry — was re-rooted onto its own `IndexException`.
 
@@ -146,9 +186,9 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, with a st
 | Blob | `BlobDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | containers of streamed large objects (`BlobContainer`) + metadata catalog | none (API-driven) |
 | KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 
-Per-model satellite projects follow one matrix: `.Language` (where a language exists), `.Storage` (model-specific layouts on the shared substrate), `.Catalog` (schema/metadata, constraint enforcement, migration apply for SQL), `.Client` (typed client over the shared client core), `.Security` (model-specific authorization).
+Each model project includes Catalog (schema/metadata and constraint enforcement), Storage (model-specific layouts over the shared kernel), and future model-specific authorization. Public types retain their existing Catalog/Storage namespaces in root feature folders; internal types declare the model RootNamespace plus `.Internal`, under `Internal/Catalog` and `Internal/Storage`. The code dependency direction is engine → Catalog → Storage → shared kernel. Storage must use no Catalog or engine types, and Catalog must use no engine types; every model owns a Roslyn semantic architecture test over its actual compiler inputs. Generated resource accessors and assembly metadata are common infrastructure. `.Language` (where a language exists), `.Client`, SQL `.Schema` and optional `.Tcp` stay separate projects.
 
-**Layout verdict:** the pre-existing matrix layout is kept. It is granular, but the granularity maps 1:1 to the backlog structure and keeps per-model concerns out of the kernel. Deliberate asymmetries: Blob and KeyValuePair have no `.Language` project (Blob is API-driven; KV commands are protocol verbs); `Database.Memory` remains the in-memory storage strategy used by tests and embedded scenarios; `Database.Embedded` is the in-process consumption facade for the platform data layer (R10).
+**Layout verdict (owner-directed model consolidation, 2026-10-20):** Catalog and Storage are components inside their model assembly; the empty model Security projects and Cache Catalog/Storage placeholders are removed. Folder boundaries and semantic tests preserve the former assembly dependency direction. This is an assembly-identity API break for every formerly public satellite type, with no member, namespace, diagnostic, wire or disk-format change. Deliberate asymmetries: Blob and KeyValuePair have no `.Language` project (Blob is API-driven; KV commands are protocol verbs); `Database.Memory` remains the in-memory storage strategy used by tests and embedded scenarios; `Database.Embedded` is the in-process consumption facade for the platform data layer (R10).
 
 #### Database names and their files (#1392)
 
@@ -167,7 +207,7 @@ The rejected alternatives: a directory named from the caller's spelling, found b
 - **`Database.Protocol`** — shared wire mechanism: the bounded big-endian frame envelope (`u32 length + u8 type`), startup/authentication, session lifecycle, errors, version negotiation, and immutable `ProtocolMessageFamily` / `ProtocolChannel` binding. Each model package owns its request and result vocabulary. SQL and Key-Value retain their deployed model message identifiers and payload layouts; Blob owns bounded chunk transfer, Documents owns nested JSON results, and Graph owns path-shaped results alongside its existing catalog exchange. No sockets or model payload policy live in this child root.
 - **The per-model servers** — the network front-end. **Servers are per-model** (2026-07-13): each model ships its own `{Model}DatabaseServer` fronting exactly one engine (`SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`), which is where model-specific wire behavior grows. The **root bases are the only area-wide requirement**: a model server derives from `DatabaseServer` (its `Engine` and `Sessions`), and its sessions from `DatabaseServerSession`, against `Connections` and the protocol child root (via the root's rollup). **Each model package carries its own full copy of the server machinery** — accept loop, session table, the session state machine and frame pump, authentication/idle/session-limit guardrails, two-phase drain — per-model duplication chosen by the owner (2026-07-14) with the second model's extraction evidence in hand: model independence outweighs the duplication/drift cost, and **wire-behavior parity is maintained by the protocol contract plus per-model E2E suites, not by shared code** (see the decision log and the preserved evidence table in §3.10). "Running" lives on the server; engines beneath it are data machines with no lifecycle.
 - **`Database.Client`** — the shared client core: connection settings, pooling, handshake, framing, and a generic model-exchange seam. A pool fixes its message family at composition and rejects an exchange from another family. Per-model `.Client` projects own parameter encoding and result materialization.
-- **`Database.Security`** — the authentication contract (`DatabaseAuthenticator`) the per-model servers drive from their handshake. Authorization (principals, roles, permission checks) arrives with the per-model security projects.
+- **`Database.Security`** — the authentication contract (`DatabaseAuthenticator`) the per-model servers drive from their handshake. Authorization (principals, roles, permission checks) belongs inside each model project when implemented.
 
 #### Request flow when one host runs more than one model
 
@@ -382,7 +422,7 @@ The integration architecture, in the order the work items landed:
   `ResourceContext` are scoped
   per resource invocation, so multiple in-process resource hosts do not share health state.
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
-- **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (`Sql.Security` enforcing over the SQL catalog's objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
+- **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (SQL enforcing over its catalog objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 
 #### Diagnostics: one event source per assembly
 
@@ -608,7 +648,7 @@ What existed before this scaffold vs. what a real multi-model OLTP engine needs.
 | Code-first resource schema had no retained model | schema compile/migrations #857–#859 | #973 added the root declaration vocabulary; #859 lowers it to a validated, dialect-bound `CompiledSchema` with canonical JSON/hash; #857 adds deterministic table/collection diff and the shipped SQL statement/apply path |
 | SDK build tooling — `Migration.targets` and the Tasks project were empty shells | #176 covers migration *workflows* as engine behavior only | #858 adds explicit per-model target loading, static C# schema compilation for SQL/KV, and ordinal SQL migration/baseline generation |
 | Shared type system — `Database.Types` skeletal, no collation/encoding story | #173 covers SQL type coercion only | Fleshed out via new feature under #31; `IndexKey` encoding depends on it |
-| `Sql.Replication` missing (matrix asymmetry) | — | Project added |
+| `Sql.Replication` missing (matrix asymmetry) | — | Project added during scaffolding, then retired with the other empty Replication projects in #1257; replication returns with its implementation design. |
 | Structural defects: `KeyValuePair.Cataalog.csproj` filename typo; `KeyValuePair.Security` test project living under `src/`; stray `using Assimalign.Cohesion.Web` in a root abstraction | — | Fixed in the scaffold PR |
 | Graph query standard undecided | #193 (evaluate candidates) | Unchanged — remains the gating decision for Graph language work; ISO GQL recommended |
 | Encryption at rest — no coverage anywhere in the L03.02 tree | #807 covers only the Security area's key documents | New feature #861 under #31: page/WAL/backup encryption consuming the `Security.DataProtection` key ring |
@@ -624,7 +664,7 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 
 | Decision | Why |
 |---|---|
-| Keep the pre-existing project matrix | It matches the backlog 1:1, keeps model semantics out of the kernel, and the owner confirmed the layout intent. Consolidation would churn 50 projects for aesthetic gain. |
+| Consolidate each model's Catalog, Storage and empty Security satellites into its engine (2026-10-20) | Supersedes the original decision to retain the scaffold matrix. Public Catalog/Storage namespaces and members stay intact; Roslyn architecture tests enforce the component direction and external-assembly limits. Language, Protocol, Client, SQL Schema and optional Tcp remain separate projects. |
 | Transactions as its own kernel project (not inside Storage or Execution) | ACID is the platform's defining requirement (R1); the MVCC/lock/snapshot machinery has consumers in every engine and a different change cadence than page I/O. |
 | One shared wire protocol, model-agnostic server | Five per-model servers would quintuple the security surface. Model semantics live in message payloads (and per-model clients), not in transport framing. |
 | Protocol project split from the server runtime | The client core must speak the protocol without referencing server internals; value-object frames are testable without sockets. |

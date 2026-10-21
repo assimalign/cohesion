@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Transactions;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentEngineTests

@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Language.Internal;

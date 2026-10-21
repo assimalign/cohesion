@@ -6,6 +6,8 @@ using System.Runtime.CompilerServices;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Evaluates scalar expressions with three-valued logic and stack-checked descent.</summary>
@@ -52,7 +54,7 @@ internal static partial class GraphExpressionEvaluator
             result = context.Current(result);
             if (result is string || GraphCompositeValues.IsComposite(result))
             {
-                try { GraphValueCodec.Measure(result); }
+                try { GraphCompositeEncoding.Measure(result); }
                 catch (DatabaseTypeException error)
                 { throw new GraphPlanningException("COHDBG013", error.Message, expression.Location, error); }
             }

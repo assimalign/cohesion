@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>

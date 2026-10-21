@@ -1,5 +1,10 @@
 # Blob database engine
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.Blob.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (15 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Blob`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
 `Assimalign.Cohesion.Database.Blob` implements named databases, containers, and streamed
 objects. Create an engine with `BlobDatabaseEngine.Create(name, options)`; a null `RootPath` selects memory,
 and a path selects durable files. `AddBlob(name, engine => ...)` captures
@@ -79,7 +84,7 @@ refused for that reason releases the listener and leaves the server stopped for 
 decision 42). A refused exchange, like every wire failure, ends the connection and aborts a
 host-opened transaction first.
 
-The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
+Blob.Protocol owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
 at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;
 `BlobProtocolTransfer.SendAsync` and `ReceiveAsync` copy its content using at most one 64 KiB
 chunk in flight, with a receiver acknowledgement after each destination write. The helpers
@@ -100,8 +105,8 @@ reflection or Microsoft.Extensions packages. It references no concrete transport
 construction belongs to the composition root; security policy beyond the supplied authenticator,
 replication, hosting integration, and compiled-schema provisioning remain outside this package.
 
-See [DESIGN.md](DESIGN.md), the [storage format](../../Assimalign.Cohesion.Database.Blob.Storage/docs/DESIGN.md),
-and the [catalog format](../../Assimalign.Cohesion.Database.Blob.Catalog/docs/DESIGN.md).
+See [DESIGN.md](DESIGN.md), the [storage format](DESIGN.md#storage-component),
+and the [catalog format](DESIGN.md#catalog-component).
 
 `BlobDatabaseEngine.CreateBuilder(name)` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine
@@ -121,3 +126,58 @@ explicit-transaction state machine and their checks, so the typed members need n
 `BlobDatabaseSession` derives directly from `DatabaseSession` for lifecycle, state and
 explicit transactions. Blob operations use its container API. It has no execute member
 and inherits no unsupported query-language operation.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.Blob.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Blob catalog
+
+`Assimalign.Cohesion.Database.Blob.Catalog` persists the containers and blob metadata of
+one logical database through the sealed `BlobCatalog`, which `BlobCatalog.Open` returns; its
+record and codec are internal. It depends on the Database root for the ownership vocabulary, Blob.Storage
+for record access, and the shared Storage and Transactions kernels for durability and MVCC.
+
+Open `BlobCatalog` after the database coordinator has scrubbed recovered records. Container
+records carry a stable identity, case-sensitive name, `DatabaseObjectOwner`, and optional owning
+schema. Blob records carry the container identity, name, length, media type, entity tag,
+creation/modification times, content checksum, and chunk-chain head.
+
+Supply a `TransactionContext` to every mutation and a `TransactionSnapshot` to every read.
+The caller acquires the model locks and owns commit or rollback. The catalog never commits
+the supplied transaction. Its metadata shares the content storage and journal so publication
+of a new head and its chunks has one logical commit decision.
+
+Blob listing supports an ordinal prefix and reads metadata records only. Ownership enforcement
+belongs to the Blob engine; the catalog can persist a directly marked schema-owned container
+without introducing compiled-schema provisioning.
+
+See [DESIGN.md](DESIGN.md) for the directory, format, and recovery rules.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.Blob.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Blob storage
+
+`Assimalign.Cohesion.Database.Blob.Storage` supplies chunk streams and the record
+adapter used by the Blob engine and catalog. It references the shared
+`Database.Storage` and `Database.Transactions` packages. Pages, page checksums,
+free-space tracking, journal framing, physical recovery, locks, snapshots, and
+logical recovery remain kernel responsibilities.
+
+Create or open one `BlobStorage` file set, construct a `TransactionCoordinator`
+with its `WriteAheadJournal` and `Records`, then perform the coordinator's normal
+recovery sequence before accepting operations. Catalog records and chunks share
+this file set and logical transaction. Metadata uses owner-zero pages, so catalog
+listing does not scan blob content.
+
+`OpenWrite` returns a forward-only stream holding one chunk buffer. Its completion
+callback receives the chain head, length, and IEEE CRC-32 for atomic metadata
+publication. `OpenRead` follows that reference one chunk at a time. An optional
+disposal callback keeps the caller's snapshot pinned until the download closes.
+Cancellation and failed uploads invoke the abort callback with the failure and cannot publish.
+
+The [design](DESIGN.md) specifies the binary format and recovery invariants.

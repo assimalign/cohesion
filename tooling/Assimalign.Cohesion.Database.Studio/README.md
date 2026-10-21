@@ -9,6 +9,10 @@ Studio keeps each model session typed: SQL, Documents and Graph execute through 
 capabilities; KeyValuePair sends typed requests; Blob uses its container API. Result display
 uses `DatabaseResultReader` over the model-neutral `DatabaseResult` family.
 
+Embedded and remote workspaces share the DTOs owned by Graph.Protocol, Documents.Protocol and
+Blob.Protocol. Studio references those assemblies directly alongside its engines and clients.
+Remote client exceptions derive from `System.Exception` and retain their own diagnostics.
+
 ## Run
 
 ```powershell

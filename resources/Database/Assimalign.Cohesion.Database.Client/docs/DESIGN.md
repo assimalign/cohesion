@@ -1,5 +1,33 @@
 # Assimalign.Cohesion.Database.Client — Design
 
+## Engine dependency guard
+
+COHDBCLIENT001 checks every project whose project name or evaluated AssemblyName is the shared
+Database.Client or matches Database.*.Client, case-insensitively with exact suffix boundaries.
+Only complete tests/examples/samples/fixtures segments below CohesionRepositoryDirectory exempt
+harnesses; checkout ancestors and exemption properties do not. Embedded and Studio are outside scope.
+
+Before ResolveAssemblyReferences and CoreCompile the guard rejects all evaluated engine
+ProjectReference items, including name-only/private, transitive and ReferenceOutputAssembly=false
+references. After ResolveAssemblyReferences, GetAssemblyIdentity checks each existing ReferencePath
+asset's actual simple name, so packages, framework members, HintPath and renamed DLLs receive the
+same rule. Both this guard and the canary's closure check filter missing design-time outputs before
+identity inspection. A third layer rejects
+forbidden CohesionSharedSource identities before expansion and Compile inputs under engine project
+directories after shared-source expansion and before CoreCompile, regardless of Link metadata.
+All three layers reject model roots and Catalog/Storage/Security/Tcp implementation families (including
+retired identities), plus Database root and shared Storage/Transactions/Indexing/Memory/Embedded/Hosting.
+Shared Types/Execution/Language/Protocol/Security and model Protocol contracts are independently named.
+The implementation uses Framework MSBuild-compatible path normalization and has no opt-out.
+
+## Contract-only dependencies
+
+Direct references are Database.Protocol, Database.Types and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample. The resource-database workflow publishes and runs it in the NativeAOT job, rejects IL2xxx/IL3xxx warnings, and executes its pre-trim compiler-closure guard during publish.
+
+## Client exception ownership
+
+`DatabaseClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
 The shared client owns transport dialing, startup/authentication, framing, pooling,
 and connection health. Model clients own request encoding, response validation, and
 result materialization. The shared client references no model package and imposes
@@ -12,11 +40,11 @@ Clients depend on shared mechanism and their own model's wire codecs:
 ```mermaid
 flowchart LR
     SqlClient["Database.Sql.Client"] --> Client["Database.Client"]
-    SqlClient --> Sql["Database.Sql"]
+    SqlClient --> Sql["Database.Sql.Protocol"]
     KvClient["Database.KeyValuePair.Client"] --> Client
-    KvClient --> Kv["Database.KeyValuePair"]
+    KvClient --> Kv["Database.KeyValuePair.Protocol"]
     BlobClient["Database.Blob.Client"] --> Client
-    BlobClient --> Blob["Database.Blob"]
+    BlobClient --> Blob["Database.Blob.Protocol"]
     Client --> Protocol["Database.Protocol"]
     Sql --> Protocol
     Kv --> Protocol
@@ -440,4 +468,4 @@ Information, including SQL0100, is never sent. Error and result payloads are unc
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
-DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through the existing inherited DatabaseException.Diagnostics API.
+DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. An empty Ready reports 2.0 rather than assuming Current. DatabaseClientException retains structured diagnostics through its locally declared read-only Diagnostics snapshot.

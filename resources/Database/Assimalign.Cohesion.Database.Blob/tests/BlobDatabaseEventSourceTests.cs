@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>

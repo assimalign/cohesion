@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>

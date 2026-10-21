@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>

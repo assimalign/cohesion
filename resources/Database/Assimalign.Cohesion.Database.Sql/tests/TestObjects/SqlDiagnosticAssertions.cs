@@ -59,17 +59,12 @@ internal static class SqlDiagnosticAssertions
         internal string DiagnosticDetail(string code)
         {
             exception.ShouldHaveDiagnostic(code);
-            return exception is SqlClientException ? exception.Message[(code.Length + 2)..] : exception.Message;
+            return exception.Message;
         }
 
         internal DatabaseException ShouldHaveDiagnostic(string code)
         {
-            if (exception is SqlClientException)
-            {
-                exception.Message.ShouldStartWith(code + ": ", Case.Sensitive);
-                return exception;
-            }
-            exception.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code && diagnostic.Severity == DiagnosticSeverity.Error);
+exception.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code && diagnostic.Severity == DiagnosticSeverity.Error);
             exception.Message.ShouldNotContain(code + ":", Case.Sensitive);
             return exception;
         }

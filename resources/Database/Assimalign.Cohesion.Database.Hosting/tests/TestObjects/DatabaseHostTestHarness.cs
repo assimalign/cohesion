@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>

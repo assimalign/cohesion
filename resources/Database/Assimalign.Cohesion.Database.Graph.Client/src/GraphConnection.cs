@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Graph.Client.Internal;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>One authenticated graph connection supporting one active exchange at a time.</summary>

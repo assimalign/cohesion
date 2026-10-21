@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Total Neo4j orderability for the supported graph value families.</summary>

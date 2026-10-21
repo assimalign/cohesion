@@ -2,6 +2,8 @@ using System;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Static signatures and result shapes; no reflection or runtime discovery.</summary>

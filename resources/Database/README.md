@@ -12,8 +12,8 @@ It composes the **child roots** `Types`, `Language`, `Storage`, `Transactions`,
 arrow always points **root → child**; a child root never references the area root.
 
 **A project whose name contains a model segment — `*.Sql.*`, `*.Documents.*`,
-`*.Graph.*`, `*.Blob.*`, or `*.KeyValuePair.*` — is a model family member. It inherits
-the area root and owns its model's vocabulary.** Relational tables, document
+`*.Graph.*`, `*.Blob.*`, or `*.KeyValuePair.*` — is a model family member. It owns
+its model's vocabulary; engines inherit the area root, while Protocol and language packages remain independent.** Relational tables, document
 collections, graph edges, and blob containers live in their model family, never in
 the area root.
 
@@ -47,22 +47,20 @@ flowchart LR
     P4["Database.Testing"]
     GRAPH["Database.Graph"]
     GRAPHCLI["Database.Graph.Client — NuGet-only"]
-    CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
-    P0 --> CORE
     P0 -->|"private"| PRIV
     P1 --> APPMODEL
     P1 --> HOSTFAM
-    P2 --> P0
+    P2 --> Wire["Database.Protocol / Types"]
     GRAPH --> P0
-    GRAPHCLI --> GRAPH
+    GRAPHCLI --> GraphWire["Database.Graph.Protocol"]
+    GRAPH --> GraphWire
     GRAPHCLI --> P2
     P3 --> P0
     P3 --> HOSTFAM
     P3 -->|"private"| PRIV
-    P4 --> CORE
     P4 --> P3
     P4 --> HOSTFAM
     P1 -.->|"COHRES001 ✗"| P3
@@ -114,31 +112,54 @@ The root session has lifecycle, state and transactions. Sql, Documents and Graph
 `DatabaseLanguageSession<TRequest>`; KeyValuePair uses `DatabaseExecutionSession<KeyValueRequest>`
 with an internal wire parser, and Blob has no execute member.
 
-Each model follows the same matrix: root (engine + public interface), plus `.Language`*, `.Storage`, `.Catalog`, `.Client`, `.Security` satellites. (The empty `.Replication` satellites and the shared `Database.Replication` and `Database.Governance` placeholders were deleted with #1257; replication returns as its own design when it is built.)
+Each model owns its engine, catalog, storage and future model-specific security in one project. Public Catalog and Storage types keep their namespaces in `src/Catalog/` and `src/Storage/`; internals live in `src/Internal/Catalog/` and `src/Internal/Storage/`. The code dependency direction remains engine → Catalog → Storage → shared kernel, enforced by a Roslyn architecture test in each model suite. `.Language` (where implemented), `.Protocol`, `.Client`, SQL `.Schema` and optional `.Tcp` remain separate projects. (The empty `.Replication` satellites and the shared `Database.Replication` and `Database.Governance` placeholders were deleted with #1257; replication returns as its own design when it is built.)
+
+`src/Internal/Engine/Storage/` holds engine persistence composition: storage strategies,
+catalog-aware glue, and engine row/entry codecs. These types may use Catalog and engine types.
+Transaction record-space adapters and their physical location-packing helpers belong to the
+Storage layer (`src/Internal/Storage/`, or nested inside a public Storage type), since they bind
+physical records to the shared transaction kernel without engine dependencies. The architecture
+test enforces both adapter and strategy placement across all five implemented models. This
+refines the original fold's folder map without changing namespaces or public members.
+
+The guard also checks each referenced type's containing assembly. Storage permits only the
+shared `Database.Storage`, `Database.Transactions`, `Database.Indexing` assemblies
+plus the BCL from the actual `Microsoft.NETCore.App` reference pack. Graph Storage also permits
+`Database.Types` for index keys, historically reached through Indexing. Catalog permits those plus
+the area root and `Database.Types`. Protocol, Language, Schema and Connections remain disallowed. The allowlists were seeded from
+the retired Storage/Catalog project references at `a64426436` and checked against current symbol
+usages. Engine code has no external-assembly restriction. Cache has no component source, so its
+architecture test is deferred until implementation.
 
 | Model | Root project | Notes |
 |---|---|---|
-| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its own protocol family, and the model builder verbs; declared dialect in `Sql.Language` |
+| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its model builder verbs and a reference to Sql.Protocol for the protocol family; declared dialect in `Sql.Language`; includes its Catalog and Storage components |
 | SQL TCP composition | `Assimalign.Cohesion.Database.Sql.Tcp` | Optional `SqlDatabaseServerOptions.Listen(Uri)` endpoint convenience; references SQL and Connections.Tcp while the engine stays transport-independent |
 | SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
-| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, transactional index management and a database-bound wire server |
+| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, transactional index management and a database-bound wire server; includes its Catalog and Storage components |
 | Documents client | `Assimalign.Cohesion.Database.Documents.Client` | NuGet-only pooled OQL rows/documents, versioned CRUD, collection commands and coded diagnostics |
 | Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
-| Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
-| Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |
-| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal and path execution, database-bound sessions, transport-neutral `GraphDatabaseServer`, and root-builder composition |
-| Graph client | `Assimalign.Cohesion.Database.Graph.Client` | [NuGet-only typed client](Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) over shared pooling and handshake; scalar GQL results, graph mutations, `SHOW`, and streams of complete graph paths |
+| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal and path execution, database-bound sessions, transport-neutral `GraphDatabaseServer`, and root-builder composition; includes its Catalog and Storage components |
+| Graph client | `Assimalign.Cohesion.Database.Graph.Client` | [NuGet-only typed client](Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) referencing only Database.Client, Graph.Protocol, Database.Types, Database.Protocol and Connections; scalar GQL results, graph mutations, `SHOW`, and streams of complete graph paths |
 | Graph language | `Assimalign.Cohesion.Database.Graph.Language` | Executable ISO/IEC 39075 GQL subset, pattern AST, diagnostics, and conformance corpus |
-| Graph storage | `Assimalign.Cohesion.Database.Graph.Storage` | Versioned nodes and relationships, durable endpoint adjacency, and shared B+Tree property indexes |
-| Graph catalog | `Assimalign.Cohesion.Database.Graph.Catalog` | Snapshot-visible labels, relationship types, property keys, indexes, and schema ownership enforcement |
-| Blob | `Assimalign.Cohesion.Database.Blob` | Streaming blob and container API, database-bound sessions, transport-neutral `BlobDatabaseServer`, engine lifecycle, and ownership enforcement over the shared kernel; no `.Language` project |
+| Blob | `Assimalign.Cohesion.Database.Blob` | Streaming blob and container API, database-bound sessions, transport-neutral `BlobDatabaseServer`, engine lifecycle, and ownership enforcement over the shared kernel; no `.Language` project; includes its Catalog and Storage components |
 | Blob client | `Assimalign.Cohesion.Database.Blob.Client` | [Typed streaming client](Assimalign.Cohesion.Database.Blob.Client/docs/OVERVIEW.md) over shared connection pooling and handshake; bounded upload/download, delete, properties, and prefix listing |
-| Blob storage | `Assimalign.Cohesion.Database.Blob.Storage` | Chunk chains backed by shared pages, WAL, recovery, and transactions; incremental stream reads and writes |
-| Blob catalog | `Assimalign.Cohesion.Database.Blob.Catalog` | Durable containers, ownership markers, and per-blob metadata for name/prefix listing |
 | Blob streaming fixture | `Assimalign.Cohesion.Database.Blob.StreamingFixture` | Non-packable process fixture under `Blob/fixtures/`, exercised by Blob tests to verify bounded-memory streams and crash recovery |
 | Blob wire streaming fixture | `Assimalign.Cohesion.Database.Blob.Client.StreamingFixture` | Non-packable process fixture under `Blob.Client/fixtures/`; transfers 256 MiB through the real client/server over InMemory with a 64 MiB managed heap |
-| KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | **Delivered** — ordered key space on the shared kernel (index-primary composition, etag CAS) and the model's wire-protocol server (`KeyValueDatabaseServer`); command grammar in `docs/COMMANDS.md`; no `.Language` project |
+| KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | **Delivered** — ordered key space on the shared kernel (index-primary composition, etag CAS) and the model's wire-protocol server (`KeyValueDatabaseServer`); command grammar in `docs/COMMANDS.md`; no `.Language` project; includes its Catalog and Storage components |
 | Cache | `Assimalign.Cohesion.Database.Cache` | Post-MVP; deferred behind KeyValuePair |
+
+### Model wire contracts
+
+| Project | Role |
+|---|---|
+| `Assimalign.Cohesion.Database.Sql.Protocol` | Single owner of Sql wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
+| `Assimalign.Cohesion.Database.Graph.Protocol` | Single owner of Graph wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
+| `Assimalign.Cohesion.Database.Documents.Protocol` | Single owner of Documents wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
+| `Assimalign.Cohesion.Database.KeyValuePair.Protocol` | Single owner of KeyValuePair wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
+| `Assimalign.Cohesion.Database.Blob.Protocol` | Single owner of Blob wire messages, codecs, model family and transfer DTOs; independently consumed by engine and client |
+
+Each implemented remote client references its model Protocol and shared Client/Protocol/Types/Connections; Documents.Client also references Execution. No remote client references an engine or the area root. The six client exceptions derive directly from System.Exception and retain local read-only Diagnostics snapshots. COHDBCLIENT001 protects this boundary in both project and resolved-reference layers. Cache.Client remains empty.
 
 ### Service surface, hosting, orchestration
 

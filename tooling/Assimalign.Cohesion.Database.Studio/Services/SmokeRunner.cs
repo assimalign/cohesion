@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>
@@ -207,8 +209,8 @@ internal sealed class SmokeRunner
 
             await StepAsync(scope, "put-get-delete", async () =>
             {
-                Documents.Document saved = await embedded.PutAsync("items", "smoke", """{"name":"smoke","score":9}""", null).ConfigureAwait(false);
-                Documents.Document? read = await embedded.GetAsync("items", "smoke").ConfigureAwait(false);
+                Assimalign.Cohesion.Database.Documents.Protocol.Document saved = await embedded.PutAsync("items", "smoke", """{"name":"smoke","score":9}""", null).ConfigureAwait(false);
+                Assimalign.Cohesion.Database.Documents.Protocol.Document? read = await embedded.GetAsync("items", "smoke").ConfigureAwait(false);
                 Require(read is { } found && Encoding.UTF8.GetString(found.Content.Span).Contains("\"smoke\"", StringComparison.Ordinal), "document not read back");
                 Require(await embedded.DeleteAsync("items", "smoke", saved.Version.Value).ConfigureAwait(false), "delete returned false");
                 return true;
@@ -237,7 +239,7 @@ internal sealed class SmokeRunner
             await using var connection = await client.ConnectAsync(token).ConfigureAwait(false);
             Require(await connection.CreateCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "create collection failed");
             Require(await connection.GetCollectionAsync("wire_items", token).ConfigureAwait(false) == "wire_items", "get collection failed");
-            Documents.Document saved = await connection.PutAsync("wire_items", "one", "{\"name\":\"wire\",\"score\":9}"u8.ToArray(), cancellationToken: token).ConfigureAwait(false);
+            Assimalign.Cohesion.Database.Documents.Protocol.Document saved = await connection.PutAsync("wire_items", "one", "{\"name\":\"wire\",\"score\":9}"u8.ToArray(), cancellationToken: token).ConfigureAwait(false);
             Require((await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false))?.Version == saved.Version, "get did not preserve version");
             var rows = await connection.QueryAsync("SELECT name, score FROM wire_items WHERE score > @min ORDER BY score DESC",
                 new Dictionary<string, object?> { ["min"] = 5 }, token).ConfigureAwait(false);

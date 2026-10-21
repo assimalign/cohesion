@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Database.Blob.Protocol.Tests</RootNamespace>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+        <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+        <CohesionPackageReference Include="xunit" />
+        <CohesionPackageReference Include="xunit.runner.visualstudio" />
+        <CohesionPackageReference Include="coverlet.collector" />
+        <CohesionPackageReference Include="Shouldly" />
+    </ItemGroup>
+</Project>

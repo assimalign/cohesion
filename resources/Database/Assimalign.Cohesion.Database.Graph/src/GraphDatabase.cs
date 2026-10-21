@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>

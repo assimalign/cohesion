@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Documents.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.AotSample;
 
 /// <summary>A real server/client consumer, executed after NativeAOT publishing on both transports.</summary>

@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 public sealed class BlobDatabaseServerTests

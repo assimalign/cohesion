@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Language;
-using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;

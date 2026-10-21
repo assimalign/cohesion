@@ -1,5 +1,7 @@
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>Describes a document result column.</summary>

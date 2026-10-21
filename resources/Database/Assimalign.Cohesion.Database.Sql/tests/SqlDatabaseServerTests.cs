@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>

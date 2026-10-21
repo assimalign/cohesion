@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Client — Design
 
+## Contract-only dependencies
+
+Direct references are Database.Client, KeyValuePair.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
+
+## Client exception ownership
+
+`KeyValueClientException` derives directly from `System.Exception`. It preserves constructors, wire codes,
+inner exception and connection-usability behavior. Its locally declared `Diagnostics` is always an
+empty, read-only collection: this model does not populate structured diagnostics or copy them from
+an inner exception. Engine-side `DatabaseException` remains in the area root; catching it no longer
+catches remote client failures.
+
 The key-value client owns command construction, parameter encoding, result
 materialization, typed outcomes, error mapping, and telemetry. The shared client
 owns pooling, handshake, framing, and exchange lifetime.
@@ -11,7 +23,7 @@ The client references shared mechanism and the key-value wire family:
 ```mermaid
 flowchart LR
     KvClient["Database.KeyValuePair.Client"] --> Client["Database.Client"]
-    KvClient --> Kv["Database.KeyValuePair"]
+    KvClient --> Kv["Database.KeyValuePair.Protocol"]
     Client --> Protocol["Database.Protocol"]
     Kv --> Protocol
 ```
@@ -20,7 +32,7 @@ flowchart LR
 | --- | --- |
 | Database.KeyValuePair.Client | Command/result policy and materialization |
 | Database.Client | Pooling, handshake, framed exchange lifetime |
-| Database.KeyValuePair | Family identifiers and payload codecs |
+| Database.KeyValuePair.Protocol | Family identifiers and payload codecs |
 | Database.Protocol | Shared framing and immutable family binding |
 
 ## Wire ownership
@@ -55,7 +67,7 @@ The typed connection captures its immutable database name when it receives the s
 (#1313). Operation diagnostics can finish after disposal returns that lease, whose members then
 refuse access. The cached name keeps diagnostics independent of the returned rental.
 
-`KeyValueClientException : DatabaseException` maps wire codes to model error
+`KeyValueClientException : Exception` maps wire codes to model error
 kinds and preserves the code. `MalformedResult` identifies a completed response
 that does not match the typed operation's values; no unread frames remain.
 Framing/decoder failure or cancellation during an exchange invalidates the shared

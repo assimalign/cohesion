@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
 /// <summary>Real-process proof that both ends of the wire stream below object size.</summary>

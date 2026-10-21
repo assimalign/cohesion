@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>

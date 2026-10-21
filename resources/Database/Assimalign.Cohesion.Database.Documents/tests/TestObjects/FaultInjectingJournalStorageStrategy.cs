@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.FileSystem;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 /// <summary>

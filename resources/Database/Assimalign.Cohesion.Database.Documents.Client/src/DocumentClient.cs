@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A pooled client for OQL, document mutations and collection operations.</summary>

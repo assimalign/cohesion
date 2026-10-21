@@ -47,39 +47,34 @@
         <!-- The SQL model family (the MVP engine): engine + wire-protocol server,
              dialect, catalog, model storage, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Tcp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
 
         <!-- The KeyValuePair model family (the second model - the kernel-generality
              proof): engine + wire-protocol server, model storage, the minimal
              catalog, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
         <!-- The Blob model family: streaming chunk persistence, metadata catalog,
              transport-neutral server, and typed streaming wire client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Storage" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Client" />
 
         <!-- The Documents engine, OQL language, collection catalog, and chunk storage. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Language" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Catalog" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Storage" />
 
         <!-- The Graph engine, ISO GQL subset, definition catalog, and adjacency storage. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Catalog" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Storage" />
 
         <!--
             Deliberately EXCLUDED from the MVP framework:
@@ -90,22 +85,13 @@
               executable, an acceptance fixture at
               Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost; never shipped.
             - The Cache model family - engine scaffolds
-              without shipping surface yet. (KeyValuePair graduated into the
-              shipping set 2026-07-14; its still-source-less satellite -
-              KeyValuePair.Security - stays excluded until it ships.)
-            - Blob.Security - a deferred model satellite; the Blob engine,
-              catalog, storage, and client ship above.
-            - Documents.Security - a deferred satellite; the Documents engine ships above.
+              without shipping surface yet. The empty Cache Catalog/Storage and model
+              Security projects were removed when these concerns folded into the engines.
             - Documents.Client and Graph.Client - shipped as NuGet-only client packages, never members
               of the App.Database shared framework (resource-areas.md).
-            - Graph.Security - a deferred satellite; the Graph
-              engine, GQL subset, catalog, and adjacency storage ship above.
             - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
               package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
-            - Database.Sql.Security - a post-MVP empty shell. Add it when its
-              feature ships. (The Governance and Replication placeholders were
-              deleted on 2026-10-05, #1257.)
 
             Private implementation dependencies. Shipped in App.Database's Runtime
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never

@@ -1,0 +1,41 @@
+<Project>
+  <!-- Capture the compiler's actual inputs so folder boundaries remain enforceable after the assemblies merge. -->
+  <PropertyGroup>
+    <!-- Cache has no component source; restore its guard when the model is implemented. -->
+    <_DatabaseArchitectureModel>$([System.Text.RegularExpressions.Regex]::Match('$(MSBuildProjectName)', '^Assimalign\.Cohesion\.Database\.(Sql|Graph|Documents|KeyValuePair|Blob)(?=\.|$)').Groups[1].Value)</_DatabaseArchitectureModel>
+    <_DatabaseArchitectureDirectory>$([System.IO.Path]::GetFileName('$(MSBuildProjectDirectory)'))</_DatabaseArchitectureDirectory>
+    <_DatabaseArchitectureSource Condition="'$(MSBuildProjectName)' == 'Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel)' and '$(_DatabaseArchitectureModel)' != ''">true</_DatabaseArchitectureSource>
+    <_DatabaseArchitectureTest Condition="'$(MSBuildProjectName)' == 'Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel).Tests' and '$(_DatabaseArchitectureModel)' != '' and '$(_DatabaseArchitectureDirectory)' == 'tests'">true</_DatabaseArchitectureTest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_DatabaseArchitectureSource)' == 'true'">
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(IntermediateOutputPath)DatabaseArchitectureGenerated</CompilerGeneratedFilesOutputPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(_DatabaseArchitectureTest)' == 'true'">
+    <CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <Compile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Database\tests\TestObjects\ModelArchitecture.cs" Link="TestObjects\ModelArchitecture.cs" />
+  </ItemGroup>
+  <Target Name="ExportDatabaseArchitectureInputs" AfterTargets="CoreCompile" Condition="'$(_DatabaseArchitectureSource)' == 'true'">
+    <ItemGroup>
+      <_DatabaseArchitectureInput Include="@(Compile)" />
+      <_DatabaseArchitectureInput Include="$(CompilerGeneratedFilesOutputPath)\**\*.cs" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)DatabaseArchitecture.sources.txt" Lines="@(_DatabaseArchitectureInput->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)DatabaseArchitecture.references.txt" Lines="@(ReferencePathWithRefAssemblies->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)DatabaseArchitecture.settings.txt" Lines="$(AssemblyName);$([System.String]::Copy('$(DefineConstants)').Replace(';', ','))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+  <Target Name="GetDatabaseArchitectureManifests" Returns="@(_DatabaseArchitectureManifest)" Condition="'$(_DatabaseArchitectureSource)' == 'true'">
+    <ItemGroup>
+      <_DatabaseArchitectureManifest Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))\DatabaseArchitecture.*.txt" />
+    </ItemGroup>
+  </Target>
+  <Target Name="CopyDatabaseArchitectureInputs" AfterTargets="Build" Condition="'$(_DatabaseArchitectureTest)' == 'true'">
+    <!-- Ask the model project for its evaluated IntermediateOutputPath, including RID/path overrides. -->
+    <MSBuild Projects="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel)\src\Assimalign.Cohesion.Database.$(_DatabaseArchitectureModel).csproj"
+             Targets="GetDatabaseArchitectureManifests" Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)">
+      <Output TaskParameter="TargetOutputs" ItemName="_DatabaseArchitectureManifest" />
+    </MSBuild>
+    <Error Condition="'@(_DatabaseArchitectureManifest->Count())' != '3'" Text="The model build must export all three architecture input manifests." />
+    <Copy SourceFiles="@(_DatabaseArchitectureManifest)" DestinationFiles="@(_DatabaseArchitectureManifest->'$(TargetDir)ModelArchitecture\%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

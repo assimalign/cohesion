@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Internal;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlNegotiatedDiagnosticTests

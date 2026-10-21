@@ -318,7 +318,7 @@ jobs:
           $packageDirectory = Join-Path $repository "_out/release/packages"
           # No area client package is a gateway dependency. Database.Client and Database.Sql.Client
           # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them;
-          # Database.Sql.Client's public closure brings the Database.Sql engine family and
+          # Database.Sql.Client's closure is now Database.Client + Database.Sql.Protocol (no engine); the Database.Sql engine family and
           # FileSystem/FileSystem.Physical, so those are packed too (NU1101 otherwise).
           # Web and Web.Routing are absent: Gateway.ControlPlane routes its own endpoints, and every
           # other Web consumer here receives them through the App.Web framework, not as packages.
@@ -338,11 +338,10 @@ jobs:
             "Assimalign.Cohesion.Database.ApplicationModel"
             "Assimalign.Cohesion.Database.Client"
             "Assimalign.Cohesion.Database.Sql.Client"
+            "Assimalign.Cohesion.Database.Sql.Protocol"
             "Assimalign.Cohesion.Database.Sql"
-            "Assimalign.Cohesion.Database.Sql.Catalog"
             "Assimalign.Cohesion.Database.Sql.Language"
             "Assimalign.Cohesion.Database.Sql.Schema"
-            "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
             "Assimalign.Cohesion.Database.Indexing"
             "Assimalign.Cohesion.Database.Language"
@@ -410,11 +409,10 @@ jobs:
             "Assimalign.Cohesion.Database.ApplicationModel"
             "Assimalign.Cohesion.Database.Client"
             "Assimalign.Cohesion.Database.Sql.Client"
+            "Assimalign.Cohesion.Database.Sql.Protocol"
             "Assimalign.Cohesion.Database.Sql"
-            "Assimalign.Cohesion.Database.Sql.Catalog"
             "Assimalign.Cohesion.Database.Sql.Language"
             "Assimalign.Cohesion.Database.Sql.Schema"
-            "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
             "Assimalign.Cohesion.Database.Indexing"
             "Assimalign.Cohesion.Database.Language"

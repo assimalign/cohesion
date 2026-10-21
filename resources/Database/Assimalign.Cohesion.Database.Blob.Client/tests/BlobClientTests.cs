@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
 /// <summary>Typed Blob operations and transfer lifetime against the actual in-memory wire server.</summary>

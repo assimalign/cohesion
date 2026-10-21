@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 
@@ -17,8 +20,11 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// retryable first-updater-wins write conflict (a concurrently committed change
 /// to the same key); callers retry the command.
 /// </remarks>
-public sealed class KeyValueClientException : DatabaseException
+public sealed class KeyValueClientException : Exception
 {
+    /// <summary>Gets the read-only diagnostics collection, which is always empty for this model.</summary>
+    public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
+
     /// <summary>
     /// Initializes a new <see cref="KeyValueClientException"/>.
     /// </summary>

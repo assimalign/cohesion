@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
+  <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
+  <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
+
+
+
+
+
+
+</root>

@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Security;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentServerLifecycleTests

@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Execution.Internal;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentExpressionEvaluator

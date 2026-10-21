@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphCatalogClientTests

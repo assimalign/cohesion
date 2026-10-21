@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Overview
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
 The key-value model engine: `KeyValueDatabaseEngine`, an ordered key space with
 point operations (get/put/delete/exists), ordered range scans, and per-entry
 etags for conditional writes — the second model engine on the shared database
@@ -65,12 +70,12 @@ keys order by unsigned lexicographic byte comparison.
 ## Dependencies
 
 - `Assimalign.Cohesion.Database` — the area root (contracts + child-root rollup).
-- `Assimalign.Cohesion.Database.KeyValuePair.Storage` — the model's storage
-  binding (`KeyValueStorage`).
-- `Assimalign.Cohesion.Database.KeyValuePair.Catalog` — index registrations +
-  entry-space format marker.
-- `Assimalign.Cohesion.Database.Storage` / `.Types` — durability options surface
-  and the shared tuple codec (direct references; the rest of the kernel arrives
+- `Assimalign.Cohesion.Database.KeyValuePair.Protocol` — independently shared wire contracts.
+- `Assimalign.Cohesion.Connections` — the transport abstraction for the model server.
+- Storage and Catalog are components in this assembly (`src/Storage/` and `src/Catalog/`):
+  the `KeyValueStorage` binding, index registrations and entry-space format marker.
+- `Assimalign.Cohesion.Database.Storage` / `.Types` / `.Indexing` — durability options,
+  the shared tuple codec and B+Tree (direct references; the rest of the kernel arrives
   through the root).
 - `Assimalign.Cohesion.Connections` — the transport listeners the model's
   wire-protocol server binds and accepts from (the server owns listener
@@ -101,3 +106,84 @@ The public session accepts typed `KeyValueRequest` commands only. Its command gr
 internal wire entry (`ExecuteCommandTextAsync`), with validation and refusals before parsing,
 then execution through the public typed NVI. Results use `DatabaseResult` and
 `DatabaseResultSet`; [COMMANDS.md](COMMANDS.md) defines the wire order and reporting.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Assimalign.Cohesion.Database.KeyValuePair.Catalog — Overview
+
+The key-value model's metadata catalog: the sealed `KeyValueCatalog`, opened over a
+database's dedicated catalog storage file set (`KeyValueCatalog.Open`).
+
+#### Catalog: Purpose
+
+Persists exactly what re-attaches a key-value database on open:
+
+- **Index registrations** — the physical identity (object id, definition, root
+  page id) of the database's primary key index, exported by the index manager and
+  re-persisted at the engine's persistence points (a backstop: the B+Tree keeps its
+  root page fixed through splits since #1159).
+- **Entry-space format version** — the data-storage layout marker (entry records
+  and the primary index tree, 2 since #1194); neither is self-describing across
+  format changes, so the engine reads this at open and refuses any format but its
+  own.
+
+#### Catalog: Scope
+
+Deliberately minimal — the key-value model has no schemas, tables, columns, or
+constraints beyond key uniqueness (enforced by the primary index itself, not
+described here). Deferred model features with catalog surface area when they land:
+named key spaces, per-entry expiration (TTL) metadata.
+
+#### Catalog: Dependencies
+
+- `Assimalign.Cohesion.Database` — the area root (`DatabaseException` ancestry).
+- `Assimalign.Cohesion.Database.Storage` / `.KeyValuePair.Storage` — the catalog
+  file set the records persist on.
+- `Assimalign.Cohesion.Database.Types` — the shared tuple codec records encode with.
+- `Assimalign.Cohesion.Database.Indexing` — `BTreeIndexRegistration`.
+
+#### Catalog: Usage
+
+The engine (`Assimalign.Cohesion.Database.KeyValuePair`) opens one catalog per
+database over its `catalog` file set; consumers never compose it directly.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Assimalign.Cohesion.Database.KeyValuePair.Storage — Overview
+
+The key-value model's storage binding: `KeyValueStorage`, the model-typed storage
+file set (`StorageModel.KeyValue`) the key-value engine composes over the shared
+`Database.Storage` kernel.
+
+#### Storage: Purpose
+
+`KeyValueStorage` derives from the kernel's `Storage` base and exposes exactly the
+record surface the key-value engine needs — entry-record insert/read/update/delete
+on the transactional page substrate, with owner-chain inserts keyed by the engine's
+key-space object id (per-object page locality). No physical machinery lives here:
+pages, buffer pool, free-space map, WAL, and recovery are the kernel's, unchanged.
+
+#### Storage: Scope
+
+- `KeyValueStorage` — factories (`Create`/`Open`, with the `checkpointOnOpen: false`
+  open the engine's recovery analysis requires) and the entry-record operations.
+- Nothing else. Entry encoding (version stamps + key/value tuple) belongs to the
+  engine (`Assimalign.Cohesion.Database.KeyValuePair`), mirroring the SQL family
+  split where `SqlRowCodec` lives in `Database.Sql`, not `Sql.Storage`.
+
+#### Storage: Dependencies
+
+- `Assimalign.Cohesion.Database.Storage` — the shared physical kernel (pages, WAL,
+  recovery, transactional record surface).
+
+#### Storage: Usage
+
+The engine's storage strategies (`Assimalign.Cohesion.Database.KeyValuePair`'s
+in-memory and file-system strategies) create and open instances; consumers never
+compose this type directly.

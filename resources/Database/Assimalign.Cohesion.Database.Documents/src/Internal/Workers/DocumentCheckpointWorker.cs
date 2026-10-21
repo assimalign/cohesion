@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 /// <summary>

@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>A parsed, database-scoped OQL statement and its named parameter values.</summary>

@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>Registers deferred document engines through the dependency-free Database application seam.</summary>

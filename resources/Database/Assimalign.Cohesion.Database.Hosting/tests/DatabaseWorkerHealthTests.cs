@@ -17,6 +17,8 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>

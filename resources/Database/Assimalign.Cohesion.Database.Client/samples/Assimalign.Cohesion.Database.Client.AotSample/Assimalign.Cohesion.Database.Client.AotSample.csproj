@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Database.Client.AotSample</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EventSourceSupport>true</EventSourceSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+  </ItemGroup>
+  <!-- Inspect compiler inputs, before trimming could hide an architectural dependency. -->
+  <Target Name="WriteClientCanaryClosure" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <_ClientCanaryExistingReference Include="@(ReferencePath)" Condition="Exists('%(FullPath)')" />
+    </ItemGroup>
+    <GetAssemblyIdentity AssemblyFiles="@(_ClientCanaryExistingReference)" Condition="'@(_ClientCanaryExistingReference)' != ''">
+      <Output TaskParameter="Assemblies" ItemName="_ClientCanaryIdentity" />
+    </GetAssemblyIdentity>
+    <WriteLinesToFile File="$(IntermediateOutputPath)client-reference-closure.txt"
+                      Lines="@(_ClientCanaryIdentity->'%(Name)|%(OriginalItemSpec)')" Overwrite="true" />
+    <ItemGroup>
+      <_ClientCanaryEngine Include="@(_ClientCanaryIdentity)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Name)', '(?i)^Assimalign\.Cohesion\.Database(?:$|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)$|\.(?:Storage|Transactions|Indexing|Memory|Embedded|Hosting)(?:$|\.)|\.(?:Sql|Graph|Documents|KeyValuePair|Blob|Cache)\.(?:Catalog|Storage|Security|Tcp)(?:$|\.))'))" />
+    </ItemGroup>
+    <Error Condition="'@(_ClientCanaryEngine)' != ''" Text="The client-only canary resolved engines: @(_ClientCanaryEngine)." />
+  </Target>
+</Project>

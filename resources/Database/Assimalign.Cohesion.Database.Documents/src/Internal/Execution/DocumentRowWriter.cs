@@ -5,6 +5,8 @@ using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Execution;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed class DocumentRowWriter : IDisposable

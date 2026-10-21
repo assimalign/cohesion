@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
 internal sealed class GraphPathsExchange

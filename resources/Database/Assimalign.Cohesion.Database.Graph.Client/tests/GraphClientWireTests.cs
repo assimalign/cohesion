@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 /// <summary>Tests scalar GQL and mutations through the production graph server and typed client.</summary>

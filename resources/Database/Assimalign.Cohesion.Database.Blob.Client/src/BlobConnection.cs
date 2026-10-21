@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Blob.Client.Internal;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client;
 
 /// <summary>A leased connection bound to one Blob database, allowing one exchange at a time.</summary>

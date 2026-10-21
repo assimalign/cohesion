@@ -5,6 +5,7 @@ on:
       # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
       # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
+      # Includes the five model Protocol src/tests/shared trees and the client-only AOT canary.
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
@@ -64,47 +65,41 @@ jobs:
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
-        # transitively. The as-yet source-less model scaffolds (Cache, plus
-        # Documents.Security, Graph.Security, Blob.Security and
-        # KeyValuePair.Security) and the post-MVP shells (Sql.Security, Memory) are
-        # excluded until they ship.
+        # transitively. The source-less Cache model scaffolds and Memory shell are
+        # excluded until they ship. Catalog, Storage and model Security components
+        # now belong to the engine projects; model Protocol projects remain separate.
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Database',
             'Assimalign.Cohesion.Database.ApplicationModel',
             'Assimalign.Cohesion.Database.Blob',
-            'Assimalign.Cohesion.Database.Blob.Catalog',
             'Assimalign.Cohesion.Database.Blob.Client',
-            'Assimalign.Cohesion.Database.Blob.Storage',
+            'Assimalign.Cohesion.Database.Blob.Protocol',
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Documents',
-            'Assimalign.Cohesion.Database.Documents.Catalog',
             'Assimalign.Cohesion.Database.Documents.Client',
             'Assimalign.Cohesion.Database.Documents.Language',
-            'Assimalign.Cohesion.Database.Documents.Storage',
+            'Assimalign.Cohesion.Database.Documents.Protocol',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Execution',
             'Assimalign.Cohesion.Database.Graph',
-            'Assimalign.Cohesion.Database.Graph.Catalog',
             'Assimalign.Cohesion.Database.Graph.Client',
             'Assimalign.Cohesion.Database.Graph.Language',
-            'Assimalign.Cohesion.Database.Graph.Storage',
+            'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
-            'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
-            'Assimalign.Cohesion.Database.KeyValuePair.Storage',
+            'Assimalign.Cohesion.Database.KeyValuePair.Protocol',
             'Assimalign.Cohesion.Database.Language',
             'Assimalign.Cohesion.Database.Protocol',
             'Assimalign.Cohesion.Database.Security',
             'Assimalign.Cohesion.Database.Sql',
-            'Assimalign.Cohesion.Database.Sql.Catalog',
             'Assimalign.Cohesion.Database.Sql.Client',
             'Assimalign.Cohesion.Database.Sql.Language',
+            'Assimalign.Cohesion.Database.Sql.Protocol',
             'Assimalign.Cohesion.Database.Sql.Schema',
-            'Assimalign.Cohesion.Database.Sql.Storage',
             'Assimalign.Cohesion.Database.Sql.Tcp',
             'Assimalign.Cohesion.Database.Storage',
             'Assimalign.Cohesion.Database.Testing',
@@ -187,6 +182,31 @@ jobs:
           & (Join-Path $output "Assimalign.Cohesion.Database.Sql.AotSample")
           if ($LASTEXITCODE -ne 0) {
             throw "Database.Sql.AotSample reported a failed check (exit code $LASTEXITCODE)."
+          }
+
+      - name: Publish and run the engine-free client NativeAOT canary
+        shell: pwsh
+        env:
+          MSBUILDDISABLENODEREUSE: '1'
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "client-aot-sample"
+          # WriteClientCanaryClosure checks compiler references before trimming and fails on engines.
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample/Assimalign.Cohesion.Database.Client.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Client.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning IL[23][0-9]{3}") {
+            throw "NativeAOT publish of Database.Client.AotSample reported IL2xxx/IL3xxx warnings."
+          }
+
+          & (Join-Path $output "Assimalign.Cohesion.Database.Client.AotSample")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Client.AotSample reported a failed check (exit code $LASTEXITCODE)."
           }
 
       - name: Publish and run the Documents client NativeAOT guard

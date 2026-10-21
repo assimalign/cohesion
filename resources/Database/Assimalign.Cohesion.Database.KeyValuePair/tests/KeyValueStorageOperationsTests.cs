@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;

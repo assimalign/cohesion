@@ -1,7 +1,21 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Wire contract ownership
+
+`Assimalign.Cohesion.Database.KeyValuePair.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.KeyValuePair`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
+
+
+## Model component boundaries
+
+Catalog, Storage and the empty Security satellite projects are consolidated into Assimalign.Cohesion.Database.KeyValuePair. Public Catalog and Storage types keep their existing namespaces and live under src/Catalog and src/Storage; their assembly identity is now Assimalign.Cohesion.Database.KeyValuePair. Internal component types live under src/Internal/Catalog and src/Internal/Storage and declare Assimalign.Cohesion.Database.KeyValuePair.Internal.
+
+Engine-owned storage strategies, row/entry codecs and catalog-aware persistence glue live in src/Internal/Engine/Storage; the architecture test enforces strategy placement there. TransactionRecordSpace implementations and physical location-packing helpers belong to the Storage layer (src/Internal/Storage, or nested within a public Storage type); adapter placement is also enforced. This refines the original fold folder map without changing namespaces, members or behavior.
+
+The dependency direction remains engine → Catalog → Storage → shared kernel. Storage-folder types must reference neither Catalog-folder nor engine types; Catalog-folder types must reference no engine types. The build exports the actual compiler inputs, and this model's architecture test recompiles them with Roslyn and checks resolved type/member symbols by their declaring source folders, including partial and generated types. Referenced types also pass a per-layer containing-assembly allowlist seeded from the retired satellite csprojs at a64426436: Storage permits shared Storage, Transactions, Indexing and the actual BCL reference pack; Catalog additionally permits the area root and Types. Engine code is unrestricted. See the area README for the common placement and assembly rules. Build-generated resource accessors and assembly metadata are shared infrastructure, outside the three layers. No new shipped-assembly visibility grant, wire or disk format, diagnostic code, or behavior is introduced.
+
+
 The key-value engine (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3, generality report §3.10):
+[docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3, generality report §3.10):
 an ordered key space over the shared kernel, and the **second model engine** —
 built deliberately as the proof that the kernel is model-general, not SQL-shaped.
 
@@ -776,7 +790,7 @@ boxed scalars only at the result-row boundary (the Execution family's shape).
 
 ## Model-owned wire family (#1015)
 
-This package owns the KeyValuePair request and tabular result codecs; the shared protocol
+KeyValuePair.Protocol owns the KeyValuePair request and tabular result codecs; the shared protocol
 contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
 scalar component for independent clients. The server binds KeyValueProtocol.Family
 once on accept and retains its existing model payloads. The shared startup version advances
@@ -1080,3 +1094,173 @@ Drop explicitly deletes keyvalue.dat, then the remaining *.dat files, before rec
 removing the directory. Open requires each existing file set's original journal and backup;
 missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
 all files and restore the complete backup, since a lost journal may hold acknowledged commits.
+
+
+## Catalog component
+
+The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Catalog: Assimalign.Cohesion.Database.KeyValuePair.Catalog — Design
+
+#### Catalog: Design intent
+
+The smallest catalog in the model family, on purpose. A key-value database's only
+durable metadata is what re-attaches it on open: the primary index's physical
+registration and the entry-space format version. Everything else a relational
+catalog carries (schemas, tables, columns, constraint descriptions) has no
+key-value counterpart — the parent issue's design note ("do not hide catalog and
+security semantics behind a raw dictionary metaphor") is honored by making the
+catalog **explicit and small**, not by inventing relational ceremony for a model
+that has none.
+
+#### Catalog: Why-this-not-that
+
+- **A dedicated catalog file set, not records mixed into the data file.** The SQL
+  family precedent (a data set and a `catalog` set in the database's directory) holds: catalog writes are
+  self-committing storage transactions with no MVCC layer above them, and mixing
+  self-committing records into a data file whose journal carries logical
+  transaction lifecycles would entangle recovery classification with metadata
+  writes. Symmetry also keeps the engine's storage strategy identical to SQL's.
+- **The `SqlCatalog` persistence pattern, reduced** (the former `DefaultSqlCatalog`,
+  collapsed into `SqlCatalog` at phase 4 of the concrete-types plan). One tuple-codec record
+  per concern (kind 1 = registrations, kind 2 = format version), rewritten in
+  place when it fits and relocated when it grows. The registration codec matches
+  `SqlCatalog`'s byte-for-byte so the family stays mutually legible; a
+  shared registration-codec helper is deliberately not extracted yet (two
+  instances, both trivial — the extraction threshold is the third model).
+- **Format version named `EntrySpaceFormatVersion`, not `RecordSpaceFormatVersion`.**
+  The key-value model was born on format 1 (MVCC-stamped entries in the key
+  space's page chain, indexed by a tree of B-tree page format 1); the name scopes
+  the marker to the model's own vocabulary. The marker describes the whole data
+  file set, entry records and the primary index tree that rides it, so #1194's
+  B-tree page format 2 (entries ordered by key, entry location and writer) made
+  it 2 although the records did not change. The engine writes the marker at
+  creation, before it registers the primary index, and refuses a database that
+  registers one on any other version, older or newer; there is no upgrade
+  machinery (owner decision of 2026-10-02; #1152). An absent marker reads as 1.
+  Bumping the marker, rather than relying only on `Database.Indexing`'s own page
+  stamp (which it checks on the tree's root when the engine attaches the
+  registration this catalog persists), is what fences engines from before #1194:
+  they reject a marker newer than 1 but cannot read the page stamp. The catalog
+  itself is unchanged: the marker is an opaque integer here.
+
+#### Catalog: Query-time introspection captures (C2)
+
+The engine's `KEYSPACES` command describes the single implicit key space from
+this catalog. `KeyValueCatalog.CaptureSnapshot()` returns a
+`KeyValueCatalogSnapshot` containing the entry-format marker and index
+registrations copied together under the existing metadata lock. The engine alone
+projects those values into client rows; the catalog stores no virtual objects or
+materialized discovery records. An existing capture is unaffected by later
+metadata publications. `KeyValueCatalogSnapshot` is public because it is that
+method's return type; it is a sealed class with an internal constructor, not a
+record, so no caller can build or clone one. The capture owns no storage and
+requires no disposal, and registrations are exposed through a read-only collection,
+matching their existing catalog vocabulary rather than adding command-result types
+here.
+
+#### Catalog: One sealed type (concrete-types plan, phase 4, #1260)
+
+`KeyValueCatalog` is one `public sealed` class. Until phase 4 the catalog was a
+public `IKeyValueCatalog` interface, an internal `DefaultKeyValueCatalog` and a
+`public static class KeyValueCatalog` whose `Open` returned the interface and whose
+static `CaptureSnapshot(IKeyValueCatalog)` downcast to the internal type; the capture
+was kept off the interface so a second catalog implementation would not owe it.
+There is no second implementation: a key-value database has exactly one catalog,
+over its own file set. So the three collapsed into the sealed class
+(`.claude/rules/database-area.md`, rule 1), `Open` is its static factory over a
+private constructor, and `CaptureSnapshot` is an instance method. The SQL catalog
+gets the same shape in the SQL model's phase-4 PR.
+
+The capture contains one database's metadata because this catalog is opened on
+that database's dedicated file set. The engine omits physical index page ids and
+exposes the command as read-only. Its two mutation verbs reject the `KEYSPACES`
+target with `DatabaseParseException` and the stable message
+`The KEYSPACES catalog surface is read-only.` Catalog mutation APIs continue to
+serve internal persistence; they are not command operations. The model has no
+schema ownership or named key-space records, so introspection invents neither.
+
+#### Catalog: Error model
+
+`KeyValueCatalogException : DatabaseException` — a malformed persisted record or
+invalid metadata write. Catalog failures are database failures to callers.
+
+#### Catalog: Non-goals
+
+- Key-space registries (multiple named key spaces per database) — deferred; the
+  engine currently owns one implicit key space (object id 1).
+- TTL/expiration metadata — deferred with the model feature.
+- Constraint descriptions — key uniqueness is enforced physically by the unique
+  primary index; there is nothing to describe.
+
+#### Catalog: AOT posture
+
+Tuple-codec encode/decode only; no reflection, no serialization frameworks.
+
+
+## Storage component
+
+The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+
+### Storage: Assimalign.Cohesion.Database.KeyValuePair.Storage — Design
+
+#### Storage: Design intent
+
+The thinnest possible model-storage satellite: it types a storage file set as
+`StorageModel.KeyValue` and exposes the kernel's protected record surface under
+entry-flavored names (`InsertEntry`/`ReadEntry`/`UpdateEntry`/`DeleteEntry`). The
+key-value model deliberately brings **no model-specific physical layout** — the
+generality bet of the second model is that the shared substrate (slotted pages,
+per-owner record chains, WAL v2, recovery) serves an ordered key-value store
+as-is, and this project is where that bet is visibly small.
+
+#### Storage: Why-this-not-that
+
+- **A `Storage` subclass, not a wrapper.** `SqlStorage` set the family shape: the
+  kernel's record operations are `protected`, and the model satellite is the
+  sanctioned way to expose the subset a model composes. A wrapper would duplicate
+  the surface; a public kernel record API would invite models to bypass their
+  engines.
+- **No entry codec here.** The record byte layout (16-byte version-stamp header +
+  key/value tuple) is engine policy, tied to the engine's MVCC composition — it
+  lives with the version store and executor in `Database.KeyValuePair`, exactly
+  where `SqlRowCodec` lives in `Database.Sql`. This satellite stays byte-agnostic.
+- **Owner-chain inserts are the primary insert path.** The engine keys every entry
+  record by its key-space object id so the key space owns its pages (the #911
+  per-object chain design). The shared-space overload exists for the catalog file
+  set, whose records are few and unowned.
+
+#### Storage: Lifecycle
+
+Instances are created/opened by the engine's storage strategy and disposed by the
+engine's database instance. `Open(..., checkpointOnOpen: false)` is the reopen
+contract: the engine runs `TransactionRecovery.Analyze` over the recovered journal
+before any truncation (classification reads lifecycle records a checkpoint would
+destroy) and checkpoints through its coordinator once analysis completes.
+
+`WriteAheadJournal` publicly returns the storage's `StorageJournal` so a
+transaction coordinator can share the storage's actual WAL. This is the same
+composition seam exposed by Documents, Graph, and Blob storage and replaces the
+shipped-to-shipped friend grant. Storage retains ownership of the journal; callers
+coordinate writes and checkpoints through the transaction coordinator and do not
+dispose the journal separately.
+
+#### Storage: Non-goals
+
+- Model-specific page layouts (adjacency pages, blob streams) — the key-value
+  model needs none.
+- Public exposure of the kernel's full record surface — only what the engine
+  composes is exposed, including the journal contract required for transaction
+  coordination. Paging, buffer management, and WAL implementation remain private.
+
+#### Storage: AOT posture
+
+No reflection, no codegen — inherited span-based record operations only.
+
+
+## Public assembly identity changes
+
+The following public types move from their Catalog or Storage assembly into Assimalign.Cohesion.Database.KeyValuePair. Their namespaces, members, diagnostic codes and serialized representations are unchanged. Public members whose signatures expose these types also reference their new assembly identity. Consumers must replace satellite project/package/assembly references with the model reference and recompile; assembly-qualified type names change. No type forwarding or compatibility assembly is supplied. Empty Security (and Cache Catalog/Storage) projects had no public types.
+
+- From `Assimalign.Cohesion.Database.KeyValuePair.Catalog`: `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog`, `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalogException`, `Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalogSnapshot`.
+- From `Assimalign.Cohesion.Database.KeyValuePair.Storage`: `Assimalign.Cohesion.Database.KeyValuePair.Storage.KeyValueStorage`.

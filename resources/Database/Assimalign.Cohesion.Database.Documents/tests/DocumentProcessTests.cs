@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentProcessTests

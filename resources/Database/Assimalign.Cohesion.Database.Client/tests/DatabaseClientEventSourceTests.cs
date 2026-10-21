@@ -20,6 +20,8 @@ using Assimalign.Cohesion.Database.Security;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Client;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>

@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 [Collection(nameof(DocumentClientEventSourceCollection))]

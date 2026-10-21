@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphDatabaseScopeTests

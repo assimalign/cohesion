@@ -10,9 +10,9 @@
 		model-owned protocol codecs. It references no hosting module.
 	-->
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 	</ItemGroup>

@@ -1,6 +1,8 @@
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Client;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>Composes a document client from database settings and a transport factory.</summary>

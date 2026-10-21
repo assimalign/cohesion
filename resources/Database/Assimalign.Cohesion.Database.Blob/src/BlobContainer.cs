@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Blob.Catalog;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob;
 
 /// <summary>

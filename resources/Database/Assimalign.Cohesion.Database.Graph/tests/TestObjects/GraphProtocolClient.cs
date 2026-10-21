@@ -6,6 +6,8 @@ using Shouldly;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>

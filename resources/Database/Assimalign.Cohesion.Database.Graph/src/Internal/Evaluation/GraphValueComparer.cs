@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Numerics;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Graph value equality, independent of materialization and CLR numeric tags.</summary>

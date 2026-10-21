@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Blob;
 using Assimalign.Cohesion.Database.Blob.Client;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>A blob as the browser shows it.</summary>

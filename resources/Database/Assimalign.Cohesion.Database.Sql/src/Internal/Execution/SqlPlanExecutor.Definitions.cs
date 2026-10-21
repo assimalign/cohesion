@@ -114,7 +114,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var view in _catalog.Views)
         {
             if (view.Dependencies.Contains(key, StringComparer.OrdinalIgnoreCase) || view.FunctionCalls.Contains(key, StringComparer.OrdinalIgnoreCase))
-            { throw new SqlPlanningException("COHSQLD002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, key, view.Schema, view.Name)); }
+            { throw new SqlPlanningException("COHSQLD002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, key, view.Schema, view.Name)); }
         }
         foreach (var function in _catalog.Functions)
         {

@@ -4,6 +4,8 @@ using System.IO;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>

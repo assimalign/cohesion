@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Blob.Catalog;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>

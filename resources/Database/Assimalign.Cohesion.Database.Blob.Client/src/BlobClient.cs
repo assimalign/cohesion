@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Client;
 
 /// <summary>Owns a pool of authenticated connections to one Blob database.</summary>

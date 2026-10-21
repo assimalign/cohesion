@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Tests;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 /// <summary>

@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static partial class GraphPlanExecutor

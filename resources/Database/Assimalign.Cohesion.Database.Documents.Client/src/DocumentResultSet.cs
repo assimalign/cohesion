@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text.Json;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Client;
 
 /// <summary>A materialized document query result with column metadata and an affected count.</summary>

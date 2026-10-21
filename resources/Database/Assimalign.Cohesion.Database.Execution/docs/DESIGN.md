@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Execution — Design
 
 The model-neutral request/result vocabulary (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2).
+[docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2).
 This package references `Database.Types` only. It has no direct or transitive dependency on
 `Database.Language`, and it owns no planner, executor, parser or transaction pipeline.
 

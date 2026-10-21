@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Documents.Protocol;
+
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal static partial class DocumentPlanExecutor

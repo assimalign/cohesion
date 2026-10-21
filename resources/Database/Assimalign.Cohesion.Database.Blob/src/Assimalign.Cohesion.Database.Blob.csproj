@@ -3,13 +3,12 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Blob</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Storage" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Catalog" />
 	</ItemGroup>
 </Project>

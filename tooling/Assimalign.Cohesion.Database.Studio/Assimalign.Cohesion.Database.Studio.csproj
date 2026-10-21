@@ -62,12 +62,15 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
 	</ItemGroup>
 </Project>

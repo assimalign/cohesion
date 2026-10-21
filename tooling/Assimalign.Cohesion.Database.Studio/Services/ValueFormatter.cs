@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph;
 
+using Assimalign.Cohesion.Database.Graph.Protocol;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>Turns engine/client values into display text.</summary>

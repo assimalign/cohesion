@@ -21,7 +21,7 @@ directory; retained versions keep a chain populated. SQL uses this query to clas
 work without adding table-size work to Build. No model metadata or new interface enters Storage.
 
 The physical layer of the Data Platform kernel (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). This document records the design
+[docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). This document records the design
 decisions that shape the storage model; the program-level requirements it satisfies are
 R1 (ACID), R3 (shared kernel), and R6 (NativeAOT) in the area design.
 

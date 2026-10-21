@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Blob.Protocol;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 public sealed class BlobMetadataProtocolTests

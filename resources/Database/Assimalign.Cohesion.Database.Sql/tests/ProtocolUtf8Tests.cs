@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Sql.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class ProtocolUtf8Tests

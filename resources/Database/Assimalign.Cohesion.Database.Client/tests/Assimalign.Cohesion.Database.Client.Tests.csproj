@@ -10,6 +10,11 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<!-- E2E acceptance: the SQL model's server (SqlDatabaseServer, implemented
 		     inside Database.Sql) + a live SQL engine over the in-memory Connections
 		     driver (tests are exempt from the area layering rules). -->
