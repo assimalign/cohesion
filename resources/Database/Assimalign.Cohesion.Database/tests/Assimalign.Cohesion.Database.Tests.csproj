@@ -26,5 +26,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<Compile Remove="TestObjects\CheckpointPace.cs" />
 	</ItemGroup>
 </Project>

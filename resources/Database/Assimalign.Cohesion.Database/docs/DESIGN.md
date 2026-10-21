@@ -515,6 +515,48 @@ ordinary storage transaction contention is retried as busy.
   and PostgreSQL from one checkpointer per cluster and WAL
   (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
   workers still visit their databases on their own thread (follow-up).
+- **Checkpoint pass observations (#1284).**
+  The opt-in internal record describes visits, after lane cleanup and before the root's
+  `SettlePass` failure settlement. `PassThrew` means non-cancellation pass work threw; a database
+  failure is recorded on its visit. Typed visit reasons distinguish interruption from cancellation. Due evidence retains
+  the closed flag and the storage due flags used by the model predicate, plus journal lengths
+  and size thresholds sampled there (lengths can change concurrently). SQL and KeyValuePair
+  short-circuit the catalog due check when data is due. An attempted due visit and a collected
+  lane outcome are explicit; a statement's checkpoint header write is not worker progress.
+  Give-up requests and the database's sampled offline state are separate, because taking a
+  database offline is queued. `_giveUpFaultPass` and its settlement policy are unchanged.
+  #1277's observational purge refusals belong to the purge worker, not this checkpoint record.
+
+  Pump backoff is nullable: absent means the root delay hook was not attached. The test-only
+  linked adapter uses `UnsafeAccessor`, with no test-to-test reference or new visibility grant.
+  Trigger timing covers the actual outer trigger call, including a pause before its signal wait;
+  the record also says whether `Set()` woke it and whether that outer timing hook was attached.
+  A failed trigger is measured before its recovery backoff; the delay is accounted separately.
+  A separate elapsed inter-pass wait ends at the next pass entry, including settlement and
+  pauses on either side of the trigger call.
+  Lane timing includes monitor acquisition and runner dispatch, including a late parking runner.
+  The shared pace helper includes each healthy attempted visit, including a visit left running;
+  request counts and requested durations remain strictly bounded per visit.
+  For each measured wait category it collects at least 12 samples within the 30-second safety
+  ceiling and requires the median and at least 75% of samples below the configured 100 ms budget.
+  Durations in the per-pass record are judged by the median rather than the maximum because
+  scheduler hiccups affect a few samples while a persistent slowdown affects every pass.
+  The helper compares recorded monotonic wait durations with that budget,
+  requires every due healthy visit to attempt work, and requires worker completions. Its overall
+  stopwatch supplies a minimum race exercise and a safety ceiling, never a throughput ratio.
+  This proves the named wait and skipped-visit regressions on the in-memory fixture, not a
+  deterministic operating-system scheduling latency or a bound on real device checkpoint I/O.
+  No embedded source guard decides these tests.
+
+  Pending waits belong to their pump thread. Thread-local state is created on first attachment,
+  and no record, history, per-pass allocation or process-wide atomic is added when unobserved.
+  The lane delegate is created only for due work; an unobserved idle visit allocates nothing.
+  Observer callbacks run outside lane/failure monitors; callback exceptions are retained for the
+  test to assert and cannot fail a pass or kill the pump. Cancellation keeps the same break path
+  with or without observation. The visit type and publication currently belong to the checkpoint
+  worker; #1279 should move the common pass identity, trigger/delay accounting, database outcome
+  and lane wait fields to a lane-neutral internal record when write-back, group-commit and purge
+  adopt lanes, retaining checkpoint due-state evidence as checkpoint-specific data.
 - **Collecting a deferred checkpoint rechecks due work in the same pass (#1283).** A lane
   that ended without finishing no longer consumes a size wake and leaves the due journal until
   the next poll: after settling it, the worker checks the backoff and due state, and attempts at
