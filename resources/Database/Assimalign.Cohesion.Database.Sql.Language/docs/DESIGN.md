@@ -7,6 +7,9 @@ The shared lexer keeps `"a""b"` as one identifier token; CurrentIdentifierText d
 function identifiers. Lexical completeness checks distinguish a closing quote from a final
 escaped quote, so `"a""` is SQL0003. Parser conformance, identifier-value and renderer round-trip
 tests pin the behavior. See Database.Language DESIGN for the PostgreSQL scanner reference.
+Simple column-reference spans retain the complete raw token, including delimiters and doubled
+quotes. Persisted-view binding edits use those source spans, so canonical expansion replaces
+the entire reference rather than leaving a suffix of the quoted name behind.
 
 ## INSERT conflict clauses (#1118)
 

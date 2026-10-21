@@ -20,6 +20,9 @@ public sealed class SqlQuotedIdentifierTests
         select.From.Single().Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("t\"x");
         select.Columns.Single().Alias.ShouldBe("c\"d");
         select.Columns.Single().Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe("a\"b");
+        var span = select.Columns.Single().Expression.Location!;
+        span.Start.ShouldBe(sql.IndexOf('"'));
+        span.End.ShouldBe(span.Start + "\"a\"\"b\"".Length);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Identifier: an escaped final quote does not terminate a name")]
