@@ -3648,6 +3648,20 @@ description + exported registrations), the engine binds them.
   TABLE drops its indexes' metadata/registrations atomically with the table
   record and DROP COLUMN on an indexed column is rejected (drop the index
   first — entries key on the column's values).
+- **Bounded build validation (#1444).** Inline CREATE INDEX, constraint backing trees and
+  deferred builds all validate uniqueness before catalog publication by walking the completed
+  tree through the incremental cursor. Adjacent live encoded keys must differ; deleted history
+  stays available to older snapshots. Validation uses latest-state visibility under the table
+  Exclusive lock, including when the DDL transaction began before a committed writer. No key
+  locks or full key set are acquired. Workspace is one cursor batch (at most 64 keys of at most
+  `BTreeIndex.MaxKeyLength` bytes), its continuation/descent fences and the previous owned key,
+  independent of row count. Existing pool and spillable pre-image budgets bound physical build
+  buffers separately. Duplicate, cancellation and storage failures use the existing unpublished
+  tree cleanup; deferred brackets remain durable before the single publication. The trade-off
+  is an extra tree pass and detecting a duplicate after construction. Full-GC retained-heap
+  tests use a 4,096-row, 900-character table over a 1 MiB pool and require less than one quarter
+  of its decoded bytes; minimum-of-three allocation comparisons bound duplicate detection's
+  overhead against an otherwise identical non-unique build for all paths.
 - **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
   adds entries stamped with the writer's sequence; DELETE stamps entry deleters
   (tombstones — old snapshots keep seeing them); UPDATE tombstones the
@@ -4620,9 +4634,10 @@ SqlConstraintTimingTests guards ADD CONSTRAINT, ADD COLUMN REFERENCES and one IN
 at 10,000 and 50,000 rows (#1197). Internal statement metrics count self-reference candidate
 visits and membership probes where they occur, plus scalar constraint-key comparisons in
 hash equality and stored-key matching. Each statement must perform n candidate visits, n probes
-and at most 2n key comparisons. Both DDL variants materialize their rows, then validate per row
-through the existing primary-key index: n child reads plus n-1 parent seeks and a constraint-seek
-access path, giving O(n log n) index work; INSERT uses the batch hash set. Forward references
+and at most 2n key comparisons. Both DDL variants stream and validate one row at a time
+(#1444), using a preliminary count pass only when provisioning needs progress totals. Without progress, validation through
+the existing primary-key index reads n children and performs n-1 parent seeks with a
+constraint-seek access path, giving O(n log n) index work; INSERT uses the batch hash set. Forward references
 and a last-key ADD COLUMN default expose repeated linear searches. Equal-row-count process-CPU
 ratios (five 10,000-row statements versus one 50,000-row statement, minimum of three rounds
 after warm-up) are supplementary output only. Setup and verification are outside those blocks.
@@ -4787,6 +4802,12 @@ CONSTRAINT` / `ADD COLUMN` validate *every* existing row against latest state,
 so they hold the `Exclusive` table lock on their own table plus the `Exclusive`
 locks on every referenced parent — the same guarantee at table grain, and DDL is
 rare enough that its cost is not the engine's concurrency story.
+
+Both validation loops retain only the current decoded row. A provisioning count pass uses
+that same locked latest-state view, then reports each streamed row. Self-references keep the
+single-row candidate shortcut and indexed parent seeks; a parent key introduced by the same
+statement has no published index yet and uses the existing constraint-scan fallback. That
+fallback may cost quadratic work, but does not retain table-sized candidate rows or keys.
 
 Reference lookups select the longest usable leading-column index prefix and
 reorder equality values to match its column order. Partial prefixes retain a

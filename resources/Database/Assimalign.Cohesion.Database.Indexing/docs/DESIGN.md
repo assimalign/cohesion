@@ -763,6 +763,11 @@ transaction context — they run where no statement bracket exists:
   check — the builder detects live duplicates itself under the object's
   exclusive lock (online rebuild remains a non-goal). It positions each entry by
   its identity like any insert, and refuses an identity already present.
+  SQL's builder (#1444) uses the existing incremental `OpenCursor` after all inserts and
+  before publication, comparing adjacent latest-state live keys. It keeps the table Exclusive
+  lock through that walk; no new probe API or per-key transaction locks are needed. Cursor
+  batches and one previous owned key bound duplicate-detection workspace independently of
+  table size. Tombstoned entries are preserved for snapshot readers and skipped by this walk.
 - **`EraseAsync` / `ClearDeleterAsync`** — the logical-undo pair: physically
   remove an aborted writer's insert; clear an aborted writer's tombstone. Both
   verify the recorded stamp before acting, so replays and stale ledgers no-op.
