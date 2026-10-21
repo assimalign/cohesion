@@ -1390,7 +1390,7 @@ public sealed class DatabaseEventSourceTests
 
         public override long AffectedCount => 0;
 
-        public override IReadOnlyList<Diagnostic>? Diagnostics { get; }
+        public override IReadOnlyList<Diagnostic> Diagnostics { get; }
     }
 
     /// <summary>

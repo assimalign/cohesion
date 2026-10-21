@@ -42,7 +42,7 @@ namespace Assimalign.Cohesion.Database;
 /// <c>COHDBS002</c> error is the inner exception.
 /// </para>
 /// </remarks>
-public class DatabaseOfflineException : DatabaseException
+public sealed class DatabaseOfflineException : DatabaseException
 {
     /// <summary>
     /// Initializes a new <see cref="DatabaseOfflineException"/>.

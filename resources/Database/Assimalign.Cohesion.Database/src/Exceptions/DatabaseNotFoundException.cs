@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database;
 /// Callers may distinguish a missing database from other failures that prevent an
 /// existing database from being opened.
 /// </remarks>
-public class DatabaseNotFoundException : DatabaseException
+public sealed class DatabaseNotFoundException : DatabaseException
 {
     /// <summary>
     /// Initializes a new instance of <see cref="DatabaseNotFoundException"/> with a message.

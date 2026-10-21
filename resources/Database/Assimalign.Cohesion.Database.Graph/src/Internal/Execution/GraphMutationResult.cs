@@ -20,5 +20,5 @@ internal sealed class GraphMutationResult : DatabaseResult
 
     public override DatabaseResultStatus Status => DatabaseResultStatus.Success;
     public override long AffectedCount => _count;
-    public override IReadOnlyList<Diagnostic>? Diagnostics => _warnings.Count == 0 ? null : _warnings;
+    public override IReadOnlyList<Diagnostic> Diagnostics => _warnings;
 }

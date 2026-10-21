@@ -938,9 +938,9 @@ internal sealed class DatabaseEventSource : EventSource
 
     // The diagnostic a failed result reports first: its first error, or its first diagnostic of any
     // severity when it holds no error.
-    private static Diagnostic? FindFailureDiagnostic(IReadOnlyList<Diagnostic>? diagnostics)
+    private static Diagnostic? FindFailureDiagnostic(IReadOnlyList<Diagnostic> diagnostics)
     {
-        if (diagnostics is null || diagnostics.Count == 0)
+        if (diagnostics.Count == 0)
         {
             return null;
         }

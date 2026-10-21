@@ -8,7 +8,7 @@ The model-neutral request/result vocabulary of the Cohesion Data Platform:
 
 - **Requests:** `DatabaseRequest` has no members. Model requests own their inputs. Language
   requests own a typed `Statement` and `Parameters`; key-value requests carry command operands.
-- **Results:** `DatabaseResult` reports status, affected count and diagnostics.
+- **Results:** `DatabaseResult` reports status, affected count and non-null diagnostics (empty when none).
   `DatabaseResultSet` streams `DatabaseRow` values described by `DatabaseColumn` metadata.
   Each model supplies the result implementations it needs.
 

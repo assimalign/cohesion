@@ -209,8 +209,8 @@ public sealed class GqlOrderPagingTests
         rows.Select(row => row[0]).ShouldBe(["Bob", "Alice", "Isolated"]);
         scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
         staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
-        (nodeAlias.Diagnostics ?? []).ShouldBeEmpty();
-        (relationshipAlias.Diagnostics ?? []).ShouldBeEmpty();
+        nodeAlias.Diagnostics.ShouldBeEmpty();
+        relationshipAlias.Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Ordering: stable ties preserve reverse input order beyond insertion sort")]

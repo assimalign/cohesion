@@ -375,6 +375,7 @@ public sealed partial class DocumentQueryTests
     private static async Task<List<DatabaseRow>> RowsAsync(DocumentDatabaseSession session, string query, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         var result = (DatabaseResultSet)await session.ExecuteAsync(DocumentQueryRequest.FromOql(query, parameters));
+        result.Diagnostics.ShouldBeEmpty();
         await using (result)
         {
             var rows = new List<DatabaseRow>();

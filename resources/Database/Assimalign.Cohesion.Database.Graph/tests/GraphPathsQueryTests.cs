@@ -29,7 +29,7 @@ public sealed class GraphPathsQueryTests
 
         result.Status.ShouldBe(DatabaseResultStatus.Success);
         result.AffectedCount.ShouldBe(-1);
-        result.Diagnostics.ShouldBeNull();
+        result.Diagnostics.ShouldBeEmpty();
         var path = result.Paths.Single();
         path.Nodes.Select(node => node.Properties["name"]).ShouldBe([first, "B", last]);
         path.Nodes.ShouldAllBe(node => node.Labels.Contains("Vertex"));

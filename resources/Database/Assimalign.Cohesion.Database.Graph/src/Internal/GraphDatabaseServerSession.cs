@@ -605,7 +605,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (result.Status != DatabaseResultStatus.Success)
         {
-            var diagnostics = result.Diagnostics ?? [];
+            var diagnostics = result.Diagnostics;
             string detail = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
                 ?? diagnostics.FirstOrDefault()?.Message
                 ?? $"The statement completed with status {result.Status}.";
@@ -649,9 +649,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     }
 
     // Prepare the complete bounded payload before any result or Error reaches the wire.
-    private byte[]? PrepareDiagnostics(IReadOnlyList<Diagnostic>? diagnostics)
+    private byte[]? PrepareDiagnostics(IReadOnlyList<Diagnostic> diagnostics)
     {
-        if (diagnostics is null || diagnostics.Count == 0 ||
+        if (diagnostics.Count == 0 ||
             !_channel!.Capabilities.Contains(ProtocolCapability.Diagnostics.Name)) { return null; }
         var entries = new List<ProtocolDiagnostic>();
         int size = sizeof(int);

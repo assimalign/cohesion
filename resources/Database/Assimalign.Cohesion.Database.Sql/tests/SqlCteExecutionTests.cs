@@ -311,7 +311,7 @@ public sealed partial class SqlCteExecutionTests
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)
     {
         var execution = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
-        execution.Status.ShouldBe(DatabaseResultStatus.Success, string.Join("; ", (execution.Diagnostics ?? []).Select(diagnostic => diagnostic.Message)));
+        execution.Status.ShouldBe(DatabaseResultStatus.Success, string.Join("; ", execution.Diagnostics.Select(diagnostic => diagnostic.Message)));
         await using var result = execution.ShouldBeAssignableTo<DatabaseResultSet>();
         var rows = new List<object?[]>();
         await foreach (var row in result.GetRowsAsync(CancellationToken.None))
