@@ -605,7 +605,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
         if (result.Status != DatabaseResultStatus.Success)
         {
-            var diagnostics = result.Diagnostics ?? [];
+            var diagnostics = result.Diagnostics;
             string detail = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
                 ?? diagnostics.FirstOrDefault()?.Message
                 ?? $"The statement completed with status {result.Status}.";

@@ -180,13 +180,13 @@ public sealed class GqlUnknownTokenWarningTests
 
         // Assert
         deleted.AffectedCount.ShouldBe(0);
-        deleted.Diagnostics.ShouldBeNull();
+        deleted.Diagnostics.ShouldBeEmpty();
         deletedByWhere.AffectedCount.ShouldBe(0);
-        deletedByWhere.Diagnostics.ShouldBeNull();
+        deletedByWhere.Diagnostics.ShouldBeEmpty();
         unmatched.AffectedCount.ShouldBe(0);
-        unmatched.Diagnostics.ShouldBeNull();
+        unmatched.Diagnostics.ShouldBeEmpty();
         returnedRows.ShouldBeEmpty();
-        returnedDiagnostics.ShouldBeNull();
+        returnedDiagnostics.ShouldBeEmpty();
         inserted.AffectedCount.ShouldBe(2);
         state.ShouldBe(TransactionState.Active);
         await using var observer = await database.CreateSessionAsync(CancellationToken.None);
@@ -368,7 +368,7 @@ public sealed class GqlUnknownTokenWarningTests
         return session;
     }
 
-    private static async Task<(List<object?[]> Rows, IReadOnlyList<Diagnostic>? Diagnostics)> ReadAsync(GraphDatabaseSession session, string gql)
+    private static async Task<(List<object?[]> Rows, IReadOnlyList<Diagnostic> Diagnostics)> ReadAsync(GraphDatabaseSession session, string gql)
     {
         await using var result = (DatabaseResultSet)await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None);
         var rows = new List<object?[]>();

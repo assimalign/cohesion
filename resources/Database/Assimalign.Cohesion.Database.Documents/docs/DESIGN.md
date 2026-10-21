@@ -1,5 +1,10 @@
 # Documents engine design
 
+## Result diagnostics (#1264)
+
+Document command and query results return a non-null Diagnostics collection, empty when
+there is nothing to report (#1264). Failure frames retain their existing diagnostic payload.
+
 ## Child-root failure boundaries (#1247, #1364)
 
 Attached-index damage becomes `DatabaseCorruptionException` / `COHDBS003`, retaining the

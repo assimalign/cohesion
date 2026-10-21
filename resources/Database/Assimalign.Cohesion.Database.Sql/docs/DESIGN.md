@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Result diagnostics (#1264)
+
+SQL command and row results return a non-null Diagnostics collection, empty when there is
+nothing to report (#1264). SQL wire diagnostic framing is unchanged: empty diagnostics emit no frame.
+
 ## Persisted quoted view text (#1235)
 
 The shared lexer now treats `"a""x"` as one delimited identifier (`a"x`). The base engine could

@@ -1,5 +1,11 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Result diagnostics (#1264)
+
+Key-value command and materialized row results return a non-null Diagnostics collection,
+empty when there is nothing to report (#1264). Supplied command diagnostics remain intact.
+`KeyValueCatalogException` is a sealed public exception leaf (#1264).
+
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped

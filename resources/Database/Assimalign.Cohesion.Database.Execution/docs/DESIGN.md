@@ -23,8 +23,9 @@ KeyValuePair requests carry command operands; `SqlQueryRequest` and `DocumentQue
 own their typed `Statement` and `Parameters`; `GraphRequest` owns those values for the row
 and path request variants. There is no shared statement property or request-kind discriminator.
 
-`DatabaseResult` reports status, affected count and diagnostics. `DatabaseResultSet` adds
-columns and streaming `DatabaseRow` values. `DatabaseColumn` describes a column, including
+`DatabaseResult` reports status, affected count and non-null diagnostics. A result with nothing
+to report returns an empty collection, including successful row, command and path results (#1264).
+`DatabaseResultSet` adds columns and streaming `DatabaseRow` values. `DatabaseColumn` describes a column, including
 optional `MaxLength`: the declared character count or binary byte limit, not an individual
 value's size. SQL uses it with the shared `Character` identity for `CHAR(n)` metadata; its
 execution and padding rules remain in the SQL model.
@@ -103,8 +104,7 @@ KeyValuePair's command parser is an internal wire entry, not a public language c
 ## Decisions and remaining work
 
 - `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` moved unchanged to
-  `Database.Types`. Diagnostics may still be null; non-null diagnostics and further result
-  NVI work remain with #1264.
+  `Database.Types`. Diagnostics are non-null; further result NVI work remains with #1264.
 - There is no shared execution pipeline. The unused pipeline, transaction-scope and executor
   abstractions were deleted under #1257. Models own their execution and transaction brackets.
 - There is no exception root here. Model failures use the root assembly's `DatabaseException`

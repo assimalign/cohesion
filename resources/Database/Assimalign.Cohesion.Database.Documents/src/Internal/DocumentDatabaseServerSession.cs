@@ -507,7 +507,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         else if (result.Status != DatabaseResultStatus.Success)
         {
-            throw new DatabaseException(ErrorMessages.StatementFailed, result.Diagnostics ?? []);
+            throw new DatabaseException(ErrorMessages.StatementFailed, result.Diagnostics);
         }
         await WriteResultFrameAsync(DocumentProtocolMessageType.Complete, new DocumentProtocolCompleteMessage(count, result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }

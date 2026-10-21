@@ -877,6 +877,11 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+The public exception leaves `DatabaseNotFoundException`, `DatabaseOfflineException`,
+`DatabaseParseException`, `DatabaseTransactionCommitUnconfirmedException` and
+`DatabaseTransactionDeadlockException` are sealed (#1264). Their shared exception bases
+remain available for the existing variant families.
+
 `DatabaseException` (inherits `Exception` per the area-scoped exception rule) is
 the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown

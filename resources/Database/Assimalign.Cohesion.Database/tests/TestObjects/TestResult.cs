@@ -16,5 +16,5 @@ internal sealed class TestResult : DatabaseResult
 
     public override long AffectedCount => 0;
 
-    public override IReadOnlyList<Diagnostic>? Diagnostics => null;
+    public override IReadOnlyList<Diagnostic> Diagnostics => [];
 }

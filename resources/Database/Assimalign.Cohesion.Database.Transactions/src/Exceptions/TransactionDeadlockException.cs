@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// Thrown when a transaction is chosen as the victim of deadlock resolution.
 /// The transaction has been rolled back and may be retried by the caller.
 /// </summary>
-public class TransactionDeadlockException : TransactionAbortedException
+public sealed class TransactionDeadlockException : TransactionAbortedException
 {
     /// <summary>
     /// Initializes a new <see cref="TransactionDeadlockException"/>.

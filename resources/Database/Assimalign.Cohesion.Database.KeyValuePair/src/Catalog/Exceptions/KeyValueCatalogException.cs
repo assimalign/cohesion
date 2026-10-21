@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// Thrown when a key-value catalog operation fails: a malformed persisted record,
 /// or an invalid metadata write.
 /// </summary>
-public class KeyValueCatalogException : DatabaseException
+public sealed class KeyValueCatalogException : DatabaseException
 {
     /// <summary>
     /// Initializes a new <see cref="KeyValueCatalogException"/>.

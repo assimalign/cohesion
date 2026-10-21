@@ -1014,8 +1014,8 @@ yet keeps the caller's transaction and its earlier writes.
   no source position, so a name is reported once per kind, at its first mention, clause by clause:
   each clause's patterns path by path (labels, then relationship types), then its `WHERE`. A
   warning for a name first met in a labeled predicate carries that predicate's span
-  (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` stays null
-  for a statement with nothing to report. The warning travels on a row result (`DatabaseResultSet`), on
+  (`DiagnosticLocation.Absolute`); a pattern name's has none. `DatabaseResult.Diagnostics` is empty
+  for a statement with nothing to report (#1264). The warning travels on a row result (`DatabaseResultSet`), on
   `GraphPathsQueryResult`, and on the result of a statement with no projection.
 - **Writes.** `INSERT` still defines new labels and relationship types. A write whose `MATCH` names
   an unknown name empties that MATCH stage, so following `INSERT` or `DELETE` stages act on no rows until a resetting NEXT: the statement
@@ -1048,9 +1048,8 @@ yet keeps the caller's transaction and its earlier writes.
   A null label is an `ArgumentNullException` before the read starts.
   `GraphSchemaResult<T>.Diagnostics` is empty, never null, when the read reports nothing: it is a
   new collection property, and .NET's design guidelines rule out a null collection.
-  `DatabaseResult.Diagnostics` keeps its existing null-when-empty contract, so a caller tests `Count`
-  on the schema result and null on a statement result until the concrete-type redesign of the
-  Database models settles one convention. The other schema reads take no name (`GetLabelsAsync`,
+  `DatabaseResult.Diagnostics` follows the same empty-when-absent contract (#1264), so a caller
+  tests `Count` on both schema and statement results. The other schema reads take no name (`GetLabelsAsync`,
   `GetRelationshipTypesAsync`) or a definition identity (`GetPropertyKeysAsync`, empty for an
   unknown identity, unchanged).
 - **Traversal.** `TraverseAsync` resolves `GraphTraversal.RelationshipType` through the catalog before its
