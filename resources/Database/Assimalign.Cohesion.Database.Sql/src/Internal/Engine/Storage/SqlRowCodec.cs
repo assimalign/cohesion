@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -128,6 +129,11 @@ internal static class SqlRowCodec
         RecordVersionStamp.WriteWriter(record, writer);
         // Deleter starts at zero (no visible delete); bytes are already zeroed.
         payload.CopyTo(record.AsSpan(StampHeaderSize));
+        if (record.Length > SlottedPage.MaxRecordSize)
+        {
+            // PostgreSQL heap/hio.c:527-534 rejects an oversized tuple before heap mutation.
+            throw SqlEvaluationException.RowTooLarge($"{table.Schema}.{table.Name}", record.Length, SlottedPage.MaxRecordSize);
+        }
         return record;
     }
 

@@ -23,6 +23,8 @@
   <data name="CommandArityInvalid" xml:space="preserve"><value>{0} takes the form: {1}.</value></data>
   <data name="DatabaseOpenFailed" xml:space="preserve"><value>Database '{0}' could not be opened because a storage operation failed. Retry OpenDatabaseAsync after the condition is resolved. {1}</value></data>
   <data name="CreationSidecarMissing" xml:space="preserve"><value>Database '{0}' is missing a required data, journal or backup file. Preserve all files and restore the complete file set from backup; a missing sidecar cannot safely be replaced.</value></data>
+  <data name="DatabaseCatalogMissing" xml:space="preserve"><value>Database '{0}' cannot be opened: its data set exists but its catalog is missing. Preserve all storage and restore the complete database from backup; an empty catalog cannot recover the entries.</value></data>
+  <data name="DatabaseCreationIncomplete" xml:space="preserve"><value>Database '{0}' cannot be opened because creation stopped before both initial data pages were flushed. Clear this incomplete data set with DropDatabaseAsync, then call CreateDatabaseAsync again.</value></data>
   <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; commands are refused until it is rolled back.</value></data>

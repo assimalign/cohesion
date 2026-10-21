@@ -60,7 +60,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     private readonly BTreeIndexManager _indexManager;
     private readonly BTreeIndex _primaryIndex;
 
-    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false)
+    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false, KeyValueCatalog? catalog = null)
         : base(name, engine)
     {
         _engine = engine;
@@ -78,7 +78,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             _catalogStorage.TakeOffline(alreadyOffline);
         }
 
-        _catalog = KeyValueCatalog.Open(catalogStorage);
+        _catalog = catalog ?? KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
         // A wait for a lock of the database ends when it goes offline (#1268 review): an offline
@@ -236,7 +236,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// exactly the current marker: this engine stamps it before it registers the index.
     /// </remarks>
     /// <exception cref="DatabaseException">The database is on another entry-space format.</exception>
-    private static void ThrowIfFormatIsNotCurrent(string name, KeyValueCatalog catalog)
+    internal static void ThrowIfFormatIsNotCurrent(string name, KeyValueCatalog catalog)
     {
         int version = catalog.EntrySpaceFormatVersion;
         int current = KeyValueRecordCodec.EntrySpaceFormatVersion;
@@ -546,7 +546,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="key">The key to write.</param>
     /// <param name="value">The value to store.</param>
     /// <param name="options">Write conditions (insert-only, compare-and-swap), or null for an unconditional upsert.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">Observed during execution; once automatic commit starts, it cannot cancel the commit or delivery of its outcome.</param>
     /// <returns>The write outcome: whether it applied, and the new (or current) etag.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
@@ -562,7 +562,9 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         await using (set.ConfigureAwait(false))
         {
-            await foreach (DatabaseRow row in set.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+            // Execute completed (and auto-commit, if any): deliver its materialized outcome
+            // without letting late cancellation report a committed write as canceled (#1246).
+            await foreach (DatabaseRow row in set.GetRowsAsync(CancellationToken.None).ConfigureAwait(false))
             {
                 return new KeyValuePutResult(row.GetBoolean(0), row.IsNull(1) ? null : row.GetInt64(1));
             }
@@ -627,6 +629,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>An async sequence of visible, live entries in ascending key order.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
+    /// <exception cref="ArgumentException">At the first <c>MoveNextAsync</c>, <paramref name="options"/> combines a non-empty prefix with non-empty start/end bounds, or carries a negative limit.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>

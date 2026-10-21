@@ -51,6 +51,9 @@ public sealed class DocumentDatabase : DatabaseInstance
 {
     private readonly DocumentDatabaseEngine _engine;
 
+    // Test seam at the snapshot cleanup boundary, including operations without a pin.
+    internal Action? BeforeSnapshotPinRelease { get; set; }
+
     internal DocumentDatabase(DatabaseName name, DocumentDatabaseEngine engine, DocumentStorage storage, bool recover)
         : base(name, engine)
     {

@@ -332,7 +332,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
 ## Persisted read-only views (#1124)
@@ -3109,6 +3109,7 @@ pin in the same change.
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 | `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
+| `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
@@ -3123,6 +3124,25 @@ follow PostgreSQL `src/backend/utils/errcodes.txt:237-240`; SQLSTATE is not a se
 in the diagnostic carrier. NOT NULL remains COHSQLE024 (23502). The live constraint corpus
 in SqlLanguageConformanceTests and both-transport SqlConstraintDiagnosticWireTests pin the
 codes, locations, statement rollback and continued use of the session/transaction.
+
+**Row and index-key limits (#1266).** Every encoded row, including its MVCC header and
+physical column layout, must fit the storage record limit (currently 8,092 bytes).
+INSERT VALUES, INSERT SELECT, UPDATE, ON CONFLICT DO UPDATE and referential SET NULL/SET DEFAULT
+check final replacement records before physical apply. Encoded index keys, including collation
+transforms and component delimiters, are limited to 1,024 bytes for both unique and nonunique
+indexes; index construction uses the same check. Equality with either limit is accepted.
+ON CONFLICT checks sizes only for rows and keys it writes: DO NOTHING may discard an oversized
+proposal, and DO UPDATE may replace it with a fitting row even if the proposal's row or a
+non-arbiter UNIQUE key exceeds its limit. Lock hashes, arbiter lookups and old-value tombstones
+do not enforce write-size limits. This follows PostgreSQL's arbitration before insertion
+(`src/backend/executor/nodeModifyTable.c:1121-1232`).
+A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
+The failure leaves the session usable and an explicit transaction active, with earlier statements
+intact. Failed upsert preparation releases its new key and row grants, including a row retained
+after waiting, while preserving earlier transaction locks. SQLSTATE is a documented mapping,
+not a new wire field. PostgreSQL's early oversized-tuple refusal is in
+`src/backend/access/heap/hio.c:527-534`. `SqlProgramLimitConformanceTests` exercises both execution
+boundaries and exact limits; `SqlUpsertArbitrationConformanceTests` exercises release after a wait.
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

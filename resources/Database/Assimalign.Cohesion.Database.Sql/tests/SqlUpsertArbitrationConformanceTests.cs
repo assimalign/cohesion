@@ -688,6 +688,65 @@ public sealed class SqlUpsertArbitrationConformanceTests
             (await QueryAsync(writer, "SELECT id, pid FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 3, null });
         });
 
+    [Theory(DisplayName = "Cohesion Test [Sql] - Upsert size refusal: a completed wait releases the retained row and proposal keys (#1266)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ExecuteAsync_OversizedReplacementAfterRowWait_ShouldReleaseNewGrantsAndKeepEarlierWork(bool oversizedKey)
+        => RepeatAsync(async () =>
+        {
+            // Arrange
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await using var engine = SqlDatabaseEngine.Create("upsert-size-release", new());
+            var database = await engine.CreateDatabaseAsync("app", timeout.Token);
+            await using var writer = await database.CreateSessionAsync(timeout.Token);
+            await using var contender = await database.CreateSessionAsync(timeout.Token);
+            await writer.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, v TEXT)", cancellationToken: timeout.Token);
+            if (oversizedKey) { await writer.ExecuteAsync("CREATE INDEX ix_v ON t(v)", cancellationToken: timeout.Token); }
+            await writer.ExecuteAsync("INSERT INTO t VALUES (1, 'old')", cancellationToken: timeout.Token);
+            database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
+            await using var holder = await writer.BeginTransactionAsync(timeout.Token);
+            var row = await HoldFirstRowAsync(database, table.ObjectId, holder.Context.Sequence, timeout.Token);
+            await using var upsert = await contender.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            await contender.ExecuteAsync("INSERT INTO t VALUES (9, 'prior')", cancellationToken: timeout.Token);
+            using var waits = new LockWaitListener(database.Name);
+            int grants = 0;
+            waits.Observed = written =>
+            {
+                if (written.EventName == "LockWaitStop" && written.Payload is { Count: > 2 } payload &&
+                    Equals(payload[1], (long)upsert.Context.Sequence.Value) && Equals(payload[2], "Granted"))
+                { Interlocked.Increment(ref grants); }
+            };
+            var probe = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, timeout.Token);
+            var locks = database.Coordinator.LockManager;
+            var pending = contender.ExecuteAsync("INSERT INTO t VALUES (1, 'new') ON CONFLICT(id) DO UPDATE SET v = @v",
+                new Dictionary<string, object?> { ["v"] = new string('x', oversizedKey ? 2000 : 9000) }, timeout.Token).AsTask();
+            try
+            {
+                // Act: the size check executes only after a real row wait and re-arbitration.
+                await waits.WaitForWaitAsync(upsert.Context.Sequence, timeout.Token);
+                await holder.RollbackAsync(timeout.Token);
+                var failure = await Should.ThrowAsync<SqlEvaluationException>(async () => await pending);
+
+                // Assert: only the failed statement's grants are released, before transaction end.
+                failure.Code.ShouldBe("COHSQLE042");
+                Volatile.Read(ref grants).ShouldBe(1);
+                upsert.State.ShouldBe(TransactionState.Active);
+                locks.TryAcquire(probe.Sequence, row, LockMode.Exclusive).ShouldBeTrue();
+                locks.TryAcquire(probe.Sequence, LockResource.Entry(table.ObjectId, Key(1).Hash()), LockMode.Exclusive).ShouldBeTrue();
+                locks.TryAcquire(probe.Sequence, LockResource.Entry(table.ObjectId, Key(9).Hash()), LockMode.Exclusive).ShouldBeFalse();
+                (await QueryAsync(contender, "SELECT id, v FROM t ORDER BY id"))[1].ShouldBe(new object?[] { 9, "prior" });
+                await upsert.RollbackAsync(timeout.Token);
+                locks.TryAcquire(probe.Sequence, LockResource.Entry(table.ObjectId, Key(9).Hash()), LockMode.Exclusive).ShouldBeTrue();
+            }
+            finally
+            {
+                timeout.Cancel();
+                if (holder.State == TransactionState.Active) { await holder.RollbackAsync(CancellationToken.None); }
+                await ((Task)pending).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await database.Coordinator.RollbackAsync(probe, CancellationToken.None);
+            }
+        });
+
     private static async Task<LockResource> HoldFirstRowAsync(SqlDatabase database, ulong objectId, TransactionSequence owner, CancellationToken cancellationToken)
     {
         using var iterator = database.DataStorage.GetUnitIterator(objectId);

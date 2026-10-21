@@ -8,13 +8,15 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Blob.Storage;
+using Assimalign.Cohesion.Database.Blob.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 
-public sealed class BlobCatalogTests
+[Collection(nameof(BlobLockHandoffCollection))]
+public sealed partial class BlobCatalogTests
 {
     [Fact(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Listing: Should preserve metadata, ownership and ordinal prefix isolation")]
     public async Task Listing_ShouldPreserveMetadataAndContainerIsolation()
@@ -263,6 +265,56 @@ public sealed class BlobCatalogTests
         // Assert
         failure.PageId.ShouldBe(page);
         await database.Coordinator.RollbackAsync(reader);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob.Catalog] - Lookup: current reads have constant work while a snapshot retains history (#1281)")]
+    [InlineData(32)]
+    [InlineData(256)]
+    public async Task FindBlob_RetainedHistory_ShouldBoundCurrentRecordReads(int versions)
+    {
+        // Arrange
+        await using var database = new TestDatabase();
+        var container = new BlobContainerMetadata(Guid.NewGuid(), "files");
+        var entry = Entry(container.Id, "item");
+        var create = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await database.Catalog.SaveContainerAsync(container, create);
+        await database.Catalog.SaveBlobAsync(entry, create);
+        await database.Coordinator.CommitAsync(create);
+        var pinned = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        for (int version = 1; version <= versions; version++)
+        {
+            var writer = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+            await database.Catalog.SaveBlobAsync(entry with { ETag = (ulong)version }, writer);
+            await database.Coordinator.CommitAsync(writer);
+        }
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+
+        // Act: count all metadata reads, including directory cleanup, in three rounds.
+        long reads = long.MaxValue;
+        for (int round = 0; round < 3; round++)
+        {
+            long before = database.Catalog.RecordReadCount;
+            database.Catalog.FindBlob(container.Id, entry.Name, reader.Snapshot).ShouldBe(entry with { ETag = (ulong)versions });
+            reads = Math.Min(reads, database.Catalog.RecordReadCount - before);
+        }
+
+        // Assert
+        _output.WriteLine($"{versions} overwrites: minimum record reads of 3 rounds={reads}");
+        reads.ShouldBe(3);
+        database.Catalog.FindBlob(container.Id, entry.Name, pinned.Snapshot).ShouldBe(entry);
+        database.Coordinator.RunVersionPurgePass(default).ShouldBe(0);
+        await database.Coordinator.RollbackAsync(reader);
+        await database.Coordinator.RollbackAsync(pinned);
+        database.Coordinator.RunVersionPurgePass(default).ShouldBeGreaterThan(0);
+        var fresh = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot);
+        for (int probe = 0; probe <= versions; probe++)
+        {
+            long before = database.Catalog.RecordReadCount;
+            database.Catalog.GetBlobs(container.Id, null, fresh.Snapshot).ShouldHaveSingleItem();
+            (database.Catalog.RecordReadCount - before).ShouldBeLessThanOrEqualTo(3);
+        }
+        database.Catalog.CachedReferenceCount.ShouldBe(2);
+        await database.Coordinator.RollbackAsync(fresh);
     }
 
     private static BlobCatalogEntry Entry(Guid containerId, string name)

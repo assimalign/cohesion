@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -124,6 +125,39 @@ public class KeyValueClientTests
         bounded.Count.ShouldBe(2);
         Text(bounded[0].Key).ShouldBe("a:2");
         Text(bounded[1].Key).ShouldBe("b:1");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Scan: Empty bounds are omitted from wire commands (#1088)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Scan_EmptyBounds_ShouldOmitClausesAndReturnMatchingKeys(bool emptyArray)
+    {
+        // Arrange
+        var observer = new RecordingObserver();
+        await using var harness = await KeyValueClientTestHarness.StartAsync(observer: observer);
+        await using var connection = await harness.Client.ConnectAsync(KeyValueClientTestHarness.Timeout());
+        foreach (string key in new[] { "a", "b", "user:1", "user:2", "z" })
+        {
+            await connection.PutAsync(Bytes(key), Bytes("v"), KeyValueClientTestHarness.Timeout());
+        }
+        observer.Executing.Clear();
+        byte[]? bound = emptyArray ? Array.Empty<byte>() : null;
+
+        // Act
+        var all = await connection.ScanAsync(new() { Prefix = bound, Start = bound, End = bound }, KeyValueClientTestHarness.Timeout());
+        var lower = await connection.ScanAsync(new() { Start = Bytes("b"), End = bound }, KeyValueClientTestHarness.Timeout());
+        var prefixed = await connection.ScanAsync(new() { Prefix = Bytes("user:"), Start = bound, End = bound }, KeyValueClientTestHarness.Timeout());
+        bool useBound = false;
+        var conditional = await connection.ScanAsync(new() { End = useBound ? Bytes("b") : null }, KeyValueClientTestHarness.Timeout());
+        var emptyPrefix = await connection.ScanAsync(new() { Prefix = bound, Start = Bytes("b") }, KeyValueClientTestHarness.Timeout());
+
+        // Assert
+        all.Select(entry => Text(entry.Key)).ShouldBe(["a", "b", "user:1", "user:2", "z"]);
+        lower.Select(entry => Text(entry.Key)).ShouldBe(["b", "user:1", "user:2", "z"]);
+        prefixed.Select(entry => Text(entry.Key)).ShouldBe(["user:1", "user:2"]);
+        conditional.Select(entry => Text(entry.Key)).ShouldBe(all.Select(entry => Text(entry.Key)));
+        emptyPrefix.Select(entry => Text(entry.Key)).ShouldBe(lower.Select(entry => Text(entry.Key)));
+        observer.Executing.ShouldBe(["SCAN", "SCAN FROM @start", "SCAN PREFIX @prefix", "SCAN", "SCAN FROM @start"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - Pooling: a returned connection's session is reused by the next rent")]

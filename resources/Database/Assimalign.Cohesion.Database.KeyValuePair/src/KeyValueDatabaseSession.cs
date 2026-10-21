@@ -276,7 +276,8 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             var scope = new KeyValueStatementContext(context, _coordinator);
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
-            await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
+            // Execution completed: auto-commit owns the end from here, as in every model.
+            await _coordinator.CommitAsync(context).ConfigureAwait(false);
             return result;
         }
         catch (TransactionCommitUnconfirmedException exception)

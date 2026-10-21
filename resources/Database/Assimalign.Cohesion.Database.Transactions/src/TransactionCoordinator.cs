@@ -427,7 +427,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// releases its locks without appending a lifecycle record or awaiting durability.
     /// </summary>
     /// <param name="context">The transaction to commit.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="cancellationToken">
+    /// Observed only before the manager claims the end. A token canceled by then leaves
+    /// the transaction active; a started commit completes without observing the token.
+    /// </param>
+    /// <returns>A task that completes when the transaction's commit ends.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled before the commit started.</exception>
     /// <exception cref="TransactionAbortedException">The transaction was aborted instead of committed.</exception>
     /// <exception cref="TransactionCommitUnconfirmedException">
     /// The transaction committed, but its commit record could not be made durable (see

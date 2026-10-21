@@ -426,6 +426,19 @@ internal sealed class BlobDatabaseEventSource : EventSource
     private void TransferFailed(Guid sessionId, string container, string code, string exceptionType)
         => WriteEvent(13, sessionId, container, code, exceptionType);
 
+    [NonEvent]
+    public void StatementCleanupFailed(DatabaseName database, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            StatementCleanupFailed(database.ToString(), exception.GetType().FullName ?? exception.GetType().Name);
+        }
+    }
+
+    [Event(14, Level = EventLevel.Warning, Message = "Database '{0}' committed a statement whose snapshot cleanup failed: {1}.")]
+    private void StatementCleanupFailed(string database, string exceptionType)
+        => WriteEvent(14, database, exceptionType);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {

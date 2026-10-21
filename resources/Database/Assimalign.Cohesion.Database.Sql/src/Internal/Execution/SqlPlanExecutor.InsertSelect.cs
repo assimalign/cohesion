@@ -93,9 +93,9 @@ internal sealed partial class SqlPlanExecutor
             return await ExecuteUpsertRowsAsync(table, indexes, BuildRows(), onConflict, returning, statement,
                 orderedDefaults, cancellationToken).ConfigureAwait(false);
         }
-        rows.AddRange(BuildRows());
+        rows.AddRange(BuildRows().Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
 
-        IEnumerable<(byte[] Record, object?[] Values)> BuildRows()
+        IEnumerable<object?[]> BuildRows()
         {
             for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
             {
@@ -147,7 +147,8 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomains(bound, values, domainEvaluator);
                 }
 
-                yield return (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values);
+                // A conflict proposal may be discarded without ever becoming a stored row.
+                yield return values;
             }
 
         }
@@ -160,7 +161,7 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, values) in rows)
         {
-            CollectUniqueKeyHashes(indexes, table, values, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, table, values, uniqueKeyHashes);
         }
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
         var returned = returning is null ? null : new List<object?[]>(rows.Count);
@@ -178,6 +179,7 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }
+                AfterInsertApplied?.Invoke();
                 return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)
                     : MaterializeProjected(returning!, returned, rows.Count);
             }, durable: false, cancellationToken).ConfigureAwait(false);

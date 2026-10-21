@@ -26,6 +26,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed partial class SqlPlanExecutor
 {
+    // Test seam: after the final INSERT effect, while its statement apply is still admitted.
+    internal static Action? AfterInsertApplied { get; set; }
+    internal static Action? AfterSelfCommit { get; set; }
+
     private readonly SqlStorage _storage;
     private readonly SqlCatalog _catalog;
     private readonly BTreeIndexManager _indexManager;
@@ -512,7 +516,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
             CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            CollectUniqueKeyHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
@@ -630,8 +634,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in updates.Values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var location = _storage.InsertRow(bracket, update.Table.ObjectId,
-                    SqlRowCodec.Encode(update.Table, update.NewValues, statement.Transaction.Sequence));
+                var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                 try
                 {
@@ -760,7 +763,7 @@ internal sealed partial class SqlPlanExecutor
     /// temporal identity (null components participate — nulls sort first and
     /// count as key values).
     /// </summary>
-    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
         var writer = new DatabaseKeyWriter();
 
@@ -774,7 +777,22 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Collects the key-lock hashes a row contributes on every unique index.
+    /// Builds and validates a key that will be written, including during index construction.
+    /// Locking, lookups and tombstones use the unchecked builder so old values and
+    /// discarded conflict proposals never fail a write-size check.
+    /// </summary>
+    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    {
+        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values);
+        if (key.Length > BTreeIndex.MaxKeyLength)
+        {
+            throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, BTreeIndex.MaxKeyLength);
+        }
+        return key;
+    }
+
+    /// <summary>
+    /// Collects lock hashes for existing values without validating or building nonunique keys.
     /// </summary>
     private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
     {
@@ -782,8 +800,20 @@ internal sealed partial class SqlPlanExecutor
         {
             if (liveIndex.Metadata.IsUnique)
             {
-                hashes.Add(BuildIndexKey(table, liveIndex.KeyOrdinals, values).Hash());
+                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
             }
+        }
+    }
+
+    /// <summary>
+    /// Validates every index key before apply and collects the unique keys' lock hashes.
+    /// </summary>
+    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    {
+        foreach (var liveIndex in indexes)
+        {
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            if (liveIndex.Metadata.IsUnique) { hashes.Add(key.Hash()); }
         }
     }
 
@@ -863,7 +893,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
             await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
             statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
@@ -963,6 +993,7 @@ internal sealed partial class SqlPlanExecutor
     {
         await commit.ConfigureAwait(false);
         statement.Metrics.RecordSelfCommit();
+        AfterSelfCommit?.Invoke();
     }
 
     /// <summary>
@@ -978,6 +1009,7 @@ internal sealed partial class SqlPlanExecutor
     {
         T result = await commit.ConfigureAwait(false);
         statement.Metrics.RecordSelfCommit();
+        AfterSelfCommit?.Invoke();
         return result;
     }
 

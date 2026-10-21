@@ -78,12 +78,6 @@ internal readonly ref struct BTreeNode
     /// </summary>
     internal const int DirectorySlotSize = 2;
 
-    /// <summary>
-    /// The largest key accepted, chosen so a fresh node always holds several entries
-    /// (split correctness requires at least two per node).
-    /// </summary>
-    internal const int MaxKeyLength = 1024;
-
     internal BTreeNode(Span<byte> body)
     {
         _body = body;
