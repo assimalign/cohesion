@@ -1147,7 +1147,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation |
 | `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
-| `COHDBG006` | Storage failure translated at the engine boundary |
+| `COHDBG006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
 | `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
@@ -1160,6 +1160,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
+| `COHDBG019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 | `COHDBS003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
@@ -1175,6 +1176,28 @@ or message prefixes: they are `Diagnostic` objects with a `Code` and `Diagnostic
 a successful result. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
 Ownership uses the shared dedicated exception rather than an invented graph ownership code.
+
+### Statement boundaries and programmatic arguments (#1199)
+
+Catalog decode failures become `COHDBG006`, as do ordinary index and storage failures;
+index/page corruption retains the common `COHDBS003` corruption signal. Catalog mutation
+conflicts carry an internal classification and become `DatabaseTransactionAbortedException`
+(`COHDBG007`), retaining the catalog cause. Disposal inside an admitted operation is
+`COHDBG019`, checked before the general InvalidOperationException/schema mismatch mapping.
+The wire statement handler also maps ObjectDisposedException from the early lifetime guards
+to that code. Each is an ExecutionFailure and keeps the authenticated session ready. An
+explicit transaction aborts on a failed admitted statement and must be rolled back.
+The per-catalog internal record-read hook exercises these engine-to-wire boundaries without
+changing stored bytes or exposing a fault-injection API.
+
+`CreateNodeAsync` rejects a null label list and null, empty or whitespace label names before
+admitting a statement; `CreateRelationshipAsync` rejects a null, empty or whitespace type.
+These are ArgumentException (ArgumentNullException for null) caller-contract failures and
+leave an explicit transaction active. Session binding/null checks also precede admission.
+GQL never calls these public argument guards: its planner validates inserted label/type names,
+property keys, finite literals and parameter values before the executor uses the core methods.
+Invalid wire text therefore receives a located parse/planning diagnostic. Direct schema and
+catalog APIs validate metadata identities, names, ownership and types as documented in XML.
 
 ## Lifecycle and delivery
 

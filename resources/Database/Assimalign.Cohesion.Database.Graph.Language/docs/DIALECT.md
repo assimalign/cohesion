@@ -12,6 +12,12 @@ The error is an execution failure over the wire; the connection remains usable. 
 legitimately reclaimed location retains its existing absence semantics. The engine's
 storage-integrity conformance tests cover corrupted media through the executing language.
 
+Malformed catalog records and ordinary index/storage failures report `COHDBG006`.
+Catalog write conflicts abort with `COHDBG007`; disposal during execution or at the wire
+statement's lifetime guard reports `COHDBG019`. These are ExecutionFailure responses and
+leave the wire session ready. An aborted explicit transaction requires rollback before
+further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
+
 ## MATCH and OPTIONAL MATCH
 
 MATCH and OPTIONAL MATCH clauses execute in source order. Each WHERE belongs to its own

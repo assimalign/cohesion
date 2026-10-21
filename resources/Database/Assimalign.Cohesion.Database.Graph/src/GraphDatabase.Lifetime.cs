@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -105,14 +106,20 @@ public sealed partial class GraphDatabase
         DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
             or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
         DatabaseException { Diagnostics.Count: > 0 } => error,
+        _ when DatabaseFailure.Find<ObjectDisposedException>(error) is not null
+            => new DatabaseException(ErrorMessages.GraphDisposed, [new Types.Diagnostic
+            { Code = "COHDBG019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
+            => new DatabaseTransactionAbortedException("COHDBG007: " + error.Message, error),
         _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null
             || DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null
+            || DatabaseFailure.Find<GraphCatalogException>(error) is not null
             => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ => error,

@@ -464,6 +464,15 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
+        catch (ObjectDisposedException exception)
+        {
+            // Early session/database guards precede the engine's statement bracket. Preserve
+            // their direct-API contract while answering a disposed wire statement with a code.
+            var reported = (DatabaseException)_databaseSession!.Database.TranslateKernelFailure(exception);
+            await WriteDiagnosticsAsync(PrepareDiagnostics(reported.Diagnostics), cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, "COHDBG019: " + reported.Message, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         catch (DatabaseTypeException exception)
         {
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);

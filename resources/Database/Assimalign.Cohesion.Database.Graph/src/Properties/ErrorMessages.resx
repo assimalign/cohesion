@@ -6,6 +6,7 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="DatabaseFilesIncomplete" xml:space="preserve"><value>Database '{0}' has a directory without a database in it, or creation stopped before both initial data pages were flushed. Creation never completed. Clear this incomplete file set with DropDatabaseAsync, then call CreateDatabaseAsync again.</value></data>
   <data name="DatabaseOpenRefused" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
+  <data name="GraphDisposed" xml:space="preserve"><value>The graph database or one of its resources has been disposed.</value></data>
   <data name="ArithmeticFailure" xml:space="preserve"><value>Graph arithmetic failed: division by zero, overflow or a non-finite result.</value></data>
   <data name="BooleanRequired" xml:space="preserve"><value>A Boolean expression requires TRUE, FALSE or NULL.</value></data>
   <data name="NumericRequired" xml:space="preserve"><value>A numeric sign requires a numeric operand.</value></data>

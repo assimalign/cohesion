@@ -33,6 +33,9 @@ public sealed class GraphCatalog
     private readonly object _sync = new();
     private readonly Dictionary<(byte Kind, Guid Parent, string Name), List<Reference>> _versions = new();
 
+    // Per-instance fault/record-visit seam, reached only by this model's tests.
+    internal Action? BeforeRecordRead { get; set; }
+
     private GraphCatalog(GraphStorage storage, TransactionCoordinator coordinator)
         => (_storage, _coordinator) = (storage, coordinator);
 
@@ -196,7 +199,7 @@ public sealed class GraphCatalog
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
         if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
         {
-            throw new GraphCatalogException($"Index '{index.Name}' already identifies property '{previous.PropertyKey}'.");
+            throw new GraphCatalogException($"Index '{index.Name}' already identifies property '{previous.PropertyKey}'.") { IsConflict = true };
         }
         return SaveAsync(record, prior, context, cancellationToken);
     }
@@ -232,7 +235,7 @@ public sealed class GraphCatalog
             RefuseSchemaOwner(found.Record, "ALTER");
             if (found.Record.Id != record.Id)
             {
-                throw new GraphCatalogException($"Definition '{record.Name}' already has a different identity.");
+                throw new GraphCatalogException($"Definition '{record.Name}' already has a different identity.") { IsConflict = true };
             }
         }
         var latestSnapshot = Latest(context);
@@ -240,7 +243,7 @@ public sealed class GraphCatalog
             .FirstOrDefault(item => item.Record.Id == record.Id);
         if (sameIdentity.Record is { } same && (same.Kind != record.Kind || same.Name != record.Name))
         {
-            throw new GraphCatalogException("A definition identity cannot be reused or renamed.");
+            throw new GraphCatalogException("A definition identity cannot be reused or renamed.") { IsConflict = true };
         }
         return SaveAsync(record, previous, context, cancellationToken);
     }
@@ -311,8 +314,8 @@ public sealed class GraphCatalog
         }
     }
 
-    private static GraphCatalogException Conflict()
-        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.");
+    internal static GraphCatalogException Conflict()
+        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.") { IsConflict = true };
 
     private void RequireMutableDefinition(Guid id, TransactionSnapshot snapshot, string operation, bool labelOnly = false)
     {
@@ -324,7 +327,7 @@ public sealed class GraphCatalog
         }
         if (found.Record is null)
         {
-            throw new GraphCatalogException("The owning graph definition does not exist.");
+            throw new GraphCatalogException("The owning graph definition does not exist.") { IsConflict = true };
         }
         RefuseSchemaOwner(found.Record, operation);
     }
@@ -406,6 +409,7 @@ public sealed class GraphCatalog
             for (int index = versions.Count - 1; index >= 0; index--)
             {
                 var reference = versions[index];
+                BeforeRecordRead?.Invoke();
                 // A reclaimed location (a deleted or reverted slot, a freed page, a page
                 // reused by another owner or as a non-data page) is a stale reference;
                 // CRC and I/O errors propagate (#1342).

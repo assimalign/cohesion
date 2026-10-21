@@ -112,7 +112,7 @@ public sealed class GraphSchema
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The existing label is schema owned.</exception>
     /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
-    /// <exception cref="GraphCatalogException">
+    /// <exception cref="DatabaseTransactionAbortedException">
     /// The identity or name conflicts with an existing definition, or the definition changed since
     /// the transaction's snapshot.
     /// </exception>
@@ -133,7 +133,7 @@ public sealed class GraphSchema
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The existing type is schema owned.</exception>
     /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
-    /// <exception cref="GraphCatalogException">
+    /// <exception cref="DatabaseTransactionAbortedException">
     /// The identity or name conflicts with an existing definition, or the definition changed since
     /// the transaction's snapshot.
     /// </exception>
@@ -154,7 +154,7 @@ public sealed class GraphSchema
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema owned.</exception>
     /// <exception cref="ArgumentException">The property metadata is invalid, such as a blank name.</exception>
-    /// <exception cref="GraphCatalogException">The owning definition is absent, or it changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The owning definition is absent, or it changed since the transaction's snapshot.</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
@@ -201,7 +201,7 @@ public sealed class GraphSchema
     /// <returns>Completion of index creation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The label is schema owned.</exception>
     /// <exception cref="ArgumentException"><paramref name="label"/> is null, or the index name or the property name is null, empty or whitespace.</exception>
-    /// <exception cref="GraphCatalogException">The index name already identifies another property, or the label or index changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The index name already identifies another property, or the label or index changed since the transaction's snapshot.</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
@@ -226,7 +226,7 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The label is schema owned.</exception>
-    /// <exception cref="GraphCatalogException">The label or its property or index metadata changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The label or its property or index metadata changed since the transaction's snapshot.</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
@@ -255,7 +255,7 @@ public sealed class GraphSchema
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The type is schema owned.</exception>
-    /// <exception cref="GraphCatalogException">The type or its property metadata changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The type or its property metadata changed since the transaction's snapshot.</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
