@@ -22,7 +22,9 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// carries its message type and payload length only, never its payload.
 /// </para>
 /// <para>
-/// Exact attempted stream writes, explicit flushes and outstanding pooled buffers are counted
+/// Plan D6: ordinary writers (including SQL's per-row writer) never update process-wide counters
+/// per frame; doing so would create contention between sessions. Exact attempted writes and explicit
+/// flushes count batched writers only. Pool counters cover their buffers and borrowed reads only,
 /// independently of listeners. Frame failures are reported by their owning session or client.
 /// </para>
 /// </remarks>
@@ -67,11 +69,11 @@ internal sealed class ProtocolEventSource : EventSource
     {
         if (command.Command != EventCommand.Enable) { return; }
         _writesCounter ??= new PollingCounter("transport-write-calls", this, () => TransportWrites)
-        { DisplayName = "Transport Write Calls" };
+        { DisplayName = "Batched Writer Transport Write Calls" };
         _flushesCounter ??= new PollingCounter("transport-flush-calls", this, () => TransportFlushes)
-        { DisplayName = "Explicit Transport Flush Calls" };
+        { DisplayName = "Batched Writer Explicit Transport Flush Calls" };
         _buffersCounter ??= new PollingCounter("pooled-buffers-in-use", this, () => PooledBuffersInUse)
-        { DisplayName = "Pooled Buffers In Use" };
+        { DisplayName = "Batched Writer and Borrowed Read Buffers In Use" };
     }
 
     private ProtocolEventSource()

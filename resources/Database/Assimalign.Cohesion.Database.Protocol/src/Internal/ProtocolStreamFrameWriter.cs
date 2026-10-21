@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -66,22 +67,24 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         if (frame.Payload.IsEmpty)
         {
             frame.Header.WriteTo(_header);
-            ProtocolEventSource.Log.TransportWrite();
+            if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportWrite(); }
             await _stream.WriteAsync(_header, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            byte[] buffer = ProtocolBufferPool.Rent(length);
+            byte[] buffer = _maxBatchBytes != 0
+                ? ProtocolBufferPool.Rent(length) : ArrayPool<byte>.Shared.Rent(length);
             try
             {
                 frame.Header.WriteTo(buffer);
                 frame.Payload.CopyTo(buffer.AsMemory(ProtocolFrameHeader.Size));
-                ProtocolEventSource.Log.TransportWrite();
+                if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportWrite(); }
                 await _stream.WriteAsync(buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
             }
             finally
             {
-                ProtocolBufferPool.Return(buffer);
+                if (_maxBatchBytes != 0) { ProtocolBufferPool.Return(buffer); }
+                else { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
             }
         }
 
@@ -93,7 +96,7 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await SendBatchAsync(cancellationToken).ConfigureAwait(false);
-        ProtocolEventSource.Log.TransportFlush();
+        if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportFlush(); }
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 

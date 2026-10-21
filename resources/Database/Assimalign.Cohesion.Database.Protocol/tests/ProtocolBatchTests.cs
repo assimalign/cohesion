@@ -16,6 +16,35 @@ namespace Assimalign.Cohesion.Database.Protocol.Tests;
 [Collection(nameof(ProtocolEventSourceCollection))]
 public sealed class ProtocolBatchTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Ordinary row writers leave batch and borrow counters unchanged")]
+    public async Task WriteFrameAsync_OrdinaryWriter_ShouldAvoidProcessWideCounters()
+    {
+        // Arrange
+        using var stream = new RecordingWriteStream();
+        long writes = ProtocolEventSource.Log.TransportWrites;
+        long flushes = ProtocolEventSource.Log.TransportFlushes;
+        long rented = ProtocolEventSource.Log.RentedBuffers;
+        long returned = ProtocolEventSource.Log.ReturnedBuffers;
+        long inUse = ProtocolEventSource.Log.PooledBuffersInUse;
+        await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
+
+        // Act: SQL writes a payload frame per row; empty frames and explicit flushes also stay uncounted.
+        for (int i = 0; i < 20; i++)
+        {
+            await writer.WriteFrameAsync(new((ProtocolMessageType)7, new byte[] { 1, 2, 3 }), CancellationToken.None);
+        }
+        await writer.WriteFrameAsync(new(ProtocolMessageType.Pong, ReadOnlyMemory<byte>.Empty), CancellationToken.None);
+        await writer.FlushAsync(CancellationToken.None);
+
+        // Assert
+        stream.WriteLengths.Count.ShouldBe(21);
+        ProtocolEventSource.Log.TransportWrites.ShouldBe(writes);
+        ProtocolEventSource.Log.TransportFlushes.ShouldBe(flushes);
+        ProtocolEventSource.Log.RentedBuffers.ShouldBe(rented);
+        ProtocolEventSource.Log.ReturnedBuffers.ShouldBe(returned);
+        ProtocolEventSource.Log.PooledBuffersInUse.ShouldBe(inUse);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Twenty frames use one bounded transport write")]
     public async Task WriteFrameAsync_TwentyFrames_ShouldCopyOnceAndFlushOneBatch()
     {

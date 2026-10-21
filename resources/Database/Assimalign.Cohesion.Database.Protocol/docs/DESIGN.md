@@ -160,8 +160,11 @@ stream write, before an explicit writer flush; the stream may already have flush
 
 **The trace allocates nothing while nobody takes it.** The stream cores are already asynchronous
 methods, so the trace adds one `IsEnabled(Verbose, Frames)` check per frame and no wrapper, task
-or allocation; the public members return the core's task unchanged. Exact transport counters
-count stream write calls and explicit stream flush calls, including failed attempts.
+or allocation; the public members return the core's task unchanged. Plan decision D6 keeps
+ordinary writers free of process-wide per-frame counter updates: SQL writes one frame per row,
+and shared atomics would contend between sessions. Exact transport counters count only batched
+writers' stream write calls and explicit flush calls, including failed attempts. Pool counters
+cover batched writer buffers and borrowed payloads, excluding ordinary writers' temporary arrays.
 Frame failures (`ProtocolException`) are not events here: the server
 session or the client that catches one reports it, with its session or connection.
 
