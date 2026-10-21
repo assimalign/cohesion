@@ -252,11 +252,17 @@ public sealed class StorageStaleTouchTests
         else
         {
             storage.Update(replacement, original, 0, new byte[] { 8 });
-            replacement.Commit();
         }
         stale.Commit();
         storage.ReadBytes(original, 0).ShouldBe(new byte[] { 8 });
         storage.ScanOwner(replacementOwner).ShouldContain(row => row.SequenceEqual(new byte[] { 8 }));
+        if (!replacementCommitted)
+        {
+            // The replacement remains active across the stale bracket's commit,
+            // and can still update before publishing its own commit.
+            storage.Update(replacement, original, 0, new byte[] { 8 });
+            replacement.Commit();
+        }
         using (var update = storage.BeginTransaction())
         {
             storage.Update(update, original, 0, new byte[] { 9 });
