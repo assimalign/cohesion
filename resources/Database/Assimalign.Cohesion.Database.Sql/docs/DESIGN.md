@@ -3429,8 +3429,11 @@ project reference or InternalsVisibleTo change is required.
   Unordered scans allocate only their output list, keeping sort state off the
   ordinary lookup path and preserving its existing allocation budget.
   An unordered non-DISTINCT LIMIT stops after OFFSET + LIMIT qualifying rows;
-  LIMIT 0 reads none. Each evaluated row still reports its expression failures,
-  while unvisited rows are not evaluated. ORDER BY with a non-DISTINCT LIMIT
+  LIMIT 0 reads none. Ordered non-DISTINCT LIMIT 0 also reads none: the row
+  collector is complete at construction, so no projection or key is evaluated.
+  The independent-volatile fallback is the exception: it lists, sorts and projects
+  every input before the window. Each evaluated row still reports its expression failures,
+  while unvisited rows are not evaluated. ORDER BY with a positive non-DISTINCT LIMIT
   evaluates every input but retains a max-heap of at most OFFSET + LIMIT outputs
   and fixed key tuples, then sorts that heap. The input ordinal breaks key ties
   to preserve the full sort's stability, collations and independent NULL placement.
@@ -5682,9 +5685,11 @@ count at bytes `4 + S`–`7 + S`. Each parameter beginning at byte `Q` has a non
 signed 32-bit big-endian name length `N` at bytes `Q`–`Q + 3`, `N` UTF-8 name bytes at
 byte `Q + 4`, a nonnegative signed 32-bit big-endian encoded-value length `V` at bytes
 `Q + 4 + N`–`Q + 7 + N`, and `V` self-describing scalar-component bytes at byte
-`Q + 8 + N`. `ResultHeader` (6) starts with a nonnegative signed 32-bit big-endian column
-count at bytes 0–3; each repeated column has the same four-byte name length and UTF-8 name,
-followed immediately by one unsigned `DatabaseType` byte. `ResultRow` (7) concatenates one
+`Q + 8 + N`. `ResultHeader` (6) starts with the signed 32-bit big-endian format marker -2
+at bytes 0–3 and a nonnegative signed 32-bit big-endian column count at bytes 4–7; each
+repeated column has the same four-byte name length and UTF-8 name, then one unsigned
+`DatabaseType` byte, then a signed 32-bit big-endian `MaxLength` (-1 when unbounded; 0 and
+values below -1 are refused). `ResultRow` (7) concatenates one
 self-describing scalar component per result field from byte 0 through the payload end, with
 no count prefix. `Transaction` (9) is reserved and has no implemented payload; SQL
 transaction commands travel as statement text in `Execute`.

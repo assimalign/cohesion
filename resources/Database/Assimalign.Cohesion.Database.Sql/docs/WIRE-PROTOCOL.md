@@ -87,7 +87,7 @@ must be nonnegative. Writers emit exactly the fields below with no padding.
 | Byte | Direction | Payload |
 | --- | --- | --- |
 | 5 Execute | Client to server | string statement, i32 parameterCount, repeated (string name, i32 encodedLength, encoded scalar component) |
-| 6 ResultHeader | Server to client | i32 columnCount, repeated (string name, u8 DatabaseType) |
+| 6 ResultHeader | Server to client | i32 format marker -2, i32 columnCount, repeated (string name, u8 DatabaseType, i32 MaxLength; -1 when unbounded) |
 | 7 ResultRow | Server to client | Concatenated self-describing scalar components, in column order; no count prefix |
 | 8 ResultComplete | Server to client | i64 affectedCount; -1 for queries, n for writes including RETURNING |
 | 9 Transaction | Reserved model identifier | No implemented payload; send transaction commands through Execute where supported |
@@ -140,7 +140,7 @@ byte after the sign, including the terminator (FF). This is System.Decimal's
 
 Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 58 00 00 00 00`; one header column ("id", Int64) =
-`00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
+`FF FF FF FE 00 00 00 01 00 00 00 02 69 64 05 FF FF FF FF`; completion(42) =
 `00 00 00 00 00 00 00 2A`. The existing server tests exercise these model payloads;
 ProtocolMessageTests additionally fixes these payload bytes.
 

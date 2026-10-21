@@ -15,7 +15,8 @@ without re-implementing any of the transport, framing, or pooling below it.
 The client **does not parse SQL**. It sends statement text and parameters over the
 wire; the server's SQL session parses, plans, and executes them. That keeps the
 client contract stable and independent of the engine's internal plan structures.
-The model reference supplies wire codecs; the client never calls its parser.
+Its wire codecs come from `Database.Sql.Protocol`; it references neither the SQL engine
+nor `Sql.Language`.
 
 ## Scope
 
@@ -46,10 +47,12 @@ category; the engine code also prefixes the message when diagnostics are not neg
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Database` — the `DatabaseException` area root.
-- `Assimalign.Cohesion.Database.Client` — the pooling client core this layers over.
-- `Assimalign.Cohesion.Database.Sql` — the SQL family identifiers and payload codecs.
-- `Assimalign.Cohesion.Database.Types` — `DatabaseType` column identities.
+- `Assimalign.Cohesion.Database.Client` — the pooling client core this layers over; its
+  `shared/` diagnostics snapshot is also compiled in (`CohesionSharedSource`).
+- `Assimalign.Cohesion.Database.Protocol` — framing, `ProtocolErrorCode` and the shared
+  error/lifecycle messages.
+- `Assimalign.Cohesion.Database.Sql.Protocol` — the SQL family identifiers and payload codecs.
+- `Assimalign.Cohesion.Database.Types` — `DatabaseType` column identities and `Diagnostic`.
 - `Assimalign.Cohesion.Connections` — the transport `IDuplexConnectionFactory` handed to
   the client core.
 

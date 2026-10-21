@@ -32,8 +32,10 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
 
 ## Dependencies
 
-`Database` (root contracts + exception root), `Database.Protocol` (framing +
-shared messages and family binding), `Connections` (transport factories).
+`Database.Types` (`DatabaseType` identities and `Diagnostic`), `Database.Protocol`
+(framing + shared messages and family binding), `Connections` (transport factories).
+It does not reference the `Database` root: `DatabaseClientException` is its own
+exception root.
 
 ## Usage
 

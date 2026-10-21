@@ -1431,18 +1431,26 @@ over the SQL wire protocol (#1100). Negative and non-integer counts retain the
 diagnostics.
 
 For non-DISTINCT queries without ORDER BY, execution stops output evaluation after
-OFFSET + LIMIT qualifying rows; LIMIT 0 evaluates no output rows (#1523). Stored-table
+OFFSET + LIMIT qualifying rows (#1523). Stored-table
 and system-view scans also stop reading input. Grouped queries still consume their
 aggregate input, but stop group projection and HAVING evaluation at the window;
 correlated queries stop outer-row evaluation. Join inputs/results and set operands
 still materialize, while their final projection stops at the window. Unvisited
 projections and HAVING predicates raise no errors and make no volatile function
 calls, following PostgreSQL's Limit node (`src/backend/executor/nodeLimit.c:82-124`).
-Non-DISTINCT ORDER BY + LIMIT
+Non-DISTINCT ORDER BY + a positive LIMIT
 with fixed ordering collations evaluates every input and retains only the best
 OFFSET + LIMIT rows, with stable input order for ties and the same collation/NULL
 placement as a full sort. Deferred collations keep full sorting, using the last
 qualifying row's resolved collations even when later rows fail WHERE or HAVING.
+Non-DISTINCT LIMIT 0, with or without ORDER BY, returns before the scan starts:
+no input row is read and no WHERE predicate, projection or ORDER BY key is
+evaluated. Grouped queries still consume their aggregate input but evaluate no
+group's HAVING or projection; correlated queries evaluate no outer row. Two cases
+do not short-circuit: the independent-volatile ORDER BY fallback below reads and
+sorts every input and projects every row before LIMIT 0 discards them, and a
+grouped query whose ORDER BY is correlated evaluates every group's HAVING and
+projection (but no ORDER BY key).
 DISTINCT still completes
 before pagination. Results remain fully evaluated before delivery; ordered index
 access and spillable sorting are separate work.
