@@ -156,8 +156,7 @@ internal sealed partial class SqlPlanner
         }
         if (select.From.Count == 0)
         {
-            if (IsCommonTableOperand(select)) { return PlanConstantCommonTable(select); }
-            throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
+            return PlanConstantSelect(select);
         }
 
         var source = ResolveRelation(select.From[0].Table, select);
@@ -186,8 +185,8 @@ internal sealed partial class SqlPlanner
         SqlBoundExpression? where = null;
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator, _subqueryTypes);
-            where = evaluator.Bind(select.Where);
+            ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
+            where = evaluator.BindPredicate(select.Where);
         }
 
         var orderByProjections = BindOrderByProjections(select, projections, outputOrdinals?.Count ?? columns.Count);
@@ -323,6 +322,7 @@ internal sealed partial class SqlPlanner
         bool usesOutput = false;
         foreach (var child in Children(expression)) { usesOutput |= ValidateOrderingCalls(child, scope); }
         if (usesOutput && expression is SqlFunctionCallExpression call) { ResolveCall(call, scope); }
+        if (usesOutput) { ValidateBooleanPositions(expression, scope, null, null); }
         return usesOutput;
     }
 
@@ -920,8 +920,8 @@ internal sealed partial class SqlPlanner
         if (update.Where is not null)
         {
             RejectAggregateInDmlWhere(update.Where);
-            ValidateExpression(update.Where, evaluator, _subqueryTypes);
-            where = evaluator.Bind(update.Where);
+            ValidatePredicate(update.Where, evaluator, "WHERE", _subqueryTypes);
+            where = evaluator.BindPredicate(update.Where);
         }
 
         var input = new SqlUpdatePlan(table, assignments, where, SelectAccessPath(table, update.Where, evaluator))
@@ -944,8 +944,8 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            ValidateExpression(delete.Where, evaluator, _subqueryTypes);
-            where = evaluator.Bind(delete.Where);
+            ValidatePredicate(delete.Where, evaluator, "WHERE", _subqueryTypes);
+            where = evaluator.BindPredicate(delete.Where);
         }
 
         var input = new SqlDeletePlan(table, where, SelectAccessPath(table, delete.Where, evaluator))
@@ -1387,11 +1387,11 @@ internal sealed partial class SqlPlanner
     /// <exception cref="DatabaseException">The expression cannot be planned.</exception>
     internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
-        IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
+        IReadOnlyDictionary<SqlExpression, int>? boundValues = null, bool validateBooleanPositions = true)
     {
         try
         {
-            ValidateExpressionCore(expression, evaluator, boundSubqueries, boundValues);
+            ValidateExpressionCore(expression, evaluator, boundSubqueries, boundValues, validateBooleanPositions);
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
         {
@@ -1399,9 +1399,61 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    // PostgreSQL parse_coerce.c:1163-1184 checks each Boolean construct by name and
+    // reports datatype mismatch before execution. NULL remains an unknown predicate.
+    private static void ValidatePredicate(SqlExpression expression, SqlExpressionEvaluator evaluator, string clause,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null)
+    {
+        ValidateExpression(expression, evaluator, boundSubqueries);
+        ValidateBooleanOperand(expression, evaluator, clause, boundSubqueries, null);
+    }
+
+    private static void ValidateBooleanOperand(SqlExpression expression, SqlExpressionEvaluator evaluator, string clause,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues, SqlExpression? diagnosticExpression = null)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        // ORDER BY aliases acquire their types in the completed output scope.
+        if (boundValues is not null && ContainsBoundOutput(expression, boundValues)) { return; }
+        // PostgreSQL resolves all CASE/COALESCE alternatives before execution, including
+        // unreachable ones (parse_expr.c:1742,2244). Do not trust the first inferred type.
+        if (expression is SqlCaseExpression conditional)
+        {
+            foreach (var branch in conditional.WhenClauses)
+            {
+                ValidateBooleanOperand(branch.Result, evaluator, clause, boundSubqueries, boundValues);
+            }
+            if (conditional.ElseResult is { } alternative)
+            {
+                ValidateBooleanOperand(alternative, evaluator, clause, boundSubqueries, boundValues);
+            }
+            return;
+        }
+        if (expression is SqlFunctionCallExpression call && SqlStandardLibrary.IsCoalesce(call.FunctionName))
+        {
+            foreach (var argument in call.Arguments)
+            {
+                ValidateBooleanOperand(argument, evaluator, clause, boundSubqueries, boundValues);
+            }
+            return;
+        }
+        if (SqlExpressionEvaluator.TryBooleanLiteral(expression, out _)) { return; }
+        if (expression is SqlParameterExpression parameter &&
+            evaluator.TryGetParameterValue(parameter, out var value) && value is not null && value is not bool)
+        {
+            throw SqlEvaluationException.BooleanRequired(clause, SqlExpressionEvaluator.OperandTypeName(value)).At((diagnosticExpression ?? expression).Location);
+        }
+        var type = evaluator.HasOutputValues ? evaluator.StaticTypeOf(expression)
+            : StaticOperandType(expression, evaluator, boundSubqueries, boundValues) ?? evaluator.StaticTypeOf(expression);
+        if (type is not (DatabaseType.Boolean or DatabaseType.Null))
+        {
+            throw SqlEvaluationException.BooleanRequired(clause, SqlType.NameOf(type)).At((diagnosticExpression ?? expression).Location);
+        }
+    }
+
     private static void ValidateExpressionCore(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
-        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+        IReadOnlyDictionary<SqlExpression, int>? boundValues, bool validateBooleanPositions)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (boundValues is not null && boundValues.ContainsKey(expression))
@@ -1450,8 +1502,10 @@ internal sealed partial class SqlPlanner
 
         foreach (var child in Children(expression))
         {
-            ValidateExpression(child, evaluator, boundSubqueries, boundValues);
+            ValidateExpression(child, evaluator, boundSubqueries, boundValues, validateBooleanPositions);
         }
+
+        if (validateBooleanPositions) { ValidateBooleanPositions(expression, evaluator, boundSubqueries, boundValues); }
 
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic)
         {
@@ -1468,6 +1522,38 @@ internal sealed partial class SqlPlanner
         }
         // Calls using output aliases resolve when BindOrdering supplies the completed
         // projection's types. The input scope cannot choose their overloads yet.
+    }
+
+    private static void ValidateBooleanPositions(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        switch (expression)
+        {
+            case SqlLogicalExpression logical:
+                foreach (var operand in logical.Operands)
+                {
+                    ValidateBooleanOperand(operand, evaluator, logical.Operator == SqlLogicalOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                }
+                break;
+            case SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } binary:
+                ValidateBooleanOperand(binary.Left, evaluator, binary.Operator == SqlBinaryOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                ValidateBooleanOperand(binary.Right, evaluator, binary.Operator == SqlBinaryOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                break;
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } unary:
+                // Preserve NOT's established operator span, including LIMIT/OFFSET diagnostics.
+                ValidateBooleanOperand(unary.Operand, evaluator, "NOT", boundSubqueries, boundValues, unary);
+                break;
+            case SqlBooleanTestExpression test:
+                ValidateBooleanOperand(test.Operand, evaluator, $"IS {test.TruthValue.ToString().ToUpperInvariant()}", boundSubqueries, boundValues, test);
+                break;
+            case SqlCaseExpression { Input: null } conditional:
+                foreach (var when in conditional.WhenClauses)
+                {
+                    ValidateBooleanOperand(when.Condition, evaluator, "CASE WHEN", boundSubqueries, boundValues);
+                }
+                break;
+        }
     }
 
     private static bool ContainsBoundOutput(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int> outputs)
@@ -1604,8 +1690,8 @@ internal sealed partial class SqlPlanner
 
     /// <summary>
     /// The type a sign's or a CAST's operand has whatever row it is evaluated on, when the plan can
-    /// tell: a literal (an integer literal is BIGINT and a fractional one NUMERIC, the values they
-    /// bind to), a column, a COLLATE or CAST, a predicate, a concatenation, a scalar call's resolved
+    /// tell: a literal (an integer literal is INTEGER when it fits, otherwise BIGINT, and a
+    /// fractional one NUMERIC), a column, a COLLATE or CAST, a predicate, a concatenation, a scalar call's resolved
     /// result type, or a bound scalar subquery. Null for a parameter or NULL, an ORDER BY value
     /// bound to an output column, or computed shapes (arithmetic, aggregates and CASE) whose richer
     /// binder inference <see cref="ValidateCast"/> uses as a fallback. A sign over a parameter is
@@ -1624,7 +1710,7 @@ internal sealed partial class SqlPlanner
         {
             SqlLiteralExpression { LiteralType: SqlLiteralType.String } => DatabaseType.String,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
-            SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } => DatabaseType.Int64,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } literal => evaluator.StaticTypeOf(literal),
             SqlLiteralExpression { LiteralType: SqlLiteralType.Float } => DatabaseType.Decimal,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Date } => DatabaseType.Date,
             SqlLiteralExpression { LiteralType: SqlLiteralType.Time } => DatabaseType.Time,

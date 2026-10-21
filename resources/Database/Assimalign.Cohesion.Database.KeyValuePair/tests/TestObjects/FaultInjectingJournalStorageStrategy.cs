@@ -126,8 +126,11 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     }
 
     /// <inheritdoc />
+    internal Func<bool, Exception?>? CreateFailure { get; set; }
+
     public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
     {
+        if (CreateFailure?.Invoke(catalog) is { } failure) { throw failure; }
         string key = Key(databaseName, catalog);
         var files = new Files(new MemoryStream(), new FaultInjectingStream(), new MemoryStream());
         lock (_sync)
@@ -141,6 +144,8 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
         return KeyValueStorage.Create(DataStream(files, key), JournalStream(files, key), new StorageStream(files.Backup), GetLabel(databaseName, catalog));
     }
 
+    internal Func<bool, Exception?>? OpenFailure { get; set; }
+
     /// <summary>
     /// Reopens a file set from the bytes its last storage left behind. A memory stream keeps its
     /// bytes after disposal, so this works for a storage the engine closed.
@@ -148,6 +153,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     /// <inheritdoc />
     public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
     {
+        if (OpenFailure?.Invoke(catalog) is { } failure) { throw failure; }
         string key = Key(databaseName, catalog);
         Files files;
         lock (_sync)

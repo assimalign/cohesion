@@ -240,6 +240,48 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         reopened.Definitions.BindCount.ShouldBe(2);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted functions: non-Boolean bodies open and fail only on invocation (#1190)")]
+    [InlineData("CASE WHEN a THEN 1 END", false)]
+    [InlineData("a OR FALSE", false)]
+    [InlineData("f(a) AND TRUE", true)]
+    public async Task Open_NonBooleanFunctionBody_ShouldDeferOperandFailure(string body, bool changedRegistration)
+    {
+        // Arrange: write the legacy bodies through the catalog, since declaration now refuses them.
+        var builder = SqlDatabaseEngine.CreateBuilder("persisted-boolean");
+        builder.Options.RootPath = _rootPath;
+        builder.Functions.Add(SqlScalarFunction.Create("f", static (int value) => value > 0));
+        await using (var engine = await builder.BuildAsync(CancellationToken.None))
+        {
+            var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+            if (changedRegistration)
+            {
+                await using var session = await database.CreateSessionAsync(CancellationToken.None);
+                await session.ExecuteAsync("CREATE FUNCTION stored(a INT) RETURNS BOOLEAN RETURN f(a) AND TRUE", cancellationToken: CancellationToken.None);
+            }
+            else
+            {
+                await database.Catalog.CreateFunctionAsync(new SqlCatalogFunction("stored",
+                    SqlDefinitionBinder.Signature("stored", [SqlType.Integer]), ["a"], ["INT"], "INT", "IMMUTABLE", false,
+                    body, [], DatabaseObjectOwner.Adhoc, null, []), CancellationToken.None);
+            }
+        }
+        var reopening = SqlDatabaseEngine.CreateBuilder("persisted-boolean");
+        reopening.Options.RootPath = _rootPath;
+        reopening.Functions.Add(SqlScalarFunction.Create("f", static (int value) => value));
+        await using var reopenedEngine = await reopening.BuildAsync(CancellationToken.None);
+
+        // Act
+        var reopened = await reopenedEngine.OpenDatabaseAsync("db", CancellationToken.None);
+        await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await reopenedSession.ExecuteAsync("SELECT stored(1)", cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics[0].Start.ShouldNotBeNull();
+        (await RowsAsync(reopenedSession, "SELECT 1")).ShouldHaveSingleItem();
+    }
+
     /// <summary>
     /// A stored definition that does not load fails the open, naming the database, table and
     /// constraint or column, rather than a later write to its table.

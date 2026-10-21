@@ -11,6 +11,25 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// <summary>Exercises executable subquery forms through SqlDatabaseServer and the production typed client.</summary>
 public sealed class SqlSubqueryWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - SELECT without FROM: constants and nested queries cross both transports (#1373)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_WithoutFrom_ShouldReturnImplicitRow(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var rows = await QueryAsync(connection, "SELECT (SELECT 42) AS answer WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)");
+        var empty = await QueryAsync(connection, "SELECT 1 WHERE NULL");
+
+        // Assert
+        rows.ShouldHaveSingleItem()[0].ShouldBe(42);
+        empty.ShouldBeEmpty();
+        (await QueryAsync(connection, "SELECT COUNT(*) WHERE FALSE")).ShouldHaveSingleItem()[0].ShouldBe(0L);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - WITH: query and all DML forms execute over the wire")]
     public async Task ExecuteAsync_CommonTables_ShouldReturnRowsAndExactAffectedCounts()
     {

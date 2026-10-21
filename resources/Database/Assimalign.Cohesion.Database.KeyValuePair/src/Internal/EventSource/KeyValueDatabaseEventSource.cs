@@ -379,6 +379,23 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
 
     // Cuts a peer-supplied string to its payload bound and marks the cut; never splits a surrogate
     // pair. Called only inside an IsEnabled check.
+    /// <summary>Records cleanup that failed after a statement fault without replacing its cause.</summary>
+    /// <param name="transaction">The transaction whose statement failed.</param>
+    /// <param name="exception">The secondary cleanup failure.</param>
+    [NonEvent]
+    public void TransactionCleanupFailed(DatabaseTransaction transaction, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            TransactionCleanupFailed(transaction.Id.ToString(), exception.GetType().FullName ?? exception.GetType().Name,
+                Bound(exception.Message, MaxTextLength));
+        }
+    }
+
+    [Event(11, Level = EventLevel.Warning, Message = "Transaction {0} failed to release a resource after a statement failure: {1}: {2}")]
+    private void TransactionCleanupFailed(string transactionId, string exceptionType, string exceptionMessage)
+        => WriteEvent(11, transactionId, exceptionType, exceptionMessage);
+
     private static string Bound(string value, int maxLength)
     {
         if (value.Length <= maxLength)

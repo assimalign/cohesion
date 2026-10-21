@@ -24,8 +24,8 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </para>
 /// <para>
 /// <b>A command is statement-atomic</b>, so a failed command leaves the transaction active
-/// (DESIGN.md, "Failed commands in explicit transactions"): the key-value model never aborts its
-/// transaction for a failed command, the per-command rule of the owner's 2026-10-04 decision. A
+/// (DESIGN.md, "Failed commands in explicit transactions"). Storage corruption and I/O failures
+/// instead abort the transaction and require rollback before further commands (#1364). A
 /// commit or rollback that started always ends the context (#1226): the kernel completes a started
 /// rollback whatever fails, keeping the key locks of a writer whose undo it must defer, and aborts
 /// a commit it cannot complete. A rollback ends the transaction even under a running command,
@@ -80,6 +80,11 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     /// </summary>
     /// <returns>The refusal.</returns>
     internal DatabaseException CreateCommandRefusal() => CreateRefusal();
+
+    /// <summary>Aborts an explicit transaction after a storage read failed.</summary>
+    /// <param name="cause">The coded failure reported to the caller.</param>
+    /// <returns>A task that completes after rollback.</returns>
+    internal ValueTask AbortForFailedStatementAsync(Exception cause) => AbortAsync(cause);
 
     /// <inheritdoc />
     protected override TransactionState GetKernelState() => _context.State;
@@ -147,7 +152,8 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
         string message = commit
             ? "COHDBK001: The session's transaction is aborted and cannot commit; nothing was committed." + reason
             : "COHDBK001: The session's transaction is aborted; commands are refused until it is rolled back." + reason;
-        return new DatabaseException(message, cause);
+        return new DatabaseException(message, [new Types.Diagnostic
+        { Code = "COHDBK001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // The area error policy: the engine translates the transaction kernel's independent exception
@@ -157,7 +163,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     private Exception Translate(Exception error) => error switch
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
-        _ when _database.TranslateOffline(error) is var offline && !ReferenceEquals(offline, error) => offline,
+        _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,

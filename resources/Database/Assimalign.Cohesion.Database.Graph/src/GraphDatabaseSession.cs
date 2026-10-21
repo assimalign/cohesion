@@ -276,7 +276,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         catch (Exception error)
         {
             // A begin that met the offline storage (#1243) gets the coded refusal.
-            var reported = _database.TranslateOffline(error);
+            var reported = _database.TranslateFailure(error);
             if (ReferenceEquals(reported, error))
             {
                 throw;

@@ -88,7 +88,9 @@ internal sealed partial class GraphPlanner
                             .OrderBy(candidate => candidate.Name, StringComparer.Ordinal).FirstOrDefault().Name ?? index;
                     }
                     int parent = Add(DescribeOperator(anchor),
-                        pathId, anchor.Label, index, $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}");
+                        pathId, anchor.UnionLabels is { } union ? string.Join("|", union) : anchor.Label, index,
+                        $"node={anchor.NodeIndex}; property={anchor.Property}; value={Value(anchor.Value)}" +
+                        (anchor.UnionLabels is null ? "" : "; combine=union"));
                     // The executor expands right of the anchor, then left, in this exact order.
                     var shape = path.Shape ?? GraphPathShape.Create(path.Pattern);
                     foreach (int edge in Enumerable.Range(anchor.NodeIndex, shape.Segments.Count - anchor.NodeIndex)

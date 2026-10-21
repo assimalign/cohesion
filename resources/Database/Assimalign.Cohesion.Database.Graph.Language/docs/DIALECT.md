@@ -357,17 +357,20 @@ A non-negated labeled predicate in a MATCH clause's top-level AND chain supplies
 labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep RETURN n` and
 `MATCH (n) WHERE n IS LABELED Keep RETURN n` anchor like `(n:Keep)`. Required labels also enable
 property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
-then property seeks; otherwise the first required label by node position anchors a label scan.
-The choice is positional, not cardinality-based; choosing by cardinality waits for label counts.
+then property seeks; otherwise the smallest retained-posting estimate across required labels
+and pure pattern unions chooses the anchor, breaking ties by source position. Estimates include
+history and affect plan cost only.
 Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
-and node ordinal. The complete predicate still filters candidates. A label scan still decodes every
-node record and filters by label (`GraphStore.GetNodes(label, snapshot)`); no label index exists yet.
-#1245 reduces the expansion budget charge and the expansion work after the scan. Reducing label-scan
-decoding through a label index belongs to #1534.
+and node ordinal. The complete predicate still filters candidates. MVCC label postings limit
+decoding to matching visible nodes, including a statement's pending additions and replacements.
+Conjunctions seek the cheapest required label and retain the complete residual.
 
 OR, XOR, NOT, IS NOT LABELED, truth tests and label expressions using `|`, `!` or `%` supply no
-required labels. Requirements remain local to their MATCH clause. Without any required label or
-a bound entity, `(n:A|B {k:1})` scans every node; `(n:A|B)->(m:C)` anchors at `m`.
+required labels. Requirements remain local to their MATCH clause. Pure pattern unions such as
+`(n:A|B {k:1})` merge label ranges, suppress duplicate identities and compete by their summed
+estimate with other positions, including `m:C` in `(n:A|B)->(m:C)`. EXPLAIN describes a union as
+LabelScan with entity `A|B` and detail `combine=union`. Negation, wildcard and mixed expressions
+keep their existing safe scan behavior. No result ordering is guaranteed without ORDER BY.
 
 Precedence from weakest to strongest; binary runs associate left:
 

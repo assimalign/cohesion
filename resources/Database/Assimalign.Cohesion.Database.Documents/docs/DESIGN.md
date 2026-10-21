@@ -1,6 +1,23 @@
 # Documents engine design
 
+## Child-root failure boundaries (#1247, #1364)
+
+Attached-index damage becomes `DatabaseCorruptionException` / `COHDBS003`, retaining the
+index cause, `COHDBI002`, and model diagnostic `COHDBD005`. Other index failures use
+`COHDBD005`. I/O inside catalog/index-registration wrappers remains `COHDBD004`, including
+open before publication. Explicit and automatic transaction begin use the same full translator.
+Wire execution returns `ExecutionFailure` with diagnostics and preserves the session; a
+regression damages an actual non-root B-tree leaf and proves both embedded and wire behavior.
+Aborted-transaction refusals carry `COHDBD001` in Diagnostics; only the wire adds its prefix.
+The internal begin fault seam exercises both begin callers without widening the coordinator.
+
+
 ## Storage corruption (#1160)
+
+A StorageIOException or IOException while opening storage crosses the engine boundary as
+DatabaseException with structured COHDBD004 diagnostics (#1364). Open releases any acquired
+file set and publishes no database, so callers may resolve the I/O condition and retry.
+
 
 Storage corruption is `COHDBS003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
@@ -279,6 +296,12 @@ compiled-schema provisioning authority in this engine.
 
 ## Documents engine diagnostic codes (#1103)
 
+Child-root storage and catalog failures cross the engine boundary as DatabaseException with
+Error entries in Diagnostics and the original InnerException (#1247). Offline and common
+COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
+transaction; after rollback the in-process session remains usable. The Documents wire returns ExecutionFailure with the carrier and serves the next statement.
+
+
 Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
 severity and the offending expression's Start/End/Line when its AST has a location. Their
 Message contains no code prefix. The Documents family is `COHDOCnnn`; paging deliberately uses
@@ -287,6 +310,8 @@ OQL0007 for the same count rule at parse and plan time:
 | Code | Meaning |
 | --- | --- |
 | `COHDBD003` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
+| `COHDBD004` | Storage operation failure (including I/O); original cause retained |
+| `COHDBD005` | Malformed or unsupported catalog/index metadata |
 | `COHDOC001` | Invalid statement, index definition, expression or grouping context |
 | `COHDOC002` | Collection does not exist |
 | `COHDOC003` | Duplicate projection name; use unique aliases |
@@ -304,6 +329,9 @@ OQL0007 for the same count rule at parse and plan time:
 | `COHDOC021` | A UNIQUE key contains an array or object |
 | `COHDOC022` | An index has fewer than one or more than 32 paths |
 | `COHDOC023` | A direct SELECT AST repeats a FROM/UNNEST binding name or supplies an empty binding name |
+| `COHDOC024` | Index already exists |
+| `COHDOC025` | Index does not exist |
+| `COHDOC026` | Composite index key exceeds the shared 1024-byte limit |
 
 `DocumentQueryRequest.FromOql` and a directly constructed typed query with parse errors
 throw `DatabaseParseException` carrying the complete, ordered parser diagnostics and the

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -83,7 +85,9 @@ public sealed class DocumentDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or DocumentCatalogException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "COHDBD005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
 
         if (recover)
@@ -123,6 +127,15 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// the engine's background workers and tests.
     /// </summary>
     internal TransactionCoordinator Coordinator { get; }
+
+    // Fault injection belongs to this model boundary; no cross-assembly test visibility is needed.
+    internal Action? BeforeTransactionBegin { get; set; }
+
+    internal ValueTask<TransactionContext> BeginContextAsync(IsolationLevel isolation, CancellationToken token)
+    {
+        BeforeTransactionBegin?.Invoke();
+        return Coordinator.BeginAsync(isolation, token);
+    }
 
     /// <summary>
     /// Gets the database's catalog of collections, document versions and indexes.
@@ -201,11 +214,18 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBD001" }, ..] }) { return error; }
         if (error is DatabaseCorruptionException) { return error; }
 
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBD005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -347,7 +367,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         try
         {
             var transactionStart = explicitTransaction?.TransactionStart ?? (Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
+            var context = explicitTransaction?.Context ?? await BeginContextAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new DocumentOperation(this, session, context, explicitTransaction, transactionStart);
             await operation.InitializeAsync(token).ConfigureAwait(false);
             session.Track(operation);
@@ -356,6 +376,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         catch (Exception error)
         {
             var reported = TranslateOffline(error);
+            if (ReferenceEquals(reported, error)) { reported = TranslateKernelFailure(error); }
             if (operation is not null)
             {
                 // The operation owns the session hold and the admission, and releases them as it ends.
@@ -402,13 +423,29 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateFailure(Exception error)
+    {
+        var translated = TranslateOffline(error);
+        return ReferenceEquals(translated, error) ? TranslateKernelFailure(error) : translated;
+    }
+
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
+            or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
+        DatabaseException { Diagnostics.Count: > 0 } => error,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
+        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("COHDBD004", error),
+        _ when DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null => CodedFailure("COHDBD005", error),
+        DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "COHDBD005", catalog),
         _ => error,
     };
+
+    private static DatabaseException CodedFailure(string code, Exception error)
+        => new(error.Message, [new Types.Diagnostic
+        { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error);
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.

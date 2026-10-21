@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Diagnostics.Tracing;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
-
-namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
@@ -15,7 +16,12 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
+
+using EventRecorder = Assimalign.Cohesion.Testing.EventSourceRecorder;
+
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// The rows an index seek fetches (#1342). An entry whose row was reclaimed beneath it (its slot
@@ -25,12 +31,37 @@ using Assimalign.Cohesion.Database.Types;
 /// failing the statement. PostgreSQL's heap fetch makes the same split: a line pointer past the
 /// page or no longer in use is "not found", and an invalid page is <c>ERRCODE_DATA_CORRUPTED</c>.
 /// </summary>
+[Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlIndexReadIntegrityTests
 {
     private const string Seek = "SELECT id FROM t WHERE val = 20";
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corruption crosses the wire as a coded execution failure (#1160)")]
-    public async Task Execute_CorruptScanOverWire_ShouldReportExecutionFailureAndKeepSessionUsable()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: storage read failures abort transactions and keep the wire session (#1364)")]
+    [InlineData(0, false, false)]
+    [InlineData(1, false, false)]
+    [InlineData(2, false, false)]
+    [InlineData(0, true, false)]
+    [InlineData(1, true, false)]
+    [InlineData(2, true, false)]
+    [InlineData(0, true, true)]
+    [InlineData(1, true, true)]
+    [InlineData(2, true, true)]
+    [InlineData(3, false, false)]
+    [InlineData(3, true, false)]
+    [InlineData(3, true, true)]
+    [InlineData(4, false, false)]
+    [InlineData(4, true, false)]
+    [InlineData(4, true, true)]
+    [InlineData(5, false, false)]
+    [InlineData(5, true, false)]
+    [InlineData(5, true, true)]
+    [InlineData(6, false, false)]
+    [InlineData(6, true, false)]
+    [InlineData(6, true, true)]
+    [InlineData(7, false, false)]
+    [InlineData(7, true, false)]
+    [InlineData(7, true, true)]
+    public async Task Execute_CorruptScanOverWire_ShouldReportExecutionFailureAndKeepSessionUsable(int failureKind, bool explicitTransaction, bool readCommitted)
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
@@ -42,6 +73,22 @@ public sealed class SqlIndexReadIntegrityTests
         Evict(database, pageId);
         var faults = strategy.Faults(ServerTestHarness.DatabaseName);
         faults.RottenPage = pageId;
+        if (failureKind != 0)
+        {
+            faults.WrapCorruption = _ => failureKind switch
+            {
+                1 => new StorageIOException("Injected storage read failure."),
+                2 => new IOException("Injected device read failure."),
+                3 => new SlottedPageException("Injected slot failure."),
+                4 => new JournalException("Injected journal failure."),
+                5 => new StorageTransactionException("Injected storage transaction failure."),
+                6 => new InvalidOperationException("Wrapped read.", new StorageTransactionException("Injected storage transaction failure.")),
+                _ => new AggregateException(new InvalidOperationException("Other branch."), new IOException("Injected device read failure.")),
+            };
+        }
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        var engineSession = serverSession.DatabaseSession.ShouldBeOfType<SqlDatabaseSession>();
+        var transaction = explicitTransaction ? await engineSession.BeginTransactionAsync(readCommitted ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, CancellationToken.None) : null;
 
         try
         {
@@ -52,12 +99,37 @@ public sealed class SqlIndexReadIntegrityTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith("COHDBS003: ", Case.Sensitive);
+            error.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHSQLE041: ", Case.Sensitive);
             error.Message.ShouldNotContain("COHDBS003: COHDBS003:", Case.Sensitive);
-            error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
-            error.Message.ShouldContain(ServerTestHarness.DatabaseName, Case.Sensitive);
+            if (failureKind == 0)
+            {
+                error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
+                error.Message.ShouldContain(ServerTestHarness.DatabaseName, Case.Sensitive);
+            }
+            if (transaction is not null)
+            {
+                transaction.State.ShouldBe(TransactionState.Faulted);
+                var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await engineSession.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT005");
+                refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
+                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHSQLE041");
+            }
         }
         finally { faults.Clear(); }
+        if (transaction is not null)
+        {
+            if (readCommitted)
+            {
+                await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("COMMIT").Encode());
+                var commit = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+                commit.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+                commit.Message.ShouldStartWith("COHSQLT005: ", Case.Sensitive);
+                engineSession.CurrentTransaction.ShouldBeNull();
+            }
+            else { await transaction.RollbackAsync(CancellationToken.None); }
+        }
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);
@@ -193,6 +265,62 @@ public sealed class SqlIndexReadIntegrityTests
         // Assert
         ids.ShouldBeEmpty();
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Abort: rollback failure preserves the exact coded read cause and emits cleanup evidence")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptRead, bool corruptCleanup)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        await using var engine = CreateEngine(strategy);
+        var database = await engine.CreateDatabaseAsync("abort-failure", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10)", cancellationToken: CancellationToken.None);
+        var transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (2, 20)", cancellationToken: CancellationToken.None);
+        var pageId = database.DataStorage.GetOwnerPages(Table(database, "t").ObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        var faults = strategy.Faults("abort-failure");
+        faults.RottenPage = pageId;
+        if (!corruptRead) { faults.WrapCorruption = _ => new StorageIOException("Injected read failure."); }
+        int aborts = 0;
+        var original = database.Coordinator.OnUndoDeferred;
+        Exception abortFailure = corruptCleanup ? new StorageCorruptionException(pageId, "Injected cleanup corruption.")
+            : new InvalidOperationException("Injected abort notification failure.");
+        database.Coordinator.OnUndoDeferred = () => { Interlocked.Increment(ref aborts); throw abortFailure; };
+        using var recorder = new EventRecorder(SqlDatabaseEventSource.Log, EventLevel.Warning);
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("SELECT id FROM t", cancellationToken: CancellationToken.None).AsTask());
+
+            // Assert
+            aborts.ShouldBe(1);
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHSQLE041");
+            if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
+            transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(failure);
+            var cleanup = recorder.Events.Where(item => item.EventId == 25).ShouldHaveSingleItem();
+            cleanup.EventName.ShouldBe("TransactionCleanupFailed");
+            cleanup.Level.ShouldBe(EventLevel.Warning);
+            cleanup.PayloadNames.ShouldNotBeNull().ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+            cleanup.Payload.ShouldNotBeNull()[0].ShouldBe(transaction.Id.ToString());
+            cleanup.Payload[1].ShouldBe(corruptCleanup ? typeof(DatabaseCorruptionException).FullName : typeof(InvalidOperationException).FullName);
+            cleanup.Payload[2].ShouldBeOfType<string>().ShouldContain(abortFailure.Message, Case.Sensitive);
+            recorder.Events.ShouldNotContain(item => item.EventId == 0);
+            transaction.State.ShouldBe(TransactionState.Faulted);
+        }
+        finally
+        {
+            faults.Clear();
+            database.Coordinator.OnUndoDeferred = original;
+        }
+        await transaction.RollbackAsync(CancellationToken.None);
     }
 
     private static SqlDatabaseEngine CreateEngine(FaultInjectingJournalSqlStorageStrategy? strategy)

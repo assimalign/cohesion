@@ -73,7 +73,7 @@ internal sealed partial class SqlPlanExecutor
             return target < 0 || valueRows?.Any(row => row[target].Kind == SqlBoundExpressionKind.DefaultItem) == true ||
                 onConflict.Assignments.Any(assignment => assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem);
         });
-        var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken);
+        var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         int identityOrdinal = -1;
         int identityTargetIndex = -1;

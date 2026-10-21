@@ -10,14 +10,14 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
-    private SqlPlan PlanConstantCommonTable(SqlSelectExpression select)
+    private SqlPlan PlanConstantSelect(SqlSelectExpression select)
     {
         var evaluator = new SqlExpressionEvaluator([], _parameters, defaultCollation: _catalog.DefaultCollation,
             subquerySlots: _subquerySlots, functions: _functions, cancellationToken: _cancellationToken,
             outerScope: OuterScope, outerDependencies: OuterDependencies);
         if (select.Columns.Any(column => column.Expression is SqlStarExpression))
         {
-            throw new SqlPlanningException("COHSQLE013", ErrorMessages.CteConstantQuery, select.Location);
+            throw new SqlPlanningException("COHSQLE013", ErrorMessages.ConstantQueryWildcard, select.Location);
         }
         if (ViewDefinitionBinding is not null) { CaptureViewSelect(select, [], null, null, evaluator); }
         if (select.GroupBy.Count > 0 || select.Having is not null || ProjectsOrOrdersByAggregate(select))
@@ -39,8 +39,8 @@ internal sealed partial class SqlPlanner
         SqlBoundExpression? where = null;
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator, _subqueryTypes);
-            where = evaluator.Bind(select.Where);
+            ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
+            where = evaluator.BindPredicate(select.Where);
         }
         var outputSlots = BindOrderByProjections(select, projections, 0);
         CaptureViewOrdering(select, [], null, evaluator, outputSlots);
@@ -109,8 +109,8 @@ internal sealed partial class SqlPlanner
 
     private HashSet<SqlSelectExpression> CollectCommonTableOperands(SqlQueryBodyExpression query)
     {
-        // Only direct SELECT operands receive the CTE's implicit row. Do not descend
-        // into scalar subqueries or derived tables, which bind their own query scopes.
+        // Capture the direct operands' projection metadata in this CTE binding scope.
+        // Scalar subqueries and derived tables bind their own query scopes.
         var operands = new HashSet<SqlSelectExpression>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<SqlQueryBodyExpression>();
         pending.Push(query);

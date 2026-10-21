@@ -7,14 +7,14 @@ namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
 /// What the engine tells a function about the call it is running in: the database, the collation
-/// the call's text arguments compare under, and the statement's cancellation token.
+/// the call's text arguments compare under, the transaction timestamp, and the statement's cancellation token.
 /// </summary>
 /// <remarks>
 /// A ref struct, so a function cannot keep it beyond the call: a scalar function reads it from
 /// <see cref="SqlArguments.Context"/>, and an aggregate receives it when the engine creates the
 /// accumulator for a group (<see cref="SqlAggregateFunction.CreateAccumulator"/>). The
 /// <see langword="default"/> context, which a test calling a function directly can pass, has no
-/// database, the binary collation and a token that is never canceled.
+/// database, the binary collation, a token that is never canceled, and no transaction timestamp.
 /// </remarks>
 public readonly ref struct SqlFunctionContext
 {
@@ -24,7 +24,12 @@ public readonly ref struct SqlFunctionContext
     internal DateTimeOffset? TransactionStart => _transactionStart;
 
     internal SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken, DateTimeOffset? transactionStart)
-        : this(database, collation, cancellationToken) => _transactionStart = transactionStart;
+    {
+        _transactionStart = transactionStart;
+        Database = database;
+        _collation = collation;
+        CancellationToken = cancellationToken;
+    }
 
     /// <summary>
     /// Initializes the context of one call: the engine's, or a test's that calls a function directly
@@ -33,13 +38,29 @@ public readonly ref struct SqlFunctionContext
     /// <param name="database">The database whose statement makes the call.</param>
     /// <param name="collation">The collation the call's input compares under; the binary collation when null.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <remarks>A direct call has no statement or transaction context, so its timestamp is null.</remarks>
     public SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken)
+        : this(database, collation, cancellationToken, (DateTimeOffset?)null)
     {
-        _transactionStart = null;
-        Database = database;
-        _collation = collation;
-        CancellationToken = cancellationToken;
     }
+
+    /// <summary>Initializes a call context with an explicit transaction timestamp.</summary>
+    /// <param name="database">The database whose statement makes the call.</param>
+    /// <param name="collation">The input collation; the binary collation when null.</param>
+    /// <param name="cancellationToken">The statement's cancellation token.</param>
+    /// <param name="transactionTimestamp">The transaction's start time.</param>
+    public SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken,
+        DateTimeOffset transactionTimestamp)
+        : this(database, collation, cancellationToken, (DateTimeOffset?)transactionTimestamp)
+    {
+    }
+
+    /// <summary>
+    /// Gets the transaction's start time, shared by every statement in an explicit transaction.
+    /// An autocommit statement receives its own start time.
+    /// </summary>
+    /// <remarks>Null means there is no statement or transaction context, including a default or direct three-argument context.</remarks>
+    public DateTimeOffset? TransactionTimestamp => _transactionStart;
 
     /// <summary>Gets the database whose statement makes the call; empty when a function is called directly.</summary>
     public DatabaseName Database { get; }

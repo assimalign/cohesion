@@ -22,8 +22,8 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
-        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), writer);
-        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Bob")), writer);
+        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), TestLabelIds.All, writer);
+        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Bob")), TestLabelIds.All, writer);
         var relationship = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, b.Id, "KNOWS", Properties("since", 2020)), Guid.Parse("10000000-0000-0000-0000-000000000001"), writer);
         (await fixture.Store.GetIncidentAsync(a.Id, writer.Snapshot)).Single().Id.ShouldBe(relationship.Id);
         (await fixture.Store.GetIncidentAsync(b.Id, writer.Snapshot)).Single().Id.ShouldBe(relationship.Id);
@@ -42,8 +42,8 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("Person", "name", writer);
-        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), writer);
-        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Bob")), writer);
+        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), TestLabelIds.All, writer);
+        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Bob")), TestLabelIds.All, writer);
         var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, b.Id, "KNOWS", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), writer);
         var self = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, a.Id, "SELF", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), writer);
         await fixture.Coordinator.CommitAsync(writer);
@@ -69,8 +69,8 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var write = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("N", "key", write);
-        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), write);
-        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 2)), write);
+        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), TestLabelIds.All, write);
+        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 2)), TestLabelIds.All, write);
         var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), a.Id, b.Id, "R", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), write);
         await fixture.Coordinator.CommitAsync(write);
         var old = await fixture.Begin();
@@ -99,8 +99,8 @@ public sealed partial class GraphStoreTests
         var store = GraphStore.Open(storage, coordinator);
         var write = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await store.CreateIndexAsync("N", "key", write);
-        var a = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), write);
-        var b = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 2)), write);
+        var a = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), TestLabelIds.All, write);
+        var b = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 2)), TestLabelIds.All, write);
         var type = Guid.Parse("10000000-0000-0000-0000-000000000001");
         var otherType = Guid.Parse("10000000-0000-0000-0000-000000000002");
         var partialType = Guid.Parse("10000000-0000-0000-0000-000000000003");
@@ -109,7 +109,7 @@ public sealed partial class GraphStoreTests
         await coordinator.CommitAsync(write);
         var partial = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await store.DeleteNodeAsync(a.Id, true, partial);
-        var uncommitted = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 3)), partial);
+        var uncommitted = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 3)), TestLabelIds.All, partial);
         await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), b.Id, uncommitted.Id, "PARTIAL", _empty), partialType, partial);
         // Drain journal buffering into the in-memory recovery image; MemoryStream
         // has no durable-flush contract.
@@ -140,7 +140,7 @@ public sealed partial class GraphStoreTests
         }
         (await recoveredStore.SearchIndexAsync("N", "key", 1m, reader.Snapshot)).Single().Id.ShouldBe(a.Id);
         (await recoveredStore.SearchIndexAsync("N", "key", 3m, reader.Snapshot)).ShouldBeEmpty();
-        var newNode = await recoveredStore.CreateNodeAsync(new StoredGraphNode((ulong)recovered.ReserveTransactionSequence(), ["N"], _empty), reader);
+        var newNode = await recoveredStore.CreateNodeAsync(new StoredGraphNode((ulong)recovered.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, reader);
         newNode.Id.ShouldBeGreaterThan(uncommitted.Id);
         await coordinator.RollbackAsync(partial);
     }
@@ -150,11 +150,11 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var write = await fixture.Begin();
-        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), write);
+        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), TestLabelIds.All, write);
         await fixture.Coordinator.CommitAsync(write);
         var index = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("N", "key", index);
-        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1.0d)), index);
+        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", 1.0d)), TestLabelIds.All, index);
         (await fixture.Store.SearchIndexAsync("N", "key", 1m, index.Snapshot)).Select(node => node.Id).ShouldBe([a.Id, b.Id]);
         await fixture.Coordinator.CommitAsync(index);
         var deleting = await fixture.Begin();
@@ -169,12 +169,12 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
-        var first = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 9007199254740992L)), writer);
-        var second = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 9007199254740993L)), writer);
-        var tiny = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1e-100)), writer);
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 2e-100)), writer);
+        var first = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 9007199254740992L)), TestLabelIds.All, writer);
+        var second = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 9007199254740993L)), TestLabelIds.All, writer);
+        var tiny = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1e-100)), TestLabelIds.All, writer);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 2e-100)), TestLabelIds.All, writer);
         await fixture.Store.CreateIndexAsync("N", "value", writer);
-        var huge = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1e100)), writer);
+        var huge = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1e100)), TestLabelIds.All, writer);
         (await fixture.Store.SearchIndexAsync("N", "value", 9007199254740992L, writer.Snapshot)).Single().Id.ShouldBe(first.Id);
         (await fixture.Store.SearchIndexAsync("N", "value", 9007199254740993L, writer.Snapshot)).Single().Id.ShouldBe(second.Id);
         (await fixture.Store.SearchIndexAsync("N", "value", 9007199254740992d, writer.Snapshot)).Count.ShouldBe(2);
@@ -188,7 +188,7 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var create = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("N", "key", create);
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "value")), create);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "value")), TestLabelIds.All, create);
         await fixture.Coordinator.CommitAsync(create);
         var old = await fixture.Begin();
         var drop = await fixture.Begin();
@@ -208,7 +208,7 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var create = await fixture.Begin();
-        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), create);
+        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, create);
         await fixture.Coordinator.CommitAsync(create);
         var stale = await fixture.Begin();
         var deleting = await fixture.Begin();
@@ -225,7 +225,7 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var create = await fixture.Begin();
-        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), create);
+        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, create);
         await fixture.Coordinator.CommitAsync(create);
         var stale = await fixture.Begin();
         var linking = await fixture.Begin();
@@ -239,11 +239,11 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
-        await Should.ThrowAsync<ArgumentException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("bad", new object())), writer).AsTask());
-        await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("tooBig", new string('x', 100_000))), writer).AsTask());
+        await Should.ThrowAsync<ArgumentException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("bad", new object())), TestLabelIds.All, writer).AsTask());
+        await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("tooBig", new string('x', 100_000))), TestLabelIds.All, writer).AsTask());
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        await Should.ThrowAsync<OperationCanceledException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), writer, cancellation.Token).AsTask());
+        await Should.ThrowAsync<OperationCanceledException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, writer, cancellation.Token).AsTask());
         fixture.Store.GetNodes(null, writer.Snapshot).ShouldBeEmpty();
     }
 
@@ -252,7 +252,7 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
-        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1d)), writer);
+        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("value", 1d)), TestLabelIds.All, writer);
         await fixture.Coordinator.CommitAsync(writer);
         using var iterator = fixture.Storage.GetUnitIterator(2);
         iterator.MoveNext().ShouldBeTrue();
@@ -273,16 +273,16 @@ public sealed partial class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var holder = await fixture.Begin();
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), holder);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, holder);
         var waiter = await fixture.Begin();
-        var pending = fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), waiter).AsTask();
+        var pending = fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, waiter).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await fixture.Coordinator.RollbackAsync(waiter);
         await fixture.Coordinator.CommitAsync(holder);
         await Should.ThrowAsync<TransactionAbortedException>(() => pending);
         var next = await fixture.Begin();
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), next, limit.Token);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], _empty), TestLabelIds.All, next, limit.Token);
         fixture.Store.GetNodes(null, next.Snapshot).Count.ShouldBe(2);
     }
 
@@ -297,10 +297,10 @@ public sealed partial class GraphStoreTests
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await store.CreateIndexAsync("N", "key", writer);
         await store.CreateIndexAsync("N", "group", writer);
-        var center = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", -1)), writer);
+        var center = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", -1)), TestLabelIds.All, writer);
         for (int i = 0; i < 240; i++)
         {
-            var node = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], new Dictionary<string, object?> { ["key"] = i, ["group"] = "same" }), writer);
+            var node = await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], new Dictionary<string, object?> { ["key"] = i, ["group"] = "same" }), TestLabelIds.All, writer);
             await store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)storage.ReserveTransactionSequence(), center.Id, node.Id, "R", _empty), Guid.Parse("10000000-0000-0000-0000-000000000001"), writer);
         }
         await coordinator.CommitAsync(writer);
@@ -327,12 +327,12 @@ public sealed partial class GraphStoreTests
         string[] labels = Enumerable.Range(0, 300).Select(i => "Label_with_a_fairly_long_name_" + i.ToString("D3", CultureInfo.InvariantCulture)).ToArray();
 
         // Act
-        var record = await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), labels, _empty), writer).AsTask());
+        var record = await Should.ThrowAsync<GraphElementTooLargeException>(() => fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), labels, _empty), labels.ToDictionary(label => label, _ => Guid.NewGuid()), writer).AsTask());
         var property = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
-            fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["M"], Properties("s", new string('s', 9_000))), writer).AsTask());
+            fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["M"], Properties("s", new string('s', 9_000))), TestLabelIds.All, writer).AsTask());
         var key = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
-            fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", new string('k', 600))), writer).AsTask());
-        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "fits")), writer);
+            fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", new string('k', 600))), TestLabelIds.All, writer).AsTask());
+        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "fits")), TestLabelIds.All, writer);
         var edge = await Should.ThrowAsync<GraphElementTooLargeException>(() =>
             fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), node.Id, node.Id, "R", Properties("s", new string('s', 9_000))), Guid.Parse("10000000-0000-0000-0000-000000000001"), writer).AsTask());
 
@@ -354,8 +354,8 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
         string tooLong = new('k', 600);
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Long"], Properties("key", tooLong)), writer);
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "short")), writer);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Long"], Properties("key", tooLong)), TestLabelIds.All, writer);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["N"], Properties("key", "short")), TestLabelIds.All, writer);
         await fixture.Store.CreateIndexAsync("N", "key", writer);
 
         // Act
@@ -380,7 +380,7 @@ public sealed partial class GraphStoreTests
         await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
         var store = GraphStore.Open(storage, coordinator);
         var create = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), create);
+        await store.CreateNodeAsync(new StoredGraphNode((ulong)storage.ReserveTransactionSequence(), ["N"], Properties("key", 1)), TestLabelIds.All, create);
         await store.CreateIndexAsync("N", "key", create);
         await store.CreateIndexAsync("N", "other", create);
         await store.CreateIndexAsync("M", "key", create);
@@ -425,7 +425,7 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var writer = await fixture.Begin();
         await fixture.Store.CreateIndexAsync("Person", "name", writer);
-        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), writer);
+        await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), ["Person"], Properties("name", "Alice")), TestLabelIds.All, writer);
         await fixture.Coordinator.CommitAsync(writer);
         GraphStore.EnsureIndexFormat(fixture.Storage);
 

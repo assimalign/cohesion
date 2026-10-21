@@ -24,12 +24,12 @@ public sealed class GraphStoreAllocationTests
         var store = GraphStore.Open(storage, coordinator);
         var transaction = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         ulong id = (ulong)storage.ReserveTransactionSequence();
-        await store.CreateNodeAsync(new StoredGraphNode(id, ["N"], new Dictionary<string, object?> { ["value"] = 0 }), transaction);
+        await store.CreateNodeAsync(new StoredGraphNode(id, ["N"], new Dictionary<string, object?> { ["value"] = 0 }), TestLabelIds.All, transaction);
         long before = GC.GetTotalAllocatedBytes(true);
 
         // Act
         for (int i = 1; i <= 2_000; i++)
-        { await store.UpdateNodeAsync(id, ["N"], new Dictionary<string, object?> { ["value"] = i }, transaction, CancellationToken.None); }
+        { await store.UpdateNodeAsync(id, ["N"], new Dictionary<string, object?> { ["value"] = i }, TestLabelIds.All, transaction, CancellationToken.None); }
         long allocated = GC.GetTotalAllocatedBytes(true) - before;
 
         // Assert

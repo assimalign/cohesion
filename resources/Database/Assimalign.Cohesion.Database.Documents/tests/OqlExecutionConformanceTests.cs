@@ -290,6 +290,36 @@ public sealed class OqlExecutionConformanceTests
         exception.Message.ShouldBe(message);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents] - Conformance: index catalog user errors have distinct codes and preserve the session")]
+    [InlineData("duplicate", "COHDOC024")]
+    [InlineData("missing", "COHDOC025")]
+    [InlineData("key-size", "COHDOC026")]
+    public async Task Execute_IndexUserError_ShouldReturnDistinctCodeAndKeepSession(string scenario, string code)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("index-errors", new());
+        var database = await engine.CreateDatabaseAsync("conformance", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", CancellationToken.None);
+        await collection.PutAsync(session, "one", Encoding.UTF8.GetBytes("{\"a\":\"" + new string('x', 2000) + "\"}"), cancellationToken: CancellationToken.None);
+        if (scenario == "duplicate") { await session.ExecuteAsync("CREATE INDEX ix ON items (b)", cancellationToken: CancellationToken.None); }
+        string statement = scenario switch
+        {
+            "duplicate" => "CREATE INDEX ix ON items (b)",
+            "missing" => "DROP INDEX absent ON items",
+            _ => "CREATE INDEX ix ON items (a)",
+        };
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        failure.InnerException.ShouldBeOfType<Catalog.DocumentCatalogException>();
+        (await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None)).Status.ShouldBe(DatabaseResultStatus.Success);
+    }
+
     private static readonly IReadOnlyDictionary<string, FunctionCase> _functionCases =
         new Dictionary<string, FunctionCase>(StringComparer.OrdinalIgnoreCase)
         {

@@ -180,7 +180,7 @@ public sealed class DocumentUpdateTests
         await using var transaction = explicitTransaction ? await session.BeginTransactionAsync(CancellationToken.None) : null;
         if (transaction is not null) { await items.PutAsync(session, "prior", "{}"u8.ToArray(), cancellationToken: CancellationToken.None); }
         // Act: a writes successfully; b exceeds the B-tree key bound.
-        await Should.ThrowAsync<DocumentCatalogException>(async () => await session.ExecuteAsync(
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "UPDATE items SET amount = CASE WHEN name = 'beta' THEN $large ELSE 20 END",
             new Dictionary<string, object?> { ["large"] = new string('x', 2000) }, CancellationToken.None));
         // Assert
@@ -188,7 +188,7 @@ public sealed class DocumentUpdateTests
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refusal = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refusal.Message.ShouldContain("COHDBD001", Case.Sensitive);
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         (await SnapshotAsync(items, session)).ShouldBe(before);

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
@@ -154,10 +155,11 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
     {
         // The cause travels in the message as well, so it survives any boundary that keeps only
         // text: the wire server reports a failure by its message.
-        string reason = cause is null ? string.Empty : " Cause: " + cause.Message;
+        string reason = cause is null ? string.Empty : string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransactionFailureCause, cause.Message);
         string message = commit
-            ? "COHDBB001: The session's transaction is aborted and cannot commit; nothing was committed." + reason
-            : "COHDBB001: The session's transaction is aborted; operations are refused until it is rolled back." + reason;
-        return new DatabaseException(message, cause);
+            ? ErrorMessages.TransactionCommitAborted + reason
+            : ErrorMessages.TransactionOperationsAborted + reason;
+        return new DatabaseException(message, [new Types.Diagnostic
+        { Code = "COHDBB001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 }

@@ -16,8 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphRecordCodec
 {
-    // One graph format fence, shared by open and recovery; #1534 extends format 3.
-    internal const byte FormatVersion = 3;
+    // One graph format fence, shared by open and recovery; #1534 adds catalog label IDs.
+    internal const byte FormatVersion = 4;
     internal static void EnsureFormat(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length < 18 || bytes[17] != FormatVersion)
@@ -37,7 +37,8 @@ internal static class GraphRecordCodec
         if (record.Node is { } node)
         {
             output.Write(node.Labels.Count);
-            foreach (string label in node.Labels) { output.Write(label); }
+            for (int i = 0; i < node.Labels.Count; i++)
+            { output.Write(node.Labels[i]); output.Write(record.LabelIds![i].ToByteArray()); }
             Properties(output, node.Properties);
         }
         else if (record.Relationship is { } relationship)
@@ -87,8 +88,14 @@ internal static class GraphRecordCodec
                 case 1:
                     int count = Count(input);
                     var labels = new string[count];
-                    for (int i = 0; i < count; i++) { labels[i] = input.ReadString(); }
-                    record = new GraphRecord(kind, id, new StoredGraphNode(id, Array.AsReadOnly(labels), Properties(input)));
+                    var labelIds = new Guid[count];
+                    for (int i = 0; i < count; i++)
+                    {
+                        labels[i] = input.ReadString();
+                        labelIds[i] = new Guid(input.ReadBytes(16));
+                        if (labelIds[i] == Guid.Empty) { throw new StorageCorruptionException(ErrorMessages.LabelIdInvalid); }
+                    }
+                    record = new GraphRecord(kind, id, new StoredGraphNode(id, Array.AsReadOnly(labels), Properties(input)), LabelIds: labelIds);
                     break;
                 case 2:
                     ulong source = input.ReadUInt64(), target = input.ReadUInt64();

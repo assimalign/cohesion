@@ -394,6 +394,8 @@ public sealed class TransactionManager : IAsyncDisposable
             // is invoked inside the same lock for the same reason; sequences it
             // hands out to non-manager consumers never stamp row versions, so the
             // snapshot maximum below stays a correct visibility bound.
+            // Lock order: this manager lock never waits on checkpoint/apply/log gates.
+            // Storage's allocator is an Interlocked reservation, not a physical begin.
             ulong sequence = _sequenceAllocator is null
                 ? ++_lastSequence
                 : _sequenceAllocator().Value;

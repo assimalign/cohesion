@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var operand in logical.Operands)
             {
                 await PrepareExpressionAsync(operand, row, statement, cancellationToken).ConfigureAwait(false);
-                var value = EvaluatePrepared(operand, evaluator, row);
+                var value = SqlExpressionEvaluator.BooleanValue(EvaluatePrepared(operand, evaluator, row), logical.IsOr ? "OR" : "AND");
                 if (logical.IsOr ? value is true : value is false) { break; }
             }
             return;
@@ -77,7 +77,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 await PrepareExpressionAsync(when.Condition, row, statement, cancellationToken).ConfigureAwait(false);
                 var condition = EvaluatePrepared(when.Condition, evaluator, row);
-                bool matches = choice.Input is null ? condition is true : input is not null && condition is not null &&
+                bool matches = choice.Input is null ? SqlExpressionEvaluator.BooleanValue(condition, "CASE WHEN") is true : input is not null && condition is not null &&
                     SqlExpressionEvaluator.Compare(input, condition, when.Collation.Resolve(frame)) == 0;
                 if (matches)
                 {

@@ -1,6 +1,26 @@
 # Blob engine design
 
+## Upload and begin failures (#1247, #1364)
+
+Upload state failures originate in the stream's failed/inactive guards, through a dedicated
+internal `BlobUploadException` carrying `COHDBB007`. The engine translates only that type
+into area Diagnostics; the guarded stream's inactive-operation check uses the same translation.
+A writable guarded stream marks its operation as an upload, so the upload code remains
+specific to uploads. The storage component retains its independent vocabulary. Unrelated `InvalidOperationException`
+and `ObjectDisposedException` pass through unchanged. An upload cannot accept buffered writes
+after rollback or a failed write, and cannot publish its partial content. Both explicit and
+automatic begin use the full failure translator. Wire exchange failures retain Blob's terminal
+connection rule. Aborted-transaction refusals carry `COHDBB001` in Diagnostics; only wire
+writers add its message prefix. The internal begin seam exercises both callers without a new
+coordinator API or visibility grant.
+
+
 ## Storage corruption (#1160)
+
+A StorageIOException or IOException while opening storage crosses the engine boundary as
+DatabaseException with structured COHDBB005 diagnostics (#1364). Open releases any acquired
+file set and publishes no database, so callers may resolve the I/O condition and retry.
+
 
 Storage corruption is `COHDBS003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
@@ -1028,9 +1048,18 @@ behind its `Open` factory.
 
 ## Diagnostics
 
+Child-root storage and catalog failures cross the engine boundary as DatabaseException with
+Error entries in Diagnostics and the original InnerException (#1247). Offline and common
+COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
+transaction; after rollback the in-process session remains usable. Blob wire errors remain terminal: the Error message receives the first diagnostic code only when it lacks that prefix, then the connection closes.
+
+
 | Code | Meaning |
 | --- | --- |
 | `COHDBB004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
+| `COHDBB005` | Storage operation failure (including I/O); original cause retained |
+| `COHDBB006` | Malformed or unsupported catalog/index metadata |
+| `COHDBB007` | Upload stream is failed or its transaction is no longer active |
 
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and

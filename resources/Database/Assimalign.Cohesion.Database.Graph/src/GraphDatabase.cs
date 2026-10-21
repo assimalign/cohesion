@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
@@ -217,6 +218,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -465,8 +472,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
         await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
+        return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), NodeLabelIds(labels, operation), operation.Context, token).ConfigureAwait(false));
     }
+
+    internal IReadOnlyDictionary<string, Guid> NodeLabelIds(IReadOnlyList<string> labels, GraphOperation operation)
+        => labels.Distinct(StringComparer.Ordinal).ToDictionary(label => label,
+            label => Catalog.FindLabel(label, operation.Context.Snapshot)!.Value.Id, StringComparer.Ordinal);
 
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)

@@ -5,7 +5,9 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -129,7 +131,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception) is DatabaseOfflineException offline)
+        catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
         {
             throw offline;
         }
@@ -187,14 +189,30 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             return await ExecuteCommandAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception) is var translated
-            && !ReferenceEquals(translated, exception))
+        catch (Exception exception) when (_database.TranslateFailure(exception) is var translated
+            && (!ReferenceEquals(translated, exception) || translated is DatabaseCorruptionException))
         {
             // A command that met the offline storage (#1243) gets the coded refusal, or is
             // unconfirmed when a storage commit record was written before the flush failed; the
             // unconfirmed commit that took it offline keeps its own type.
-            throw translated;
+            throw await AbortStorageFailureAsync(translated).ConfigureAwait(false);
         }
+    }
+
+    // Runs after the command admission and snapshot pin have been released.
+    private async ValueTask<Exception> AbortStorageFailureAsync(Exception error)
+    {
+        if (DatabaseFailure.IsStorageFailure(error)
+            && CurrentTransaction is { } transaction)
+        {
+            try { await transaction.AbortForFailedStatementAsync(error).ConfigureAwait(false); }
+            catch (Exception abortFailure)
+            {
+                // Keep the exact coded exception, including the common corruption type.
+                KeyValueDatabaseEventSource.Log.TransactionCleanupFailed(transaction, abortFailure);
+            }
+        }
+        return error;
     }
 
     private async ValueTask<DatabaseResult> ExecuteCommandAsync(KeyValueRequest request, CancellationToken cancellationToken)

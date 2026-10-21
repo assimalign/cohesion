@@ -249,6 +249,15 @@ internal static class Program
         Check("in process: NULLS LAST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x NULLS LAST, id"), [[1], [3], [2]]);
         Check("in process: DESC NULLS FIRST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x DESC NULLS FIRST, id"), [[2], [3], [1]]);
         Check("in process: aggregate NULL placement", await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY x NULLS LAST, id) FROM null_ordering"), [["a,c,b"]]);
+        Check("in process: SELECT without FROM (#1373)", await RowsAsync(session, "SELECT (SELECT 42) WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)"), [[42L]]);
+        Check("in process: public function timestamp (#1373)",
+            new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
+        Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
+        CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "COHSQLE003");
+        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "COHSQLE003");
+        Check("in process: Boolean string literal (#1190)", await RowsAsync(session, "SELECT 1 WHERE 'YeS'"), [[1L]]);
+        Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
+        Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);
         Check("in process: OFFSET FETCH", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 ROW FETCH FIRST ROW ONLY"), [[2L]]);
         Check("in process: OFFSET before LIMIT", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1"), [[2L]]);
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);

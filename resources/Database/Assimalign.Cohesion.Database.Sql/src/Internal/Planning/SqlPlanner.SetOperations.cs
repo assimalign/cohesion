@@ -18,9 +18,6 @@ internal sealed partial class SqlPlanner
         return query is SqlSetOperationExpression set ? PlanSetOperation(set) : PlanSubqueries((SqlSelectExpression)query);
     }
 
-    private bool IsCommonTableOperand(SqlSelectExpression select)
-        => _commonTableState?.BindingOperands?.Contains(select) == true;
-
     private SqlSetOperationPlan PlanSetOperation(SqlSetOperationExpression set)
     {
         var pending = new Stack<(SqlQueryBodyExpression Query, bool Visited)>();

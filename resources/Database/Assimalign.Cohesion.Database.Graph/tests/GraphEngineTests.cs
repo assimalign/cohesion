@@ -151,10 +151,12 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Format: format-2 records and registrations are refused with COHDBG017 before scrub (#1532)")]
-    [InlineData(1)]
-    [InlineData(2)]
-    public async Task OpenDatabaseAsync_GraphFormatTwo_ShouldPreserveCodedRefusalAsync(ulong owner)
+    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with COHDBG017 before scrub, leaving every file unchanged (#1534)")]
+    [InlineData(1, 2)]
+    [InlineData(2, 2)]
+    [InlineData(1, 3)]
+    [InlineData(2, 3)]
+    public async Task OpenDatabaseAsync_EarlierGraphFormat_ShouldPreserveCodedRefusalAsync(ulong owner, byte version)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -176,7 +178,19 @@ public sealed class GraphEngineTests
                 records.MoveNext().ShouldBeTrue();
                 var record = records.Current;
                 byte[] bytes = record.Data.ToArray();
-                bytes[17] = 2;
+                bytes[17] = version;
+                if (owner == 2 && version == 3)
+                {
+                    // The format-3 node layout shipped by #1532: stamps, kind/version,
+                    // identity/revision, label strings, properties. No catalog GUID follows a label.
+                    using var legacy = new MemoryStream();
+                    using var output = new BinaryWriter(legacy);
+                    output.Write(bytes.AsSpan(0, 34));
+                    output.Write(1);
+                    output.Write("N");
+                    output.Write(0);
+                    bytes = legacy.ToArray();
+                }
                 using var bracket = storage.BeginTransaction();
                 storage.UpdateEntry(bracket, record.PageId, record.SlotIndex, bytes);
                 bracket.Commit();
@@ -198,6 +212,7 @@ public sealed class GraphEngineTests
             failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith("COHDBG017: ", Case.Sensitive);
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
+            Directory.GetFiles(directory).Order().ShouldBe(before.Keys.Order());
             foreach (var (path, bytes) in before) { File.ReadAllBytes(path).ShouldBe(bytes); }
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }

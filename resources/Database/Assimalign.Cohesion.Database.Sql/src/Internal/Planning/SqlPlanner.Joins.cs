@@ -46,8 +46,8 @@ internal sealed partial class SqlPlanner
                     }
                     if (!metadataOnly)
                     {
-                        ValidateExpression(on, scope, _subqueryTypes);
-                        condition = scope.Bind(on);
+                        ValidatePredicate(on, scope, "JOIN ON", _subqueryTypes);
+                        condition = scope.BindPredicate(on);
                         if (ViewDefinitionBinding is not null) { CaptureViewJoin(on, bindings.Skip(start).ToArray(), scope); }
                         CollectJoinEqualities(on, scope, equalities);
                     }

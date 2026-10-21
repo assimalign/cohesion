@@ -186,7 +186,6 @@ public sealed class BlobDatabaseEngineBuilder
     /// <exception cref="ArgumentException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="ArgumentOutOfRangeException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="DatabaseException">See <see cref="BuildAsync"/>.</exception>
-    /// <exception cref="Assimalign.Cohesion.Database.Storage.StorageException">See <see cref="BuildAsync"/>.</exception>
     /// <exception cref="AggregateException">See <see cref="BuildAsync"/>.</exception>
     public BlobDatabaseEngine Build()
         => Task.Run(async () => await BuildAsync(CancellationToken.None).ConfigureAwait(false)).GetAwaiter().GetResult();
@@ -207,11 +206,8 @@ public sealed class BlobDatabaseEngineBuilder
     /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// A declared database exists but its storage format was refused; the engine was disposed.
-    /// </exception>
-    /// <exception cref="Assimalign.Cohesion.Database.Storage.StorageException">
-    /// A declared database's files could not be read (a damaged header, an I/O failure): the storage
-    /// layer's own exception, which is not a <see cref="DatabaseException"/>; the engine was disposed.
+    /// A declared database's storage format was refused, or opening it failed with corruption
+    /// (<c>COHDBS003</c>) or coded I/O failure (<c>COHDBB005</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>

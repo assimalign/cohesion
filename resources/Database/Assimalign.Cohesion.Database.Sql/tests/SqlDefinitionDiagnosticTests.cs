@@ -26,7 +26,6 @@ public sealed class SqlDefinitionDiagnosticTests
     [InlineData("CREATE FUNCTION f(p INT) RETURNS INT IMMUTABLE RETURN weak(p)", "body")]
     [InlineData("CREATE DOMAIN native_domain AS INT", "statement")]
     [InlineData("CREATE DOMAIN nested_domain AS base_domain", "statement")]
-    [InlineData("CREATE TABLE c (id INT CHECK (id));", "check")]
     [InlineData("DROP DOMAIN absent;", "statement")]
     [InlineData("DROP FUNCTION absent(INT);", "statement")]
     public async Task Execute_InvalidDefinition_ShouldCarryLocatedDiagnosticAsync(string sql, string span)

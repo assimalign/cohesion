@@ -362,8 +362,9 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   and an unstamped page (checksum zero) is never verified, so the header alone would
   otherwise hand the B-tree a writable span past the buffer.
 - **Extension runs under the pool lock.** Allocating a page past the end of the data
-  stream grows the stream through `EnsureLength`, under the same lock every page read
-  and write-back holds, and only ever grows it. An in-memory stream copies its array
+  stream grows the stream through `EnsureLength`, serializing grow-only length checks
+  with other allocations. The backing handle serializes the growth itself with page I/O,
+  including flush write-back outside the pool monitor (#1269). An in-memory stream copies its array
   into a new one when it grows; a write-back that landed in the old array after its
   region was copied was lost while the pool recorded the page clean, so a later eviction
   dropped the change and the reload was stale or all zeros (#1157 review). The
@@ -374,6 +375,23 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   the caller's concern (a handle hands out a raw pointer); the transaction layer above
   provides content-level isolation. Sharding the lock is a measured-need optimization,
   not a default.
+- **Flush I/O leaves the monitor (#1269).** `FlushAll` snapshots dirty frame identities
+  under the monitor, then writes in 16-page bursts with a yield between them. One rented
+  page image is reused; each copy is made under the monitor and its frame holds an I/O
+  lease until the write completes. Pins and dirty marks still progress, while eviction
+  skips the leased frame or waits with the monitor released if it is the only candidate.
+  A miss rechecks its requested id after that wait, so two misses cannot replace each
+  other's pinned frame. Snapshot entries evicted in between are ignored by identity.
+  `FlushSome` uses the same path, copying only unpinned pages; `FlushPage` and the final
+  stream flush also leave the monitor. A flush/resize/disposal gate serializes those operations
+  before they take the monitor; a shrink never exposes a resident set above its capacity while
+  waiting for a frame's I/O. Disposal drains I/O before clearing frames or closing
+  streams. Blocked-handle rendezvous tests observe resize and disposal waiting on that
+  gate and verify frame residency before releasing I/O in both Debug and Release.
+  Every exception releases the frame lease and rented image in `finally`; lease waiters
+  are pulsed before the debug frame assertion can throw.
+  Foreground misses and evictions still perform their own I/O under the monitor; moving
+  those paths is #1541. No checkpoint completion-time target or spread checkpoint is added.
 - **Write-back writes a private copy.** A pinned writer can change a page while the pool
   writes it back — `FlushAll` and `FlushPage` write pinned pages, and until #1157 the
   paced page writer did too. Write-back therefore copies the page first, stamps the
@@ -418,6 +436,11 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   allocation of a free page whose last write a crash tore — recovery repairs torn pages
   from journal images, and an unjournaled checkpoint anchor page has none. The clear zeroes
   the page LSN too, which storage format 3 relies on (invariant A, "Write ordering rules").
+  If obtaining the overwrite pin or initializing the page fails, allocation releases any pin
+  and returns the reserved id to the free map; repeated refusals when every frame is pinned
+  therefore consume no allocated pages (#1269). The unjournaled-write audit runs after
+  stream extension but before buffer initialization, and dirty marking runs last, so a
+  refusing audit preserves a resident free page's bytes and dirty version.
 
 ### Capacity (#1254)
 
@@ -1357,6 +1380,13 @@ engine) added three storage-side rules that keep the logical layer sound:
   a checkpoint truncates the journal — the only other sequence witness — while
   MVCC row stamps persist in data pages, so a recycled sequence would corrupt
   snapshot visibility.
+  Reservations use `Interlocked.Increment`, including internally sequenced brackets;
+  adoption raises the same counter with compare/exchange. Reservation takes no transaction
+  lock, so manager begin cannot hold its snapshot lock behind a checkpoint (#1269).
+  At a checkpoint, physical brackets and logical writer enrollment are excluded through
+  truncation: the captured floor bounds every stamp whose journal witness can be discarded.
+  Concurrent reservations above it stamp nothing, and later promotion appends a new BEGIN
+  and physical records to the retained journal. Non-checkpoint header writes truncate nothing.
 - **Checkpoints carry logical writers; the open-time checkpoint is deferrable.**
   `Checkpoint(ReadOnlySpan<long>)` embeds the in-flight *logical* sequences it is given
   in the truncating checkpoint record and, first, in the header's checkpoint anchor
@@ -1727,7 +1757,9 @@ taken in `BeginTransaction` under the transaction lock and released exactly once
 commit/rollback: a begun-but-untouched transaction holds no page lock yet has already
 appended its begin record, and the whole checkpoint now runs *under* the transaction
 lock, so no transaction can slip between the emptiness check and the truncation.
-(Lock order is transaction lock → header → buffer pool → journal medium → journal append;
+(Lock order is transaction lock → header → flush gate → buffer pool monitor, then journal
+medium → journal append; flush I/O releases the monitor, eviction never takes the flush gate,
+and waits on a frame lease release the monitor.
 no path takes them in reverse. In particular, never wait for the medium while holding the
 append lock. Medium owners briefly acquire the append lock to detach or publish a prefix,
 and latch failures before yielding the medium. The offline latch may then take the group-commit
@@ -1800,16 +1832,20 @@ these remain investigation paths. The opt-in Blob listener also counts process-w
 `StorageTransactionException` occurrences, since a busy checkpoint throws before `CheckpointStart`;
 this is test-only measurement, alongside the existing deferred `BracketOpen` event.
 
-**A checkpoint stalls its database.** While it runs, every statement waits for the apply gate,
-and every reader and writer that appends a lifecycle record waits for the coordinator's log gate,
-which the checkpoint holds across its whole flush; `FlushAll` also holds the pool's lock across
-every write-back. The stall is the checkpoint's duration, which grows with the dirty part of the
-pool: the #1254 review's probe (physical files, 30,000 rows of 900 bytes, the size trigger off)
-measured the longest point `SELECT` during a checkpoint at 241–267 ms with the 32 MiB pool and
-166–184 ms with a 1 MiB pool, against a 0.38–0.42 ms median. The gate predates #1254; the larger
-pool lengthens the stall, and size-triggered checkpoints make it recur every 256 MiB of journal
-under load. Letting read-only transactions begin without the log gate, and writing back outside
-the pool lock in batches, would shorten it (a follow-up).
+**Readers can progress during a checkpoint (#1269).** The #1254 review measured point-read
+stalls of 166–267 ms while the checkpoint held the lifecycle, transaction and pool locks.
+Readers now reserve sequences without the transaction lock, append no lifecycle records and
+end without the log gate; flush write-back and its stream flush run outside the pool monitor.
+The checkpoint still excludes statement apply, so writers wait through the sharp checkpoint.
+`StorageCheckpointFlushTests` parks write-ahead, page writes and stream flushes and proves cached
+pins progress; it also covers dirty versions, recycled snapshots, failed I/O, disposal and
+counter-driven contention. `CheckpointLatencyProbeTests` reports nearest-rank p99 for reads overlapping at least five
+checkpoints (continuing until overlap is observed) over physical files with a 32 MiB pool.
+Timing is reported, never a CI threshold;
+the controlled-storage p99 < 10 ms gate remains a #1511/SF10 measurement. PostgreSQL spreads
+writes toward `checkpoint_completion_target` in `CheckpointWriteDelay`
+(`src/backend/postmaster/checkpointer.c:782-865`); this change only yields between bounded
+bursts, without spreading a checkpoint while the apply gate is held.
 
 **The defaults** are engine options (every engine has the same three): `CheckpointJournalSize`
 256 MiB, `CheckpointInterval` 5 minutes (was 30 seconds), `BufferPoolCapacity` 32 MiB. The

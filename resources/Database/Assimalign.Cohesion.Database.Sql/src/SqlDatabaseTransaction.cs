@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -28,9 +29,10 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>A statement is statement-atomic</b>, so a failed statement leaves the transaction active (a
-/// constraint violation, an evaluation fault, a deadlock victim): the SQL model never aborts its
-/// transaction for a failed statement, the owner's 2026-10-04 per-statement decision, and never
-/// calls the base's abort. A commit or rollback that started always ends the context (#1226): the
+/// constraint violation, an evaluation fault, a deadlock victim). Storage corruption or I/O failure
+/// is the exception (#1364): it aborts the transaction through the base, retains the coded cause,
+/// and requires rollback before further statements. A commit or rollback that started always ends
+/// the context (#1226): the
 /// kernel completes a started rollback whatever fails, keeping the locks of a writer whose undo it
 /// must defer, and aborts a commit it cannot complete. A rollback ends the transaction even under a
 /// running statement, which then fails and applies nothing.
@@ -55,6 +57,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     // makes its disposal touch nothing.
     private readonly SqlDatabase _database;
     private readonly SqlCatalogSnapshot? _catalogSnapshot;
+    private Exception? _storageFailure;
 
     internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null)
         : base(context.Id, context.IsolationLevel)
@@ -102,6 +105,27 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// </summary>
     /// <returns>The refusal.</returns>
     internal DatabaseException CreateStatementRefusal() => CreateRefusal();
+
+    internal bool HasStorageFailure => _storageFailure is not null;
+
+    internal Exception RecordStorageFailure(Exception cause)
+    {
+        _storageFailure ??= cause;
+        return cause;
+    }
+
+    internal async ValueTask AbortStorageFailureAsync(Exception? cleanupFailure = null)
+    {
+        var cause = _storageFailure;
+        _storageFailure = null;
+        if (cleanupFailure is not null) { SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, cleanupFailure); }
+        if (cause is null) { return; }
+        try { await AbortAsync(cause).ConfigureAwait(false); }
+        catch (Exception abortFailure)
+        {
+            SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, abortFailure);
+        }
+    }
 
     /// <inheritdoc />
     protected override TransactionState GetKernelState() => _context.State;
@@ -171,7 +195,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
         string message = commit
             ? AbortedCode + ": The session's transaction is aborted and cannot commit; nothing was committed." + reason
             : AbortedCode + ": The session's transaction is aborted; statements are refused until it is rolled back." + reason;
-        return new DatabaseException(message, cause);
+        return new DatabaseException(message, [new Types.Diagnostic
+        { Code = "COHSQLT005", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // The area error policy: the engine translates the transaction kernel's independent exception
@@ -181,7 +206,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     private Exception Translate(Exception error) => error switch
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
-        _ when _database.TranslateOffline(error) is var offline && !ReferenceEquals(offline, error) => offline,
+        _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,

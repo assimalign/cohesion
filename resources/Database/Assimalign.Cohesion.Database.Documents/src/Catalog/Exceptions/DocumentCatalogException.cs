@@ -7,6 +7,14 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog;
 /// <summary>Reports malformed or unsupported persisted document catalog metadata.</summary>
 public sealed class DocumentCatalogException : Exception
 {
+    // User errors retain their identity across the engine boundary without parsing message text.
+    internal string? Code { get; }
+
+    internal DocumentCatalogException(string code, string message) : base(message)
+    {
+        Code = code;
+    }
+
     /// <summary>Initializes a catalog error.</summary>
     /// <param name="message">The error description.</param>
     public DocumentCatalogException(string message) : base(message) { }
