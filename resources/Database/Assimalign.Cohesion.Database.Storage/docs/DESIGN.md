@@ -80,6 +80,10 @@ A test that used to intercept a non-virtual member by re-implementing `IStorage`
 decorating `IStorageJournal` now uses a hook on the type that makes the call (the
 transaction coordinator's internal test hooks), never protected surface on `Storage`.
 
+## Cancellable structure reads (#1542)
+
+StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writer or physical rollback owns the structure latch. Cancellation takes no shared hold, including the race where acquisition succeeds as cancellation arrives. The existing un-tokened API remains unchanged. B+Tree batches use this overload; lock order stays transaction locks -> tree latch -> page pin/pool monitor, with no awaits under the tree latch.
+
 ## The page model
 
 - **8 KiB pages, 96-byte header.** The header layout (`Page.Header`) is an explicit

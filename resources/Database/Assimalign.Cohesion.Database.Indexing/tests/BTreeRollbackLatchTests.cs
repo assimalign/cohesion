@@ -96,6 +96,7 @@ public sealed class BTreeRollbackLatchTests
         Exception? failure = null;
         long rollbacks = 0;
         long reads = 0;
+        long reverseReads = 0;
 
         // Act: the writer inserts a second version of every committed key, which splits leaves
         // across the whole tree, then rolls the transaction back physically.
@@ -113,21 +114,24 @@ public sealed class BTreeRollbackLatchTests
                 Interlocked.Increment(ref rollbacks);
             }
         });
-        var readers = Enumerable.Range(0, 3).Select(_ => Task.Run(async () =>
+        var readers = Enumerable.Range(0, 3).Select(readerIndex => Task.Run(async () =>
         {
+            bool reverse = readerIndex == 0;
+            var expected = reverse ? committed.Reverse().ToArray() : committed;
             while (!stop.IsCancellationRequested && Volatile.Read(ref failure) is null)
             {
                 var reader = await harness.Manager.BeginAsync();
                 try
                 {
-                    var references = await ReferencesAsync(index, reader);
-                    if (!references.SequenceEqual(committed))
+                    var references = await ReferencesAsync(index, reader, reverse);
+                    if (!references.SequenceEqual(expected))
                     {
                         Interlocked.CompareExchange(ref failure, new InvalidOperationException(
                             $"A cursor read {references.Count} entries, not the 400 committed ones: [{string.Join(", ", references.Except(committed).Take(5))}] extra."), null);
                     }
 
                     Interlocked.Increment(ref reads);
+                    if (reverse) { Interlocked.Increment(ref reverseReads); }
                 }
                 catch (Exception exception)
                 {
@@ -146,7 +150,7 @@ public sealed class BTreeRollbackLatchTests
         var elapsed = Stopwatch.StartNew();
         while (Volatile.Read(ref failure) is null
             && (elapsed.Elapsed < RaceMinimum
-                || ((Interlocked.Read(ref rollbacks) < 5 || Interlocked.Read(ref reads) < 20) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
+                || ((Interlocked.Read(ref rollbacks) < 5 || Interlocked.Read(ref reads) < 20 || Interlocked.Read(ref reverseReads) < 5) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
         {
             await Task.Delay(50);
         }
@@ -158,6 +162,7 @@ public sealed class BTreeRollbackLatchTests
         failure.ShouldBeNull();
         rollbacks.ShouldBeGreaterThanOrEqualTo(5);
         reads.ShouldBeGreaterThanOrEqualTo(20);
+        reverseReads.ShouldBeGreaterThanOrEqualTo(5);
     }
 
     /// <summary>
@@ -190,10 +195,10 @@ public sealed class BTreeRollbackLatchTests
         return index;
     }
 
-    private static async Task<List<ulong>> ReferencesAsync(BTreeIndex index, TransactionContext reader)
+    private static async Task<List<ulong>> ReferencesAsync(BTreeIndex index, TransactionContext reader, bool reverse = false)
     {
         var references = new List<ulong>();
-        await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+        await using var cursor = index.OpenCursor(reader, IndexKeyRange.All, reverse);
         while (await cursor.MoveNextAsync())
         {
             references.Add(cursor.CurrentEntryReference);

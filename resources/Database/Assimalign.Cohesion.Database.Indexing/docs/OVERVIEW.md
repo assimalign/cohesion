@@ -6,7 +6,7 @@ Shared index infrastructure for every Cohesion database engine: order-preserving
 
 - `IndexKey` / `IndexKeyRange` — byte-comparable key encoding (implemented, tested) and range scans
 - `BTreeIndex` — point/range operations bound to a transaction context (sealed)
-- `BTreeCursor` — streaming scan iteration (sealed)
+- `BTreeCursor` — incremental forward/reverse scans with bounded owned batches and cancellation (sealed)
 - `BTreeIndexManager` / `IndexDefinition` — create/drop/open per logical database, and the
   registrations a catalog persists (sealed; `BTreeIndexManager.Create`)
 - `IndexKind` — BTree (default), Hash (post-MVP)

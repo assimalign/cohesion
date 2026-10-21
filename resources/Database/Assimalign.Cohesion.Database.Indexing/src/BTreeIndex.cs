@@ -40,8 +40,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </para>
 /// <para>
 /// Concurrency model (MVP): a tree-level reader/writer latch serializes structural
-/// access — writers are exclusive, cursors materialize their results under the read
-/// latch. Entry-level write conflicts between transactions are the lock manager's
+/// access — writers are exclusive, cursors copy bounded batches under the read
+/// latch and resume by entry identity. Entry-level write conflicts are the lock manager's
 /// job (unique keys) and the storage page write locks' job (everything else).
 /// Deletes are tombstones (the deleter stamp); physical reclamation and node merges
 /// belong to the vacuum feature that follows version pruning.
@@ -306,16 +306,22 @@ public sealed class BTreeIndex
     /// </summary>
     /// <remarks>
     /// Entries with equal keys are returned in entry-reference order (reversed when
-    /// <paramref name="reverse"/> is true).
+    /// <paramref name="reverse"/> is true), with writer stamps breaking reference ties.
+    /// Opening reads no pages. Keep the transaction alive throughout enumeration and
+    /// collect mutation targets before applying writes; see <see cref="BTreeCursor"/>.
     /// </remarks>
     /// <param name="transaction">The transaction whose snapshot reads resolve through.</param>
     /// <param name="range">The key range to scan.</param>
     /// <param name="reverse">Whether to scan in descending key order.</param>
+    /// <param name="cancellationToken">Cancellation token for opening and reading the cursor.</param>
     /// <returns>A cursor over the visible entries in the range.</returns>
-    public BTreeCursor OpenCursor(TransactionContext transaction, IndexKeyRange range, bool reverse = false)
+    /// <exception cref="ArgumentNullException"><paramref name="transaction"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public BTreeCursor OpenCursor(TransactionContext transaction, IndexKeyRange range, bool reverse = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
-        return OpenCursor(transaction.Snapshot, range, reverse);
+        cancellationToken.ThrowIfCancellationRequested();
+        return OpenCursor(transaction.Snapshot, range, reverse, cancellationToken);
     }
 
     /// <summary>
@@ -327,34 +333,22 @@ public sealed class BTreeIndex
     /// </summary>
     /// <remarks>
     /// Entries with equal keys are returned in entry-reference order (reversed when
-    /// <paramref name="reverse"/> is true).
+    /// <paramref name="reverse"/> is true), with writer stamps breaking reference ties.
+    /// Opening reads no pages. The caller retains the snapshot pin throughout enumeration;
+    /// see <see cref="BTreeCursor"/> for mutation and lifetime requirements.
     /// </remarks>
     /// <param name="snapshot">The visibility snapshot entries filter through.</param>
     /// <param name="range">The key range to scan.</param>
     /// <param name="reverse">Whether to scan in descending key order.</param>
+    /// <param name="cancellationToken">Cancellation token for opening and reading the cursor.</param>
     /// <returns>A cursor over the visible entries in the range.</returns>
-    public BTreeCursor OpenCursor(TransactionSnapshot snapshot, IndexKeyRange range, bool reverse = false)
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
+    public BTreeCursor OpenCursor(TransactionSnapshot snapshot, IndexKeyRange range, bool reverse = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-
-        var results = new List<(byte[] Key, ulong EntryReference)>();
-
-        _latch.EnterRead();
-        try
-        {
-            CollectVisible(snapshot, range, results);
-        }
-        finally
-        {
-            _latch.ExitRead();
-        }
-
-        if (reverse)
-        {
-            results.Reverse();
-        }
-
-        return new BTreeCursor(results);
+        cancellationToken.ThrowIfCancellationRequested();
+        return new BTreeCursor(this, snapshot, range, reverse, cancellationToken);
     }
 
     /// <summary>Locks a unique key and finds its live entry in the latest index state.</summary>
@@ -602,63 +596,128 @@ public sealed class BTreeIndex
     }
 
     /// <summary>
-    /// Materializes the snapshot-visible entries of <paramref name="range"/> in
-    /// order. An inclusive start descends to <c>(start, -inf)</c>, before the first
-    /// entry of the start key; an exclusive start to <c>(start, +inf)</c>, after its
-    /// last. Only the first leaf needs positioning: every later leaf on the chain
-    /// holds entries past the start. The first leaf may hold no entry at or past the
-    /// start (the start falls between its last entry and the next separator); the
-    /// walk then begins on the next leaf.
+    /// Copies at most one batch, re-descending strictly past the last examined identity.
+    /// No physical position survives this call: a split, erase or physical rollback can
+    /// change every page and slot between batches. Invisible entries count toward the
+    /// examination limit too; otherwise an old snapshot could starve writers.
     /// </summary>
-    private void CollectVisible(TransactionSnapshot snapshot, IndexKeyRange range, List<(byte[] Key, ulong EntryReference)> results)
+    internal void ReadCursorBatch(BTreeCursor cursor, CancellationToken cancellationToken)
     {
-        ReadOnlySpan<byte> startKey = range.Start.HasValue ? range.Start.Value.Encoded.Span : default;
-        ReadOnlySpan<byte> endKey = range.End.HasValue ? range.End.Value.Encoded.Span : default;
-        var start = range.IsStartInclusive ? BTreeSearchKey.AtKey(startKey) : BTreeSearchKey.AfterKey(startKey);
-
-        long leafId = range.Start is null ? DescendToLeftmostLeaf() : Descend(start, null);
-        bool firstLeaf = true;
-
-        while (leafId >= 0)
+        // Order: transaction/key locks (if any) -> tree latch -> page pin/pool monitor.
+        // Never acquire a transaction lock or await under the tree latch. Rollback takes
+        // the same latch exclusively; all page handles leave before the shared hold does.
+        _latch.EnterRead(cancellationToken);
+        try
         {
-            long nextLeaf;
+            bool reverse = cursor.Reverse;
+            var range = cursor.Range;
+            var continuation = cursor.Continuation;
+            var boundary = cursor.Boundary;
+            var bound = reverse ? range.End : range.Start;
+            ReadOnlySpan<byte> boundKey = bound.HasValue ? bound.Value.Encoded.Span : default;
+            var position = boundary is not null ? boundary.AsSearchKey() : continuation is { } last
+                ? BTreeSearchKey.AtEntry(last.Key, last.EntryReference, last.Writer)
+                : (reverse ? range.IsEndInclusive : !range.IsStartInclusive)
+                    ? BTreeSearchKey.AfterKey(boundKey) : BTreeSearchKey.AtKey(boundKey);
+            long leafId = DescendCursor(position, bound.HasValue || continuation.HasValue || boundary is not null,
+                reverse, cursor, cancellationToken, out var leafBoundary);
+            int examined = 0;
+            bool firstLeaf = true;
 
-            using (var handle = _storage.PageManager.GetPage((PageId)leafId))
+            while (leafId >= 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var handle = _storage.PageManager.GetPage((PageId)leafId);
+                cursor.PagesVisited++;
                 var node = OpenNode(handle.Page.AsBodySpan(), leafId);
-                nextLeaf = node.NextLeaf;
-                int index = 0;
-
-                if (firstLeaf && range.Start is not null)
+                int index = reverse ? node.EntryCount - 1 : 0;
+                if (firstLeaf && (bound.HasValue || continuation.HasValue || boundary is not null))
                 {
-                    index = node.FindLowerBound(start);
+                    index = node.FindLowerBound(position);
+                    if (reverse) { index--; }
+                    else if (boundary is null && continuation.HasValue && index < node.EntryCount && node.CompareToEntry(position, index) == 0) { index++; }
                 }
-
-                firstLeaf = false;
-
-                for (; index < node.EntryCount; index++)
+                if (index < 0 || index >= node.EntryCount)
                 {
-                    var key = node.GetKey(index);
-
-                    if (range.End is not null)
+                    // Undo can leave arbitrarily long chains of empty leaves. Yield after
+                    // one empty leaf. A separator is a logical fence even after its source
+                    // entry is erased: resume at it, never at a retained physical page id.
+                    // On a later leaf we have made identity progress; the next descent can
+                    // move past that exhausted leaf's fence before visiting the empty chain.
+                    if (firstLeaf)
                     {
-                        int comparison = key.SequenceCompareTo(endKey);
-                        if (comparison > 0 || (comparison == 0 && !range.IsEndInclusive))
+                        cursor.Continuation = null;
+                        cursor.Boundary = leafBoundary;
+                        cursor.Completed = leafBoundary is null;
+                    }
+                    return;
+                }
+                firstLeaf = false;
+                int lastExamined = -1;
+                bool lastVisible = false;
+                for (; index >= 0 && index < node.EntryCount; index += reverse ? -1 : 1)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var key = node.GetKey(index);
+                    var stop = reverse ? range.Start : range.End;
+                    if (stop.HasValue)
+                    {
+                        int comparison = key.SequenceCompareTo(stop.Value.Encoded.Span);
+                        if ((reverse ? comparison < 0 : comparison > 0) ||
+                            (comparison == 0 && !(reverse ? range.IsStartInclusive : range.IsEndInclusive)))
                         {
+                            cursor.Completed = true;
                             return;
                         }
                     }
-
-                    if (!IsEntryVisible(node, index, snapshot))
+                    cursor.EntriesExamined++;
+                    examined++;
+                    bool visible = IsEntryVisible(node, index, cursor.Snapshot);
+                    lastExamined = index;
+                    lastVisible = visible;
+                    if (visible || examined == BTreeCursor.ExaminationLimit)
                     {
-                        continue;
+                        // Own the key before releasing the pin. Keep an invisible identity
+                        // only at the work boundary, so long dead runs allocate per batch.
+                        var entry = new BTreeCursor.Entry(key.ToArray(), node.GetEntryReference(index), node.GetWriter(index));
+                        cursor.Continuation = entry;
+                        cursor.Boundary = null;
+                        if (visible) { cursor.Entries[cursor.Count++] = entry; }
                     }
-
-                    results.Add((key.ToArray(), node.GetEntryReference(index)));
+                    if (cursor.Count == BTreeCursor.BatchSize || examined == BTreeCursor.ExaminationLimit) { return; }
                 }
+                if (lastExamined >= 0 && !lastVisible)
+                {
+                    cursor.Continuation = new BTreeCursor.Entry(node.GetKey(lastExamined).ToArray(),
+                        node.GetEntryReference(lastExamined), node.GetWriter(lastExamined));
+                    cursor.Boundary = null;
+                }
+                leafId = reverse ? node.PrevLeaf : node.NextLeaf;
             }
+            cursor.Completed = true;
+        }
+        finally { _latch.ExitRead(); }
+    }
 
-            leafId = nextLeaf;
+    private long DescendCursor(in BTreeSearchKey position, bool bounded, bool reverse, BTreeCursor cursor,
+        CancellationToken cancellationToken, out Separator? leafBoundary)
+    {
+        long current = RootPageId;
+        leafBoundary = null;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var handle = _storage.PageManager.GetPage((PageId)current);
+            cursor.PagesVisited++;
+            var node = OpenNode(handle.Page.AsBodySpan(), current);
+            if (node.IsLeaf) { return current; }
+            int slot = bounded ? node.FindChildSlot(position) : reverse ? node.EntryCount - 1 : -1;
+            // Reverse positions are exclusive (an inclusive upper key uses +inf).
+            // Equality with a separator therefore belongs in its left child.
+            if (bounded && reverse && slot >= 0 && node.CompareToSeparator(position, slot) == 0) { slot--; }
+            int fence = reverse ? slot : slot + 1;
+            if (fence >= 0 && fence < node.EntryCount) { leafBoundary = Separator.FromNode(node, fence); }
+            current = node.GetChildAt(slot);
         }
     }
 

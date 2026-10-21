@@ -55,6 +55,9 @@ public sealed class StoragePageLatch
     /// </summary>
     internal int WaitingWriters => _latch.WaitingWriteCount;
 
+    /// <summary>Gets the current shared-acquisition waiters (diagnostics and tests).</summary>
+    internal int WaitingReaders => _latch.WaitingReadCount;
+
     /// <summary>
     /// Creates a latch for one structure's pages.
     /// </summary>
@@ -65,6 +68,22 @@ public sealed class StoragePageLatch
     /// Holds the latch shared, waiting while a writer or a rollback holds it.
     /// </summary>
     public void EnterRead() => _latch.EnterReadLock();
+
+    /// <summary>Holds the latch shared, observing cancellation while waiting for a writer.</summary>
+    /// <param name="cancellationToken">Cancellation token for acquiring the shared hold.</param>
+    /// <exception cref="System.OperationCanceledException">Acquisition is canceled; no hold is taken.</exception>
+    /// <exception cref="LockRecursionException">The current thread already holds this non-recursive latch.</exception>
+    public void EnterRead(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!cancellationToken.CanBeCanceled) { _latch.EnterReadLock(); return; }
+        while (!_latch.TryEnterReadLock(10)) { cancellationToken.ThrowIfCancellationRequested(); }
+        if (cancellationToken.IsCancellationRequested)
+        {
+            _latch.ExitReadLock();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+    }
 
     /// <summary>
     /// Releases a shared hold.
