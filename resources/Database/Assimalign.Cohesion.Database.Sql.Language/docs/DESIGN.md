@@ -510,9 +510,9 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   because `f(*` is read as the `COUNT(*)` star argument).
 - **Identifiers are delimited only when needed**, mirroring the lexer's identifier
   scan: a keyword, builtin function name, unsupported-vocabulary or positional word,
-  or a name the lexer would not read as one word is quoted; a name containing `"`
-  cannot be delimited and is refused with `NotSupportedException`, as is a node type
-  the parser does not produce. A called function name is bare when it is a builtin
+  or a name the lexer would not read as one word is quoted. Embedded `"` characters
+  are doubled inside those delimiters. A node type the parser does not produce is
+  refused with `NotSupportedException`. A called function name is bare when it is a builtin
   or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
   `RANK`, ...): a bare call to one of those parses as the window function, which the
   dialect rejects, so an error-free tree that calls one named a delimited user
