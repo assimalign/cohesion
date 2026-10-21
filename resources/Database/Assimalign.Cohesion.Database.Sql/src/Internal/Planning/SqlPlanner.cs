@@ -1410,20 +1410,20 @@ internal sealed partial class SqlPlanner
 
     private static void ValidateBooleanOperand(SqlExpression expression, SqlExpressionEvaluator evaluator, string clause,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
-        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+        IReadOnlyDictionary<SqlExpression, int>? boundValues, SqlExpression? diagnosticExpression = null)
     {
         // ORDER BY aliases acquire their types in the completed output scope.
         if (boundValues is not null && ContainsBoundOutput(expression, boundValues)) { return; }
         if (expression is SqlParameterExpression parameter &&
             evaluator.TryGetParameterValue(parameter, out var value) && value is not null && value is not bool)
         {
-            throw SqlEvaluationException.BooleanRequired(clause, SqlExpressionEvaluator.OperandTypeName(value)).At(expression.Location);
+            throw SqlEvaluationException.BooleanRequired(clause, SqlExpressionEvaluator.OperandTypeName(value)).At((diagnosticExpression ?? expression).Location);
         }
         var type = evaluator.HasOutputValues ? evaluator.StaticTypeOf(expression)
             : StaticOperandType(expression, evaluator, boundSubqueries, boundValues) ?? evaluator.StaticTypeOf(expression);
         if (type is not (DatabaseType.Boolean or DatabaseType.Null))
         {
-            throw SqlEvaluationException.BooleanRequired(clause, SqlType.NameOf(type)).At(expression.Location);
+            throw SqlEvaluationException.BooleanRequired(clause, SqlType.NameOf(type)).At((diagnosticExpression ?? expression).Location);
         }
     }
 
@@ -1517,7 +1517,8 @@ internal sealed partial class SqlPlanner
                 ValidateBooleanOperand(binary.Right, evaluator, binary.Operator == SqlBinaryOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
                 break;
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } unary:
-                ValidateBooleanOperand(unary.Operand, evaluator, "NOT", boundSubqueries, boundValues);
+                // Preserve NOT's established operator span, including LIMIT/OFFSET diagnostics.
+                ValidateBooleanOperand(unary.Operand, evaluator, "NOT", boundSubqueries, boundValues, unary);
                 break;
             case SqlCaseExpression { Input: null } conditional:
                 foreach (var when in conditional.WhenClauses)
