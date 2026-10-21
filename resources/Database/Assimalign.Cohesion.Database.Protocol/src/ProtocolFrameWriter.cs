@@ -69,7 +69,9 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
     /// <remarks>Callers must serialize writes, flushes and disposal. Flush at result and latency
     /// boundaries, including before awaiting further result production. A frame larger than the
     /// byte bound is written alone and retains the per-frame payload limit. Disposal discards an
-    /// unfinished batch; it never sends an unverified result.</remarks>
+    /// unfinished batch; it never sends an unverified result. A failed transport write or flush,
+    /// including cancellation during a send, faults the writer; subsequent writes and flushes
+    /// throw <see cref="IOException"/>.</remarks>
     public static ProtocolFrameWriter CreateBatched(Stream stream, bool leaveOpen = false,
         int maxBatchBytes = 64 * 1024, int maxBatchFrames = 32)
     {

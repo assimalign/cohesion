@@ -176,8 +176,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && _databaseSession is not null)
         {
             // Ready can reach the peer before its explicit flush resumes. If soft stop
-            // cancels that final handshake flush, the authenticated peer still needs its
-            // terminal notice, just as one already inside the ready loop does.
+            // cancels that final handshake flush, attempt the authenticated peer's terminal
+            // notice. A writer faulted by the canceled send/flush refuses this best-effort
+            // write: the pump must close rather than append to an uncertain frame stream.
             _closeReason = GraphDatabaseEventSource.CloseReason.Shutdown;
             await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
         }
@@ -611,14 +612,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                 if (payload is not null) { ArrayPool<byte>.Shared.Return(payload, clearArray: true); }
             }
         }
-        long completeStarted = Stopwatch.GetTimestamp();
-        try
-        {
-            await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
-            await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
-                new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
-        }
-        finally { GraphDatabaseEventSource.Log.PathPhaseCompleted(Id, 2, completeStarted); }
+        await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
+            new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteResultAsync(DatabaseResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)

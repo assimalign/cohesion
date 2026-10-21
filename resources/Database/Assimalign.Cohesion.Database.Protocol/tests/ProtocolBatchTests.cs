@@ -220,6 +220,41 @@ public sealed class ProtocolBatchTests
         ProtocolEventSource.Log.PooledBuffersInUse.ShouldBe(balance);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Failed sends fault the batched writer before it can accept more frames")]
+    [InlineData(false, 100, 32)]
+    [InlineData(true, 100, 32)]
+    [InlineData(false, 100, 1)]
+    [InlineData(true, 100, 1)]
+    [InlineData(false, 100_000, 32)]
+    [InlineData(true, 100_000, 32)]
+    public async Task WriteFrameAsync_FailedSend_ShouldRefuseSubsequentWritesAndFlushes(bool cancel, int payloadSize, int batchFrames)
+    {
+        // Arrange: the stream would succeed on its next attempt, making accidental reuse observable.
+        using var cancellation = new CancellationTokenSource();
+        using var stream = new InterruptedOnceWriteStream(cancel ? cancellation : null);
+        long balance = ProtocolEventSource.Log.PooledBuffersInUse;
+        var writer = ProtocolFrameWriter.CreateBatched(stream, true, maxBatchFrames: batchFrames);
+        async Task SendAsync()
+        {
+            await writer.WriteFrameAsync(new(ProtocolMessageType.Error, new byte[payloadSize]), cancellation.Token);
+            await writer.FlushAsync(cancellation.Token);
+        }
+
+        // Act
+        if (cancel) { await Should.ThrowAsync<OperationCanceledException>(SendAsync); }
+        else { await Should.ThrowAsync<IOException>(SendAsync); }
+
+        // Assert: accepted frames are never silently dropped while allowing a later send.
+        stream.Length.ShouldBe(0);
+        await Should.ThrowAsync<IOException>(async () =>
+            await writer.WriteFrameAsync(new(ProtocolMessageType.Pong, ReadOnlyMemory<byte>.Empty), CancellationToken.None));
+        await Should.ThrowAsync<IOException>(async () => await writer.FlushAsync(CancellationToken.None));
+        stream.WriteAttempts.ShouldBe(1);
+        await writer.DisposeAsync();
+        await writer.DisposeAsync();
+        ProtocolEventSource.Log.PooledBuffersInUse.ShouldBe(balance);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Backpressured batch cancellation joins I/O before pool return")]
     public async Task FlushAsync_CancellationDuringBackpressure_ShouldReleaseAllBuffers()
     {

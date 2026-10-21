@@ -28,6 +28,7 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
     private int _batchLength;
     private int _batchFrames;
     private bool _disposed;
+    private bool _faulted;
 
     internal ProtocolStreamFrameWriter(Stream stream, bool leaveOpen, int maxBatchBytes = 0, int maxBatchFrames = 1)
     {
@@ -45,6 +46,7 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         int length = ProtocolFrameHeader.Size + frame.Payload.Length;
         if (_maxBatchBytes != 0)
         {
+            ThrowIfFaulted();
             if (_batchLength > _maxBatchBytes - length)
             {
                 await SendBatchAsync(cancellationToken).ConfigureAwait(false);
@@ -68,7 +70,8 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         {
             frame.Header.WriteTo(_header);
             if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportWrite(); }
-            await _stream.WriteAsync(_header, cancellationToken).ConfigureAwait(false);
+            try { await _stream.WriteAsync(_header, cancellationToken).ConfigureAwait(false); }
+            catch when (_maxBatchBytes != 0) { _faulted = true; throw; }
         }
         else
         {
@@ -81,6 +84,7 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
                 if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportWrite(); }
                 await _stream.WriteAsync(buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
             }
+            catch when (_maxBatchBytes != 0) { _faulted = true; throw; }
             finally
             {
                 if (_maxBatchBytes != 0) { ProtocolBufferPool.Return(buffer); }
@@ -95,9 +99,11 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
     protected override async ValueTask FlushCoreAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_maxBatchBytes != 0) { ThrowIfFaulted(); }
         await SendBatchAsync(cancellationToken).ConfigureAwait(false);
         if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportFlush(); }
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        try { await _stream.FlushAsync(cancellationToken).ConfigureAwait(false); }
+        catch when (_maxBatchBytes != 0) { _faulted = true; throw; }
     }
 
     private async ValueTask SendBatchAsync(CancellationToken cancellationToken)
@@ -120,10 +126,22 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
                 position += ProtocolFrameHeader.Size + (int)header.PayloadLength;
             }
         }
+        catch
+        {
+            // A stream failure can follow a partial write, or cancellation before any bytes.
+            // Accepted frames cannot safely be retried or followed by another result.
+            _faulted = true;
+            throw;
+        }
         finally
         {
             _batch!.AsSpan(0, length).Clear();
         }
+    }
+
+    private void ThrowIfFaulted()
+    {
+        if (_faulted) { throw new IOException(ErrorMessages.FrameWriterFaulted); }
     }
 
     /// <inheritdoc />

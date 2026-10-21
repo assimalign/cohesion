@@ -1514,6 +1514,9 @@ explicit flush at completion, diagnostics and errors. A larger frame is sent alo
 the existing 16 MiB per-frame limit; results have no aggregate wire cap. Every write awaits
 transport backpressure. Path encoding measures first, rents caller-owned storage, writes
 directly from spans and returns cleared storage only after the writer has copied or sent it.
+This keeps a temporary encoding buffer plus the batch copy, including for large paths that fit
+the batch; a reserve API was deferred to keep the framing boundary model-neutral and avoid
+another public seam. Paths larger than the batch use one standalone transport write.
 Only the session pump uses the writer; teardown joins the pump before returning its buffers.
 The terminal error output-completion and drain deadline contract remains unchanged.
 Latency and completion flushes share the transport boundary: disposed flushes close the
@@ -1523,8 +1526,11 @@ GraphDatabaseEventSource adds Verbose event 15, PathPhaseCompleted, under Sessio
 sessionId, phase (Execute, Encode or Send) and durationMilliseconds. Exact cumulative counters
 path-execute-calls, path-encode-calls, path-send-calls and the corresponding *-milliseconds
 attribute work independently of listeners. Execute includes parse/planning/materialization;
-encode counts each attempted path; send counts each path handoff and completion, including
-backpressure and flush waits. Failure and cancellation still close the attempted phase.
+encode counts each attempted path; send counts each attempted Path handoff, including
+backpressure and latency flush waits. Diagnostics and PathsComplete do not increment path
+send counts or timings. Failure and cancellation still close the attempted phase. A failed
+transport send or flush faults the batched writer, so even a best-effort soft-stop terminal
+notice cannot append to an uncertain stream; the session closes.
 Shared protocol transport-write-calls and transport-flush-calls expose batching at the
 Stream boundary; for DuplexPipeStream their sum counts implicit plus explicit flush requests.
 GraphClient's decode counters complete the per-phase view. No durability setting or Path
