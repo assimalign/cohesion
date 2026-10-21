@@ -130,7 +130,7 @@ internal sealed class SqlTableReclamation
             // Allocate the fence AFTER observing the committed unpublication, never
             // use the DROP transaction's earlier begin sequence. Every possible old
             // reader is at or below it, including snapshots begun during the DROP.
-            var fence = _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken)
+            var fence = _database.Coordinator.BeginSnapshotPinAsync(cancellationToken)
                 .AsTask().GetAwaiter().GetResult();
             long epoch;
             try

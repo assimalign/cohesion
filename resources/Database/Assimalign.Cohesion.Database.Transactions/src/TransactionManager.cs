@@ -370,9 +370,16 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The context for the new transaction.</returns>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
-    public async ValueTask<TransactionContext> BeginAsync(
+    public ValueTask<TransactionContext> BeginAsync(
         IsolationLevel isolationLevel = IsolationLevel.Snapshot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        BeginAsync(isolationLevel, isSnapshotPin: false, cancellationToken);
+
+    internal ValueTask<TransactionContext> BeginSnapshotPinAsync(CancellationToken cancellationToken) =>
+        BeginAsync(IsolationLevel.Snapshot, isSnapshotPin: true, cancellationToken);
+
+    private async ValueTask<TransactionContext> BeginAsync(
+        IsolationLevel isolationLevel, bool isSnapshotPin, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
@@ -407,7 +414,7 @@ public sealed class TransactionManager : IAsyncDisposable
 
             var snapshot = CaptureSnapshotLocked(new TransactionSequence(sequence));
             context = new TransactionContext(
-                this, TransactionId.NewId(), new TransactionSequence(sequence), isolationLevel, snapshot);
+                this, TransactionId.NewId(), new TransactionSequence(sequence), isolationLevel, snapshot, isSnapshotPin);
             _active[sequence] = context;
         }
 

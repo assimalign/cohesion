@@ -293,6 +293,11 @@ GQL transaction-control syntax is outside the profile. Wire transactions are del
 `BEGIN`/`COMMIT`/`ROLLBACK` do not parse and reserved `Transaction` byte 9 is rejected with
 `ProtocolViolation`. No connection-level transaction API is exposed. Results materialize before
 the statement transaction is released, so result iteration cannot race record reclamation.
+Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
+manager registration, fixed snapshot and existing rollback/disposal release paths. Pins remain
+in the current-transactions gauge but move none of the begin, commit or rollback rates and
+emit no Verbose kernel lifecycle events. A real explicit rollback still counts. Read-only pins
+append no lifecycle records (#1280); registered statement snapshots are outside this change.
 
 Open defers the storage checkpoint, performs physical WAL recovery, validates graph/index formats
 before coordinator record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery

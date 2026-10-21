@@ -1151,17 +1151,18 @@ interfaces: they re-implemented `IStorage.Checkpoint` and
 `Storage.Checkpoint`, `Storage.ReserveTransactionSequence` and
 `StorageJournal.AppendRollback` are non-virtual, and a test cannot hand `Storage` a journal
 of its own, so the interception moved to the type that makes the calls
-(`database-area.md`, "Test doubles"). The coordinator carries three internal hooks, reached
+(`database-area.md`, "Test doubles"). The coordinator carries four internal hooks, reached
 only through this package's `InternalsVisibleTo` grant to its own tests:
 
 | Hook | Where it runs | Used for |
 |---|---|---|
 | `BeforeCheckpoint(long[] writers)` | under the lifecycle append gate, just before `storage.Checkpoint(writers)`, inside the same `try` | the writers a checkpoint lists, a checkpoint held open against a concurrent lifecycle append, a failed checkpoint |
 | `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the context returns | a begin that reached the coordinator while a checkpoint holds the append gate (the reader may now finish; its first apply waits) |
+| `BeforeContextTrackedAsync(TransactionContext context)` | after manager registration, before coordinator tracking, with neither lock held | pause begin while disposal aborts its context and clears the coordinator table (#1351) |
 | `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
 
-Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation or
-abort record, never per row. Each rewritten test asserts that its hook fired: the
+Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation,
+context begin or abort record, never per row. Each rewritten test asserts that its hook fired: the
 `Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
 
 **Stream-level triggers cover the rest.** #1252 made every journal append a write into a
@@ -1181,11 +1182,12 @@ catalog: `docs/programs/DATABASE_EVENT_SOURCES_PLAN.md` §4.3). Every engine mod
 database's kernel through `TransactionCoordinator`, so the one source covers the transactions of
 all five engines. The explicit transaction a session runs is the root's
 (`Assimalign.Cohesion.Database`); the events here are the kernel transactions: one under each
-explicit transaction, one per autocommit statement, and, in every model, one snapshot pin per
-statement of a `ReadCommitted` explicit transaction, which always ends rolled back
-(`BlobOperation`, `GraphOperation`, `DocumentOperation`, `SqlDatabaseSession` and
-`KeyValueDatabaseSession` begin it at `Snapshot` and end it with `RollbackAsync`; Sql and
-KeyValuePair since #1363). The conventions
+explicit transaction and one per autocommit statement. In every model, statement snapshot pins
+use `BeginSnapshotPinAsync` and end through `RollbackAsync`. Their immutable kind is assigned
+under the manager lock before active-table insertion (#1351), preserving the snapshot/prune
+ordering described above. Pins remain in the current-transactions gauge but move none of the
+three transaction rates and emit none of the Verbose begin, commit or rollback events, including
+when disposal aborts them. Real transaction rollbacks and failures still count. The conventions
 every Database source shares (failure payloads, `Start`/`Stop` endings) are in the area's
 [`DESIGN.md`](../../../../docs/resources/Database/DESIGN.md#diagnostics-one-event-source-per-assembly).
 
@@ -1277,17 +1279,21 @@ reads exact values.
 
 | Counter | Kind | Transition |
 | --- | --- | --- |
-| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
-| `transactions-per-second` | rate | the gauge's +1 |
-| `commits-per-second` | rate | the gauge's −1 of a context that ended `Committed` (an unconfirmed commit included) |
-| `rollbacks-per-second` | rate | the gauge's −1 of any other end: a rollback, an aborted commit, a disposal's abort, and the snapshot pins of `ReadCommitted` statements, which always end rolled back (so this rate includes read traffic in every model; Sql and KeyValuePair since #1363) |
+| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync` or `BeginSnapshotPinAsync`, including pins); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
+| `transactions-per-second` | rate | a tracked context other than a snapshot pin begins |
+| `commits-per-second` | rate | a context other than a snapshot pin ends `Committed` (an unconfirmed commit included) |
+| `rollbacks-per-second` | rate | a context other than a snapshot pin ends rolled back or aborted, including an aborted commit or disposal's abort |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
 
-The transaction counters count the coordinator's transactions, the same population as the gauge;
-the lock counters count every lock manager. The transaction counters move once at a kernel
-transaction's begin and once at its end, which is once per autocommit statement (plan D6 reads
-statement throughput from `transactions-per-second`), beside a per-database lock; only writers append journal records (#1280). No counter moves per row or per frame. The six backing fields are process-global and sit
+The transaction rates exclude snapshot pins; the gauge includes every open context, so it still
+exposes a leaked pin. A pin keeps its ordinary manager registration, sequence, fixed snapshot,
+end claim and lock release. It writes no journal lifecycle records (#1280); registered statement
+snapshots without kernel contexts are outside #1351. The lock counters count every lock manager.
+The transaction rates move once at a non-pin kernel transaction's begin and once at its end,
+which is once per autocommit statement (plan D6 reads statement throughput from
+`transactions-per-second`), beside a per-database lock; only writers append journal records
+(#1280). No counter moves per row or per frame. The six backing fields are process-global and sit
 together, so the begin and end `Interlocked` operations of every database in the process share
 them (plan D6 sanctions these counters).
 
@@ -1297,8 +1303,14 @@ its table, counting each one out of the gauge. A context the manager's disposal 
 `BeginAsync` added it would be added after that clearing and never counted out, so `BeginAsync`
 runs `UntrackEnded` right after adding it: a context that is no longer active leaves the gauge
 there, and one the later clearing counts is no longer in the table when `UntrackEnded` looks. No
-hook makes the race deterministic for a test (the sequence hook runs under the manager's lock,
-which the manager's disposal takes), so it is covered by this argument rather than a test.
+timing assumption is needed: the internal `BeforeContextTrackedAsync` hook pauses begin after
+manager registration, and a non-parallel test completes disposal before resuming tracking. The
+test requires one observed crossing of that window; its timeout is only a hang ceiling. The
+gauge must return and all rates stay fixed. Cancellation before begin, a refused
+second end, a canceled rollback followed by disposal, and each successful end path are covered
+by exact counter deltas. Each model retains and sums every published increment for read hits
+and misses through publications after the reads finish, then verifies that its real explicit
+rollback still counts. The canonical recorder is wrapped by a test-side rate history.
 
 **Cost when nobody listens** (event-source.md rule 9): every write is behind
 `IsEnabled(level, keywords)`, and every `ToString` and the storage name read are inside it. An

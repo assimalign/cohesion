@@ -576,7 +576,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// </remarks>
     private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)
         => transaction.IsolationLevel == IsolationLevel.ReadCommitted
-            ? await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false)
+            ? await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false)
             : null;
 
     // Error-only async work stays outside the statement's normal state machine. The finally

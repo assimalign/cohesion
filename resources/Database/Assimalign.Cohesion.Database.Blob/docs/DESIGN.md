@@ -342,6 +342,11 @@ Snapshot and ReadCommitted isolation are supported; unsupported isolation is
 rejected rather than weakened. Read operations pin the selected snapshot until stream disposal.
 An explicit ReadCommitted operation also retains a fixed snapshot pin so an earlier writer
 committing during download cannot advance the purge horizon past its selected content.
+Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
+manager registration, fixed snapshot and existing rollback/disposal release paths. Pins remain
+in the current-transactions gauge but move none of the begin, commit or rollback rates and
+emit no Verbose kernel lifecycle events. A real explicit rollback still counts. Read-only pins
+append no lifecycle records (#1280); registered statement snapshots are outside this change.
 
 Mutations take the shared lock manager's database exclusive lock before physical application.
 This conservative first version serializes writers for the upload lifetime; snapshot readers
