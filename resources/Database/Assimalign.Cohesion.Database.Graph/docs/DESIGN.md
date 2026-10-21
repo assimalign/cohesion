@@ -3,7 +3,8 @@
 ## Runtime child-root diagnostics (#1247, #1364)
 
 An autocommit statement whose commit succeeded reports success even if releasing its
-ReadCommitted snapshot pin fails during disposal. Cleanup still releases the session hold;
+ReadCommitted snapshot pin fails during disposal (an OutOfMemoryException still propagates).
+Cleanup still releases the session hold;
 the coordinator owns any remaining pin until shutdown. Event 13, `StatementCleanupFailed`
 (Warning; database, exceptionType), records the cleanup failure without changing the durable
 outcome or inviting a duplicate retry.

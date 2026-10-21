@@ -113,13 +113,12 @@ public sealed class GraphSchema
     /// <exception cref="DatabaseObjectLockedException">The existing label is schema owned.</exception>
     /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
     /// <exception cref="DatabaseTransactionAbortedException">
-    /// The identity or name conflicts with an existing definition, or the definition changed since
-    /// the transaction's snapshot.
+    /// The definition changed since the transaction's snapshot (<c>COHDBG007</c>, retryable).
     /// </exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
+    /// The identity or name conflicts with an existing definition (<c>COHDBG003</c>, a caller error that a retry repeats); the catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
     /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
@@ -134,13 +133,12 @@ public sealed class GraphSchema
     /// <exception cref="DatabaseObjectLockedException">The existing type is schema owned.</exception>
     /// <exception cref="ArgumentException">The definition is invalid, such as a blank name.</exception>
     /// <exception cref="DatabaseTransactionAbortedException">
-    /// The identity or name conflicts with an existing definition, or the definition changed since
-    /// the transaction's snapshot.
+    /// The definition changed since the transaction's snapshot (<c>COHDBG007</c>, retryable).
     /// </exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
+    /// The identity or name conflicts with an existing definition (<c>COHDBG003</c>, a caller error that a retry repeats); the catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
     /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
@@ -154,11 +152,11 @@ public sealed class GraphSchema
     /// <returns>Completion of the mutation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema owned.</exception>
     /// <exception cref="ArgumentException">The property metadata is invalid, such as a blank name.</exception>
-    /// <exception cref="DatabaseTransactionAbortedException">The owning definition is absent, or it changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The owning definition changed since the transaction's snapshot (<c>COHDBG007</c>, retryable).</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The property type is not supported by graph storage, or existing graph data violates the
+    /// The owning definition does not exist (<c>COHDBG003</c>, a caller error that a retry repeats); the property type is not supported by graph storage, or existing graph data violates the
     /// property (both <c>COHDBG003</c>); the session is closed, another statement holds it, or its
     /// transaction refuses statements (<c>COHDBG007</c>); or the transaction ended while the
     /// statement waited for the writer lock.
@@ -201,11 +199,11 @@ public sealed class GraphSchema
     /// <returns>Completion of index creation.</returns>
     /// <exception cref="DatabaseObjectLockedException">The label is schema owned.</exception>
     /// <exception cref="ArgumentException"><paramref name="label"/> is null, or the index name or the property name is null, empty or whitespace.</exception>
-    /// <exception cref="DatabaseTransactionAbortedException">The index name already identifies another property, or the label or index changed since the transaction's snapshot.</exception>
+    /// <exception cref="DatabaseTransactionAbortedException">The label or index changed since the transaction's snapshot (<c>COHDBG007</c>, retryable).</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The label is unknown (<c>COHDBG002</c>); the index already exists (<c>COHDBG003</c>); the
+    /// The index name already identifies another property (<c>COHDBG003</c>, a caller error that a retry repeats); the label is unknown (<c>COHDBG002</c>); the index already exists (<c>COHDBG003</c>); the
     /// names exceed one graph record, or an existing node's value exceeds the index key
     /// (<c>COHDBG009</c>); the session is closed,
     /// another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>); or the

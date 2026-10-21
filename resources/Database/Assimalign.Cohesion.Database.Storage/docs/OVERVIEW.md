@@ -4,7 +4,7 @@ The physical storage kernel of the Cohesion Data Platform: fixed-size pages, a b
 pool with pin-counted caching, slotted-page record layout, a free-space map, and the
 journal (write-ahead log) that provides durability. Every database model (SQL,
 Documents, Graph, Blob, KeyValuePair) composes this project for its on-disk
-representation — model-specific layouts live in `{Model}.Storage` projects, never here.
+representation — model-specific layouts live in the Storage components of each `Database.{Model}` engine project (`src/Storage`, `src/Internal/Storage`), never here.
 
 ## Scope
 
