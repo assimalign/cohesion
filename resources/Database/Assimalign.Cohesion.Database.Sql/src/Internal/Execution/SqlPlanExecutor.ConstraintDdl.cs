@@ -348,10 +348,10 @@ internal sealed partial class SqlPlanExecutor
             {
                 CheckDomains(bound!, row, evaluator!, added);
             }
+            ValidateRows(replacement, [row], statement, cancellationToken, current: true);
             statement.ProvisioningProgress?.Invoke(++processed, rows.Count);
         }
 
-        ValidateRows(replacement, rows, statement, cancellationToken, current: true);
         if (plan.Constraints.Count == 0)
         {
             // The catalog publishes its own copy of the replacement definition, built from the

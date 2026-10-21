@@ -9,15 +9,16 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>Guards self-FK validation at 50,000 rows against quadratic batch searches (#1197).</summary>
 /// <remarks>
 /// Equal row counts are compared: five 10,000-row operations against one 50,000-row operation.
-/// Each block uses process CPU time, excluding setup and verification, and the minimum of three
-/// rounds after warm-up. Linear work has a ratio near one; a quadratic batch walk approaches five.
-/// The generous bound allows index height, allocation and collection costs. Timing tests run alone.
+/// Internal statement counters bound candidate visits, probes, key comparisons and DDL record
+/// visits at both sizes. Process CPU ratios, excluding setup and verification, are output only.
+/// The minimum of three rounds after warm-up remains supplementary evidence. Tests run alone.
 /// </remarks>
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlConstraintTimingTests
@@ -72,13 +73,11 @@ public sealed class SqlConstraintTimingTests
             }
         }
 
-        // Assert
+        // Assert: deterministic bounds were checked for every statement in both sizes.
         _output.WriteLine($"{operation} minimum of {rounds}: small={small:F3} ms; large={large:F3} ms; ratio={large / small:F3}");
-        small.ShouldBeGreaterThan(0);
-        (large / small).ShouldBeLessThan(2.8, $"{operation}: {small:F3} ms for five {smallRows:N0}-row operations; {large:F3} ms for one {largeRows:N0}-row operation");
     }
 
-    private static async Task<double> MeasureBlockAsync(SqlDatabaseSession session, string operation, int count, int repeats)
+    private async Task<double> MeasureBlockAsync(SqlDatabaseSession session, string operation, int count, int repeats)
     {
         for (int i = 0; i < repeats; i++)
         {
@@ -102,6 +101,9 @@ public sealed class SqlConstraintTimingTests
         for (int i = 0; i < repeats; i++)
         {
             affected[i] = (await session.ExecuteAsync(statements[i], cancellationToken: TestTimeout.Token(120))).AffectedCount;
+            var metrics = session.LastStatementMetrics.ShouldNotBeNull();
+            _output.WriteLine($"{operation} {count:N0} rows: candidates={metrics.SelfReferenceCandidateVisits}; probes={metrics.SelfReferenceProbes}; comparisons={metrics.ConstraintKeyComparisons}; records={metrics.RecordsExamined}; path={metrics.AccessPath}");
+            AssertValidationWork(metrics, operation, count);
         }
         double elapsed = (Environment.CpuUsage.TotalTime - start).TotalMilliseconds;
 
@@ -116,6 +118,22 @@ public sealed class SqlConstraintTimingTests
             await session.ExecuteAsync($"DROP TABLE batch_{i}", cancellationToken: TestTimeout.Token());
         }
         return elapsed;
+    }
+
+    private static void AssertValidationWork(SqlStatementMetrics metrics, string operation, int count)
+    {
+        // Each row contributes one self key and one non-NULL reference. Comparisons include
+        // hash collisions and stored parent-key checks, so a linear batch search cannot hide.
+        metrics.SelfReferenceCandidateVisits.ShouldBe((long)count);
+        metrics.SelfReferenceProbes.ShouldBe((long)count);
+        if (operation != "insert")
+        {
+            // n child reads plus n-1 parent seeks; the final row references itself.
+            metrics.RecordsExamined.ShouldBe(2L * count - 1);
+            metrics.AccessPath.ShouldStartWith("constraint-seek:", Case.Sensitive);
+        }
+        metrics.ConstraintKeyComparisons.ShouldBeGreaterThanOrEqualTo((long)count);
+        metrics.ConstraintKeyComparisons.ShouldBeLessThanOrEqualTo(2L * count);
     }
 
     private static string Insert(string table, int count)

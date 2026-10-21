@@ -43,7 +43,7 @@ internal sealed partial class SqlPlanExecutor
             if (deletions?.ContainsKey(key) != true && updates?.ContainsKey(key) != true) { yield return row; }
         }
         if (updates is null) { yield break; }
-        foreach (var row in updates.Find(table, columns, keys, _catalog.DefaultCollation, cancellationToken))
+        foreach (var row in updates.Find(table, columns, keys, _catalog.DefaultCollation, statement.Metrics, cancellationToken))
         {
             yield return row;
         }
@@ -67,14 +67,14 @@ internal sealed partial class SqlPlanExecutor
         internal bool ContainsKey((ulong ObjectId, ulong Location) key) => _rows.ContainsKey(key);
 
         internal IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Find(
-            SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, Collation defaultCollation, CancellationToken cancellationToken)
+            SqlCatalogTable table, IReadOnlyList<string> columns, object?[] keys, Collation defaultCollation, SqlStatementMetrics metrics, CancellationToken cancellationToken)
         {
             if (!_tables.TryGetValue(table.ObjectId, out var rows)) { return []; }
             var projection = (table.ObjectId, string.Join("\0", columns));
             if (!_indexes.TryGetValue(projection, out var index))
             {
                 int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                index = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? defaultCollation).ToArray()));
+                index = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? defaultCollation).ToArray(), metrics));
                 foreach (var row in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();

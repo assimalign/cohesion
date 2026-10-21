@@ -368,14 +368,17 @@ internal sealed partial class SqlPlanExecutor
         }
         int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
         return candidates.Where(row => ordinals.Select((ordinal, i) => ValuesEqual(row.Values[ordinal], keys[i],
-            table.Columns[ordinal].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
+            table.Columns[ordinal].Collation ?? _catalog.DefaultCollation, statement.Metrics)).All(equal => equal));
     }
 
     private static bool SameConstraintColumns(IReadOnlyList<string> left, IReadOnlyList<string> right)
         => left.Count == right.Count && left.All(column => right.Contains(column, StringComparer.OrdinalIgnoreCase));
 
-    private static bool ValuesEqual(object? left, object? right, Collation? collation = null)
-        => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
+    private static bool ValuesEqual(object? left, object? right, Collation? collation = null, SqlStatementMetrics? metrics = null)
+    {
+        if (metrics is not null) { metrics.ConstraintKeyComparisons++; }
+        return left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
+    }
 
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
@@ -505,10 +508,11 @@ internal sealed partial class SqlPlanExecutor
             if (parent.ObjectId == table.ObjectId)
             {
                 int[] ordinals = constraint.ReferencedColumns!.Select(column => FindColumnOrdinal(table, column)).ToArray();
-                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray()));
+                selfKeys = new(new GroupKeyComparer(ordinals.Select(ordinal => table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).ToArray(), statement.Metrics));
                 foreach (var candidate in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    statement.Metrics.SelfReferenceCandidateVisits++;
                     selfKeys.Add(ordinals.Select(ordinal => candidate[ordinal]).ToArray());
                 }
             }
@@ -521,6 +525,7 @@ internal sealed partial class SqlPlanExecutor
                     continue; // MATCH SIMPLE
                 }
 
+                if (selfKeys is not null) { statement.Metrics.SelfReferenceProbes++; }
                 if (selfKeys?.Contains(keys) == true)
                 {
                     continue;
@@ -561,11 +566,11 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i],
-                table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).Any(value => value);
+                table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation, statement.Metrics)).Any(value => value);
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
             if (changed && updates?.Find(table, constraint.ReferencedColumns!, keys,
-                _catalog.DefaultCollation, cancellationToken).Any() == true) { continue; }
+                _catalog.DefaultCollation, statement.Metrics, cancellationToken).Any() == true) { continue; }
             if (changed && FinalConstraintRows(child, constraint.Columns, keys, statement, cancellationToken,
                 deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {
