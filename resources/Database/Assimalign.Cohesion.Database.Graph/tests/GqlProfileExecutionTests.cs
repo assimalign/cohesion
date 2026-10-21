@@ -31,6 +31,11 @@ public sealed class GqlProfileExecutionTests
                      [1, 0, "ExpandPath", null, null, null, null, null],
                      [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+                new("EXPLAIN MATCH (a:Person|Robot) RETURN a",
+                    [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
+                     [1, 0, "ExpandPath", null, null, null, null, null],
+                     [2, 1, "LabelScan", "Person|Robot", null, "node=0; property=; value=NULL; combine=union", null, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
                 new("EXPLAIN MATCH (a) WHERE a IS LABELED Person RETURN a",
                     [[0, null, "Match", null, null, "filter=True; matches_nothing=False", null, null],
                      [1, 0, "ExpandPath", null, null, null, null, null],
@@ -52,6 +57,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
+                new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
                 new("MATCH (a)-[r:KNOWS]->(b) MATCH (a)-[s:KNOWS]->(b) RETURN r.weight, s.weight", [[2L, 2L]]),
                 new("MATCH (a:Person)-[:KNOWS]->(b) WHERE b.age > 50 RETURN a.name", []),

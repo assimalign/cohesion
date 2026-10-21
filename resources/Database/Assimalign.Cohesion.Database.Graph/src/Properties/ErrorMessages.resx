@@ -77,6 +77,12 @@
 
   <data name="RecordFormatUnsupported" xml:space="preserve"><value>COHDBG017: Unsupported graph record format. This engine requires format 3; recreate the database with this engine. No upgrade path is available.</value></data>
 
+  <data name="LabelPostingInvalid" xml:space="preserve">
+    <value>Invalid graph label posting key.</value>
+  </data>
+  <data name="LabelIdInvalid" xml:space="preserve">
+    <value>Each node label requires a nonempty catalog identity.</value>
+  </data>
   <data name="RelationshipTypeIdInvalid" xml:space="preserve"><value>A relationship requires a nonempty catalog type identity.</value></data>
 
   <data name="AdjacencyKeyInvalid" xml:space="preserve"><value>Invalid graph adjacency key length.</value></data>

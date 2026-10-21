@@ -465,8 +465,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         await LockWriterAsync(operation, token).ConfigureAwait(false);
         await ValidateNodeAsync(operation, labels, properties, token).ConfigureAwait(false);
-        return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), operation.Context, token).ConfigureAwait(false));
+        return Materialize(await Store.CreateNodeAsync(new StoredGraphNode((ulong)DataStorage.ReserveTransactionSequence(), labels, properties ?? new Dictionary<string, object?>()), NodeLabelIds(labels, operation), operation.Context, token).ConfigureAwait(false));
     }
+
+    internal IReadOnlyDictionary<string, Guid> NodeLabelIds(IReadOnlyList<string> labels, GraphOperation operation)
+        => labels.Distinct(StringComparer.Ordinal).ToDictionary(label => label,
+            label => Catalog.FindLabel(label, operation.Context.Snapshot)!.Value.Id, StringComparer.Ordinal);
 
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)

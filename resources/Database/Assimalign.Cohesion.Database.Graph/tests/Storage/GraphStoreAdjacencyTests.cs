@@ -24,8 +24,8 @@ public sealed partial class GraphStoreTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         await using var fixture = new Fixture();
         var write = await fixture.Begin();
-        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), write, timeout.Token);
-        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), write, timeout.Token);
+        var a = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), TestLabelIds.All, write, timeout.Token);
+        var b = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), TestLabelIds.All, write, timeout.Token);
         var wanted = Guid.Parse("10000000-0000-0000-0000-000000000001");
         var other = Guid.Parse("10000000-0000-0000-0000-000000000002");
         for (int i = 0; i < 8; i++) { await CreateEdgeAsync(a.Id, b.Id, wanted, "T"); }
@@ -71,7 +71,7 @@ public sealed partial class GraphStoreTests
         await using var fixture = new Fixture();
         var seed = await fixture.Begin();
         var type = Guid.NewGuid();
-        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), seed, timeout.Token);
+        var node = await fixture.Store.CreateNodeAsync(new StoredGraphNode((ulong)fixture.Storage.ReserveTransactionSequence(), [], _empty), TestLabelIds.All, seed, timeout.Token);
         var edge = await fixture.Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)fixture.Storage.ReserveTransactionSequence(), node.Id, node.Id, "T", Properties("x", 1)), type, seed, timeout.Token);
         await fixture.Coordinator.CommitAsync(seed, timeout.Token);
         var old = await fixture.Begin();

@@ -1062,13 +1062,28 @@ internal sealed partial class GraphPlanner
             { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
         }
         GraphAnchor? scan = null;
+        long scanCost = long.MaxValue;
         for (int i = 0; i < shape.Nodes.Count; i++)
         {
             foreach (var node in shape.Nodes[i])
             {
                 var labels = sources.GetRequiredLabels(node);
-                if (labels.Count == 0) { continue; }
-                scan ??= new GraphAnchor(i, labels[0], null, null);
+                foreach (string candidate in labels)
+                {
+                    long cost = _database.Store.EstimateLabelCount(candidate);
+                    if (scan is null || cost < scanCost)
+                    { scan = new GraphAnchor(i, candidate, null, null); scanCost = cost; }
+                }
+                if (labels.Count == 0)
+                {
+                    if (UnionLabels(node.LabelExpression) is { Count: > 0 } union)
+                    {
+                        long cost = union.Sum(label => _database.Store.EstimateLabelCount(label));
+                        if (scan is null || cost < scanCost)
+                        { scan = new GraphAnchor(i, union[0], null, null, union); scanCost = cost; }
+                    }
+                    continue;
+                }
                 var inline = FirstValues(node.Properties);
                 var equalities = sources.GetEqualities(node.Variable);
                 if (inline.Count == 0 && equalities.Count == 0) { continue; }
@@ -1095,6 +1110,24 @@ internal sealed partial class GraphPlanner
             }
         }
         return scan ?? new GraphAnchor(0, null, null, null);
+    }
+
+    private static IReadOnlyList<string>? UnionLabels(GqlLabelExpression? expression)
+    {
+        if (expression is not GqlLabelDisjunction) { return null; }
+        var result = new List<string>();
+        var pending = new Stack<GqlLabelExpression>();
+        pending.Push(expression);
+        while (pending.TryPop(out var current))
+        {
+            if (current is GqlLabelName name) { result.Add(name.Name); }
+            else if (current is GqlLabelDisjunction disjunction)
+            {
+                for (int i = disjunction.Operands.Count - 1; i >= 0; i--) { pending.Push(disjunction.Operands[i]); }
+            }
+            else { return null; }
+        }
+        return result.Distinct(StringComparer.Ordinal).ToArray();
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>

@@ -1007,12 +1007,17 @@ whichever of the two lands second adds the other's case.
 predicates in the clause's top-level AND chain supply required node labels. Thus `(n:A&B {k: 1})`
 and `MATCH (n) WHERE n IS LABELED A&B AND n.k = 1` may seek an index of `A` or `B`.
 Pattern labels precede WHERE labels in source order. Bound entities take precedence, then property
-seeks, then a scan of the first required label at any node position. `(a)->(b) WHERE b:A` may
+seeks, then the smallest retained-posting estimate across required labels and pure pattern
+unions at any node position (#1534). `(a)->(b) WHERE b:A` may
 therefore anchor at `b`, as `(a)->(b:A)` does. The full pattern and predicate remain residual
 checks. EXPLAIN reports the selected label and node ordinal. Requirements are clause-local;
 relationship labeled predicates supply no node labels. OR, XOR, NOT, truth tests, IS NOT LABELED
-and label expressions using `|`, `!` or `%` supply none, so `(n:A|B {k: 1})` and
-`(n:!A {k: 1})` still scan all nodes unless another requirement narrows them.
+and label expressions using `|`, `!` or `%` supply no required labels. Pure pattern unions
+such as `(n:A|B {k: 1})` merge MVCC label-posting ranges with duplicate suppression;
+conjunctions scan the cheapest required label and retain the complete residual. EXPLAIN
+reports union labels as `A|B` with `combine=union`. Negation and mixed expressions retain
+a full scan unless another safe anchor narrows them. Counts are advisory retained-posting
+estimates, not snapshot-specific result counts.
 Behavior consulted, no code copied: Neo4j's
 `community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`
 reads HasLabels selections for any pattern node (relative to C:/Source/repos/neo4j/neo4j).

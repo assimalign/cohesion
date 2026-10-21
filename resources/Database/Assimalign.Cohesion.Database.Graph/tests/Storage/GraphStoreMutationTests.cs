@@ -47,7 +47,7 @@ public sealed class GraphStoreMutationTests
             if (overlaps == 0) { await store.CreateIndexAsync("N", "x", seed, token); }
             ulong nodeId = (ulong)storage.ReserveTransactionSequence();
             if (relationship || mutation != "Create")
-            { await store.CreateNodeAsync(new StoredGraphNode(nodeId, ["N"], Properties(0)), seed, token); }
+            { await store.CreateNodeAsync(new StoredGraphNode(nodeId, ["N"], Properties(0)), TestLabelIds.All, seed, token); }
             ulong id = nodeId;
             if (relationship)
             {
@@ -118,10 +118,10 @@ public sealed class GraphStoreMutationTests
                 if (mutation == "Create")
                 {
                     if (relationship) { await store.CreateRelationshipAsync(new StoredGraphRelationship(id, nodeId, nodeId, "R", Properties(value)), Guid.Parse("10000000-0000-0000-0000-000000000001"), context, token); }
-                    else { await store.CreateNodeAsync(new StoredGraphNode(id, ["N"], Properties(value)), context, token); }
+                    else { await store.CreateNodeAsync(new StoredGraphNode(id, ["N"], Properties(value)), TestLabelIds.All, context, token); }
                 }
                 else if (relationship) { await store.UpdateRelationshipAsync(id, Properties(value), context, token); }
-                else { await store.UpdateNodeAsync(id, ["N"], Properties(value), context, token); }
+                else { await store.UpdateNodeAsync(id, ["N"], Properties(value), TestLabelIds.All, context, token); }
             }
 
             async Task DeleteAsync(TransactionContext context)
@@ -190,7 +190,7 @@ public sealed class GraphStoreMutationTests
         {
             var seed = await coordinator.BeginAsync(IsolationLevel.Snapshot, token);
             ulong nodeId = (ulong)storage.ReserveTransactionSequence();
-            await store.CreateNodeAsync(new StoredGraphNode(nodeId, ["N"], Properties(0)), seed, token);
+            await store.CreateNodeAsync(new StoredGraphNode(nodeId, ["N"], Properties(0)), TestLabelIds.All, seed, token);
             ulong id = nodeId;
             if (relationship)
             {
@@ -233,7 +233,7 @@ public sealed class GraphStoreMutationTests
             async Task UpdateAsync(TransactionContext context, int value)
             {
                 if (relationship) { await store.UpdateRelationshipAsync(id, Properties(value), context, token); }
-                else { await store.UpdateNodeAsync(id, ["N"], Properties(value), context, token); }
+                else { await store.UpdateNodeAsync(id, ["N"], Properties(value), TestLabelIds.All, context, token); }
             }
 
             async Task MutateAsync()

@@ -20,6 +20,7 @@ internal sealed class GraphUpdates
     private readonly GraphDatabase _database;
     private readonly GraphOperation _operation;
     private readonly Dictionary<ulong, GraphNode> _nodes = [];
+    private readonly Dictionary<string, HashSet<ulong>> _nodeLabels = new(StringComparer.Ordinal);
     private readonly Dictionary<ulong, GraphRelationship> _relationships = [];
     private readonly Dictionary<(ulong Node, GraphIncidentDirection Direction), Dictionary<Guid, List<ulong>>> _createdIncident = [];
     private readonly Dictionary<ulong, Guid> _createdTypes = [];
@@ -37,7 +38,7 @@ internal sealed class GraphUpdates
             Array.AsReadOnly(labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
         _created.Add((true, node.Id.Value));
-        _nodes.Add(node.Id.Value, node);
+        RememberNode(node);
         return node;
     }
 
@@ -75,17 +76,63 @@ internal sealed class GraphUpdates
     internal StoredGraphRelationship? FindRelationship(ulong id) => _relationships.TryGetValue(id, out var edge)
         ? new StoredGraphRelationship(id, edge.From.Value, edge.To.Value, edge.Type, edge.Properties)
         : _database.Store.FindRelationship(id, _operation.Context.Snapshot);
-    internal void DeletedNode(ulong id) => _nodes.Remove(id);
+    internal void DeletedNode(ulong id)
+    {
+        if (_nodes.Remove(id, out var node)) { ForgetLabels(node); }
+    }
     internal void DeletedRelationship(ulong id) => _relationships.Remove(id);
 
     internal StoredGraphNode? FindNode(ulong id) => _nodes.TryGetValue(id, out var node)
         ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, _operation.Context.Snapshot);
 
-    internal IReadOnlyList<StoredGraphNode> GetNodes(string? label) => _nodes.Count == 0
-        ? _database.Store.GetNodes(label, _operation.Context.Snapshot)
-        : _database.Store.GetNodes(null, _operation.Context.Snapshot)
-            .Where(node => !_nodes.ContainsKey(node.Id)).Concat(_nodes.Values.Select(node =>
-                new StoredGraphNode(node.Id.Value, node.Labels, node.Properties))).Where(node => label is null || node.Labels.Contains(label, StringComparer.Ordinal)).OrderBy(node => node.Id).ToArray();
+    private void RememberNode(GraphNode node)
+    {
+        if (_nodes.TryGetValue(node.Id.Value, out var previous)) { ForgetLabels(previous); }
+        _nodes[node.Id.Value] = node;
+        foreach (string label in node.Labels)
+        {
+            if (!_nodeLabels.TryGetValue(label, out var ids)) { _nodeLabels.Add(label, ids = []); }
+            ids.Add(node.Id.Value);
+        }
+    }
+
+    private void ForgetLabels(GraphNode node)
+    {
+        foreach (string label in node.Labels)
+        {
+            if (_nodeLabels.TryGetValue(label, out var ids))
+            {
+                ids.Remove(node.Id.Value);
+                if (ids.Count == 0) { _nodeLabels.Remove(label); }
+            }
+        }
+    }
+
+    internal IReadOnlyList<StoredGraphNode> GetNodes(string? label, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        var stored = label is null ? _database.Store.GetNodes(null, _operation.Context.Snapshot)
+            : _database.Store.ScanLabels([label], _operation.Context.Snapshot, token);
+        return MergeNodes(stored, label is null ? _nodes.Values : PendingNodes([label]));
+    }
+
+    internal IReadOnlyList<StoredGraphNode> GetUnionNodes(IReadOnlyList<string> labels, CancellationToken token)
+        => MergeNodes(_database.Store.ScanLabels(labels, _operation.Context.Snapshot, token), PendingNodes(labels));
+
+    private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels)
+    {
+        var selected = new HashSet<ulong>();
+        foreach (string label in labels)
+        {
+            if (_nodeLabels.TryGetValue(label, out var ids)) { selected.UnionWith(ids); }
+        }
+        return selected.Select(id => _nodes[id]);
+    }
+
+    private IReadOnlyList<StoredGraphNode> MergeNodes(IReadOnlyList<StoredGraphNode> stored, IEnumerable<GraphNode> pending)
+        => _nodes.Count == 0 ? stored : stored.Where(node => !_nodes.ContainsKey(node.Id))
+            .Concat(pending.Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties)))
+            .OrderBy(node => node.Id).ToArray();
 
     internal async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string key, object? value, CancellationToken token)
     {
@@ -192,7 +239,7 @@ internal sealed class GraphUpdates
                     if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
                     {
                         _changed.Add((true, node.Id.Value));
-                        _nodes[node.Id.Value] = replacement;
+                        RememberNode(replacement);
                         touchedNodes.Add(node.Id.Value);
                     }
                 }
@@ -231,9 +278,9 @@ internal sealed class GraphUpdates
         foreach (var node in _nodes.Values)
         {
             if (IsCreated(true, node.Id.Value))
-            { await _database.Store.CreateNodeAsync(new StoredGraphNode(node.Id.Value, node.Labels, node.Properties), _operation.Context, token).ConfigureAwait(false); }
+            { await _database.Store.CreateNodeAsync(new StoredGraphNode(node.Id.Value, node.Labels, node.Properties), _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token).ConfigureAwait(false); }
             else
-            { await _database.Store.UpdateNodeAsync(node.Id.Value, node.Labels, node.Properties, _operation.Context, token).ConfigureAwait(false); }
+            { await _database.Store.UpdateNodeAsync(node.Id.Value, node.Labels, node.Properties, _database.NodeLabelIds(node.Labels, _operation), _operation.Context, token).ConfigureAwait(false); }
             if (_changed.Contains((true, node.Id.Value)) && !_created.Contains((true, node.Id.Value))) { count++; }
         }
         foreach (var edge in _relationships.Values)

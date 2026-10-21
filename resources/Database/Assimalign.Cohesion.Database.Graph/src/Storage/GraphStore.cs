@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;
 
-/// <summary>Transactional graph records, adjacency, and exact node-property indexes over a shared coordinator.</summary>
+/// <summary>Transactional graph records, label postings, adjacency, and exact node-property indexes over a shared coordinator.</summary>
 /// <remarks>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> One sealed type with a private constructor
 /// behind <see cref="Open"/>: it replaces the former <c>IGraphStore</c> interface, the
@@ -92,18 +92,20 @@ public sealed partial class GraphStore
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
-    /// <summary>Creates a node and maintains its property indexes.</summary>
+    /// <summary>Creates a node and maintains its label and property indexes.</summary>
+    /// <param name="labelIds">The nonempty catalog identity for each label. The caller resolves these identities from the catalog.</param>
     /// <param name="node">The complete node with an identity reserved from the backing storage.</param><param name="context">Owning transaction.</param><param name="cancellationToken">Cancellation token.</param><returns>The created node.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="node"/> has null labels or properties, or <paramref name="context"/> is null.</exception>
-    /// <exception cref="ArgumentException">The identity already exists, a label or property key is null or whitespace, or a property value is not a supported scalar.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="node"/> has null labels or properties, or <paramref name="labelIds"/> or <paramref name="context"/> is null.</exception>
+    /// <exception cref="ArgumentException">The identity already exists, a label or property key is null or whitespace, a label has no nonempty catalog identity, or a property value is not a supported scalar.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The identity is zero.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> is not active.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="GraphElementTooLargeException">The labels and properties exceed one graph record, or an indexed property value exceeds the index key.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     public async ValueTask<StoredGraphNode> CreateNodeAsync(StoredGraphNode node,
-        TransactionContext context, CancellationToken cancellationToken = default)
+        IReadOnlyDictionary<string, Guid> labelIds, TransactionContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(labelIds);
         ArgumentNullException.ThrowIfNull(node.Labels);
         ArgumentNullException.ThrowIfNull(node.Properties);
         ArgumentOutOfRangeException.ThrowIfZero(node.Id);
@@ -113,6 +115,7 @@ public sealed partial class GraphStore
         EnsureNew(1, node.Id);
         var proposed = new GraphRecord(1, node.Id, new StoredGraphNode(node.Id,
             node.Labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), node.Properties));
+        proposed = proposed with { LabelIds = ResolveLabelIds(proposed.Node!.Value.Labels, labelIds) };
         byte[] bytes = await EncodeAsync(proposed, context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes); // Own immutable copies, never retain caller dictionaries.
         node = record.Node!.Value;
@@ -122,7 +125,9 @@ public sealed partial class GraphStore
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
         var inserted = await ApplyAsync(context, async bracket =>
         {
+            if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
+            await InsertLabelsAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             foreach (var change in changes)
             {
                 await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false);
@@ -144,14 +149,16 @@ public sealed partial class GraphStore
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public StoredGraphRelationship? FindRelationship(ulong id, TransactionSnapshot snapshot) => Find(2, id, snapshot)?.Record.Relationship;
 
-    /// <summary>Enumerates visible nodes, optionally restricted by label.</summary>
+    /// <summary>Enumerates visible nodes in identity order, seeking MVCC label postings when a label is specified.</summary>
     /// <param name="label">Optional label.</param><param name="snapshot">Visibility snapshot.</param><returns>The visible nodes.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="StorageCorruptionException">A selected record or label posting is malformed, or a required tree is missing.</exception>
     public IReadOnlyList<StoredGraphNode> GetNodes(string? label, TransactionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        return Ids(1).Select(id => FindNode(id, snapshot)).Where(node => node is { } found
-            && (label is null || found.Labels.Contains(label, StringComparer.Ordinal))).Select(node => node!.Value).OrderBy(node => node.Id).ToArray();
+        if (label is not null) { return ScanLabel(label, snapshot); }
+        return Ids(1).Select(id => FindNode(id, snapshot)).Where(node => node.HasValue)
+            .Select(node => node!.Value).OrderBy(node => node.Id).ToArray();
     }
 
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
@@ -298,6 +305,7 @@ public sealed partial class GraphStore
                     await DeleteIndexEntryAsync(definition.Id, Composite(GraphRecordCodec.Key(value), stored.Id), node.Value.Reference.Location, context, cancellationToken).ConfigureAwait(false);
                 }
             }
+            await DeleteLabelsAsync(node.Value.Record, node.Value.Reference.Location, context, cancellationToken).ConfigureAwait(false);
             Tombstone(bracket, node.Value.Reference, context);
             SaveRegistrations(bracket);
             return true;
@@ -360,6 +368,7 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
+            RememberLabels(record);
             var next = new Reference(page, slot, writer, record.Revision);
             if (!_records.TryGetValue((record.Kind, record.Id), out var versions))
             { versions = new VersionChain { Head = next }; }
@@ -396,7 +405,7 @@ public sealed partial class GraphStore
                 {
                     var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                     if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
-                    { return new Found(reference, GraphRecordCodec.Decode(bytes)); }
+                    { return new Found(reference, DecodeRead(bytes)); }
                     if (current is not null) { previous = current; }
                 }
                 else
@@ -473,7 +482,7 @@ public sealed partial class GraphStore
         // field instead of retaining a set proportional to the outgoing degree or decoding twice.
         if (skipSourceId is { } source && bytes.Length >= 50 && bytes.Span[16] == 2 &&
             BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(34, 8)) == source) { return null; }
-        var record = GraphRecordCodec.Decode(bytes);
+        var record = DecodeRead(bytes);
         return new Found(new Reference(page, slot, writer, record.Revision), record);
     }
 
