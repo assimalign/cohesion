@@ -36,10 +36,14 @@ public sealed class CheckpointLatencyProbeTests
             using var storage = new ProbeStorage(directory);
             await using var coordinator = new TransactionCoordinator(storage, storage.Log, new ProbeRecordSpace());
             var pages = new List<PageId>();
-            for (int i = 0; i < Storage.Storage.DefaultBufferPoolCapacity - 1; i++)
+            using (var bracket = storage.BeginTransaction())
             {
-                using var page = storage.PageManager.AllocatePage(PageType.Data);
-                pages.Add(page.Id);
+                for (int i = 0; i < Storage.Storage.DefaultBufferPoolCapacity - 1; i++)
+                {
+                    using var page = storage.AllocatePageForWrite(bracket, PageType.Data);
+                    pages.Add(page.Id);
+                }
+                bracket.Commit();
             }
 
             var latencies = new List<double>();
@@ -81,11 +85,15 @@ public sealed class CheckpointLatencyProbeTests
                 var elapsed = Stopwatch.StartNew();
                 do
                 {
-                    foreach (var pageId in pages)
+                    using (var bracket = storage.BeginTransaction())
                     {
-                        using var page = storage.PageManager.GetPage(pageId);
-                        page.Page.AsBodySpan()[0] = (byte)((checkpoints % 255) + 1);
-                        page.MarkDirty();
+                        foreach (var pageId in pages)
+                        {
+                            using var page = storage.OpenPageForWrite(bracket, pageId);
+                            page.Page.AsBodySpan()[0] = (byte)((checkpoints % 255) + 1);
+                            page.MarkDirty();
+                        }
+                        bracket.Commit();
                     }
 
                     Interlocked.Increment(ref checkpointEpoch);

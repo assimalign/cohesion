@@ -28,9 +28,13 @@ public class TransactionCoordinatorRecoveryTests
         using var storage = CoordinatorStorage.Create(data);
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         PageId pageId;
-        using (var page = storage.PageManager.AllocatePage(PageType.Data))
+        using (var bracket = storage.BeginTransaction())
         {
-            pageId = page.Id;
+            using (var page = storage.AllocatePageForWrite(bracket, PageType.Data))
+            {
+                pageId = page.Id;
+            }
+            bracket.Commit();
         }
         long before = storage.ReserveTransactionSequence();
         using var entered = new ManualResetEventSlim();
