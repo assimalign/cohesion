@@ -3902,11 +3902,13 @@ checkpoint, including one a statement completed after deferral. Requested waits 
 failed database, and an extra 250 ms pump pause deterministic failures, independent of writer
 throughput or scheduler latency. Lane wait elapsed time remains available for diagnosis.
 
-Unconditional pump delays use one internal wait operation observed through the root's existing
-test grant; a test-only adapter connects it to the model-local record. Model test projects reference
-the root test assembly for that adapter. Its source guard embeds the pump and lane sources and
-rejects raw blocking waits outside their observed operations, so a direct WaitOne or Sleep cannot
-bypass the record. No shipped API, interface or visibility grant is added.
+Unconditional pump delays use one internal wait operation, and the worker records each measured
+trigger, inter-pass and lane wait in the per-pass record. Each model test project compiles the
+root's `WorkerPumpObservation` and `CheckpointPace` helpers as linked source files and reaches the
+internal wait hook with `[UnsafeAccessor]`; no model test project references another test
+assembly, and no source-text guard decides these tests. Measured waits are judged by the median
+and a 75% share over at least 12 samples, never by the slowest sample (root DESIGN, "per-pass
+record"). No shipped API, interface or visibility grant is added.
 The old six-second checkpoint floor and median timing ratio are removed: the SQL test passed an
 injected 250 ms pause before this change. Observation uses concrete types and delegates and stays
 NativeAOT- and trimming-safe.
