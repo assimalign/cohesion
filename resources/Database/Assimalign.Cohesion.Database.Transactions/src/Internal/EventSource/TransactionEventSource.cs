@@ -79,16 +79,16 @@ internal sealed class TransactionEventSource : EventSource
         public const EventKeywords Purge = (EventKeywords)0x8;
     }
 
-    /// <summary>The coordinator transactions begun and not yet ended.</summary>
+    /// <summary>The open coordinator contexts, including snapshot pins.</summary>
     internal long CurrentTransactions => Volatile.Read(ref _currentTransactions);
 
-    /// <summary>The coordinator transactions begun since the process started.</summary>
+    /// <summary>The coordinator transactions begun since process start, excluding snapshot pins.</summary>
     internal long TotalTransactions => Volatile.Read(ref _totalTransactions);
 
-    /// <summary>The coordinator transactions that ended committed since the process started.</summary>
+    /// <summary>The coordinator transactions committed since process start, excluding snapshot pins.</summary>
     internal long TotalCommits => Volatile.Read(ref _totalCommits);
 
-    /// <summary>The coordinator transactions that ended rolled back or aborted since the process started.</summary>
+    /// <summary>The coordinator transactions rolled back or aborted since process start, excluding snapshot pins.</summary>
     internal long TotalRollbacks => Volatile.Read(ref _totalRollbacks);
 
     /// <summary>The deadlock victims chosen since the process started.</summary>
@@ -104,24 +104,33 @@ internal sealed class TransactionEventSource : EventSource
     /// Counts a transaction the coordinator began tracking: the opening transition of the
     /// <c>current-transactions</c> gauge.
     /// </summary>
+    /// <param name="context">The tracked context; snapshot pins enter only the gauge.</param>
     [NonEvent]
-    public void TransactionTracked()
+    public void TransactionTracked(TransactionContext context)
     {
         Interlocked.Increment(ref _currentTransactions);
-        Interlocked.Increment(ref _totalTransactions);
+        if (!context.IsSnapshotPin)
+        {
+            Interlocked.Increment(ref _totalTransactions);
+        }
     }
 
     /// <summary>
     /// Counts a transaction the coordinator stopped tracking because it ended: the closing
     /// transition of the <c>current-transactions</c> gauge.
     /// </summary>
-    /// <param name="committed">True when the transaction ended committed; otherwise it rolled back or was aborted.</param>
+    /// <param name="context">The ended context; snapshot pins leave the gauge without moving a rate.</param>
     [NonEvent]
-    public void TransactionUntracked(bool committed)
+    public void TransactionUntracked(TransactionContext context)
     {
         Interlocked.Decrement(ref _currentTransactions);
 
-        if (committed)
+        if (context.IsSnapshotPin)
+        {
+            return;
+        }
+
+        if (context.State == TransactionState.Committed)
         {
             Interlocked.Increment(ref _totalCommits);
         }
@@ -135,7 +144,7 @@ internal sealed class TransactionEventSource : EventSource
     [NonEvent]
     public void TransactionBegun(Storage.Storage storage, TransactionContext context)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Transactions))
+        if (!context.IsSnapshotPin && IsEnabled(EventLevel.Verbose, Keywords.Transactions))
         {
             TransactionBegun(storage.Name, (long)context.Sequence.Value, context.IsolationLevel.ToString());
         }
@@ -145,7 +154,7 @@ internal sealed class TransactionEventSource : EventSource
     [NonEvent]
     public void TransactionCommitted(Storage.Storage storage, TransactionContext context)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Transactions))
+        if (!context.IsSnapshotPin && IsEnabled(EventLevel.Verbose, Keywords.Transactions))
         {
             TransactionCommitted(storage.Name, (long)context.Sequence.Value);
         }
@@ -155,7 +164,7 @@ internal sealed class TransactionEventSource : EventSource
     [NonEvent]
     public void TransactionRolledBack(Storage.Storage storage, TransactionContext context)
     {
-        if (IsEnabled(EventLevel.Verbose, Keywords.Transactions))
+        if (!context.IsSnapshotPin && IsEnabled(EventLevel.Verbose, Keywords.Transactions))
         {
             TransactionRolledBack(storage.Name, (long)context.Sequence.Value);
         }

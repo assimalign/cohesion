@@ -49,7 +49,7 @@ internal sealed class GraphOperation
             // Capture the pin before the statement snapshot. An earlier writer
             // may commit while the operation is open, so the refreshing transaction
             // context alone cannot preserve the statement's original horizon.
-            _snapshotPin = await _database.Coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
+            _snapshotPin = await _database.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
             Context = _context.PinStatementSnapshot();
         }
     }

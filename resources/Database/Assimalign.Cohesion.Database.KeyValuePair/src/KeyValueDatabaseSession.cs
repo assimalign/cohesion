@@ -334,7 +334,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// </remarks>
     private async ValueTask<TransactionContext?> BeginSnapshotPinAsync(TransactionContext transaction, CancellationToken cancellationToken)
         => transaction.IsolationLevel == IsolationLevel.ReadCommitted
-            ? await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false)
+            ? await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false)
             : null;
 
     /// <summary>

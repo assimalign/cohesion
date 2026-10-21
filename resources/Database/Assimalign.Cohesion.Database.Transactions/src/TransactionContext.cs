@@ -66,7 +66,8 @@ public sealed class TransactionContext
         TransactionId id,
         TransactionSequence sequence,
         IsolationLevel isolationLevel,
-        TransactionSnapshot beginSnapshot)
+        TransactionSnapshot beginSnapshot,
+        bool isSnapshotPin)
     {
         _manager = manager;
         _endSync = new object();
@@ -74,6 +75,7 @@ public sealed class TransactionContext
         Sequence = sequence;
         IsolationLevel = isolationLevel;
         _beginSnapshot = beginSnapshot;
+        IsSnapshotPin = isSnapshotPin;
         _state = TransactionState.Active;
     }
 
@@ -88,6 +90,7 @@ public sealed class TransactionContext
         Sequence = transaction.Sequence;
         IsolationLevel = transaction.IsolationLevel;
         _beginSnapshot = snapshot;
+        IsSnapshotPin = transaction.IsSnapshotPin;
     }
 
     /// <summary>
@@ -101,6 +104,9 @@ public sealed class TransactionContext
     /// than the context the manager began. A manager ends only its own contexts, never a view.
     /// </summary>
     internal bool IsStatementView => _transaction is not null;
+
+    /// <summary>Gets whether this context only holds a statement snapshot horizon.</summary>
+    internal bool IsSnapshotPin { get; }
 
     /// <summary>
     /// Gets the external identity of the transaction.

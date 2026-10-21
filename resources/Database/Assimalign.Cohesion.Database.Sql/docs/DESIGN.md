@@ -5253,10 +5253,13 @@ involve the pin: the #1363 review saw it about once in 150,000 probe statements
 under a heavier load, and never in 30 consecutive two-second guard runs. It is
 tracked separately.
 
-The pin costs a kernel begin and an abort record per read-committed statement, and
-it moves the kernel transaction counters: each pin counts as a begun and a
-rolled-back transaction, as it already did in Documents, Graph and Blob. Keeping
-pins out of those rates waits on #1351. On the in-memory engine (Release, one
+The pin retains its kernel context and snapshot horizon, but uses
+`TransactionCoordinator.BeginSnapshotPinAsync` (#1351): it contributes no begin,
+commit or rollback rate and emits no Verbose kernel lifecycle events. It remains
+in the current-transactions gauge and is released through the existing rollback
+and disposal paths. Read-only pins append no lifecycle records (#1280).
+Registered statement snapshots without kernel contexts remain a follow-up.
+The original #1363 measurements on the in-memory engine (Release, one
 process per run at high priority on four pinned cores, four alternating pairs,
 median of seven rounds of 2,000 statements) a read-committed primary-key seek took
 32.8 µs before the pin and 36.3 µs with it. The first cut's pin also cost time in

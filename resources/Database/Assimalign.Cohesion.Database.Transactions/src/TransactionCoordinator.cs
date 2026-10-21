@@ -359,14 +359,40 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="isolationLevel">The isolation level the transaction runs under.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The transaction context.</returns>
-    public async ValueTask<TransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+    public ValueTask<TransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default) =>
+        BeginAsync(isolationLevel, isSnapshotPin: false, cancellationToken);
+
+    /// <summary>
+    /// Begins a snapshot pin that holds the version-pruning horizon for one statement.
+    /// It remains tracked by the current-transactions gauge, but contributes no transaction
+    /// begin, commit or rollback rate and writes no Verbose transaction lifecycle events.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The pin context, to release through <see cref="RollbackAsync"/> when the statement ends.</returns>
+    /// <remarks>
+    /// Begin the pin before capturing the statement snapshot. The pin uses the same manager
+    /// registration and end paths as a snapshot transaction, including disposal and cancellation.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The transaction manager or storage was disposed.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public ValueTask<TransactionContext> BeginSnapshotPinAsync(CancellationToken cancellationToken = default) =>
+        BeginAsync(IsolationLevel.Snapshot, isSnapshotPin: true, cancellationToken);
+
+    private async ValueTask<TransactionContext> BeginAsync(
+        IsolationLevel isolationLevel, bool isSnapshotPin, CancellationToken cancellationToken)
     {
-        var context = await _manager.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+        // Manager registration (including the immutable pin kind) finishes under its lock
+        // before this coordinator takes _sync. Neither lock is held while acquiring the
+        // other or while waiting on apply/checkpoint/log gates. Disposal therefore sees
+        // the kind before it can end a pin, with the same horizon protection as any snapshot.
+        var context = isSnapshotPin
+            ? await _manager.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false)
+            : await _manager.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
         lock (_sync)
         {
             _openContexts[context.Sequence.Value] = context;
-            TransactionEventSource.Log.TransactionTracked();
+            TransactionEventSource.Log.TransactionTracked(context);
         }
 
         // Only the manager's disposal can have ended the context by now (it aborts every active
@@ -995,7 +1021,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 // a commit or rollback that untracks it later finds it gone.
                 foreach (var context in _openContexts.Values)
                 {
-                    TransactionEventSource.Log.TransactionUntracked(committed: context.State == TransactionState.Committed);
+                    TransactionEventSource.Log.TransactionUntracked(context);
                 }
 
                 _openContexts.Clear();
@@ -1028,7 +1054,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             _statementBrackets.Remove(context.Sequence.Value);
             if (_openContexts.Remove(context.Sequence.Value))
             {
-                TransactionEventSource.Log.TransactionUntracked(committed: context.State == TransactionState.Committed);
+                TransactionEventSource.Log.TransactionUntracked(context);
             }
         }
     }

@@ -123,6 +123,159 @@ public sealed class TransactionEventSourceTests
         source.TotalRollbacks.ShouldBe(rollbacks + 1);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Snapshot pin: Should leave rates and lifecycle events unchanged on every end path (#1351)")]
+    [InlineData("Commit")]
+    [InlineData("Rollback")]
+    [InlineData("Dispose")]
+    [InlineData("CanceledRollback")]
+    public async Task BeginSnapshotPinAsync_EachEndPath_ShouldOnlyMoveTheGauge(string end)
+    {
+        // Arrange
+        var source = TransactionEventSource.Log;
+        using var storage = EventStorage.Create(UniqueName());
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+        long current = source.CurrentTransactions;
+        long total = source.TotalTransactions;
+        long commits = source.TotalCommits;
+        long rollbacks = source.TotalRollbacks;
+        long journalLength = storage.JournalStream.Length;
+
+        // Act
+        var pin = await coordinator.BeginSnapshotPinAsync(CancellationToken.None);
+        pin.IsSnapshotPin.ShouldBeTrue();
+        pin.PinStatementSnapshot().IsSnapshotPin.ShouldBeTrue();
+        pin.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
+        source.CurrentTransactions.ShouldBe(current + 1);
+        coordinator.GetOpenContexts().ShouldContain(pin);
+        if (end == "Commit")
+        {
+            await coordinator.CommitAsync(pin, CancellationToken.None);
+        }
+        else if (end == "Rollback")
+        {
+            await coordinator.RollbackAsync(pin, CancellationToken.None);
+            await Should.ThrowAsync<TransactionAbortedException>(async () => await coordinator.RollbackAsync(pin, CancellationToken.None));
+        }
+        else
+        {
+            if (end == "CanceledRollback")
+            {
+                using var canceled = new CancellationTokenSource();
+                canceled.Cancel();
+                await Should.ThrowAsync<OperationCanceledException>(async () => await coordinator.RollbackAsync(pin, canceled.Token));
+                pin.State.ShouldBe(TransactionState.Active);
+                source.CurrentTransactions.ShouldBe(current + 1);
+                coordinator.GetOpenContexts().ShouldContain(pin);
+            }
+            await coordinator.DisposeAsync();
+        }
+
+        // Assert
+        source.CurrentTransactions.ShouldBe(current);
+        source.TotalTransactions.ShouldBe(total);
+        source.TotalCommits.ShouldBe(commits);
+        source.TotalRollbacks.ShouldBe(rollbacks);
+        coordinator.GetOpenContexts().ShouldBeEmpty();
+        storage.JournalStream.Length.ShouldBe(journalLength);
+        recorder.For(storage.Name).ShouldBeEmpty();
+        recorder.ShouldHaveNoInstrumentationError();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Snapshot pin: Should not track a canceled begin or a begin refused after disposal (#1351)")]
+    public async Task BeginSnapshotPinAsync_CanceledOrDisposed_ShouldNotTrackAContext()
+    {
+        // Arrange
+        var source = TransactionEventSource.Log;
+        using var storage = EventStorage.Create(UniqueName());
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        long current = source.CurrentTransactions;
+        long total = source.TotalTransactions;
+        long rollbacks = source.TotalRollbacks;
+
+        // Act
+        await Should.ThrowAsync<OperationCanceledException>(async () => await coordinator.BeginSnapshotPinAsync(canceled.Token));
+        await coordinator.DisposeAsync();
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await coordinator.BeginSnapshotPinAsync(CancellationToken.None));
+
+        // Assert
+        coordinator.GetOpenContexts().ShouldBeEmpty();
+        source.CurrentTransactions.ShouldBe(current);
+        source.TotalTransactions.ShouldBe(total);
+        source.TotalRollbacks.ShouldBe(rollbacks);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Snapshot pin: Concurrent begin and disposal should return the gauge without moving rates (#1351)")]
+    public async Task BeginSnapshotPinAsync_RacesDisposal_ShouldReturnTheGaugeWithoutMovingRates()
+    {
+        // Arrange: this collection disables parallelization for the process-wide counters.
+        var source = TransactionEventSource.Log;
+        long current = source.CurrentTransactions;
+        long total = source.TotalTransactions;
+        long commits = source.TotalCommits;
+        long rollbacks = source.TotalRollbacks;
+        int begun = 0;
+        int refused = 0;
+        int aborted = 0;
+        int rounds = 0;
+        var elapsed = Stopwatch.StartNew();
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Act: cover both admission before disposal and refusal after it, for at least 250 ms.
+        do
+        {
+            using var storage = EventStorage.Create(UniqueName());
+            await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+            var initial = await coordinator.BeginSnapshotPinAsync(ceiling.Token);
+            using var start = new ManualResetEventSlim();
+            var beginning = Task.Run(async () =>
+            {
+                start.Wait(ceiling.Token);
+                for (int attempt = 0; attempt < 32; attempt++)
+                {
+                    try
+                    {
+                        var pin = await coordinator.BeginSnapshotPinAsync(ceiling.Token);
+                        Interlocked.Increment(ref begun);
+                        // Keep every admitted pin for disposal, including one returned after
+                        // the coordinator cleared its table: BeginAsync must untrack it itself.
+                        pin.IsSnapshotPin.ShouldBeTrue();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        Interlocked.Increment(ref refused);
+                    }
+                    await Task.Yield();
+                }
+            }, ceiling.Token);
+            var disposing = Task.Run(async () =>
+            {
+                start.Wait(ceiling.Token);
+                await coordinator.DisposeAsync();
+            }, ceiling.Token);
+            start.Set();
+            await Task.WhenAll(beginning, disposing).WaitAsync(ceiling.Token);
+            if (initial.State == TransactionState.Faulted) { aborted++; }
+            coordinator.GetOpenContexts().ShouldBeEmpty();
+            source.CurrentTransactions.ShouldBe(current);
+            rounds++;
+        }
+        while (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || begun == 0 || refused == 0 || aborted == 0);
+
+        // Assert
+        begun.ShouldBeGreaterThan(0);
+        refused.ShouldBeGreaterThan(0);
+        aborted.ShouldBe(rounds);
+        (begun + refused).ShouldBe(rounds * 32);
+        source.CurrentTransactions.ShouldBe(current);
+        source.TotalTransactions.ShouldBe(total);
+        source.TotalCommits.ShouldBe(commits);
+        source.TotalRollbacks.ShouldBe(rollbacks);
+        _output.WriteLine($"Rounds={rounds}; begun={begun}; refused={refused}; aborted={aborted}");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should return the transaction gauge for a transaction the coordinator's disposal aborts")]
     public async Task DisposeAsync_TransactionStillOpen_ShouldReturnTheGauge()
     {

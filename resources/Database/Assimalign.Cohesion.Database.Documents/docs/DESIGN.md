@@ -144,6 +144,11 @@ describes.
 Snapshot isolation fixes the read horizon at transaction start. ReadCommitted
 captures one statement snapshot and pins its retention horizon for the statement.
 Serializable is rejected rather than silently weakened.
+Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
+manager registration, fixed snapshot and existing rollback/disposal release paths. Pins remain
+in the current-transactions gauge but move none of the begin, commit or rollback rates and
+emit no Verbose kernel lifecycle events. A real explicit rollback still counts. Read-only pins
+append no lifecycle records (#1280); registered statement snapshots are outside this change.
 
 The shared lock manager serializes writers per logical database. Before changing
 a document, collection, or index, the operation compares its snapshot with the

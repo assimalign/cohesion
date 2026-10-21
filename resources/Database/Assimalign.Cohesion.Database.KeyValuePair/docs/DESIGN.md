@@ -316,10 +316,11 @@ release visits only the owner's own locks
 ([Transactions DESIGN.md](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md), the
 version store and the lock manager), so the same `GET` takes 3.5 and 3.2 µs; an auto-commit
 `GET`, which paid the lock-table walk before #1363 too (38 and 158 µs), takes 2.9 and 2.1 µs.
-Each pin also counts as a begun and a rolled-back kernel transaction in the transaction counters,
-as in Documents, Graph and Blob. Keeping pins out of those rates waits on #1351. A cheaper
-mechanism for all five models, a statement-snapshot registration in the transaction manager with
-no kernel transaction behind it, is a recorded follow-up.
+Each pin uses `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining the same
+kernel context, snapshot horizon and release paths. It remains in the current-transactions
+gauge but contributes no begin, commit or rollback rate and emits no Verbose kernel lifecycle
+events, including during disposal. Read-only pins append no lifecycle records (#1280).
+Statement-snapshot registration without kernel contexts remains a follow-up.
 
 ## Typed execution and the wire command grammar
 
