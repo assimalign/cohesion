@@ -2980,7 +2980,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (!ReferenceEquals(transaction.Owner, this))
         {
-            throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            throw new StorageTransactionException(StorageTransactionErrorCode.ForeignStorage, string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.TransactionStorageMismatch, transaction.Sequence, transaction.Owner.Name, Name));
         }
 

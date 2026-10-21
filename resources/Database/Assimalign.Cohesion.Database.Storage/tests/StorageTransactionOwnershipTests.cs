@@ -46,6 +46,7 @@ public sealed class StorageTransactionOwnershipTests
         var refusal = Should.Throw<StorageTransactionException>(() => Mutate(second, foreign, row.PageId, operation));
 
         // Assert
+        refusal.Code.ShouldBe(StorageTransactionErrorCode.ForeignStorage);
         refusal.Message.ShouldContain("first", Case.Sensitive);
         refusal.Message.ShouldContain("second", Case.Sensitive);
         foreign.PreImages.Count.ShouldBe(0);
@@ -108,7 +109,7 @@ public sealed class StorageTransactionOwnershipTests
         using var second = TornStorage.Create(name: "second");
         var row = second.Insert("second row");
         using var foreign = first.BeginTransaction();
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         long writes = 0;
         long refusals = 0;
         long lockedRefusals = 0;
@@ -134,6 +135,8 @@ public sealed class StorageTransactionOwnershipTests
         {
             do
             {
+                // The timeout is only a hang guard; coverage is decided by milestones below.
+                stop.Token.ThrowIfCancellationRequested();
                 for (int operation = 0; operation < 9; operation++)
                 {
                     if (second.IsPageWriteLocked(row.PageId)) { lockedRefusals++; }
@@ -142,13 +145,13 @@ public sealed class StorageTransactionOwnershipTests
                 }
                 await Task.Yield();
             }
-            while (!stop.IsCancellationRequested && (elapsed.Elapsed < TimeSpan.FromSeconds(1)
-                || Interlocked.Read(ref writes) < 100 || refusals < 100 || lockedRefusals < 20));
+            while (elapsed.Elapsed < TimeSpan.FromSeconds(1)
+                || Interlocked.Read(ref writes) < 100 || refusals < 100 || lockedRefusals < 20);
         }
         finally
         {
             stop.Cancel();
-            await writer.WaitAsync(TimeSpan.FromSeconds(30));
+            await writer.WaitAsync(TimeSpan.FromMinutes(5));
         }
 
         // Assert

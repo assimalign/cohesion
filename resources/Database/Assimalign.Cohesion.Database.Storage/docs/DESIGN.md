@@ -915,7 +915,8 @@ Every rule below is stated for a storage transaction (a *bracket*):
 7. **Storage-qualified transaction ownership (#1286).** Every record or page mutation
    validates the bracket's owning Storage by reference before enlisting a latch or taking a pin, lock,
    pre-image or journal record. A foreign bracket throws `StorageTransactionException`
-   naming both storages. Page write locks hold the bracket object itself, so equal
+   with `Code = StorageTransactionErrorCode.ForeignStorage`, naming both storages.
+   Page write locks hold the bracket object itself, so equal
    sequence numbers from different storages never identify the same lock owner.
    Commit and rollback route through the bracket's immutable owner. The lock order at
    first touch is an already-held structure latch and pin, then the transaction monitor;
@@ -2555,7 +2556,7 @@ the others) stay as they were; the counters are their process-wide totals for to
 
 ## Error model
 
-`StorageException` is the area root for this library. `StorageIOException` (stream and
+`StorageException` is the child root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
 `StorageCorruptionException` (`COHDBS003`, checksum/header integrity failures, and since #1253 a gap
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
@@ -2570,6 +2571,11 @@ inner-exception or aggregate chain, and
 failed), and `JournalException` (journal framing violations: a record whose frame would exceed
 2 GiB; since #1252 a failed append no longer raises it) all derive from it, so consumers can
 catch the family or the specific failure.
+Foreign-storage transaction refusals remain `StorageTransactionException` under that child
+root and carry `Code = StorageTransactionErrorCode.ForeignStorage`, before latch enlistment,
+pins, locks, pre-images or journal changes. Other transaction violations carry `Unspecified`.
+The ownership race test runs for a minimum duration and until every coverage counter reaches
+its milestone; its five-minute timeout is a hang guard that fails the test, never a coverage window.
 Engines translate `StorageOfflineException` into the area root's `DatabaseOfflineException`
 with their own code, or into `DatabaseTransactionCommitUnconfirmedException` when
 `CommitRecordWritten` is set.

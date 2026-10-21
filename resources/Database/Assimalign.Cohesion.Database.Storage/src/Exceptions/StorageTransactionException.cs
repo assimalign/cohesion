@@ -14,7 +14,19 @@ public sealed class StorageTransactionException : StorageException
     /// </summary>
     /// <param name="message">A message describing the violation.</param>
     public StorageTransactionException(string message)
-        : base(message)
+        : this(StorageTransactionErrorCode.Unspecified, message)
     {
     }
+
+    /// <summary>Initializes a transaction violation with a machine-readable reason.</summary>
+    /// <param name="code">The reason for the refusal.</param>
+    /// <param name="message">A message describing the violation.</param>
+    public StorageTransactionException(StorageTransactionErrorCode code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    /// <summary>Gets the reason for the violation, or <see cref="StorageTransactionErrorCode.Unspecified"/> for a general violation.</summary>
+    public StorageTransactionErrorCode Code { get; }
 }
