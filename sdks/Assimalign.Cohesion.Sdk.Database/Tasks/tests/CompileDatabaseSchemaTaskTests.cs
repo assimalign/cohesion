@@ -38,7 +38,9 @@ public partial class CompileDatabaseSchemaTaskTests
         bool success = task.Execute();
         // Assert
         success.ShouldBeFalse();
-        engine.Errors.ShouldContain(error => error.Code == "COHDBSDK110");
+        var error = engine.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBSDK110");
+        error.Message.ShouldNotBeNull().ShouldContain("not extracted into the typed-schema artifact", Case.Sensitive);
         task.Schemas.ShouldBeEmpty();
     }
 
@@ -55,7 +57,7 @@ public partial class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe("cohesion/database-schema/v7");
+        schema.Format.ShouldBe("cohesion/database-schema/v8");
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         ITaskItem item = task.Schemas.ShouldHaveSingleItem();

@@ -48,11 +48,65 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();
         File.ReadAllText(artifact).ShouldBe(document);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: v7 temporal artifacts and baselines reach the format gate without changing files")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Execute_V7TemporalDocument_ShouldRefuseFormatWithoutChangingFiles(bool baseline)
+    {
+        // Arrange: retain the v7 TimeSpan spelling and hash the artifact's actual bytes.
+        using var directory = new TemporaryDirectory();
+        var current = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", false, [],
+            [new CompiledSchemaTable("items", "Tests.Row",
+                [new CompiledSchemaColumn("duration", DatabaseType.TimeSpan, true, DefaultLiteral: "'93784.0000005 seconds'")],
+                null, [], [])], []);
+        string artifact = WriteSchema(directory.File("schemas"), current);
+        string document = current.CanonicalDocument
+            .Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v7", StringComparison.Ordinal)
+            .Replace("93784.0000005 seconds", "1.02:03:04.0000005", StringComparison.Ordinal);
+        if (baseline)
+        {
+            Directory.CreateDirectory(directory.File("Migrations/orders"));
+            File.WriteAllText(directory.File("Migrations/orders/0001_initial.schema.json"), document);
+        }
+        else
+        {
+            File.WriteAllText(artifact, document);
+        }
+        string artifactHash = baseline ? current.Hash : Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document)));
+        File.WriteAllText(Path.ChangeExtension(artifact, ".sha256"), artifactHash + "\n");
+        string[] inputPaths = Directory.GetFiles(directory.Path, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).ToArray();
+        byte[][] inputContents = inputPaths.Select(File.ReadAllBytes).ToArray();
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, engine, "next");
+
+        // Act
+        bool result = task.Execute();
+
+        // Assert
+        result.ShouldBeFalse();
+        var error = engine.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBSDK206");
+        error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
+        error.Message.ShouldContain("Rebuild", Case.Sensitive);
+        task.MigrationPath.ShouldBeEmpty();
+        task.BaselinePath.ShouldBeEmpty();
+        Directory.GetFiles(directory.Path, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).ShouldBe(inputPaths);
+        for (int i = 0; i < inputPaths.Length; i++)
+        {
+            File.ReadAllBytes(inputPaths[i]).ShouldBe(inputContents[i]);
+        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: SQL writes ordinal script and baseline")]
