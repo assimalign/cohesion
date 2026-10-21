@@ -4352,6 +4352,13 @@ referential updates validate parents through current visibility after waiting fo
 the fixed-snapshot crosscheck. Pending replacements are grouped once by table ObjectId and
 indexed lazily by constraint key using SQL equality and collation. Self-reference candidate
 keys are hashed once per constraint, so validation is linear in the candidate rows.
+SqlConstraintTimingTests guards ADD CONSTRAINT, ADD COLUMN REFERENCES and one INSERT SELECT
+at 50,000 rows (#1197). It compares equal row counts (five 10,000-row operations and one
+50,000-row operation), using the minimum of three process-CPU rounds after warm-up and a
+2.8 growth bound. ADD CONSTRAINT streams validation one row at a time through the existing
+primary-key index, giving O(n log n) seeks; batch callers use the hash set. Forward references
+and a last-key ADD COLUMN default prevent an accidental repeated linear search from matching
+the first candidate immediately. Setup and verification are outside the measured blocks.
 Collection, validation and physical replacement loops observe statement cancellation. Re-keying
 a referenced child retains UPDATE's incoming-reference restriction. All old index entries
 and row versions are tombstoned before replacement versions and indexes are inserted in
