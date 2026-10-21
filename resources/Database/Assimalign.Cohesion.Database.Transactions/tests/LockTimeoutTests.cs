@@ -53,17 +53,20 @@ public sealed class LockTimeoutTests
         // Arrange
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var locks = Create(true);
-        using var outer = locks.EnterLockTimeout(TimeSpan.FromMilliseconds(500));
+        using var outer = locks.EnterLockTimeout(TimeSpan.FromHours(1));
+        CancellationTokenSource? timer = null;
+        locks.WaitTimerArmed = source => { source.CancelAfter(Timeout.InfiniteTimeSpan); timer = source; };
+        CancellationTokenSource? previous = null;
 
-        // Act: total elapsed time exceeds one timeout, but neither wait does.
-        var elapsed = Stopwatch.StartNew();
+        // Act: each queued wait owns a fresh timer, independent of the preceding wait.
         for (int index = 0; index < 2; index++)
         {
             locks.TryAcquire(_holder, _row, LockMode.Exclusive).ShouldBeTrue();
             var pending = locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, ceiling.Token).AsTask();
             try
             {
-                await Task.Delay(300, ceiling.Token);
+                timer.ShouldNotBeNull().ShouldNotBeSameAs(previous);
+                previous = timer;
                 pending.IsCompleted.ShouldBeFalse();
             }
             finally { locks.ReleaseAll(_holder); }
@@ -76,20 +79,21 @@ public sealed class LockTimeoutTests
             using var inner = locks.EnterLockTimeout(TimeSpan.Zero);
             throw new InvalidOperationException();
         });
-        await Should.ThrowAsync<TransactionLockTimeoutException>(async () =>
-            await locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, ceiling.Token));
+        var timed = locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, ceiling.Token).AsTask();
+        timer!.Cancel();
+        await Should.ThrowAsync<TransactionLockTimeoutException>(() => timed);
         outer.Dispose();
+        timer = null;
         var untimed = locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, ceiling.Token).AsTask();
         try
         {
-            await Task.Delay(600, ceiling.Token);
+            timer.ShouldBeNull();
             untimed.IsCompleted.ShouldBeFalse();
         }
         finally { locks.ReleaseAll(_holder); }
         await untimed.WaitAsync(ceiling.Token);
 
         // Assert
-        elapsed.Elapsed.ShouldBeGreaterThan(TimeSpan.FromMilliseconds(500));
         locks.ReleaseAll(_waiter);
         locks.TryAcquire(_probe, _row, LockMode.Exclusive).ShouldBeTrue();
         locks.ReleaseAll(_probe);
@@ -161,30 +165,49 @@ public sealed class LockTimeoutTests
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Lock timeout: grant, timer and caller cancellation races leave no hidden grant or waiter")]
     public async Task AcquireAsync_GrantCancellationRace_ShouldHaveOneOutcomeAndReleaseEverything()
     {
-        // Arrange: require all outcomes and exact wait counters, with a minimum duration and
-        // a ceiling. Different schedules force both timeout/cancellation and concurrent grants.
+        // Arrange: stop after dequeue but before notification, then cancel both deadlines.
+        // Require that exact interleaving as well as cancellation/timeout winning the queue.
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var locks = Create(true);
-        int granted = 0, timedOut = 0, canceled = 0, iterations = 0;
+        int granted = 0, timedOut = 0, canceled = 0, iterations = 0, canceledAfterDequeue = 0;
+        CancellationTokenSource? timer = null;
+        locks.WaitTimerArmed = source => { source.CancelAfter(Timeout.InfiniteTimeSpan); timer = source; };
+        using var recorder = new EventSourceRecorder(TransactionEventSource.Log, System.Diagnostics.Tracing.EventLevel.Verbose);
         long waits = TransactionEventSource.Log.TotalLockWaits;
         var elapsed = Stopwatch.StartNew();
 
         // Act
-        while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || granted < 8 || timedOut < 8 || canceled < 8)
+        while (elapsed.Elapsed < TimeSpan.FromSeconds(1) || canceledAfterDequeue < 8 || timedOut < 8 || canceled < 8)
         {
             ceiling.Token.ThrowIfCancellationRequested();
             locks.TryAcquire(_holder, _row, LockMode.Exclusive).ShouldBeTrue();
             using var caller = CancellationTokenSource.CreateLinkedTokenSource(ceiling.Token);
-            using var scope = locks.EnterLockTimeout(TimeSpan.FromMilliseconds(2));
+            using var dequeued = new ManualResetEventSlim();
+            using var notify = new ManualResetEventSlim();
+            using var scope = locks.EnterLockTimeout(TimeSpan.FromHours(1));
             var pending = locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, caller.Token).AsTask();
+            locks.BeforeGrantNotification = () =>
+            {
+                dequeued.Set();
+                notify.Wait(ceiling.Token);
+            };
             Task release = Task.CompletedTask;
             try
             {
                 switch (iterations % 3)
                 {
-                    case 0: release = Task.Run(() => locks.ReleaseAll(_holder), ceiling.Token); break;
-                    case 1: break;
-                    case 2: caller.Cancel(); release = Task.Run(() => locks.ReleaseAll(_holder), ceiling.Token); break;
+                    case 0:
+                        release = Task.Run(() => locks.ReleaseAll(_holder), ceiling.Token);
+                        dequeued.Wait(ceiling.Token);
+                        pending.IsCompleted.ShouldBeFalse();
+                        caller.Cancel();
+                        timer!.Cancel();
+                        pending.IsCompleted.ShouldBeFalse();
+                        canceledAfterDequeue++;
+                        notify.Set();
+                        break;
+                    case 1: timer!.Cancel(); break;
+                    case 2: caller.Cancel(); break;
                 }
                 try { await pending.WaitAsync(ceiling.Token); granted++; }
                 catch (TransactionLockTimeoutException) { timedOut++; }
@@ -192,7 +215,9 @@ public sealed class LockTimeoutTests
             }
             finally
             {
+                notify.Set();
                 await release;
+                locks.BeforeGrantNotification = null;
                 locks.ReleaseAll(_holder);
                 // A canceled request must not have secretly won a concurrent grant.
                 if (pending.IsCompletedSuccessfully) { locks.ReleaseAll(_waiter); }
@@ -204,10 +229,56 @@ public sealed class LockTimeoutTests
 
         // Assert
         granted.ShouldBeGreaterThanOrEqualTo(8);
+        canceledAfterDequeue.ShouldBe(granted);
         timedOut.ShouldBeGreaterThanOrEqualTo(8);
         canceled.ShouldBeGreaterThanOrEqualTo(8);
         (granted + timedOut + canceled).ShouldBe(iterations);
         (TransactionEventSource.Log.TotalLockWaits - waits).ShouldBe(iterations);
+        var stopped = recorder.Events.Where(e => e.EventName == "LockWaitStop").ToArray();
+        stopped.Length.ShouldBe(iterations);
+        stopped.Count(e => e.Payload![2]?.ToString() == "Granted").ShouldBe(granted);
+        stopped.Count(e => e.Payload![2]?.ToString() == "Timeout").ShouldBe(timedOut);
+        stopped.Count(e => e.Payload![2]?.ToString() == "Cancelled").ShouldBe(canceled);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Lock timeout: a delayed continuation retains the cause that removed the wait")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AcquireAsync_LaterCancellationBeforeContinuation_ShouldKeepFirstOutcome(bool callerFirst)
+    {
+        // Arrange
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var caller = CancellationTokenSource.CreateLinkedTokenSource(ceiling.Token);
+        using var entered = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        var locks = Create(true);
+        using var recorder = new EventSourceRecorder(TransactionEventSource.Log, System.Diagnostics.Tracing.EventLevel.Verbose);
+        locks.TryAcquire(_holder, _row, LockMode.Exclusive).ShouldBeTrue();
+        CancellationTokenSource? timer = null;
+        locks.WaitTimerArmed = source => { source.CancelAfter(Timeout.InfiniteTimeSpan); timer = source; };
+        using var scope = locks.EnterLockTimeout(TimeSpan.FromHours(1));
+        int paused = 0;
+        locks.BeforeWaitOutcome = () => { Interlocked.Increment(ref paused); entered.Set(); resume.Wait(ceiling.Token); };
+        var pending = locks.AcquireAsync(_waiter, _row, LockMode.Exclusive, caller.Token).AsTask();
+
+        // Act: the first completion has already left the queue before the other token changes.
+        try
+        {
+            if (callerFirst) { caller.Cancel(); } else { timer!.Cancel(); }
+            entered.Wait(ceiling.Token);
+            if (callerFirst) { timer!.Cancel(); } else { caller.Cancel(); }
+        }
+        finally { resume.Set(); }
+
+        // Assert
+        if (callerFirst) { await Should.ThrowAsync<OperationCanceledException>(() => pending); }
+        else { await Should.ThrowAsync<TransactionLockTimeoutException>(() => pending); }
+        paused.ShouldBe(1);
+        recorder.Events.Where(e => e.EventName == "LockWaitStop").ShouldHaveSingleItem()
+            .Payload![2].ShouldBe(callerFirst ? "Cancelled" : "Timeout");
+        locks.ReleaseAll(_holder);
+        locks.TryAcquire(_probe, _row, LockMode.Exclusive).ShouldBeTrue();
+        locks.ReleaseAll(_probe);
     }
 
     private static LockManager Create(bool engineMode)

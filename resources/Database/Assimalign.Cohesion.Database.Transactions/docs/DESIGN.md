@@ -472,17 +472,22 @@ scope: zero disables it, nested scopes restore the previous duration, and concur
 independent settings. It covers direct and nested unique-index requests in standalone and engine
 modes, without a shipped visibility grant. Durations must be non-negative and at most int.MaxValue
 milliseconds, matching PostgreSQL's bound (guc_parameters.dat:1617-1625). Only a contended wait
-creates a linked cancellation source and arms CancelAfter; each wait gets a new budget, as
+creates a timer source; each wait gets a new budget, as
 PostgreSQL's ProcSleep does (src/backend/storage/lmgr/proc.c:1407-1425). A timeout removes the
 queued request and throws TransactionLockTimeoutException (SQLSTATE 55P03). The caller owns
 rollback and release of the owner's earlier grants. Caller cancellation and storage abandonment
-keep their existing meanings and take precedence when observed together with the timer.
+keep their existing meanings. Separate caller, timer and abandonment registrations carry their
+cause into queue removal under `_sync`; the first removal fixes both the exception and event
+outcome, even if another deadline expires before the continuation resumes. This follows
+PostgreSQL's earlier-deadline rule (src/backend/tcop/postgres.c:3590-3600).
 The apply-gate refusal still runs before any wait: lock waits precede the coordinator's apply
 gate and storage/index latches. Cancellation callbacks take only the lock table's _sync;
 registrations/timers are disposed outside _sync. Grant/end and cancellation now arbitrate under
 _sync: cancellation can complete only a request it removed, so it cannot replace a grant whose
 notification has not yet run. LockTimeoutTests checks Timeout events, independent flows, scope
-restoration, individual budgets, other end reasons and a counter-driven grant/cancel/timer stress.
+restoration, individual budgets and other end reasons. Per-manager internal hooks control timer
+expiry and pause after grant dequeue but before notification; the arbitration test cancels both
+tokens in that interval and counts that interleaving, requiring grant as its sole outcome.
 
 **Unwritten statement marks (#1668).** LockManager.MarkStatement(owner) returns an opaque,
 allocation-free LockStatementMark with value equality over manager identity, owner and grant
@@ -1293,8 +1298,8 @@ ended it, and names how in `outcome`, the one `Stop` of the area whose ending is
 rather than the area's `status` (the area `DESIGN.md`): `Granted`; `Cancelled` by the caller's
 token; `Timeout`, because the individual lock timer expired; `Ended`, because the owner's transaction ended while it waited; `Deadlock`, because a grant
 closed a cycle through it (#1390; since the #1390 review's queue no grant can, and the outcome
-stays for the check that would report one); or `Abandoned`, because the storage went offline (the same
-decision `WaitAbandonableAsync` makes). The cancellation
+stays for the check that would report one); or `Abandoned`, because the storage went offline. The
+cause captured when the request leaves the queue drives both this event and its exception. The cancellation
 registration is disposed inside that `try`, as soon as the await ends and before the stop is
 written, the order the wait had before it was traced. The wait is timed whether or not anyone
 listens: it already costs a queued waiter, a completion source and a registration, and a listener

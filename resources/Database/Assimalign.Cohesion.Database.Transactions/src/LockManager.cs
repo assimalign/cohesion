@@ -150,7 +150,7 @@ public sealed class LockManager
     // How a lock request's wait ended, as the LockWaitStop event names it.
     private const string WaitGranted = "Granted";
     private const string WaitCancelled = "Cancelled";
-    private const string waitTimedOut = "Timeout";
+    private const string WaitTimedOut = "Timeout";
     private const string WaitEnded = "Ended";
     private const string WaitAbandoned = "Abandoned";
     private const string WaitDeadlock = "Deadlock";
@@ -166,6 +166,11 @@ public sealed class LockManager
     internal LockManager()
     {
     }
+
+    // Per-manager test seams; all run outside _sync.
+    internal Action<CancellationTokenSource>? WaitTimerArmed { get; set; }
+    internal Action? BeforeWaitOutcome { get; set; }
+    internal Action? BeforeGrantNotification { get; set; }
 
     /// <summary>
     /// Creates a standalone lock manager: a mode-compatibility lock table with a FIFO queue per
@@ -220,7 +225,7 @@ public sealed class LockManager
     {
         if (_abandon is null && _lockTimeout.Value == TimeSpan.Zero)
         {
-            return AcquireCoreAsync(owner, resource, mode, cancellationToken, cancellationToken);
+            return AcquireCoreAsync(owner, resource, mode, cancellationToken);
         }
 
         return TryAcquire(owner, resource, mode)
@@ -321,21 +326,14 @@ public sealed class LockManager
         // Lock/latch order: wait before the coordinator's apply gate and before storage/index
         // latches. Timer cancellation only takes _sync; dispose registrations/timers after leaving
         // _sync, so a callback draining there cannot deadlock with a grant or release.
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abandon?.Token ?? default);
         var timeout = _lockTimeout.Value;
-        if (timeout > TimeSpan.Zero) { wait.CancelAfter(timeout); }
-        try
-        {
-            await AcquireCoreAsync(owner, resource, mode, wait.Token, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is { } cause)
-        {
-            throw Abandoned(owner, resource, mode, cause);
-        }
-        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timeout > TimeSpan.Zero)
-        {
-            throw new TransactionLockTimeoutException(exception);
-        }
+        using var timer = timeout > TimeSpan.Zero ? new CancellationTokenSource(timeout) : null;
+        if (timer is not null) { WaitTimerArmed?.Invoke(timer); }
+        // Separate callbacks carry their cause into the queue arbitration. A later deadline
+        // cannot relabel a completed wait while its continuation is delayed (PostgreSQL
+        // src/backend/tcop/postgres.c:3590-3600 likewise reports the earlier timeout).
+        await AcquireCoreAsync(owner, resource, mode, cancellationToken, timer?.Token ?? default,
+            _abandon?.Token ?? default).ConfigureAwait(false);
     }
 
     private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
@@ -354,14 +352,16 @@ public sealed class LockManager
     /// <param name="owner">The transaction requesting the lock.</param>
     /// <param name="resource">The resource to lock.</param>
     /// <param name="mode">The requested lock mode.</param>
-    /// <param name="cancellationToken">The token the wait observes: the caller's, or in engine mode the caller's linked with the abandonment.</param>
-    /// <param name="callerToken">The caller's own token, which tells a canceled wait from an abandoned one in the diagnostics.</param>
+    /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <param name="timeoutToken">The individual lock timer's token.</param>
+    /// <param name="abandonToken">The storage abandonment token.</param>
     private async ValueTask AcquireCoreAsync(
         TransactionSequence owner,
         LockResource resource,
         LockMode mode,
         CancellationToken cancellationToken,
-        CancellationToken callerToken)
+        CancellationToken timeoutToken = default,
+        CancellationToken abandonToken = default)
     {
         Waiter? waiter;
         List<Waiter>? granted = null;
@@ -392,7 +392,7 @@ public sealed class LockManager
                 // requester is the victim. Every edge the request added starts or ends at its
                 // owner, so the search from the owner sees every cycle it closed. Taking it off
                 // again restores the queue as it was, so it unblocks nobody.
-                waiter = new Waiter(this, owner.Value, mode, entry);
+                waiter = new Waiter(this, owner.Value, mode, entry, cancellationToken);
                 EnqueueLocked(waiter, place);
 
                 if (ClosesCycleLocked(owner.Value))
@@ -434,14 +434,17 @@ public sealed class LockManager
             // wait was traced: a late cancellation cannot reach CancelWaiter during a listener's
             // synchronous dispatch. The callback is static and the waiter its state, so a request
             // granted at once allocates no closure for a registration it never makes.
-            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(), waiter);
+            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(WaitCancelled), waiter);
+            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(WaitTimedOut), waiter);
+            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(WaitAbandoned), waiter);
             await waiter.Completion.Task.ConfigureAwait(false);
         }
         finally
         {
+            BeforeWaitOutcome?.Invoke();
             if (TransactionEventSource.Log.IsEnabled())
             {
-                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter, callerToken), startWritten, started);
+                TransactionEventSource.Log.LockWaitStop(_database, owner, resource, mode, WaitOutcome(waiter), startWritten, started);
             }
         }
     }
@@ -450,17 +453,14 @@ public sealed class LockManager
     /// Names how a finished wait ended: granted; canceled by its caller; timed out; failed because its owner's
     /// transaction ended (<see cref="FailEnded"/>); chosen as a deadlock victim after a grant
     /// closed a cycle through it (<see cref="FailDeadlocked"/>); or abandoned because the storage
-    /// went offline, which <see cref="WaitAbandonableAsync"/> decides the same way.
+    /// went offline. Cancellation callbacks preserve the cause that removed the request.
     /// </summary>
-    private string WaitOutcome(Waiter waiter, CancellationToken callerToken) => waiter.Completion.Task.Status switch
+    private static string WaitOutcome(Waiter waiter) => waiter.CancellationOutcome ?? (waiter.Completion.Task.Status switch
     {
         TaskStatus.RanToCompletion => WaitGranted,
-        TaskStatus.Canceled when !callerToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is not null => WaitAbandoned,
-        TaskStatus.Canceled when !callerToken.IsCancellationRequested => waitTimedOut,
-        TaskStatus.Canceled => WaitCancelled,
         _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => WaitDeadlock,
         _ => WaitEnded,
-    };
+    });
 
     private static TransactionDeadlockException Deadlock(TransactionSequence owner, LockResource resource, LockMode mode)
         => new($"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
@@ -674,7 +674,7 @@ public sealed class LockManager
         FailDeadlocked(victims);
     }
 
-    private static void CompleteGranted(List<Waiter>? granted)
+    private void CompleteGranted(List<Waiter>? granted)
     {
         if (granted is null)
         {
@@ -683,6 +683,7 @@ public sealed class LockManager
 
         foreach (var waiter in granted)
         {
+            BeforeGrantNotification?.Invoke();
             waiter.Completion.TrySetResult();
         }
     }
@@ -720,7 +721,7 @@ public sealed class LockManager
         }
     }
 
-    private void CancelWaiter(Waiter waiter)
+    private void CancelWaiter(Waiter waiter, string outcome)
     {
         List<Waiter>? granted = null;
         List<Waiter>? victims = null;
@@ -732,6 +733,7 @@ public sealed class LockManager
             // it now may unblock the requests queued behind it.
             if (removed = waiter.Entry.Waiters.Remove(waiter))
             {
+                waiter.CancellationOutcome = outcome;
                 UntrackWaitLocked(waiter);
                 LeftLocked(waiter.Entry);
                 WakeScheduledLocked(ref granted, ref victims);
@@ -740,7 +742,19 @@ public sealed class LockManager
 
         // Grant/end and cancellation arbitrate under _sync. Once a grant removed the waiter,
         // its completion owns the outcome even if its asynchronous notification has not run.
-        if (removed) { waiter.Completion.TrySetCanceled(); }
+        if (removed)
+        {
+            if (outcome == WaitTimedOut)
+            {
+                waiter.Completion.TrySetException(new TransactionLockTimeoutException(new OperationCanceledException()));
+            }
+            else if (outcome == WaitAbandoned)
+            {
+                waiter.Completion.TrySetException(Abandoned(new TransactionSequence(waiter.Owner), waiter.Resource,
+                    waiter.Mode, Volatile.Read(ref _abandonCause)!));
+            }
+            else { waiter.Completion.TrySetCanceled(waiter.CallerToken); }
+        }
         CompleteGranted(granted);
         FailDeadlocked(victims);
     }
@@ -1476,12 +1490,13 @@ public sealed class LockManager
     {
         private readonly LockManager _manager;
 
-        public Waiter(LockManager manager, ulong owner, LockMode mode, LockEntry entry)
+        public Waiter(LockManager manager, ulong owner, LockMode mode, LockEntry entry, CancellationToken callerToken)
         {
             _manager = manager;
             Owner = owner;
             Mode = mode;
             Entry = entry;
+            CallerToken = callerToken;
         }
 
         public ulong Owner { get; }
@@ -1494,9 +1509,14 @@ public sealed class LockManager
         // so this is the table's entry for the resource for as long as the request is queued.
         public LockEntry Entry { get; }
 
+        public CancellationToken CallerToken { get; }
+
+        // Written only by the callback that removes this request under _sync, before completion.
+        public string? CancellationOutcome { get; set; }
+
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // The wait's cancellation callback.
-        public void Cancel() => _manager.CancelWaiter(this);
+        public void Cancel(string outcome) => _manager.CancelWaiter(this, outcome);
     }
 }
