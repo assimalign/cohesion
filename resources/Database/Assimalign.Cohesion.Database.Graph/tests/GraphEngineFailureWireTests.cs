@@ -20,10 +20,12 @@ public sealed class GraphEngineFailureWireTests
     [InlineData(1, false, "COHDBG006")]
     [InlineData(2, false, "COHDBG007")]
     [InlineData(3, false, "COHDBG019")]
+    [InlineData(4, false, "COHDBS003")]
     [InlineData(0, true, "COHDBG006")]
     [InlineData(1, true, "COHDBG006")]
     [InlineData(2, true, "COHDBG007")]
     [InlineData(3, true, "COHDBG019")]
+    [InlineData(4, true, "COHDBS003")]
     public async Task Execute_EngineFailure_ShouldKeepSessionReady(int kind, bool explicitTransaction, string code)
     {
         // Arrange
@@ -41,6 +43,7 @@ public sealed class GraphEngineFailureWireTests
             0 => new IndexException("Injected index read failure."),
             1 => new GraphCatalogException("Injected malformed catalog record."),
             2 => GraphCatalog.Conflict(),
+            4 => new IndexCorruptionException("graph index", 42, 0),
             _ => new ObjectDisposedException("graph storage"),
         };
         int visits = 0;
