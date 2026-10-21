@@ -74,7 +74,7 @@ public sealed class DocumentInsertNumericTests
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refused = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refused.Message.ShouldContain("COHDBD001", Case.Sensitive);
+            refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT META().id FROM items WHERE n = 2", cancellationToken: CancellationToken.None);

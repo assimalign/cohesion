@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database — Design
 
+## Engine failure diagnostics (#1247, #1364)
+
+An engine error code always appears in `Diagnostics`. Only wire writers add a code prefix
+when formatting a response message; embedded messages remain ordinary explanatory text.
+Classification searches inner exceptions and every aggregate branch. A wrapped `IOException`
+is still I/O. Corruption takes precedence over I/O, and existing coded failures are retained.
+`DatabaseCorruptionException.Create` also accepts the genuine index-corruption variant:
+it retains the `IndexCorruptionException` and page, leads with `COHDBS003`, and carries
+`COHDBI002` plus the engine's model code as additional diagnostics. This owning-root operation
+serves every B-tree model without a new child-to-root dependency or visibility grant.
+The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped failures.
+
+
 ## Storage corruption (#1160)
 
 Storage corruption is `COHDBS003` (#1160). The engine translates a

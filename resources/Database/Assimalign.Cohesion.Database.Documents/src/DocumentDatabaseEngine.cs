@@ -9,6 +9,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -672,14 +673,28 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 storage?.Dispose();
                 throw refusal;
             }
-            catch (Exception exception) when (exception is StorageIOException or IOException
-                || exception is DatabaseException { InnerException: StorageIOException or IOException })
+            catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+                && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
+            {
+                var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
+                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw refusal;
+            }
+            catch (Exception exception) when (DatabaseFailure.Find<IOException>(exception) is not null || DatabaseFailure.Find<StorageIOException>(exception) is not null)
             {
                 string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(message, [new Types.Diagnostic
                 { Code = "COHDBD004", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+            }
+            catch (Assimalign.Cohesion.Database.Indexing.IndexException exception)
+            {
+                storage?.Dispose();
+                throw new DatabaseException(exception.Message, [new Types.Diagnostic
+                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Documents.Catalog.DocumentCatalogException exception)
             {

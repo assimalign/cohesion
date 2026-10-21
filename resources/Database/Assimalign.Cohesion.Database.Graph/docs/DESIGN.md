@@ -1,5 +1,13 @@
 # Graph engine design
 
+## Runtime child-root diagnostics (#1247, #1364)
+
+Runtime storage failures, including wrapped I/O, use structured `COHDBG006` Diagnostics and
+plain embedded messages, matching open. Only the wire writer adds the prefix. Begin and
+operations share the translator. Attached-index damage leads with `COHDBS003`, retaining the
+index cause and `COHDBI002` plus `COHDBG006`; other index failures use `COHDBG006`.
+
+
 ## Storage corruption (#1160)
 
 A StorageIOException or IOException while opening storage crosses the engine boundary as

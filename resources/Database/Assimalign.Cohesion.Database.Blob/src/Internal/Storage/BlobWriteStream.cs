@@ -175,7 +175,7 @@ internal sealed class BlobWriteStream : Stream
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_failed)
         {
-            throw new InvalidOperationException("The blob upload has failed and cannot be published.");
+            throw new BlobUploadException(ErrorMessages.UploadFailed);
         }
     }
 
@@ -183,7 +183,7 @@ internal sealed class BlobWriteStream : Stream
     {
         if (_context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("The blob upload's transaction is no longer active.");
+            throw new BlobUploadException(ErrorMessages.UploadTransactionInactive);
         }
     }
 

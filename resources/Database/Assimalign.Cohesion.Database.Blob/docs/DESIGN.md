@@ -1,5 +1,20 @@
 # Blob engine design
 
+## Upload and begin failures (#1247, #1364)
+
+Upload state failures originate in the stream's failed/inactive guards, through a dedicated
+internal `BlobUploadException` carrying `COHDBB007`. The engine translates only that type
+into area Diagnostics; the guarded stream's inactive-operation check uses the same translation.
+A writable guarded stream marks its operation as an upload, so the upload code remains
+specific to uploads. The storage component retains its independent vocabulary. Unrelated `InvalidOperationException`
+and `ObjectDisposedException` pass through unchanged. An upload cannot accept buffered writes
+after rollback or a failed write, and cannot publish its partial content. Both explicit and
+automatic begin use the full failure translator. Wire exchange failures retain Blob's terminal
+connection rule. Aborted-transaction refusals carry `COHDBB001` in Diagnostics; only wire
+writers add its message prefix. The internal begin seam exercises both callers without a new
+coordinator API or visibility grant.
+
+
 ## Storage corruption (#1160)
 
 A StorageIOException or IOException while opening storage crosses the engine boundary as

@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Blob.Catalog;
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Blob.Storage;
@@ -94,6 +95,15 @@ public sealed class BlobDatabase : DatabaseInstance
     /// the engine's background workers and tests.
     /// </summary>
     internal TransactionCoordinator Coordinator { get; }
+
+    // Fault injection belongs to this model boundary; no cross-assembly test visibility is needed.
+    internal Action? BeforeTransactionBegin { get; set; }
+
+    internal ValueTask<TransactionContext> BeginContextAsync(IsolationLevel isolation, CancellationToken token)
+    {
+        BeforeTransactionBegin?.Invoke();
+        return Coordinator.BeginAsync(isolation, token);
+    }
 
     /// <summary>
     /// Gets the database's catalog of containers and blob metadata.
@@ -208,11 +218,18 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBB001" }, ..] }) { return error; }
         if (error is DatabaseCorruptionException) { return error; }
 
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBB006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -249,12 +266,15 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
+            or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
+        DatabaseException { Diagnostics.Count: > 0 } => error,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
-        Assimalign.Cohesion.Database.Storage.StorageException or IOException => CodedFailure("COHDBB005", error),
+        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("COHDBB005", error),
+        BlobUploadException => CodedFailure(BlobUploadException.Code, error),
         BlobCatalogException catalog => CodedFailure("COHDBB006", catalog),
-        InvalidOperationException => CodedFailure("COHDBB007", error),
         _ => error,
     };
 
@@ -357,7 +377,7 @@ public sealed class BlobDatabase : DatabaseInstance
         BlobOperation? operation = null;
         try
         {
-            var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
+            var context = explicitTransaction?.Context ?? await BeginContextAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new BlobOperation(this, session, context, explicitTransaction);
             await operation.InitializeAsync(token).ConfigureAwait(false);
             session.Track(operation);

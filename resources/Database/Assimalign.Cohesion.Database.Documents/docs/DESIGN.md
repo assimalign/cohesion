@@ -1,5 +1,17 @@
 # Documents engine design
 
+## Child-root failure boundaries (#1247, #1364)
+
+Attached-index damage becomes `DatabaseCorruptionException` / `COHDBS003`, retaining the
+index cause, `COHDBI002`, and model diagnostic `COHDBD005`. Other index failures use
+`COHDBD005`. I/O inside catalog/index-registration wrappers remains `COHDBD004`, including
+open before publication. Explicit and automatic transaction begin use the same full translator.
+Wire execution returns `ExecutionFailure` with diagnostics and preserves the session; a
+regression damages an actual non-root B-tree leaf and proves both embedded and wire behavior.
+Aborted-transaction refusals carry `COHDBD001` in Diagnostics; only the wire adds its prefix.
+The internal begin fault seam exercises both begin callers without widening the coordinator.
+
+
 ## Storage corruption (#1160)
 
 A StorageIOException or IOException while opening storage crosses the engine boundary as

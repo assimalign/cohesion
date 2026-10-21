@@ -138,7 +138,7 @@ public sealed partial class DocumentQueryTests
         {
             await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await PutAsync(collection, session, "bad", "{\"a\":1,\"b\":2}"));
             var aborted = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items"));
-            aborted.Message.ShouldContain("COHDBD001");
+            aborted.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await session.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS uq ON items (other)");

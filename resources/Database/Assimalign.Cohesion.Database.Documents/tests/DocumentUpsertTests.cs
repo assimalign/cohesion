@@ -162,7 +162,7 @@ public sealed class DocumentUpsertTests
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refusal = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refusal.Message.ShouldContain("COHDBD001", Case.Sensitive);
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await AssertUnchangedAsync(items, session, before);

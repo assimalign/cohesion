@@ -32,6 +32,7 @@ internal sealed class BlobGuardedStream : Stream
     {
         _inner = inner;
         _operation = operation;
+        if (inner.CanWrite) { operation.MarkUpload(); }
     }
 
     public override bool CanRead => !_disposed && _inner.CanRead;

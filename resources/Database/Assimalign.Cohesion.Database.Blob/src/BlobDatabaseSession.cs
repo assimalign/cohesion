@@ -325,12 +325,12 @@ public sealed class BlobDatabaseSession : DatabaseSession
         TransactionContext context;
         try
         {
-            context = await _database.Coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+            context = await _database.BeginContextAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error)
         {
-            // A begin that met the offline storage (#1243) gets the coded refusal.
-            var reported = _database.TranslateOffline(error);
+            // Begin uses the same child-root translation as operations, including I/O and offline refusals.
+            var reported = _database.TranslateFailure(error);
             if (ReferenceEquals(reported, error))
             {
                 throw;

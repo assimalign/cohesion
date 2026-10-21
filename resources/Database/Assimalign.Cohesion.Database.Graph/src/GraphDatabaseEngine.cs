@@ -9,6 +9,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -670,8 +671,19 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 storage?.Dispose();
                 throw refusal;
             }
-            catch (Exception exception) when (exception is StorageIOException or IOException
-                || exception is DatabaseException { InnerException: StorageIOException or IOException })
+            catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+                && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
+            {
+                var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
+                { Code = "COHDBG006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
+                storage?.Dispose();
+                throw refusal;
+            }
+            catch (Exception exception) when (StorageCorruptionException.Find(exception) is null
+                && DatabaseFailure.IsStorageFailure(exception)
+                && DatabaseFailure.Find<StorageFormatException>(exception) is null
+                && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexFormatException>(exception) is null)
             {
                 string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);

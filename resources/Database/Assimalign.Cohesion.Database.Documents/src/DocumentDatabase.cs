@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Documents.Catalog;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -127,6 +128,15 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// </summary>
     internal TransactionCoordinator Coordinator { get; }
 
+    // Fault injection belongs to this model boundary; no cross-assembly test visibility is needed.
+    internal Action? BeforeTransactionBegin { get; set; }
+
+    internal ValueTask<TransactionContext> BeginContextAsync(IsolationLevel isolation, CancellationToken token)
+    {
+        BeforeTransactionBegin?.Invoke();
+        return Coordinator.BeginAsync(isolation, token);
+    }
+
     /// <summary>
     /// Gets the database's catalog of collections, document versions and indexes.
     /// </summary>
@@ -204,11 +214,18 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBD001" }, ..] }) { return error; }
         if (error is DatabaseCorruptionException) { return error; }
 
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
         {
             return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
+        if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
+        {
+            return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
+            { Code = "COHDBD005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -350,7 +367,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         try
         {
             var transactionStart = explicitTransaction?.TransactionStart ?? (Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            var context = explicitTransaction?.Context ?? await Coordinator.BeginAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
+            var context = explicitTransaction?.Context ?? await BeginContextAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new DocumentOperation(this, session, context, explicitTransaction, transactionStart);
             await operation.InitializeAsync(token).ConfigureAwait(false);
             session.Track(operation);
@@ -406,12 +423,22 @@ public sealed class DocumentDatabase : DatabaseInstance
     /// </summary>
     /// <param name="error">The failure to translate.</param>
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal Exception TranslateFailure(Exception error)
+    {
+        var translated = TranslateOffline(error);
+        return ReferenceEquals(translated, error) ? TranslateKernelFailure(error) : translated;
+    }
+
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
+            or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
+        DatabaseException { Diagnostics.Count: > 0 } => error,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
-        Assimalign.Cohesion.Database.Storage.StorageException or IOException => CodedFailure("COHDBD004", error),
+        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("COHDBD004", error),
+        _ when DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null => CodedFailure("COHDBD005", error),
         DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "COHDBD005", catalog),
         _ => error,
     };

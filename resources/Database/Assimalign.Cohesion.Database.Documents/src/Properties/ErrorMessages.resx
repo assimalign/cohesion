@@ -86,4 +86,7 @@
   <data name="PhysicalRegistrationMalformed" xml:space="preserve"><value>Malformed physical index registration.</value></data>
 
   <data name="CatalogHeaderMalformed" xml:space="preserve"><value>Malformed document catalog metadata header.</value></data>
+  <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
+  <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
+  <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
 </root>

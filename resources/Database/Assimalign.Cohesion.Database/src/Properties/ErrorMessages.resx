@@ -4,7 +4,7 @@
 <resheader name="version"><value>2.0</value></resheader>
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="StorageCorrupt" xml:space="preserve"><value>COHDBS003: Database '{0}' is corrupt. {2} Restore the database from a verified backup.</value></data>
-  <data name="StoragePageCorrupt" xml:space="preserve"><value>COHDBS003: Database '{0}' is corrupt on page {1}. {2} Restore the database from a verified backup.</value></data>
+  <data name="StorageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt. {2} Restore the database from a verified backup.</value></data>
+  <data name="StoragePageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt on page {1}. {2} Restore the database from a verified backup.</value></data>
   <data name="ObjectOwnedBySchema" xml:space="preserve"><value>Object '{0}' is owned by schema '{1}' and cannot be changed by {2}. Alter the schema and redeploy it.</value></data>
 </root>

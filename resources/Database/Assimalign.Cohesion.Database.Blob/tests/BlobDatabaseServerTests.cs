@@ -420,7 +420,7 @@ public sealed class BlobDatabaseServerTests
         var refusal = ProtocolErrorMessage.Decode(refusalFrame.Payload.Span);
         refusal.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         refusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
-        commit.Message.ShouldStartWith("COHDBB001", Case.Sensitive);
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
         commit.Message.ShouldContain(refusal.Message, Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadBlobAsync(files, "keep", token)).ShouldBe("original"u8.ToArray());

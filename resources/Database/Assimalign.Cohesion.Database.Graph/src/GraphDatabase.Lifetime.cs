@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
@@ -38,7 +39,7 @@ public sealed partial class GraphDatabase
         }
         catch (Exception error)
         {
-            var reported = TranslateOffline(error);
+            var reported = TranslateFailure(error);
             if (operation is not null)
             {
                 // The operation owns the session hold and the admission, and releases them as it ends.
@@ -66,7 +67,7 @@ public sealed partial class GraphDatabase
         catch (Exception error)
         {
             // An explicit transaction records the error its caller sees as the cause of its abort.
-            var reported = Translate(error);
+            var reported = TranslateFailure(error);
             await operation.AbortAsync(reported).ConfigureAwait(false);
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
@@ -76,7 +77,7 @@ public sealed partial class GraphDatabase
     // Child-root failures cross the engine boundary as the area root's exceptions. A failure the
     // offline storage caused is the database's coded refusal (#1243), checked first: the offline
     // error is a StorageException, which the kernel translation would report as COHDBG006.
-    private Exception Translate(Exception error) => TranslateOffline(error) is var offline && !ReferenceEquals(offline, error)
+    internal Exception TranslateFailure(Exception error) => TranslateOffline(error) is var offline && !ReferenceEquals(offline, error)
         ? offline
         : TranslateStatementFailure(error);
 
@@ -101,13 +102,19 @@ public sealed partial class GraphDatabase
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
+            or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
+        DatabaseException { Diagnostics.Count: > 0 } => error,
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
-        StorageException => new DatabaseException("COHDBG006: " + error.Message, error),
+        _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null
+            || DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null
+            => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ => error,
     };
 

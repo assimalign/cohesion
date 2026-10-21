@@ -66,13 +66,20 @@ public sealed class ChildRootFailureWireTests
             storage.BufferPoolCapacity = capacity;
             faults.RottenPage = pageId;
             faults.WrapCorruption = _ => new StorageIOException("Injected device read failure.");
+            Should.Throw<StorageIOException>(() => { using var probe = storage.PageManager.GetPage(pageId); });
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
         }
         try
         {
             // Act: a content read may have sent TransferStart before its first failing chunk.
             await client.SendAsync(BlobProtocolMessageType.Read, new BlobReadMessage(BlobServerHarness.ContainerName, "one").Encode());
-            ProtocolFrame frame;
-            do { frame = (await client.ReadAsync()).ShouldNotBeNull(); } while (frame.Type != ProtocolMessageType.Error);
+            ProtocolFrame frame = default;
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                frame = (await client.ReadAsync()).ShouldNotBeNull();
+                if (frame.Type == ProtocolMessageType.Error) { break; }
+            }
+            frame.Type.ShouldBe(ProtocolMessageType.Error);
             var failure = ProtocolErrorMessage.Decode(frame.Payload.Span);
 
             // Assert
@@ -93,4 +100,35 @@ public sealed class ChildRootFailureWireTests
         }
         (await files.GetPropertiesAsync("one", CancellationToken.None)).ShouldNotBeNull();
     }
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Begin: storage failures are coded in process and terminal on the wire")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BeginTransaction_StorageFailure_ShouldCodeAtBothBoundaries(bool rawIo)
+    {
+        // Arrange
+        await using var harness = await BlobServerHarness.StartAsync();
+        harness.Engine.TryGetDatabase(BlobServerHarness.DatabaseName, out var database).ShouldBeTrue();
+        await using var session = await database!.CreateSessionAsync(CancellationToken.None);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        int attempts = 0;
+        Exception cause = rawIo ? new System.IO.IOException("Injected begin device failure.") : new StorageIOException("Injected begin storage failure.");
+        database.BeforeTransactionBegin = () => { Interlocked.Increment(ref attempts); throw cause; };
+
+        // Act
+        var embedded = await Should.ThrowAsync<DatabaseException>(() => session.BeginTransactionAsync(cancellationToken: CancellationToken.None).AsTask());
+        await client.SendAsync(BlobProtocolMessageType.GetProperties, new BlobGetPropertiesMessage(BlobServerHarness.ContainerName, "one").Encode());
+        var failure = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+        database.BeforeTransactionBegin = null;
+
+        // Assert
+        attempts.ShouldBe(2);
+        embedded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB005");
+        embedded.InnerException.ShouldBeSameAs(cause);
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Message.ShouldStartWith("COHDBB005: ", Case.Sensitive);
+        (await client.ReadAsync()).ShouldBeNull();
+        (await session.GetContainerAsync(BlobServerHarness.ContainerName, CancellationToken.None)).Name.ShouldBe(BlobServerHarness.ContainerName);
+    }
+
 }

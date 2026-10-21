@@ -206,7 +206,7 @@ public sealed class DocumentCollectionDdlTests
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("CREATE COLLECTION later", cancellationToken: CancellationToken.None)))
-            .Message.ShouldContain("COHDBD001", Case.Sensitive);
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
         await transaction.RollbackAsync(CancellationToken.None);
         (await CollectionsAsync(session)).ShouldBe(["items:Adhoc"]);
     }
