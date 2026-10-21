@@ -425,7 +425,8 @@ public abstract class DatabaseEngineWorker
     /// <param name="retryAfter">How long later passes skip the database.</param>
     /// <param name="countsTowardOffline">
     /// Whether this failure counts toward the offline window and minimum. False reports a persistent
-    /// refusal for observation only; later operational failures start their own offline window.
+    /// refusal for observation only, without refusing clients. A completed observation-only pass ends
+    /// an earlier operational streak; later operational failures start their own offline window.
     /// </param>
     /// <returns>
     /// The number of failed passes in the current episode, including report-only failures; the offline minimum counts only failures
@@ -484,6 +485,7 @@ public abstract class DatabaseEngineWorker
             if (countsTowardOffline)
             {
                 record.CountOfflineFailure(_pass);
+                record.OperationalFault = exception;
             }
 
             record.Order = ++_order;
@@ -496,7 +498,7 @@ public abstract class DatabaseEngineWorker
             offlineFailures = record.OfflineFailures;
             persisted = record.OfflinePersisted;
             _passReported = true;
-            Volatile.Write(ref _fault, exception);
+            PublishFaultLocked();
         }
 
         DatabaseEventSource.Log.WorkerFailed(this, database, exception, failures);
@@ -700,11 +702,12 @@ public abstract class DatabaseEngineWorker
 
     /// <summary>
     /// Gets whether the worker holds a failure of <paramref name="database"/>: its record, from the
-    /// failure to the pass that finishes the database's work, or until the engine ends it (owner
-    /// decision 42). Read by <see cref="DatabaseEngine.HasFailingWorker"/>.
+    /// operational failure to the pass that finishes the database's work, reports only observationally,
+    /// or until the engine ends it (owner decision 42). Observational-only records do not refuse
+    /// service. Read by <see cref="DatabaseEngine.HasFailingWorker"/>.
     /// </summary>
     /// <param name="database">The database's name.</param>
-    /// <returns>True while the worker holds a failure of the database.</returns>
+    /// <returns>True while the worker holds an operational failure of the database.</returns>
     internal bool HoldsFailure(string database)
     {
         // A worker holding no database failure, the usual case, answers without its lock.
@@ -715,7 +718,7 @@ public abstract class DatabaseEngineWorker
 
         lock (_sync)
         {
-            return _databases.ContainsKey(database);
+            return _databases.TryGetValue(database, out var record) && record.OperationalFault is not null;
         }
     }
 
@@ -873,6 +876,13 @@ public abstract class DatabaseEngineWorker
                     List<string>? ended = null;
                     foreach (var (database, record) in _databases)
                     {
+                        if (record.FailedPass == _pass && !record.CountedOfflineFailure(_pass))
+                        {
+                            // A completed observation-only pass ends the operational streak. A
+                            // later operational failure must earn its own count and elapsed window.
+                            record.EndOfflineStreak();
+                        }
+
                         if (record.VisitedPass != _pass)
                         {
                             // Not visited: dropped, closed or offline. Nothing is left to recover.
@@ -959,10 +969,22 @@ public abstract class DatabaseEngineWorker
             long newest = 0;
             foreach (var record in _databases.Values)
             {
-                if (record.Order > newest)
+                if (record.OperationalFault is not null && record.Order > newest)
                 {
                     newest = record.Order;
-                    fault = record.Fault;
+                    fault = record.OperationalFault;
+                }
+            }
+
+            if (fault is null)
+            {
+                foreach (var record in _databases.Values)
+                {
+                    if (record.Order > newest)
+                    {
+                        newest = record.Order;
+                        fault = record.Fault;
+                    }
                 }
             }
         }
@@ -1024,6 +1046,7 @@ public abstract class DatabaseEngineWorker
         private long _offlineFailedPass;
 
         public Exception Fault = null!;
+        public Exception? OperationalFault;
         public int Failures;
         public int OfflineFailures;
         public long Order;
@@ -1041,6 +1064,15 @@ public abstract class DatabaseEngineWorker
         /// Gets the time since the first offline-capable failure; report-only failures do not start it.
         /// </summary>
         public TimeSpan OfflinePersisted => OfflineFailures == 0 ? TimeSpan.Zero : _clock.GetElapsedTime(_firstOfflineFailedAt);
+
+        public bool CountedOfflineFailure(long pass) => _offlineFailedPass == pass;
+
+        public void EndOfflineStreak()
+        {
+            OfflineFailures = 0;
+            _offlineFailedPass = 0;
+            OperationalFault = null;
+        }
 
         public void CountOfflineFailure(long pass)
         {

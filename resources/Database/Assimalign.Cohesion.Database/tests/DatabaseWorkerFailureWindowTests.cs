@@ -989,4 +989,104 @@ public sealed class DatabaseWorkerFailureWindowTests
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("4 passes in a row over 100 s", Case.Sensitive);
     }
 
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: observational reports keep a retained give-up fault after cancellation")]
+    public async Task ReportFailure_CancelledObservation_ShouldKeepTheGiveUpFault()
+    {
+        // Arrange
+        using var cancellation = new CancellationTokenSource();
+        var leafFailure = new System.IO.IOException("give-up failed");
+        var observation = new InvalidOperationException("observation only");
+        await using var engine = new TestEngine(EngineName) { TakeOfflineFailure = leafFailure };
+        await engine.CreateDatabaseAsync("a", CancellationToken.None);
+        await engine.CreateDatabaseAsync("b", CancellationToken.None);
+        var worker = new ScriptedWorker((self, pass) =>
+        {
+            if (pass == 1)
+            {
+                self.Begin("a").ShouldBeTrue();
+                self.Fail("a", new InvalidOperationException("purge failed"), TimeSpan.Zero);
+                self.GiveUp("a", StorageOfflineCause.VersionPurgeFailures, "injected give-up", observation).ShouldBeTrue();
+            }
+            else
+            {
+                self.Begin("b").ShouldBeTrue();
+                self.Fail("b", observation, TimeSpan.Zero, countsTowardOffline: false);
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+        }, kind: DatabaseEngineWorkerKind.VersionPurge);
+        engine.Attach(worker);
+        worker.RunIteration(CancellationToken.None);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        worker.Fault.ShouldBeSameAs(leafFailure);
+
+        // Act
+        Should.Throw<OperationCanceledException>(() => worker.RunIteration(cancellation.Token));
+
+        // Assert
+        worker.Fault.ShouldBeSameAs(leafFailure);
+        engine.HasFailingWorker("b").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: observations never displace an operational database fault")]
+    public async Task ReportFailure_ObservationAfterOperationalFailure_ShouldKeepTheOperationalFault()
+    {
+        // Arrange
+        await using var engine = new TestEngine(EngineName);
+        await engine.CreateDatabaseAsync("a", CancellationToken.None);
+        await engine.CreateDatabaseAsync("b", CancellationToken.None);
+        var operational = new System.IO.IOException("operational failure");
+        var worker = new ScriptedWorker((self, _) =>
+        {
+            self.Begin("a").ShouldBeTrue();
+            self.Fail("a", operational, TimeSpan.Zero);
+            self.Begin("b").ShouldBeTrue();
+            self.Fail("b", new InvalidOperationException("observation only"), TimeSpan.Zero, countsTowardOffline: false);
+        });
+        engine.Attach(worker);
+
+        // Act
+        worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        worker.Fault.ShouldBeSameAs(operational);
+        engine.HasFailingWorker("a").ShouldBeTrue();
+        engine.HasFailingWorker("b").ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Worker: an observational-only pass ends the operational offline streak")]
+    public async Task ReportFailure_ObservationBetweenOperationalFailures_ShouldRestartTheOfflineStreak()
+    {
+        // Arrange
+        var clock = new ManualTimeProvider();
+        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await engine.CreateDatabaseAsync("a", CancellationToken.None);
+        var worker = new ScriptedWorker((self, pass) =>
+        {
+            self.Begin("a").ShouldBeTrue();
+            self.Fail("a", new InvalidOperationException("injected failure"), TimeSpan.Zero, countsTowardOffline: pass != 2);
+        });
+        engine.Attach(worker);
+
+        // Act: operational at 0; observation at 100; new operational failures at 200, 250 and 300.
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(Window);
+        worker.RunIteration(CancellationToken.None);
+        bool failingAfterObservation = engine.HasFailingWorker("a");
+        clock.Advance(Window);
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(Window / 2);
+        worker.RunIteration(CancellationToken.None);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        var beforeTheWindow = engine.GiveUps;
+        clock.Advance(Window / 2);
+        worker.RunIteration(CancellationToken.None);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+
+        // Assert
+        failingAfterObservation.ShouldBeFalse();
+        beforeTheWindow.ShouldBeEmpty();
+        engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("3 passes in a row over 100 s", Case.Sensitive);
+    }
 }
