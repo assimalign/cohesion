@@ -1788,7 +1788,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     TimeOnly time => time,
                     DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
-                    string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
+                    string text => SqlLiteralText.ParseTime(text.Trim()),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
                 },
                 DatabaseType.DateTime => value switch
@@ -1808,7 +1808,7 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.TimeSpan => value switch
                 {
                     TimeSpan timeSpan => timeSpan,
-                    string text => TimeSpan.Parse(text, CultureInfo.InvariantCulture),
+                    string text => SqlCastText.ParseInterval(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to INTERVAL."),
                 },
                 DatabaseType.Guid => value switch

@@ -2401,10 +2401,12 @@ Times use 00..23 hours, 00..59 minutes and seconds, and at most seven fractional
 TIME and TIMESTAMP literals reject zones. TIMESTAMPTZ accepts Z or an offset within
 +/-14:00; missing offsets mean UTC. Named zones, BC years, infinity, epoch, today and now
 are outside the grammar. `SqlLiteralText` exposes the invariant text readers publicly in
-Sql.Language, for reuse by CAST. Existing plain-string assignment keeps its input grammar,
-including TIMESTAMP ignoring a written offset, through SqlTemporalText.
+Sql.Language, for reuse by CAST. Plain-string TIME and INTERVAL assignment use the same readers
+as CAST (#1422), including surrounding whitespace trimming. DATE and timestamp assignment retain
+their input grammar through SqlTemporalText, including TIMESTAMP ignoring a written offset.
 
-INTERVAL is day-time only. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
+INTERVAL is day-time only. An unqualified bare signed number means seconds, as in PostgreSQL:
+INTERVAL '12' and CAST('12' AS INTERVAL) both yield twelve seconds. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
 ranges are consumed greedily; multi-field values use a space after DAY and colons between
 clock fields. Subordinate hours are below 24, and subordinate minutes/seconds below 60.
 Only SECOND admits a fraction in qualified forms. A leading sign applies to the whole
@@ -2795,8 +2797,13 @@ supply a floating operand, cast text to REAL or DOUBLE first.
 - **Temporal input** calls the public strict literal readers in `SqlLiteralText`,
   trimming surrounding whitespace. DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL
   use the [typed-literal grammar](#literals); a TIMESTAMP input containing an offset
-  is rejected. INTERVAL input is day-time only; year-month fields and bare numbers
-  such as '12' fail. INSERT's plain-string assignment acceptance is unchanged.
+  is rejected. INTERVAL input is day-time only; year-month fields fail, and bare signed
+  numbers such as '12' mean seconds (PostgreSQL datetime.c:3625-3657). Plain-string TIME and
+  INTERVAL assignment use these same readers on INSERT, UPDATE, INSERT ... SELECT and
+  DEFAULTs, including domain columns. TIME accepts HH:mm[:ss[.fffffff]] without a zone;
+  .NET spellings such as '1 PM' and interval day-dot-clock input such as '1.02:03:04' fail.
+  INTERVAL accepts unit/clock strings and ISO day-time durations. In particular, assigning
+  '12' now stores twelve seconds rather than twelve days (#1422).
   All zone-dependent temporal conversions follow the
   [timestamp normalization rule](#timestamp-normalization-1110).
   TIMESTAMP to DATE/TIME extracts fields. INTERVAL to TIME requires

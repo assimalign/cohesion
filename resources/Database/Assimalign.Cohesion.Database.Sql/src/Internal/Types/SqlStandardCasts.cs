@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Entries convert storage values; CAST applies target modifiers and domain checks afterwards.
 /// Exact numeric widenings are implicit, narrowings and output to character types assignment,
 /// and text input explicit. JSON/JSONB pairs are assignment casts. Literal text uses SqlLiteralText's strict
-/// grammar; assignment's SqlTemporalText reader retains its separate input acceptance.
+/// grammar, shared by TIME/INTERVAL assignment; SqlTemporalText retains DATE and timestamp assignment acceptance.
 /// </remarks>
 internal static class SqlStandardCasts
 {

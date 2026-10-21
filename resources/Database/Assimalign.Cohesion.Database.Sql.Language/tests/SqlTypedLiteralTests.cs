@@ -23,6 +23,10 @@ public sealed class SqlTypedLiteralTests
         ["TIMESTAMPTZ '2024-01-01 10:00:00'", SqlLiteralType.TimestampWithTimeZone, "2024-01-01 10:00:00.0000000+00:00"],
         ["INTERVAL '2' HOUR", SqlLiteralType.Interval, "PT7200S"],
         ["INTERVAL '3' MINUTE", SqlLiteralType.Interval, "PT180S"],
+        ["INTERVAL '12'", SqlLiteralType.Interval, "PT12S"],
+        ["INTERVAL '-12.0000001'", SqlLiteralType.Interval, "-PT12.0000001S"],
+        ["INTERVAL '+12.5'", SqlLiteralType.Interval, "PT12.5S"],
+        ["INTERVAL '0'", SqlLiteralType.Interval, "PT0S"],
         ["INTERVAL '0.0000001' SECOND", SqlLiteralType.Interval, "PT0.0000001S"],
         ["INTERVAL '1 02' DAY TO HOUR", SqlLiteralType.Interval, "PT93600S"],
         ["INTERVAL '1 02:30' DAY TO MINUTE", SqlLiteralType.Interval, "PT95400S"],
@@ -112,6 +116,9 @@ public sealed class SqlTypedLiteralTests
     [InlineData("X'0'")]
     [InlineData("X'0G'")]
     [InlineData("INTERVAL 'garbage'")]
+    [InlineData("INTERVAL '12.34.56'")]
+    [InlineData("INTERVAL '0.00000001'")]
+    [InlineData("INTERVAL '922337203685.4775808'")]
     [InlineData("INTERVAL 'P'")]
     [InlineData("INTERVAL '1 day 2 days'")]
     [InlineData("INTERVAL '1:02' DAY TO HOUR")]

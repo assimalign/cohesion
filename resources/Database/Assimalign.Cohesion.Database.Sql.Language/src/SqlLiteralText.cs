@@ -88,7 +88,7 @@ public static class SqlLiteralText
     /// <exception cref="ArgumentNullException">The text is null.</exception>
     public static byte[] ParseBinary(string text) => Convert.FromHexString(text);
 
-    /// <summary>Reads a day-time interval: a qualified ISO field value, PostgreSQL unit/clock string, or ISO 8601 duration.</summary>
+    /// <summary>Reads a day-time interval: a qualified ISO field value, PostgreSQL unit/clock string, bare seconds, or ISO 8601 duration.</summary>
     /// <param name="text">The unquoted text.</param>
     /// <param name="qualifier">An optional DAY, HOUR, MINUTE or SECOND field or descending TO range.</param>
     /// <returns>The exact duration, at 100 nanosecond resolution.</returns>
@@ -262,7 +262,10 @@ public static class SqlLiteralText
                 "MICROSECOND" or "MICROSECONDS" or "US" or "USEC" or "USECS" or "USECOND" or "USECONDS" => 6,
                 _ => -1,
             };
-            if (unit.Length == 0 && position < span.Length)
+            // PostgreSQL DecodeInterval defaults an unqualified rightmost number to seconds
+            // (src/backend/utils/adt/datetime.c:3625-3657), not TimeSpan.Parse's days.
+            if (unit.Length == 0 && position == span.Length) { field = 3; }
+            else if (unit.Length == 0 && position < span.Length)
             {
                 int end = position;
                 while (end < span.Length && !char.IsWhiteSpace(span[end])) { end++; }

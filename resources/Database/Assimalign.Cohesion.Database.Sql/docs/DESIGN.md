@@ -1646,8 +1646,11 @@ flowchart LR
   the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
   being accidentally treated as text casts. All 19 shared SQL types are covered by the
   [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
-  CAST text reads temporal and interval input through public SqlLiteralText, independently of
-  SqlTemporalText's existing plain-string assignment reader. Zone-dependent conversions follow
+  CAST text reads temporal and interval input through public SqlLiteralText. TIME and INTERVAL
+  plain-string assignment use those same readers (#1422), including trimmed input, day-time
+  unit/clock/ISO intervals and bare signed seconds. PostgreSQL defaults an unqualified interval
+  number to seconds (src/backend/utils/adt/datetime.c:3625-3657); '12' therefore stores twelve
+  seconds rather than twelve days. DATE and timestamp assignment retain SqlTemporalText. Zone-dependent conversions follow
   the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
@@ -1663,6 +1666,11 @@ flowchart LR
   stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
   JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
   ownership path as application casts, including folded/shared constants and empty arrays.
+- **Allocation-free cast lookup (#1422).** The frozen cast index uses a value key holding storage
+  ordinals and case-insensitive domain names. Lookup preserves domain-to-domain, domain-to-base,
+  storage-to-domain and storage-to-base precedence, with no formatted or normalized key strings.
+  Binding allocates only its result vector; deterministic tests measure the minimum of three
+  allocation rounds for both individual lookup and full storage-vector resolution.
 - **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
   type of the value it may convert, chosen in this order: from the operand's domain when the
   plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;

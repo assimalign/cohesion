@@ -339,8 +339,10 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   valid forms (including year-month intervals) report COHDBL001, invalid contents
   SQL0008, both at the complete literal. Canonical rendering retains typed prefixes
   so persisted-expression equivalence checks kind and value without losing type.
-  SqlTemporalText keeps the established plain-string input acceptance and delegates
-  its normalized value to this grammar; typed input reaches the strict readers directly.
+  TIME and INTERVAL plain-string assignment share these readers with CAST (#1422).
+  An unqualified bare signed interval number means seconds, following PostgreSQL's
+  DecodeInterval default (src/backend/utils/adt/datetime.c:3625-3657). DATE and timestamp
+  assignment retain SqlTemporalText's input acceptance; typed input reaches the strict readers directly.
   PostgreSQL gram.y:17806-17828 supplies the typed-string/interval split; datetime.c:3959-3977
   distinguishes date M from time M in ISO durations. X deliberately uses ISO binary semantics.
   PostgreSQL clock intervals accept explicit or implicit days and independently signed clock
