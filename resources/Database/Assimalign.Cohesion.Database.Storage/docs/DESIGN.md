@@ -644,7 +644,9 @@ object ids, so a table scan stops decoding the whole database.
   next insert reuses.
 - **A failed allocating touch releases its reservation.** If first-touch registration
   throws before recording a pre-image, cleanup removes the data/index directory entry,
-  stamps a reclaimed page and returns its id under transaction then owner then map locks.
+  stamps a reclaimed page and returns its id under transaction then owner then map locks,
+  in the same transaction-lock hold that drops the failed touch's write lock. No rival
+  can claim or commit the reservation before cleanup.
   Cleanup performs no device I/O, preserving the original registration error. If another
   bracket already holds the allocation through the publication window tracked by #1365,
   that bracket retains it: cleanup must never recycle a write-locked page. Closing that

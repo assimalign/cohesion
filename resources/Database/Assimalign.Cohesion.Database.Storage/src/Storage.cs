@@ -1538,12 +1538,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 RegisterIndexOwnerPage(ownerId, handle.Id);
             }
-            RegisterTouch(owner, handle);
+            RegisterTouch(owner, handle, allocationOwnerId: ownerId);
             return handle;
         }
         catch
         {
-            ReleaseFailedAllocation(handle, ownerId);
+            handle.Dispose();
             throw;
         }
     }
@@ -3101,12 +3101,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             page.OwnerId = ownerId;
 
             RegisterOwnerPage(ownerId, handle.Id);
-            RegisterTouch(transaction, handle);
+            RegisterTouch(transaction, handle, allocationOwnerId: ownerId);
             return handle;
         }
         catch
         {
-            ReleaseFailedAllocation(handle, ownerId);
+            handle.Dispose();
             throw;
         }
     }
@@ -3115,49 +3115,40 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         // No first touch completed, so the bracket has no pre-image that could undo
         // this reservation. Remove its directory entries before making it reusable.
-        lock (_transactionLock)
+        // RegisterTouch still holds _transactionLock after releasing our write lock:
+        // no rival can claim or commit this allocation between refusal and cleanup.
+        lock (_ownerLock)
         {
             long pageId = (long)handle.Id;
-            if (_pageWriteLocks.ContainsKey(pageId))
+            if (_ownerPages.TryGetValue(ownerId, out var pages))
             {
-                // Another bracket reached the newly published directory entry (#1365).
-                // It owns this allocation now; reclaiming it would free a locked page.
-                handle.Dispose();
-                return;
+                pages.Remove(pageId);
+                if (pages.Count == 0) { _ownerPages.Remove(ownerId); }
+            }
+            if (_currentWritePages.TryGetValue(ownerId, out var current) && current == handle.Id)
+            {
+                _currentWritePages.Remove(ownerId);
+            }
+            if (_indexOwnerPages.TryGetValue(ownerId, out var indexes))
+            {
+                indexes.Remove(pageId);
+                if (indexes.Count == 0) { _indexOwnerPages.Remove(ownerId); }
             }
 
-            lock (_ownerLock)
-            {
-                if (_ownerPages.TryGetValue(ownerId, out var pages))
-                {
-                    pages.Remove(pageId);
-                    if (pages.Count == 0) { _ownerPages.Remove(ownerId); }
-                }
-                if (_currentWritePages.TryGetValue(ownerId, out var current) && current == handle.Id)
-                {
-                    _currentWritePages.Remove(ownerId);
-                }
-                if (_indexOwnerPages.TryGetValue(ownerId, out var indexes))
-                {
-                    indexes.Remove(pageId);
-                    if (indexes.Count == 0) { _indexOwnerPages.Remove(ownerId); }
-                }
-
-                // As with allocation itself, no committed content belongs to this page.
-                // Keep a valid reclaimed header for the next open, without device I/O
-                // that could mask the registration failure (the journal may be offline).
-                var page = handle.Page;
-                new Span<byte>(page.Pointer, Page.Size).Clear();
-                page.Id = pageId;
-                page.Type = PageType.Reclaimed;
-                handle.MarkDirty();
-                handle.Dispose();
-                _freeSpaceMap.Free((PageId)pageId);
-            }
+            // As with allocation itself, no committed content belongs to this page.
+            // Keep a valid reclaimed header for the next open, without device I/O
+            // that could mask the registration failure (the journal may be offline).
+            var page = handle.Page;
+            new Span<byte>(page.Pointer, Page.Size).Clear();
+            page.Id = pageId;
+            page.Type = PageType.Reclaimed;
+            handle.MarkDirty();
+            handle.Dispose();
+            _freeSpaceMap.Free((PageId)pageId);
         }
     }
 
-    private unsafe bool RegisterTouch(StorageTransaction transaction, StoragePageHandle handle, long? freeGeneration = null)
+    private unsafe bool RegisterTouch(StorageTransaction transaction, StoragePageHandle handle, long? freeGeneration = null, ulong? allocationOwnerId = null)
     {
         long pageId = (long)handle.Id;
         bool locked = false;
@@ -3270,6 +3261,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 lock (_transactionLock)
                 {
                     _pageWriteLocks.Remove(pageId);
+                    if (allocationOwnerId is ulong ownerId)
+                    {
+                        ReleaseFailedAllocation(handle, ownerId);
+                    }
                 }
             }
 
