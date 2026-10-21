@@ -1671,6 +1671,17 @@ UNION, INTERSECT and EXCEPT were already keywords; removing their unsupported ro
 keeping CORRESPONDING contextual changes no persisted identifier quoting, so the storage
 format is unchanged. Persisted-text drift tests pin these four spellings.
 
+### Boolean search conditions (#1190)
+
+WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and operands
+of AND, OR and NOT require BOOLEAN. A known non-Boolean type, including arithmetic,
+CASE or aggregate results and supplied parameters, fails planning before rows are read
+with COHSQLE003 / SQLSTATE 42804, naming the construct. Runtime checks enforce the same
+rule for values whose types were unknown. An untyped NULL is UNKNOWN and retains SQL
+three-valued logic; CAST(NULL AS INT) is a non-Boolean typed expression and is refused.
+Only TRUE admits a row or selects a searched CASE arm. Boolean AND/OR keep their
+short-circuit order; simple CASE compares values and does not require Boolean WHEN values.
+
 ## Subqueries and query-source inserts (#1021)
 
 Subqueries are separate planned queries. An uncorrelated child materializes once
@@ -3027,7 +3038,7 @@ pin in the same change.
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
+| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |

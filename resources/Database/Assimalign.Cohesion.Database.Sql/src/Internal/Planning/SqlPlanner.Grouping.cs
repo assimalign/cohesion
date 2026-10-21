@@ -28,7 +28,7 @@ internal sealed partial class SqlPlanner
         }
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator, _subqueryTypes);
+            ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
         }
 
         var aggregates = new List<(SqlFunctionCallExpression Call, SqlAggregateFunction Function)>();
@@ -121,6 +121,7 @@ internal sealed partial class SqlPlanner
                     projections[i].Expression, evaluator) };
         }
 
+        if (select.Having is not null) { ValidatePredicate(select.Having, groupScope, "HAVING", _subqueryTypes); }
         var having = select.Having is null ? null : groupScope.Bind(select.Having);
         var ordering = BindOrdering(select.OrderBy,
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));

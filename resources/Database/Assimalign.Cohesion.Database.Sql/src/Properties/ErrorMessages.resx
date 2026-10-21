@@ -35,6 +35,7 @@
   <data name="FunctionResultDomainViolation" xml:space="preserve"><value>A value of SQL function '{0}' violates domain '{1}'.</value></data>
   <data name="CastDomainViolation" xml:space="preserve"><value>CAST to {0} failed: the value violates the check of domain '{1}' ({2}).</value></data>
   <data name="ColumnNullabilityConflict" xml:space="preserve"><value>Conflicting NULL/NOT NULL declarations for column '{0}'.</value></data>
+  <data name="BooleanPredicateOperand" xml:space="preserve"><value>Argument of {0} must be BOOLEAN, not {1}.</value></data>
   <data name="BooleanTestOperand" xml:space="preserve"><value>IS TRUE, FALSE or UNKNOWN requires a BOOLEAN operand.</value></data>
   <data name="LikeWorkLimit" xml:space="preserve"><value>LIKE with invariant collation exceeded its work limit for the input and pattern. Simplify the pattern or use an index-backed collation.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>Invalid LIKE ESCAPE sequence: ESCAPE must be empty or one Unicode scalar, and a pattern must not end with the escape character.</value></data>

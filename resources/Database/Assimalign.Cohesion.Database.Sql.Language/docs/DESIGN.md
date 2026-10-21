@@ -69,6 +69,10 @@ ordering syntax through rendering and remain distinguishable for catalog-aware a
 Special-form names render as quoted ordinary calls when a quantifier or ordering is present;
 the standard EXTRACT/POSITION and niladic arms apply only without those modifiers.
 
+Boolean search conditions (#1190) use the existing AST. Engine planning and runtime
+reject non-Boolean predicates with COHSQLE003 (42804), including upsert WHERE; NULL
+retains three-valued logic. The live clause corpus pins these errors.
+
 FROM-less SELECT (#1373) retains the existing AST and grammar. The engine now uses
 one implicit row for every such query, including views and nested queries; DIALECT.md
 specifies filtering, aggregation and wildcard refusal. No profile count changes.

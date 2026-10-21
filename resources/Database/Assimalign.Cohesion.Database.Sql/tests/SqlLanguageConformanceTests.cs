@@ -604,8 +604,20 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Using] = Query("SELECT id FROM t LEFT JOIN t copy USING (id) ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.From[0].Joins[0].UsingColumns.Count == 1,
             [[1], [2], [3]]),
-        [SqlClauses.Where] = Query("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", expression => expression is SqlSelectExpression { Where: not null },
-            [[2]]),
+        [SqlClauses.Where] = new("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", _seed,
+            expression => expression is SqlSelectExpression { Where: not null },
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[2]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE NULL;", []);
+                foreach (string sql in new[] { "SELECT id FROM t WHERE age", "SELECT COUNT(*) FROM t HAVING SUM(age)",
+                    "SELECT t.id FROM t JOIN t u ON t.age", "SELECT CASE WHEN age THEN 1 END FROM t",
+                    "SELECT TRUE OR age FROM t", "SELECT FALSE AND age FROM t", "SELECT NOT age FROM t" })
+                {
+                    var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+                    failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+                }
+            }),
         [SqlClauses.Collate] = Query("SELECT id FROM t WHERE name = 'ada' COLLATE case_insensitive;",
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",

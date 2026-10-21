@@ -26,6 +26,10 @@ Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
+Boolean predicate errors (#1190) retain ExecutionFailure, COHSQLE003 diagnostics and
+connection reuse over InMemory and TCP. Coverage includes every clause, supplied string
+parameters and explicit transactions; failed writes preserve rows. No protocol changes.
+
 ## Constraint diagnostics (#1666)
 
 SqlConnection preserves the existing ExecutionFailure category and exposes the single

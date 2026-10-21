@@ -65,7 +65,7 @@ internal sealed partial class SqlPlanner
             Validate(assignment.Value);
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
         }
-        if (clause.Where is not null) { Validate(clause.Where); }
+        if (clause.Where is not null) { Validate(clause.Where, "ON CONFLICT DO UPDATE WHERE"); }
         return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
             clause.Where is null ? null : evaluator.Bind(clause.Where));
 
@@ -85,13 +85,14 @@ internal sealed partial class SqlPlanner
             return string.Equals(name, candidate, StringComparison.OrdinalIgnoreCase);
         }
 
-        void Validate(SqlExpression expression)
+        void Validate(SqlExpression expression, string? predicateClause = null)
         {
             if (ContainsAggregate(expression))
             { throw new SqlPlanningException("COHSQLE017", ErrorMessages.UpsertAggregate, expression.Location); }
             if (ContainsStar(expression))
             { throw new SqlPlanningException("COHSQLE013", ErrorMessages.UpsertStar, expression.Location); }
-            ValidateExpression(expression, evaluator);
+            if (predicateClause is null) { ValidateExpression(expression, evaluator); }
+            else { ValidatePredicate(expression, evaluator, predicateClause); }
         }
     }
 }

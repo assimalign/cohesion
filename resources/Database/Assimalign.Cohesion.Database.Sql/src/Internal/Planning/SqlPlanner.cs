@@ -185,7 +185,7 @@ internal sealed partial class SqlPlanner
         SqlBoundExpression? where = null;
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator, _subqueryTypes);
+            ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
             where = evaluator.Bind(select.Where);
         }
 
@@ -322,6 +322,7 @@ internal sealed partial class SqlPlanner
         bool usesOutput = false;
         foreach (var child in Children(expression)) { usesOutput |= ValidateOrderingCalls(child, scope); }
         if (usesOutput && expression is SqlFunctionCallExpression call) { ResolveCall(call, scope); }
+        if (usesOutput) { ValidateBooleanPositions(expression, scope, null, null); }
         return usesOutput;
     }
 
@@ -919,7 +920,7 @@ internal sealed partial class SqlPlanner
         if (update.Where is not null)
         {
             RejectAggregateInDmlWhere(update.Where);
-            ValidateExpression(update.Where, evaluator, _subqueryTypes);
+            ValidatePredicate(update.Where, evaluator, "WHERE", _subqueryTypes);
             where = evaluator.Bind(update.Where);
         }
 
@@ -943,7 +944,7 @@ internal sealed partial class SqlPlanner
         if (delete.Where is not null)
         {
             RejectAggregateInDmlWhere(delete.Where);
-            ValidateExpression(delete.Where, evaluator, _subqueryTypes);
+            ValidatePredicate(delete.Where, evaluator, "WHERE", _subqueryTypes);
             where = evaluator.Bind(delete.Where);
         }
 
@@ -1398,6 +1399,34 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    // PostgreSQL parse_coerce.c:1163-1184 checks each Boolean construct by name and
+    // reports datatype mismatch before execution. NULL remains an unknown predicate.
+    private static void ValidatePredicate(SqlExpression expression, SqlExpressionEvaluator evaluator, string clause,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null)
+    {
+        ValidateExpression(expression, evaluator, boundSubqueries);
+        ValidateBooleanOperand(expression, evaluator, clause, boundSubqueries, null);
+    }
+
+    private static void ValidateBooleanOperand(SqlExpression expression, SqlExpressionEvaluator evaluator, string clause,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        // ORDER BY aliases acquire their types in the completed output scope.
+        if (boundValues is not null && ContainsBoundOutput(expression, boundValues)) { return; }
+        if (expression is SqlParameterExpression parameter &&
+            evaluator.TryGetParameterValue(parameter, out var value) && value is not null && value is not bool)
+        {
+            throw SqlEvaluationException.BooleanRequired(clause, SqlExpressionEvaluator.OperandTypeName(value)).At(expression.Location);
+        }
+        var type = evaluator.HasOutputValues ? evaluator.StaticTypeOf(expression)
+            : StaticOperandType(expression, evaluator, boundSubqueries, boundValues) ?? evaluator.StaticTypeOf(expression);
+        if (type is not (DatabaseType.Boolean or DatabaseType.Null))
+        {
+            throw SqlEvaluationException.BooleanRequired(clause, SqlType.NameOf(type)).At(expression.Location);
+        }
+    }
+
     private static void ValidateExpressionCore(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
         IReadOnlyDictionary<SqlExpression, int>? boundValues)
@@ -1452,6 +1481,8 @@ internal sealed partial class SqlPlanner
             ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
 
+        ValidateBooleanPositions(expression, evaluator, boundSubqueries, boundValues);
+
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic)
         {
             ValidateTemporalArithmetic(arithmetic, evaluator);
@@ -1467,6 +1498,34 @@ internal sealed partial class SqlPlanner
         }
         // Calls using output aliases resolve when BindOrdering supplies the completed
         // projection's types. The input scope cannot choose their overloads yet.
+    }
+
+    private static void ValidateBooleanPositions(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        switch (expression)
+        {
+            case SqlLogicalExpression logical:
+                foreach (var operand in logical.Operands)
+                {
+                    ValidateBooleanOperand(operand, evaluator, logical.Operator == SqlLogicalOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                }
+                break;
+            case SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } binary:
+                ValidateBooleanOperand(binary.Left, evaluator, binary.Operator == SqlBinaryOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                ValidateBooleanOperand(binary.Right, evaluator, binary.Operator == SqlBinaryOperator.And ? "AND" : "OR", boundSubqueries, boundValues);
+                break;
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } unary:
+                ValidateBooleanOperand(unary.Operand, evaluator, "NOT", boundSubqueries, boundValues);
+                break;
+            case SqlCaseExpression { Input: null } conditional:
+                foreach (var when in conditional.WhenClauses)
+                {
+                    ValidateBooleanOperand(when.Condition, evaluator, "CASE WHEN", boundSubqueries, boundValues);
+                }
+                break;
+        }
     }
 
     private static bool ContainsBoundOutput(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int> outputs)

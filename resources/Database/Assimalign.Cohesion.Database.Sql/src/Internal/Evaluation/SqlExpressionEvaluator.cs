@@ -210,8 +210,15 @@ internal sealed partial class SqlExpressionEvaluator
             return true;
         }
 
-        return Evaluate(predicate, row) is true;
+        return BooleanValue(Evaluate(predicate, row), "predicate") is true;
     }
+
+    internal static bool? BooleanValue(object? value, string clause) => value switch
+    {
+        null => null,
+        bool flag => flag,
+        _ => throw SqlEvaluationException.BooleanRequired(clause, OperandTypeName(value)),
+    };
 
     /// <summary>
     /// Binds an expression in this scope and evaluates it once: the planner's way to compute a value
@@ -778,9 +785,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// The first term that decides the chain (<see langword="false"/> for <c>AND</c>,
     /// <see langword="true"/> for <c>OR</c>) ends it, and no later term is evaluated, so a guard
     /// such as <c>d &lt;&gt; 0 AND x / d &gt; 1</c> never divides by zero. Otherwise the chain is
-    /// unknown when any term was unknown (a NULL, or a value that is not a Boolean), and the
-    /// operator's identity when none was. That is exactly what the nested binary operators the
-    /// chain replaces computed, in the same order and with the same faults: evaluating
+    /// unknown when any term was NULL. A non-null, non-Boolean term raises COHSQLE003. The
+    /// operator's identity is returned when no term was unknown. This preserves the nested
+    /// operators' order and faults: evaluating
     /// <c>(a AND b) AND c</c> left operand first visits a, b, c in turn and stops at the same
     /// term (the #1069 short-circuit contract).
     /// </remarks>
@@ -791,7 +798,7 @@ internal sealed partial class SqlExpressionEvaluator
         var operands = logical.Operands;
         for (int index = 0; index < operands.Length; index++)
         {
-            bool? value = EvaluateCore(operands[index], row) as bool?;
+            bool? value = BooleanValue(EvaluateCore(operands[index], row), logical.IsOr ? "OR" : "AND");
             if (value is null)
             {
                 unknown = true;
@@ -879,7 +886,7 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
                     ? operand
                     : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
-                SqlUnaryOperator.Not => operand is bool flag ? Box(!flag) : throw new SqlPlanningException("COHSQLE003", "NOT requires a boolean operand.", unary.Location),
+                SqlUnaryOperator.Not => Box(!BooleanValue(operand, "NOT")!.Value),
                 _ => throw new SqlPlanningException("COHSQLE013", $"Unary operator {unary.Operator} is not supported.", unary.Location),
             };
         }
@@ -1071,7 +1078,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             if (expression.Input is null)
             {
-                if (EvaluateCore(when.Condition, row) is true)
+                if (BooleanValue(EvaluateCore(when.Condition, row), "CASE WHEN") is true)
                 {
                     return SqlTemporalArithmetic.Promote(EvaluateCore(when.Result, row, copySharedBinary), expression.ResultType);
                 }

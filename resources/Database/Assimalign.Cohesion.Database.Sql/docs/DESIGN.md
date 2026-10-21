@@ -156,6 +156,23 @@ Character and length, following #1437. DATETIME,
 DATETIME2 and DATETIMEOFFSET add no SQL Server range/rounding behavior; every temporal
 precision, 7 included, and INTERVAL field restrictions stay unsupported under #1438.
 
+## Boolean search conditions (#1190)
+
+WHERE (including UPDATE/DELETE and FROM-less SELECT), JOIN ON, HAVING and ON CONFLICT
+DO UPDATE WHERE require BOOLEAN. The shared planner check uses StaticOperandType with
+binder inference as its fallback, so arithmetic, CASE results, aggregates and supplied
+parameters fail before reading even an empty relation. AND/OR/NOT operands and searched
+CASE conditions use the same rule, including ORDER BY output aliases. The error is
+COHSQLE003 (SQLSTATE 42804), names the construct and retains its source span. This follows
+PostgreSQL src/backend/parser/parse_coerce.c:1163-1184 without implicit non-Boolean coercion.
+Untyped NULL remains UNKNOWN; a typed non-Boolean NULL expression is refused.
+
+Matches, logical chains, NOT and searched CASE also check values at runtime. Correlated
+branch preparation shares the check before selecting or evaluating another branch.
+Boolean short-circuiting and simple CASE value comparisons retain their existing rules.
+Invalid stored view predicates now fail binding with the same diagnostic; catalog/storage
+encoding is unchanged. No interface, visibility grant, reflection or dynamic code is added.
+
 ## Request parameters (#1102)
 
 Each execution copies request parameters into an ordinal, bare-name dictionary using

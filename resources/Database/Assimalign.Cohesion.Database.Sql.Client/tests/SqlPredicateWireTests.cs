@@ -14,6 +14,50 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 [Collection(nameof(SqlClientEventSourceCollection))]
 public sealed class SqlPredicateWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Boolean predicates: every clause returns a located reusable datatype mismatch over both transports (#1190)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_NonBooleanPredicates_ShouldPreserveConnectionAndRows(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await connection.ExecuteAsync("CREATE UNIQUE INDEX users_pk ON users(id)", cancellationToken: SqlClientTestHarness.Timeout());
+        string[] statements =
+        [
+            "SELECT id FROM users WHERE score + 1",
+            "UPDATE users SET score = score WHERE score",
+            "DELETE FROM users WHERE @p",
+            "SELECT l.id FROM users l JOIN users r ON l.score",
+            "SELECT COUNT(*) FROM users HAVING SUM(score)",
+            "SELECT CASE WHEN score THEN 1 END FROM users",
+            "SELECT FALSE AND score FROM users",
+            "SELECT TRUE OR score FROM users",
+            "SELECT NOT score FROM users",
+            "INSERT INTO users VALUES(1,'changed',300) ON CONFLICT(id) DO UPDATE SET score = excluded.score WHERE excluded.score",
+            "SELECT 1 WHERE @p",
+        ];
+        await connection.ExecuteAsync("BEGIN", cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Act / Assert
+        foreach (string sql in statements)
+        {
+            var command = new SqlCommand(sql);
+            command.Parameters.Add("p", "text");
+            var error = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.ExecuteAsync(command, SqlClientTestHarness.Timeout()));
+            error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            error.ConnectionUsable.ShouldBeTrue();
+            var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
+            diagnostic.Code.ShouldBe("COHSQLE003");
+            diagnostic.Start.ShouldNotBeNull();
+        }
+        await connection.ExecuteAsync("COMMIT", cancellationToken: SqlClientTestHarness.Timeout());
+        var rows = await connection.QueryAsync("SELECT id, score FROM users ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout());
+        rows.Select(row => (row[0], row[1])).ShouldBe(new (object?, object?)[] { (1, 100L), (2, 200L) });
+        (await connection.QueryAsync("SELECT 1 WHERE NULL", cancellationToken: SqlClientTestHarness.Timeout())).ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Predicates: truth tables and parameter ESCAPE cross both transports")]
     [InlineData(false)]
     [InlineData(true)]

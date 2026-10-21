@@ -291,6 +291,14 @@ internal sealed class SqlEvaluationException : DatabaseException
     internal static SqlEvaluationException NumericValueOutOfRange(string detail, Exception? innerException = null)
         => new(NumericValueOutOfRangeCode, $"Numeric value out of range: {detail}", innerException);
 
+    /// <summary>Creates the failure for a non-Boolean argument of a search condition.</summary>
+    /// <param name="clause">The Boolean construct.</param>
+    /// <param name="operandType">The operand's type.</param>
+    /// <returns>The coded datatype mismatch.</returns>
+    internal static SqlEvaluationException BooleanRequired(string clause, string operandType)
+        => new(InvalidOperandTypeCode, string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.BooleanPredicateOperand, clause, operandType), null);
+
     /// <summary>Creates the failure for a unary sign applied to a value that is not a number.</summary>
     /// <param name="operatorText">The sign, <c>+</c> or <c>-</c>.</param>
     /// <param name="operandType">The operand's type, as the dialect names it.</param>

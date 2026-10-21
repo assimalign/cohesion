@@ -39,7 +39,7 @@ internal sealed partial class SqlPlanner
         SqlBoundExpression? where = null;
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator, _subqueryTypes);
+            ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
             where = evaluator.Bind(select.Where);
         }
         var outputSlots = BindOrderByProjections(select, projections, 0);
