@@ -41,8 +41,8 @@ public sealed class GqlPathFrontierAllocationTests
         {
             OnCandidate = count =>
             {
-                // Incident storage is already loaded at candidate 1. Measure additional live
-                // search state, excluding that existing storage buffer and setup allocations.
+                // The first candidate has primed the bounded incident streams. Measure
+                // additional live search state as those streams advance, excluding setup.
                 if (count == 1) { baseline = GC.GetTotalMemory(forceFullCollection: true); }
                 else if (count % 5_000 == 0)
                 {

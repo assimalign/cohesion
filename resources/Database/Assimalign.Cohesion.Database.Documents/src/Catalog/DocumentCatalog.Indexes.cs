@@ -256,7 +256,7 @@ public sealed partial class DocumentCatalog
         }
         var range = new IndexKeyRange(start, end, true, false);
         var result = new Dictionary<string, DocumentCatalogEntry>(StringComparer.Ordinal);
-        await using var cursor = index.OpenCursor(snapshot, range);
+        await using var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {
             var (page, slot) = DocumentStorage.UnpackLocation(cursor.CurrentEntryReference);
@@ -349,7 +349,7 @@ public sealed partial class DocumentCatalog
             // but coordinator untracking follows release. Such a writer is already visible.
             latest ??= new TransactionSnapshot(context.Sequence, TransactionSequence.None,
                 new TransactionSequence(ulong.MaxValue), _coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
-            await using var cursor = ResolveIndex(change.Metadata).OpenCursor(latest, new IndexKeyRange(key, key, true, true));
+            await using var cursor = ResolveIndex(change.Metadata).OpenCursor(latest, new IndexKeyRange(key, key, true, true), cancellationToken: cancellationToken);
             while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (cursor.CurrentEntryReference != change.OldLocation) { throw Duplicate(change.Metadata, latest); }

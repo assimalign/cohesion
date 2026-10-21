@@ -69,7 +69,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
 
 - **Index-primary reads.** `GET`/`EXISTS` seek the unique primary index
   (`key` → packed record location) through the command's snapshot; `SCAN` drives
-  a snapshot cursor over an `IndexKeyRange`. Keys go into `IndexKey` **raw** —
+  an incremental snapshot cursor over an `IndexKeyRange` (#1542). Open and each move receive the command token; LIMIT stops after its bounded batch, and disposal drops owned keys. Reads finish before any mutation applies. Keys go into `IndexKey` **raw** —
   the key-value ordering contract (unsigned lexicographic byte comparison) *is*
   `IndexKey`'s comparison, so no codec transformation applies to keys. Every
   fetched record's stamps are re-checked against the same snapshot (the SQL seek

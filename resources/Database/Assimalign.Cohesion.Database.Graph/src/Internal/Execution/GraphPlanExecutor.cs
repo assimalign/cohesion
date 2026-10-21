@@ -431,7 +431,7 @@ internal static partial class GraphPlanExecutor
         private int _viable;
         private int _candidates;
         internal int Consumed => _physical;
-        // Sampling after incident loading isolates the retained DFS state from read buffers.
+        // Sampling at each consumed candidate includes the bounded incident read buffers.
         internal Action<int>? OnCandidate { get; init; }
         internal void VisitCandidate() => OnCandidate?.Invoke(++_candidates);
         internal int Physical => _physical;

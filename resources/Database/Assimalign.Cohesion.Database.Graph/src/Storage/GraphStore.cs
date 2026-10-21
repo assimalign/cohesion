@@ -224,6 +224,33 @@ public sealed partial class GraphStore
     private long _incidentRecordsDecoded;
     internal long IncidentRecordsDecoded => Interlocked.Read(ref _incidentRecordsDecoded);
 
+    // Discover only the types present at this endpoint. Jump past each whole type run
+    // instead of enumerating its degree or probing every type in the database catalog.
+    internal async ValueTask<IReadOnlyList<Guid>> GetIncidentTypesAsync(ulong nodeId, GraphIncidentDirection direction,
+        TransactionSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_indexes.TryGetIndex(adjacencyId, treeName, out var index)) { return []; }
+        var result = new List<Guid>();
+        var low = AdjacencyKey(nodeId, direction, Guid.Empty, 0);
+        var high = AdjacencyKey(nodeId, direction, _maximumTypeId, ulong.MaxValue);
+        bool inclusive = true;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, inclusive, true),
+                cancellationToken: cancellationToken);
+            if (!await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false)) { return result; }
+            var key = cursor.CurrentKey.Encoded.Span;
+            if (key.Length != 33) { throw new StorageCorruptionException(ErrorMessages.AdjacencyKeyInvalid); }
+            Guid type = new(key.Slice(9, 16), bigEndian: true);
+            result.Add(type);
+            if (type == _maximumTypeId) { return result; }
+            low = AdjacencyKey(nodeId, direction, type, ulong.MaxValue);
+            inclusive = false;
+        }
+    }
+
     /// <summary>Streams visible relationships from indexed endpoint, direction and catalog-type ranges.</summary>
     /// <param name="nodeId">Incident node identity.</param>
     /// <param name="direction">Direction relative to the incident node.</param>
@@ -255,7 +282,7 @@ public sealed partial class GraphStore
                 var low = AdjacencyKey(nodeId, selected, type ?? Guid.Empty, 0);
                 var high = AdjacencyKey(nodeId, selected, type ?? _maximumTypeId, ulong.MaxValue);
                 cancellationToken.ThrowIfCancellationRequested();
-                await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true));
+                await using var cursor = index.OpenCursor(snapshot, new IndexKeyRange(low, high, true, true), cancellationToken: cancellationToken);
                 while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
                 {
                     cancellationToken.ThrowIfCancellationRequested();

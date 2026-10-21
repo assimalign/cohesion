@@ -75,6 +75,10 @@ Administrative database lookup remains ordinal-ignore-case. SQL database default
 column collations, and expression `COLLATE` have no effect on this model.
 Configurable document collation is deferred; stored text retains its original form.
 
+## Incremental index reads (#1542)
+
+Catalog index scans and unique probes pass their statement token at cursor open and on every move. Shared B+Tree cursors copy bounded batches and release their read latch before document decoding or validation. Scans and unique checks finish before applying index changes, so transaction-stamped own writes cannot extend an active scan.
+
 ## Intent and composition
 
 Documents combines the Blob engine's lifecycle, session transaction, worker, and

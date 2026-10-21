@@ -20,7 +20,7 @@ internal static partial class GraphPlanExecutor
     private abstract record PathTask;
     private sealed record NodeTask(IReadOnlyList<GqlNodePattern> Patterns, PathTask? Next) : PathTask;
     private sealed record EdgeTask(GqlRelationshipPattern Pattern, bool Forward, PathTask? Next) : PathTask;
-    private sealed record IncidentTask(EdgeTask Hop, IReadOnlyList<StoredGraphRelationship> Edges, int Index) : PathTask;
+    private sealed record IncidentTask(EdgeTask Hop, IAsyncEnumerator<StoredGraphRelationship> Edges) : PathTask;
     private sealed record RepeatTask(GraphPathSegment Segment, bool Forward, int Count, string[] Names, PathTask? Next) : PathTask;
     private sealed record EndIterationTask(RepeatTask Repeat, PathTask? Next) : PathTask;
     private sealed record StartLeftTask(GraphNode Anchor, PathTask? Next) : PathTask;
@@ -93,106 +93,122 @@ internal static partial class GraphPlanExecutor
             var frontier = new Stack<PathState>();
             frontier.Push(new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null,
                 new NodeTask(shape.Nodes[anchor.NodeIndex], tasks)));
-            while (frontier.TryPop(out var state))
+            var incidents = new HashSet<IAsyncEnumerator<StoredGraphRelationship>>();
+            try
             {
-                token.ThrowIfCancellationRequested();
-                operation.EnsureActive();
-                switch (state.Task)
+                while (frontier.TryPop(out var state))
                 {
-                    case null:
-                        if (plan.Pattern.Variable is { } pathVariable)
-                        { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
-                        // Fixed chains retain the base matcher's source-ordered nodes, then edges,
-                        // independently of the anchor. Repetitions retain reverse encounter order.
-                        var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
-                        bool matches = true;
-                        for (var check = finalProperties; check is not null; check = check.Previous)
-                        { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, operation.EvaluationContext, parameters, deferUnbound)) { matches = false; break; } }
-                        if (matches) { acceptMatch(state.Bindings, finalProperties); }
-                        break;
-                    case StartLeftTask start:
-                        frontier.Push(state with { Current = start.Anchor, Task = start.Next });
-                        break;
-                    case NodeTask nodes:
-                        bool accepted = true;
-                        var properties = state.Properties;
-                        foreach (var pattern in nodes.Patterns)
-                        {
-                            if (!AcceptNode(pattern, state.Current, state.Bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { accepted = false; break; }
-                            if (shape.HasQuantifier) { properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties); }
-                        }
-                        if (accepted) { frontier.Push(state with { Properties = properties, Task = nodes.Next }); }
-                        break;
-                    case RepeatTask repeat:
-                        if (repeat.Count == 0)
-                        {
-                            foreach (string name in repeat.Names)
-                            { state.Groups[name] = []; state.Bindings[name] = Array.Empty<object?>(); }
-                        }
-                        if (repeat.Segment.Quantifier?.Max is not { } max || repeat.Count < max)
-                        {
-                            var iteration = state.Fork();
-                            foreach (string name in repeat.Names) { iteration.Bindings.Remove(name); }
-                            var end = new EndIterationTask(repeat, repeat.Next);
-                            frontier.Push(iteration with { Task = BodyTasks(repeat.Segment.Body, repeat.Forward, end) });
-                        }
-                        if (repeat.Count >= (repeat.Segment.Quantifier?.Min ?? 1))
-                        { frontier.Push(state with { Task = repeat.Next }); }
-                        break;
-                    case EndIterationTask end:
-                        foreach (string name in end.Repeat.Names)
-                        {
-                            var previous = state.Groups[name];
-                            var values = new object?[previous.Length + 1];
-                            Array.Copy(previous, 0, values, end.Repeat.Forward ? 0 : 1, previous.Length);
-                            values[end.Repeat.Forward ? previous.Length : 0] = state.Bindings[name];
-                            state.Groups[name] = values;
-                            state.Bindings[name] = values;
-                        }
-                        frontier.Push(state with { Task = end.Repeat with { Count = end.Repeat.Count + 1 } });
-                        break;
-                    case EdgeTask edgeTask:
-                        var incident = await operation.Updates.GetIncidentAsync(state.Current.Id.Value,
-                            GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
-                            operation.Updates.SelectTypes(edgeTask.Pattern), token).ConfigureAwait(false);
-                        frontier.Push(state with { Task = new IncidentTask(edgeTask, incident, 0) });
-                        break;
-                    case IncidentTask cursor:
-                        // Resume the parent cursor after exactly one child. Sibling fan-out never
-                        // retains copies of bindings, trails, identity sets or groups in the frontier.
-                        if (cursor.Index == cursor.Edges.Count) { break; }
-                        frontier.Push(state with { Task = cursor with { Index = cursor.Index + 1 } });
-                        budget.VisitCandidate();
-                        budget.Consume();
-                        var edge = cursor.Edges[cursor.Index];
-                        var hop = cursor.Hop;
-                        ulong from = state.Current.Id.Value;
-                        bool outgoing = hop.Pattern.Direction == GqlPatternDirection.Outgoing && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Incoming && !hop.Forward;
-                        bool incoming = hop.Pattern.Direction == GqlPatternDirection.Incoming && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Outgoing && !hop.Forward;
-                        if (state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
-                            outgoing && edge.SourceId != from || incoming && edge.TargetId != from) { break; }
-                        var bindings = new Dictionary<string, object?>(state.Bindings, StringComparer.Ordinal);
-                        var relationship = GraphDatabase.Materialize(edge);
-                        if (!Accept(hop.Pattern.Variable, relationship, bindings) ||
-                            !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
-                        // The hop's own checks precede the cap; deferred references still qualify.
-                        // A qualifying 65th edge fails before any target constraints can hide it.
-                        if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
-                        ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
-                        if (operation.Updates.FindNode(next) is not { } target) { break; }
-                        var nextNode = GraphDatabase.Materialize(target);
-                        if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
-                            !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }
-                        budget.ConsumeViable();
-                        var copy = state.Fork(bindings);
-                        copy.Used.Add(edge.Id);
-                        if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
-                        else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
-                        frontier.Push(copy with { Current = nextNode, Task = hop.Next,
-                            Properties = shape.HasQuantifier
-                                ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties });
-                        break;
+                    token.ThrowIfCancellationRequested();
+                    operation.EnsureActive();
+                    switch (state.Task)
+                    {
+                        case null:
+                            if (plan.Pattern.Variable is { } pathVariable)
+                            { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
+                            // Fixed chains retain the base matcher's source-ordered nodes, then edges,
+                            // independently of the anchor. Repetitions retain reverse encounter order.
+                            var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
+                            bool matches = true;
+                            for (var check = finalProperties; check is not null; check = check.Previous)
+                            { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, operation.EvaluationContext, parameters, deferUnbound)) { matches = false; break; } }
+                            if (matches) { acceptMatch(state.Bindings, finalProperties); }
+                            break;
+                        case StartLeftTask start:
+                            frontier.Push(state with { Current = start.Anchor, Task = start.Next });
+                            break;
+                        case NodeTask nodes:
+                            bool accepted = true;
+                            var properties = state.Properties;
+                            foreach (var pattern in nodes.Patterns)
+                            {
+                                if (!AcceptNode(pattern, state.Current, state.Bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { accepted = false; break; }
+                                if (shape.HasQuantifier) { properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties); }
+                            }
+                            if (accepted) { frontier.Push(state with { Properties = properties, Task = nodes.Next }); }
+                            break;
+                        case RepeatTask repeat:
+                            if (repeat.Count == 0)
+                            {
+                                foreach (string name in repeat.Names)
+                                { state.Groups[name] = []; state.Bindings[name] = Array.Empty<object?>(); }
+                            }
+                            if (repeat.Segment.Quantifier?.Max is not { } max || repeat.Count < max)
+                            {
+                                var iteration = state.Fork();
+                                foreach (string name in repeat.Names) { iteration.Bindings.Remove(name); }
+                                var end = new EndIterationTask(repeat, repeat.Next);
+                                frontier.Push(iteration with { Task = BodyTasks(repeat.Segment.Body, repeat.Forward, end) });
+                            }
+                            if (repeat.Count >= (repeat.Segment.Quantifier?.Min ?? 1))
+                            { frontier.Push(state with { Task = repeat.Next }); }
+                            break;
+                        case EndIterationTask end:
+                            foreach (string name in end.Repeat.Names)
+                            {
+                                var previous = state.Groups[name];
+                                var values = new object?[previous.Length + 1];
+                                Array.Copy(previous, 0, values, end.Repeat.Forward ? 0 : 1, previous.Length);
+                                values[end.Repeat.Forward ? previous.Length : 0] = state.Bindings[name];
+                                state.Groups[name] = values;
+                                state.Bindings[name] = values;
+                            }
+                            frontier.Push(state with { Task = end.Repeat with { Count = end.Repeat.Count + 1 } });
+                            break;
+                        case EdgeTask edgeTask:
+                            var incident = operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
+                                GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
+                                operation.Updates.SelectTypes(edgeTask.Pattern), token).GetAsyncEnumerator(token);
+                            incidents.Add(incident);
+                            frontier.Push(state with { Task = new IncidentTask(edgeTask, incident) });
+                            break;
+                        case IncidentTask cursor:
+                            // Resume the parent cursor after exactly one child. Sibling fan-out never
+                            // retains copies of bindings, trails, identity sets or groups in the frontier.
+                            if (!await cursor.Edges.MoveNextAsync().ConfigureAwait(false))
+                            {
+                                incidents.Remove(cursor.Edges);
+                                await cursor.Edges.DisposeAsync().ConfigureAwait(false);
+                                break;
+                            }
+                            frontier.Push(state);
+                            budget.VisitCandidate();
+                            budget.Consume();
+                            var edge = cursor.Edges.Current;
+                            var hop = cursor.Hop;
+                            ulong from = state.Current.Id.Value;
+                            bool outgoing = hop.Pattern.Direction == GqlPatternDirection.Outgoing && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Incoming && !hop.Forward;
+                            bool incoming = hop.Pattern.Direction == GqlPatternDirection.Incoming && hop.Forward || hop.Pattern.Direction == GqlPatternDirection.Outgoing && !hop.Forward;
+                            if (state.Used.Contains(edge.Id) || !GraphLabelEvaluator.Accepts(hop.Pattern, edge.Type) ||
+                                outgoing && edge.SourceId != from || incoming && edge.TargetId != from) { break; }
+                            var bindings = new Dictionary<string, object?>(state.Bindings, StringComparer.Ordinal);
+                            var relationship = GraphDatabase.Materialize(edge);
+                            if (!Accept(hop.Pattern.Variable, relationship, bindings) ||
+                                !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
+                            // The hop's own checks precede the cap; deferred references still qualify.
+                            // A qualifying 65th edge fails before any target constraints can hide it.
+                            if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
+                            ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
+                            if (operation.Updates.FindNode(next) is not { } target) { break; }
+                            var nextNode = GraphDatabase.Materialize(target);
+                            if (hop.Next is NodeTask targetNodes && targetNodes.Patterns.Any(pattern =>
+                                !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }
+                            budget.ConsumeViable();
+                            var copy = state.Fork(bindings);
+                            copy.Used.Add(edge.Id);
+                            if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
+                            else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
+                            frontier.Push(copy with { Current = nextNode, Task = hop.Next,
+                                Properties = shape.HasQuantifier
+                                    ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties });
+                            break;
+                    }
                 }
+            }
+            finally
+            {
+                // Parent incident cursors remain in the DFS frontier while a child runs.
+                // Budget refusal, cancellation and evaluation/storage errors close them all.
+                foreach (var incident in incidents) { await incident.DisposeAsync().ConfigureAwait(false); }
             }
         }
     }

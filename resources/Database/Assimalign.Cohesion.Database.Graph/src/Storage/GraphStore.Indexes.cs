@@ -126,7 +126,7 @@ public sealed partial class GraphStore
         if (!GraphRecordCodec.TryKey(value, out var key)) { return []; }
         var result = new List<StoredGraphNode>();
         await using var cursor = ResolveIndex(definition.Id).OpenCursor(snapshot,
-            new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true));
+            new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true), cancellationToken: cancellationToken);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {
             if (ReadAt(cursor.CurrentEntryReference, snapshot)?.Record.Node is { } node

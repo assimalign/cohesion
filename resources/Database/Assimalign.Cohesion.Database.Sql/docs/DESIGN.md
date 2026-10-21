@@ -2846,7 +2846,7 @@ project reference or InternalsVisibleTo change is required.
   from its outer child plan (`src/backend/executor/nodeModifyTable.c:4442,4497`);
   Cohesion reuses its existing SELECT seek and retains its two-phase write discipline.
 - **Seek execution is snapshot-anchored.** The executor drives the B+Tree
-  cursor through the **statement snapshot** (the `BTreeIndex.OpenCursor(snapshot,
+  cursor incrementally through bounded batches (#1542), passing cancellation at open and on every move. DML still drains all targets before apply for Halloween safety. The cursor reads through the **statement snapshot** (the `BTreeIndex.OpenCursor(snapshot,
   …)` overload — the same snapshot the equivalent scan filters through, which
   is the equivalence anchor under ReadCommitted's per-statement re-capture),
   unpacks each visible entry's packed row location, fetches the row, and
