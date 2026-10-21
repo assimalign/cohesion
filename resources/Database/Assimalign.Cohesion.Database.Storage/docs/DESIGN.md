@@ -642,6 +642,13 @@ object ids, so a table scan stops decoding the whole database.
   *before* its first-touch pre-image (and full page image) is captured, so a rolled-back allocation
   restores an empty page still belonging to the chain — a safe leak the owner's
   next insert reuses.
+- **A failed allocating touch releases its reservation.** If first-touch registration
+  throws before recording a pre-image, cleanup removes the data/index directory entry,
+  stamps a reclaimed page and returns its id under transaction then owner then map locks.
+  Cleanup performs no device I/O, preserving the original registration error. If another
+  bracket already holds the allocation through the publication window tracked by #1365,
+  that bracket retains it: cleanup must never recycle a write-locked page. Closing that
+  publication window remains separate from generation validation.
 - **Chain release (`FreeOwnerPages`) is transactional with commit-deferred
   reuse.** Each page is retyped `Free` under the transaction (a rollback restores the chain
   bytes from the pre-image, and recovery redoes the release only once it committed), but the pages
@@ -670,20 +677,31 @@ object ids, so a table scan stops decoding the whole database.
   write-locked by transaction T" (the concurrency suite on CI runners). A page
   one transaction releases twice (its last record deleted, then its chain released) is
   freed once: a second free could return it to the list after another allocation took
-  it, and hand it to a second owner. A writer also captures the page's free generation
-  before pinning and rechecks it under the transaction lock before taking a write lock
-  (#1273). A commit between the pin and registration invalidates that touch, even if
-  an allocator already reused the id: checking only `IsAllocated` would miss reuse.
-  A stale owner-chain insert allocates a fresh page; an explicit write open reports
-  "not allocated". Refusal releases the pin without a lock, pre-image or page record.
-  The map retains one generation per page ever freed, across reuse, for the storage's
-  lifetime; generations are in memory only and do not change the storage format.
+  it, and hand it to a second owner. A writer captures the page's free generation
+  when it learns the id (#1273): current-write-page lookup and bounded owner-release
+  snapshots capture both under `_ownerLock`, in owner-lock then free-map-lock order,
+  matching committed frees. The generation travels through pinning to registration,
+  which rechecks it under the transaction lock before granting a write lock; a page
+  already write-locked by this bracket needs no recheck. The page manager combines
+  allocation checking and generation capture in one map hold before the pin. A free
+  anywhere between lookup and registration invalidates the touch even after reuse,
+  including same-owner reuse. A stale insert allocates a fresh page; owner release
+  skips it and counts pages released or already pending free in this bracket, also
+  checking the owner tag before retyping. An explicit write open reports "not allocated". Refusal releases the pin
+  without a lock, pre-image or page record.
+  Generations are in memory only and do not change the storage format. Open seeds no
+  entries: zero suffices without active brackets. The last bracket's completion clears
+  entries under the transaction lock, excluding new begins; entries therefore cover
+  only distinct pages freed since the last quiescent point, with dictionary capacity
+  bounded by the largest such interval (at most the file's page count).
   Lock order is structure latch, pin with the pool monitor released, then transaction
   lock and free-map lock; the free-map lock is never held across a pin or a wait for
-  the transaction lock. Deterministic pin/free rendezvous tests and a non-parallel
-  stress test verify reuse and commit, rollback and disposal cleanup; the stress test
-  runs for a minimum duration and until every scenario counter reaches its milestone,
-  with a timeout that fails the test. PostgreSQL guards the same edge from the
+  the transaction lock. Deterministic owner-lookup and pin/free rendezvous tests verify
+  active and committed replacements, surviving records, updateability and recovery.
+  A non-parallel regression loop repeats the pin/free scenarios for a minimum duration
+  and until every scenario counter reaches its milestone, with a failing timeout.
+  Reallocation runs on a separate thread after the freeing commit returns.
+  PostgreSQL guards the same edge from the
   allocating side, using a page the FSM reports only if its buffer lock is free
   (`_bt_allocbuf`, `src/backend/access/nbtree/nbtpage.c`).
 - **Why release is O(pages), not O(1).** Page logging prices a transactional free at one

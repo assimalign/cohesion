@@ -27,8 +27,8 @@ public sealed class StorageFreeSpaceMap
     private readonly object _sync = new();
     private readonly Queue<long> _freeQueue = new();
     private readonly HashSet<long> _freeSet = new();
-    // Retain a page's generation across reuse: allocated -> free -> allocated must
-    // invalidate a writer that observed the earlier allocation (#1273).
+    // Retain generations across reuse while a bracket can hold an earlier lookup.
+    // Storage resets these at quiescence under its transaction lock (#1273).
     private readonly Dictionary<long, long> _freeGenerations = new();
     private long _nextPageId;
 
@@ -170,6 +170,15 @@ public sealed class StorageFreeSpaceMap
         }
     }
 
+    // Only Storage's transaction-lock holder may reset, with no active bracket.
+    internal void ResetFreeGenerations()
+    {
+        lock (_sync)
+        {
+            _freeGenerations.Clear();
+        }
+    }
+
     /// <summary>
     /// Marks a page as already allocated during storage initialization.
     /// This advances the internal page counter without adding to the free list.
@@ -208,7 +217,7 @@ public sealed class StorageFreeSpaceMap
 
             if (_freeSet.Add(id))
             {
-                _freeGenerations[id] = _freeGenerations.GetValueOrDefault(id) + 1;
+                // Opening has no active transactions: generation zero is sufficient.
                 _freeQueue.Enqueue(id);
             }
         }

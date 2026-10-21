@@ -227,6 +227,23 @@ public sealed class StoragePageManager
         return true;
     }
 
+    // Writers use the generation from the same map hold that checks allocation;
+    // a second allocation check before the pin would neither close the race nor
+    // strengthen the transaction-lock recheck that follows it.
+    internal bool TryGetPage(PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle, out long generation)
+    {
+        ThrowIfHeaderPage(pageId);
+
+        if (!_freeSpaceMap.TryGetAllocationGeneration(pageId, out generation))
+        {
+            handle = null;
+            return false;
+        }
+
+        handle = _bufferPool.Pin(pageId, _stream);
+        return true;
+    }
+
     private static void ThrowIfHeaderPage(PageId pageId)
     {
         if ((long)pageId == 0L)

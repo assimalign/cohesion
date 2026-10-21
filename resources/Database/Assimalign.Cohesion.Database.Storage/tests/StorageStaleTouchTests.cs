@@ -47,6 +47,125 @@ public sealed class StorageStaleTouchTests
         await ExerciseOwnerReadRaceAsync(insert: false, index, replacementCommitted, sameOwner, stop.Token);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - Allocation: a failed first touch releases its reservation and owner-directory entry")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AllocatePageForWrite_FirstTouchFails_ShouldReleaseReservationAndDirectory(bool index)
+    {
+        // Arrange: fail after the image append, before RegisterTouch can record a pre-image.
+        using var storage = TornStorage.Create(consistencyChecks: true);
+        using var transaction = storage.BeginTransaction();
+        int failures = 0;
+        storage.Log.ConfigureCheckpointTrigger(1, () =>
+        {
+            failures++;
+            throw new InvalidOperationException("Injected first-touch failure.");
+        });
+
+        // Act
+        try
+        {
+            Should.Throw<InvalidOperationException>(() =>
+            {
+                if (index)
+                {
+                    using var page = storage.AllocatePageForWrite(transaction, PageType.Index, ownerId: 17);
+                }
+                else
+                {
+                    storage.Insert(transaction, 17, [1]);
+                }
+            }).Message.ShouldBe("Injected first-touch failure.");
+        }
+        finally
+        {
+            storage.Log.ConfigureCheckpointTrigger(0, null);
+        }
+
+        // Assert: both directories are empty, the id is reusable, and the failed pin is gone.
+        failures.ShouldBe(1);
+        var failed = (PageId)(storage.FreeSpaceMap.TotalPageCount - 1);
+        storage.FreeSpaceMap.IsAllocated(failed).ShouldBeFalse();
+        storage.HasOwnerPages(17).ShouldBeFalse();
+        storage.GetOwnerPages(17).ShouldBeEmpty();
+        storage.FreeOwnerPages(transaction, 17).ShouldBe(0);
+        transaction.PreImages.ShouldBeEmpty();
+        storage.IsPageWriteLocked(failed).ShouldBeFalse();
+        storage.BufferPool.TryGet(failed, out var pin).ShouldBeTrue();
+        using (pin)
+        {
+            pin.ShouldNotBeNull();
+            pin.PinCount.ShouldBe(1);
+            pin.Page.Type.ShouldBe(PageType.Reclaimed);
+        }
+        transaction.Rollback();
+        using (var retry = storage.BeginTransaction())
+        {
+            storage.Insert(retry, 99, [7]).PageId.ShouldBe(failed);
+            retry.Commit();
+        }
+        storage.BufferPool.CheckInvariants();
+        using var recovered = TornStorage.Open(storage.CaptureDurable());
+        recovered.ScanOwner(17).ShouldBeEmpty();
+        recovered.ScanOwner(99).Single().ShouldBe(new byte[] { 7 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Free generations: retain reuse protection until the last active bracket ends")]
+    public void Commit_LastActiveBracketEnds_ShouldResetFreeGenerations()
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        var row = storage.Insert("original");
+        using var observer = storage.BeginTransaction();
+        storage.FreeSpaceMap.TryGetAllocationGeneration(row.PageId, out long learned).ShouldBeTrue();
+
+        // Act: an active observer prevents pruning even after another bracket's committed reuse.
+        using (var freeing = storage.BeginTransaction())
+        {
+            storage.FreeOwnerPages(freeing, 0).ShouldBe(1);
+            freeing.Commit();
+        }
+        using (var replacement = storage.BeginTransaction())
+        {
+            storage.Insert(replacement, 99, [7]).PageId.ShouldBe(row.PageId);
+            replacement.Commit();
+        }
+
+        // Assert
+        storage.FreeSpaceMap.IsAllocationCurrent(row.PageId, learned).ShouldBeFalse();
+        storage.FreeSpaceMap.TryGetAllocationGeneration(row.PageId, out long retained).ShouldBeTrue();
+        retained.ShouldBeGreaterThan(learned);
+        observer.Commit();
+        storage.FreeSpaceMap.TryGetAllocationGeneration(row.PageId, out long idle).ShouldBeTrue();
+        idle.ShouldBe(0);
+        storage.ReadBytes(row.PageId, 0).ShouldBe(new byte[] { 7 });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - Free generations: opening free pages starts at generation zero")]
+    public void OpenExisting_FreePages_ShouldUseZeroGenerationUntilFreedAgain()
+    {
+        // Arrange
+        using var storage = TornStorage.Create();
+        var row = storage.Insert("original");
+        using (var freeing = storage.BeginTransaction())
+        {
+            storage.FreeOwnerPages(freeing, 0).ShouldBe(1);
+            freeing.Commit();
+        }
+        storage.Checkpoint();
+
+        // Act
+        using var reopened = TornStorage.Open(storage.CaptureDurable());
+        using var replacement = reopened.BeginTransaction();
+        reopened.Insert(replacement, 99, [7]).PageId.ShouldBe(row.PageId);
+
+        // Assert
+        reopened.FreeSpaceMap.TryGetAllocationGeneration(row.PageId, out long generation).ShouldBeTrue();
+        generation.ShouldBe(0);
+        replacement.Commit();
+        reopened.ScanOwner(99).Single().ShouldBe(new byte[] { 7 });
+    }
+
     private static async Task ExerciseOwnerReadRaceAsync(
         bool insert, bool index, bool replacementCommitted, bool sameOwner, CancellationToken cancellationToken)
     {
