@@ -106,12 +106,12 @@ public sealed partial class GraphDatabase
         DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
             or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
         DatabaseException { Diagnostics.Count: > 0 } => error,
-        _ when DatabaseFailure.Find<ObjectDisposedException>(error) is not null
-            => new DatabaseException(ErrorMessages.GraphDisposed, [new Types.Diagnostic
-            { Code = "COHDBG019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
+        _ when DatabaseFailure.Find<ObjectDisposedException>(error) is not null
+            => new DatabaseException(ErrorMessages.GraphDisposed, [new Types.Diagnostic
+            { Code = "COHDBG019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),

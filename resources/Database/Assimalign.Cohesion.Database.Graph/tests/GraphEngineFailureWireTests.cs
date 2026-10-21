@@ -10,11 +10,31 @@ using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphEngineFailureWireTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Engine: a disposed commit resource cannot hide a kernel transaction outcome")]
+    public async Task TranslateKernelFailure_DisposedResource_ShouldRetainTransactionOutcome()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("commit-failure", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        var disposed = new ObjectDisposedException("commit resource");
+        var unconfirmed = new TransactionCommitUnconfirmedException("Commit durability is unknown.", disposed);
+        var aborted = new TransactionAbortedException("The transaction was aborted.", disposed);
+
+        // Act
+        var uncertain = database.TranslateKernelFailure(unconfirmed).ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
+        var refused = database.TranslateKernelFailure(aborted).ShouldBeOfType<DatabaseTransactionAbortedException>();
+
+        // Assert
+        uncertain.InnerException.ShouldBeSameAs(unconfirmed);
+        refused.InnerException.ShouldBeSameAs(aborted);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: child failures report execution failure and preserve the session")]
     [InlineData(0, false, "COHDBG006")]
     [InlineData(1, false, "COHDBG006")]
