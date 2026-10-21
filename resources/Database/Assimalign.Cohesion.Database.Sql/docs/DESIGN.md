@@ -1405,7 +1405,16 @@ time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a`
 4.20 MB) while the JIT build allocates 18 KB less: publishing variants pins the difference to
 `src/Internal/Execution/SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
 instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
-allocation decisions) rather than at an allocation the change makes; it is not yet explained.
+allocation decisions); that attribution was a hypothesis, not an identified cause.
+
+**Disposition (#1374, 2026-10-21).** The owner-directed current-tree reproduction after
+#1198/#1366, published Release win-arm64 with ILC mstat/map output, measured Q8 at
+5,592,872 NativeAOT bytes/build and 5,344,232 JIT bytes/build (minimum of three rounds
+after warm-up); it cannot reproduce the historical 4.20/4.36 MB pair because B2 has
+replaced that Build path and table binding now includes foreign keys. The historical
+delta, including the later unexplained −34 KB below, is retired as superseded rather
+than an active allocation target; the maps do not establish an inlining or stack-allocation
+cause, and the original ILC attribution remains unproven.
 
 **The shared call path.** A NativeAOT profile of Q1 after the review put about 3% of the
 statement, some 19 ns per call, on the path every call takes between the row and the function's
