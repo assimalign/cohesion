@@ -72,6 +72,9 @@ internal sealed class SqlStatementMetrics
 
     internal SqlStatementReferences? References { get; set; }
 
+    // Keep wire-only state in the shared statement object, rather than every context copy.
+    internal SqlResultPreparation? ResultPreparation { get; set; }
+
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
     /// "seek:&lt;index&gt;", or one "join-scan"/"join-seek:&lt;index&gt;" entry per join step separated by semicolons), empty for

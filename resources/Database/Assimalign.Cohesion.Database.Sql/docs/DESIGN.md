@@ -45,6 +45,10 @@ The client discards partial columns and rows; the connection and any explicit tr
 usable because the statement wrote nothing. Uncoded result failures use COHSQLE045; already-coded
 failures retain their diagnostics. Transport failures during delivery remain terminal on both
 paths, as do malformed incoming parameters. Embedded execution allocates no wire buffers.
+The optional wire preparation reference lives once in the shared statement metrics, so copies
+of SqlStatementContext captured by scan iterators and filtering closures do not each grow.
+Execution clears that reference on success or failure before delivery, keeping retained metrics
+from retaining encoded payloads.
 
 There is no aggregate encoded-result cap on either path. Results are already fully materialized;
 a 64 MiB cap adds a functional limit without bounding their existing memory. Writes additionally

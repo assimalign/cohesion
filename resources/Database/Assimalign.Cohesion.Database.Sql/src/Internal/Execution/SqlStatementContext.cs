@@ -48,7 +48,7 @@ internal readonly struct SqlStatementContext
         ProvisioningProgress = provisioningProgress;
         ScriptReceipt = scriptReceipt;
         DdlInterlock = ddlInterlock;
-        ResultPreparation = resultPreparation;
+        Metrics.ResultPreparation = resultPreparation;
     }
 
     /// <summary>
@@ -104,11 +104,9 @@ internal readonly struct SqlStatementContext
     /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
     internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
 
-    private SqlResultPreparation? ResultPreparation { get; }
-
     // DML calls this before its physical statement bracket can commit.
     internal ValueTask<DatabaseResult> PrepareResultAsync(DatabaseResult result, CancellationToken cancellationToken)
-        => ResultPreparation is { } preparation ? preparation.PrepareAsync(result, cancellationToken) : ValueTask.FromResult(result);
+        => Metrics.ResultPreparation is { } preparation ? preparation.PrepareAsync(result, cancellationToken) : ValueTask.FromResult(result);
 
     private sealed class ProvisioningNames
     {
