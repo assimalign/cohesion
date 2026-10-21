@@ -8,6 +8,9 @@ tests assert DatabaseNotFound and ConnectionFailure kind and reuse a one-slot po
 TCP also covers 200 authentication and capacity refusals through the typed client, 200
 unsupported-major handshakes through the public protocol (production clients send Current),
 and 200 idle and graceful-stop notices surfaced by the next concrete-client operation.
+An in-memory regression returns an authenticated rental to its pool and leaves the client open
+and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
+abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
 ## Contract-only dependencies
 

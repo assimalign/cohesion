@@ -4104,6 +4104,12 @@ registry before I/O, and Stop joins them after joining the accept loop. Every re
 attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
 Connections.Tcp's transport disposal contract remains #1086.
 
+The SQL TLS variant uses the production Connections.Security decorator over TCP. It remains
+skipped for the Connections owner's #1086: the enabled probe returned Internal while awaiting
+a frame instead of DatabaseNotFound after Database-only fixes. TlsConnection completes its
+SslStream-backed output without completing the inner TCP output, so this area cannot guarantee
+that fatal frame reaches the peer. The complete regression remains available for that owner.
+
 TerminalDrainLinger defaults to two seconds and begins after output completion, including for
 capacity refusals. It bounds only the peer-close wait; ShutdownDrainTimeout remains the outer
 bound starting before any terminal write. An unread idle pooled client therefore cannot occupy
