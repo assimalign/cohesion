@@ -1066,6 +1066,57 @@ public sealed class DocumentTransactionFailureTests
         (await IdsAsync(observer)).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Documents] - Commit: a full-buffer drain before the commit append aborts and takes storage offline")]
+    public async Task CommitAsync_FullBufferDrainBeforeCommitRecord_ShouldAbortAndGoOffline()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using var engine = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync("test");
+        await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
+        var transaction = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "pending", Doc("pending"));
+
+        // Arrange: fill the append buffer so the next append must first drain the preceding frames.
+        var journal = database.DataStorage.WriteAheadJournal;
+        JournalFrames.FillAppendBuffer(journal);
+        long lastBeforeCommit = journal.LastLsn;
+        journal.WrittenLsn.ShouldBeLessThan(lastBeforeCommit);
+
+        // Act: fail the drain of the preceding frames, before COMMIT gets an LSN.
+        DatabaseOfflineException error;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
+            unspent = failures.Remaining;
+        }
+        var stateAfterCommit = transaction.State;
+        journal.LastLsn.ShouldBe(lastBeforeCommit);
+        var offline = StorageOfflineException.Find(error).ShouldNotBeNull();
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.CommitRecordWritten.ShouldBeFalse();
+        offline.InnerException.ShouldBeOfType<System.IO.IOException>();
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = DocumentDatabaseEngine.Create("document-engine", QuietOptions(strategy));
+        var recovered = await reopened.OpenDatabaseAsync("test");
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert
+        unspent.ShouldBe(0);
+        StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Code.ShouldBe("COHDBD002");
+        stateAfterCommit.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeNull();
+        (await IdsAsync(observer)).ShouldBeEmpty();
+    }
+
+
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Rollback: a late operation of a rolled-back transaction does not release its deferred writer lock")]
     public async Task LockWriterAsync_LateOperationOfRolledBackTransaction_ShouldNotReleaseItsDeferredWriterLock()
     {

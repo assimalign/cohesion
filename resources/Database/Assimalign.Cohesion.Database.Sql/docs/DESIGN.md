@@ -27,6 +27,40 @@ successful-statement allocation behavior is unchanged.
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
+Wire result preparation is scoped to writing statements (#1651). SqlResultPreparation encodes
+and size-checks the header and every row inside DML's ApplyStatementAsync, before its physical
+undo bracket closes, autocommit CommitAsync or explicit EndStatement. This includes INSERT SELECT,
+upsert, UPDATE, DELETE and RETURNING. Enumeration and disposal also finish there. DDL and
+transaction control have a fixed zero-count completion, prepared before invoking their execution
+or commit. An encoding or size failure therefore precedes any write commit and result frame;
+DML rolls back only this statement, preserving earlier explicit-transaction work. A committed
+write is never reported as an ordinary statement failure. The pre-commit write ordering follows
+PostgreSQL's output-before-commit ordering (src/backend/tcop/postgres.c:1297-1360 and
+src/backend/access/common/printtup.c:360).
+
+Read-only SELECT, EXPLAIN, system views and SHOW encode one frame at a time during delivery,
+after materialization and statement admission have ended. A late encoding, enumeration or
+disposal failure ends the exchange with ExecutionFailure, even after partial result frames.
+The client discards partial columns and rows; the connection and any explicit transaction stay
+usable because the statement wrote nothing. Uncoded result failures use COHSQLE045; already-coded
+failures retain their diagnostics. Transport failures during delivery remain terminal on both
+paths, as do malformed incoming parameters. Embedded execution allocates no wire buffers.
+The optional wire preparation reference lives once in the shared statement metrics, so copies
+of SqlStatementContext captured by scan iterators and filtering closures do not each grow.
+Execution clears that reference on success or failure before delivery, keeping retained metrics
+from retaining encoded payloads.
+
+There is no aggregate encoded-result cap on either path. Results are already fully materialized;
+a 64 MiB cap adds a functional limit without bounding their existing memory. Writes additionally
+retain encoded payloads until delivery, accepting that memory cost to preserve statement atomicity;
+reads retain only the current encoded frame. Every header/row is bounded by
+ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB). Size refusals use COHSQLE045 / SQLSTATE
+54000 and report the encoded size and frame limit. Variable-width sizes include UTF-8 and zero
+escapes and are measured before allocating encoded columns. The row scratch buffer is at most one
+frame; header encoding uses a temporary growable buffer (less than twice the frame limit) plus
+one encoded column name, and string encoding may use one column's UTF-8 sort key (at most one
+frame). Collection/array overhead and existing materialized values are additional. Streaming
+write execution will need a different storage/buffering design.
 
 ## Model component boundaries
 
@@ -371,8 +405,9 @@ scalar ordering expressions. Qualified references and aggregate operands retain
 their source scope. Invalid numeric ordinals fail during binding, even for an
 empty input; compound constants such as `1 + 1` remain scalar expressions.
 
-The executor materializes each referenced projection before sorting and retains
-source values alongside it for other ordering keys. Grouped queries use the
+The executor evaluates each projection and its ordering keys in one pass. Source
+values are available while keys are evaluated; only completed outputs and fixed
+keys survive that iteration. Grouped queries use the
 same binding against completed group outputs. The planner compiles each ordering
 key once, in the ordering scope (`SqlExpressionEvaluator.ForOrdering`): a node bound
 to an output becomes a slot read (`SqlBoundSlot`) at the ordinal after the source
@@ -383,8 +418,7 @@ last descending by default, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL
 overrides placement per key independently of direction (#1112). Binding resolves the default
 to SqlBoundOrdering.NullsFirst; the shared comparer applies direction only to non-NULL
 values. Ordinary, correlated, grouped and aggregate-input ordering use this comparer,
-including DISTINCT aggregate representative selection. Both sort paths capture direction and
-NULL-placement signs once per key before constructing their comparison delegates. Outer derived-table outputs use
+including DISTINCT aggregate representative selection. Outer derived-table outputs use
 ordinary alias, ordinal and source bindings. Structural aggregate/query equality includes
 placement. Format 24 fences the newly storable NULLS text in view bodies; formats through
 23 are refused at open, without an upgrade reader. Canonical rendering preserves explicit
@@ -3394,18 +3428,56 @@ project reference or InternalsVisibleTo change is required.
   spelled as one of them as the unsupported function (`Function '<name>' is not
   supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
   a column, until the parser gives them a function node.
-- **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
-  this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
-  rows. Streaming operators arrive with the planner build-out.
+- **Bounded SELECT execution (#1523, slice 1).** Stored-table and system-view
+  matches feed projection and key evaluation directly, without a source-row list.
+  Unordered scans allocate only their output list, keeping sort state off the
+  ordinary lookup path and preserving its existing allocation budget.
+  An unordered non-DISTINCT LIMIT stops after OFFSET + LIMIT qualifying rows;
+  LIMIT 0 reads none. Ordered non-DISTINCT LIMIT 0 also reads none: the row
+  collector is complete at construction, so no projection or key is evaluated.
+  The independent-volatile fallback is the exception: it lists, sorts and projects
+  every input before the window. Each evaluated row still reports its expression failures,
+  while unvisited rows are not evaluated. ORDER BY with a positive non-DISTINCT LIMIT
+  evaluates every input but retains a max-heap of at most OFFSET + LIMIT outputs
+  and fixed key tuples, then sorts that heap. The input ordinal breaks key ties
+  to preserve the full sort's stability, collations and independent NULL placement.
+  Deferred ordering collations retain full sorting; ordering and DISTINCT capture
+  resolved collations from qualifying rows before a later rejected row clears the
+  correlated frame. Empty grouped/correlated sorts still resolve collations, as
+  before; ordinary empty SELECTs skip ordering resolution as their base path did.
+  Independent volatile outputs in ordinary SELECTs without output ordering dependencies
+  retain full source sorting followed by projection in sorted order before pagination,
+  preserving the base's call order/count (PostgreSQL
+  `src/backend/optimizer/plan/planner.c:6649-6662` postpones independent volatile outputs).
+  Other projections and keys evaluate together in input order, projection first;
+  errors can therefore precede errors a sort-first path used to report.
+  The final projection checks the statement token before early stop completes,
+  preserving caller cancellation and statement-deadline translation.
+  The heap follows the reversed-bound principle in PostgreSQL
+  `src/backend/utils/sort/tuplesort.c:2482-2523`; its storage grows from actual
+  retained rows, never from the requested count. It appends until the bound and
+  heapifies only on overflow, avoiding heap work when LIMIT covers the input
+  while keeping the exact bound (rather than PostgreSQL's 2x staging at
+  `tuplesort.c:1126-1144`). The internal statement metric `PeakOrderedRows`
+  measures actual collector retention through execution, independently of scan
+  decode/projection allocations. DISTINCT keeps the full ordering
+  and deduplication path before pagination. Group and set operators share bounded
+  final ordering, but aggregation states, set operands, join inputs/results and
+  correlated grouped outputs still materialize. A full sort remains in memory.
+  `SqlMaterializedResultSet` contains completed output rows before delivery;
+  snapshot, locks and reader-epoch ownership remain statement-scoped. Ordered index
+  access, pull/batch result delivery, mid-stream errors and granted spilling are
+  deferred slices; this change adds no public option, visibility grant or wire frame.
+  Per-input decode, projection and key arrays remain; decode column pruning and
+  reusable key scratch/admission-only allocation are follow-ups.
 - **Row-window counts retain Int64 semantics (#1100).** The planner accepts
   nonnegative integers through `Int64.MaxValue`, as PostgreSQL evaluates its
   offset and limit as Int64 (`src/backend/executor/nodeLimit.c:369-399`). After
   ordering and `DISTINCT`, stored-table/join, system-view and grouped execution
-  use one private `ApplyRowWindow` helper. It clamps the offset to the materialized
-  row count and the limit to the remaining row count before checked Int32
-  conversions for `List.GetRange`. The collection bounds justify each conversion;
-  no count wraps or allocates according to the requested size, and the helper
-  never adds the two Int64 counts. A large limit keeps all remaining rows and a
+  use bounded collection or the private `ApplyRowWindow` helper. The helper clamps
+  counts to actual rows and removes excluded ranges in place, avoiding a copy.
+  The heap bound saturates OFFSET + LIMIT at Int64.MaxValue, without narrowing or
+  preallocating from either count. A large limit keeps all remaining rows and a
   large offset keeps none. Count evaluation and invalid-count diagnostics stay
   in the planner. The live conformance corpus and Sql.Client wire tests cover
   every plan shape, zero and small windows, the Int32 and UInt32 boundaries, and
@@ -4079,6 +4151,29 @@ database grew its journal to 130 times a 4 MiB size in six seconds. A checkpoint
 reader and writer of its database while it flushes ("Checkpoint triggers" in `Database.Storage`
 DESIGN.md has the scale).
 
+Persistent storage refusals (#1277) are reported once through the worker's per-database
+failure path after at least three refused attempts spanning FailureBackoff on the engine clock
+against the same blocked page and owning bracket. Not-due retries do not count. A changed blocker
+or completion of the refused work resets the episode; unrelated writes and WAL activity do not.
+This follows PostgreSQL's retry bound for the conflicting lock
+(src/backend/access/heap/vacuumlazy.c:3205-3219). A busy full pass retries after FailureBackoff,
+so a client bracket can clear without waiting a MaintenanceInterval. Close, drop or replacement
+ends the episode. Reclamation tracks whether
+a full purge is still owed: a successful reclamation batch between full passes clears its own
+refusal report without waiting for the maintenance interval. This report sets the
+observational worker fault until the work completes, but never starts the offline window or
+increments its minimum-pass count or makes HasFailingWorker true (owner default). Clients remain
+served throughout an observational refusal. A foreign-storage refusal is an operational error
+and is reported immediately through the normal offline-capable failure path. The shared
+checkpoint worker makes the same distinction; a statement-deferred foreign-storage checkpoint
+failure reaches the next checkpoint call rather than being swallowed as busy.
+
+Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
+assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
+the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
+writer. This is distinct from a failed drain after buffering COMMIT, whose outcome is
+committed-unconfirmed. The journal-buffer fault helper uses only the public journal API.
+
 **Deferred undo is retried on its own backoff (#1226).** A rollback whose undo fails keeps the
 writer's locks until a retry completes it; the version-purge worker retries about 100 ms later,
 then at doubling delays up to `MaintenanceInterval` (`Database.Transactions` DESIGN.md). A
@@ -4464,7 +4559,8 @@ and leaves it active. A statement is admitted into the transaction through the b
 operation admission, so a statement refused by a transaction that is ending or ended says why.
 
 A statement stays statement-atomic: a failed statement (a constraint violation, an evaluation
-fault, a deadlock victim) writes nothing and leaves the transaction active, the owner's
+fault, a wire result encoding or size failure, a deadlock victim) writes nothing and leaves the
+transaction active, the owner's
 2026-10-04 per-statement decision. Storage corruption and I/O failures abort through the base
 and require rollback before further statements (#1364). A transaction the
 kernel ended under its caller (its database was dropped or closed while the session held it)
@@ -5593,9 +5689,11 @@ count at bytes `4 + S`–`7 + S`. Each parameter beginning at byte `Q` has a non
 signed 32-bit big-endian name length `N` at bytes `Q`–`Q + 3`, `N` UTF-8 name bytes at
 byte `Q + 4`, a nonnegative signed 32-bit big-endian encoded-value length `V` at bytes
 `Q + 4 + N`–`Q + 7 + N`, and `V` self-describing scalar-component bytes at byte
-`Q + 8 + N`. `ResultHeader` (6) starts with a nonnegative signed 32-bit big-endian column
-count at bytes 0–3; each repeated column has the same four-byte name length and UTF-8 name,
-followed immediately by one unsigned `DatabaseType` byte. `ResultRow` (7) concatenates one
+`Q + 8 + N`. `ResultHeader` (6) starts with the signed 32-bit big-endian format marker -2
+at bytes 0–3 and a nonnegative signed 32-bit big-endian column count at bytes 4–7; each
+repeated column has the same four-byte name length and UTF-8 name, then one unsigned
+`DatabaseType` byte, then a signed 32-bit big-endian `MaxLength` (-1 when unbounded; 0 and
+values below -1 are refused). `ResultRow` (7) concatenates one
 self-describing scalar component per result field from byte 0 through the payload end, with
 no count prefix. `Transaction` (9) is reserved and has no implemented payload; SQL
 transaction commands travel as statement text in `Execute`.

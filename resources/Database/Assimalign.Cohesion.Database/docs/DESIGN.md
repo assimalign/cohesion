@@ -436,6 +436,18 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   that throws or returns before its engine stopped it, and reports `Faulted` until disposal,
   but the base's loop lets nothing escape, so no worker reaches that frame (the hosting
   health description no longer names the case).
+Persistent purge refusals use the same per-database failure record and WorkerFailed event,
+but report with countsTowardOffline false (#1277, owner default). Their observational fault
+clears with completed work; they never start the offline window or increment its minimum-pass
+count. An observation-only completed pass ends an earlier operational streak; subsequent
+operational failures start their own count and window. Observational records do not make
+HasFailingWorker true, so clients remain served. Fault publication always retains a whole-pass,
+give-up or operational database fault ahead of an observation, including when a pass is
+cancelled before settlement. Ordinary
+ReportFailure callers retain the existing give-up policy. The shared checkpointer and the
+statement-deferred checkpoint hand-off treat ForeignStorage as an operational failure; only
+ordinary storage transaction contention is retried as busy.
+
 - **A worker failure never ends a worker, and one database's failure slows no other
   (#1268 and its review).** `DatabaseEngineWorker.Run` is a non-virtual loop over the
   non-virtual pass `RunIteration` and the protected `void RunIterationCore`. A pass
@@ -988,7 +1000,7 @@ forwards, so keywords scope out-of-process tools only.
 
 | Id | Event | Level | Keyword | Payload | Written by |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `WorkerFailed` | Warning | — | `workerName`, `workerKind`, `database` (empty for a failure of the whole pass or of its trigger wait), `exceptionType` (full name), `exceptionMessage`, `consecutiveFailures` | `DatabaseEngineWorker`: a reported failure, a pass or trigger wait that threw, a give-up the leaf failed |
+| 1 | `WorkerFailed` | Warning | — | `workerName`, `workerKind`, `database` (empty for a failure of the whole pass or of its trigger wait), `exceptionType` (full name), `exceptionMessage`, `consecutiveFailures` (episode pass count, including report-only passes; the offline minimum counts only operational failures) | `DatabaseEngineWorker`: a reported failure, a pass or trigger wait that threw, a give-up the leaf failed |
 | 2 | `WorkerRecovered` | Informational | — | `workerName`, `workerKind`, `database` (empty for the worker's passes), `failures` | `DatabaseEngineWorker`, the pass that finished the failed work |
 | 3 | `DatabaseTakenOffline` | Error | — | `engineName`, `database`, `cause` (the `StorageOfflineCause` name), `workerName`, `workerKind`, `exceptionType` (full name of the worker's last failure), `exceptionMessage` | `DatabaseEngine`, the queued give-up (owner decision 25) |
 | 4 | `EngineCreated` | Informational | — | `engineName`, `model`, `workerFailureWindowMilliseconds`, `workerFailureMinimumPasses` | the `DatabaseEngine` constructor every leaf reaches |

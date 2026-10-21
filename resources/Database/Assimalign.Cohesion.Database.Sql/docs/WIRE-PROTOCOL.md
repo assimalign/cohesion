@@ -24,6 +24,20 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
+Writing statements encode and size-check the header and every row before their commit or
+explicit-transaction statement completion. DML enumeration and disposal finish inside its undo
+bracket; DDL and transaction control prepare their fixed completion before execution/commit.
+Result failures precede any committed write or result frame and roll back only the DML statement.
+Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery. A late result failure
+ends even a partial exchange with ExecutionFailure; the client discards partial columns and rows.
+Both paths keep the connection and explicit transaction usable on result failures.
+COHSQLE045 identifies uncoded result failures and size refusals; already-coded failures retain
+their diagnostics. Size refusals correspond to SQLSTATE 54000 and report encoded bytes and
+ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB) for each header/row. Neither path has an
+aggregate result cap. Writes retain their prepared payloads for delivery without re-encoding;
+reads retain only the current encoded frame. Diagnostics, when negotiated, immediately precede
+Error. A transport failure during delivery is terminal; a committed write is never reported as
+an ordinary statement failure (#1651).
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
 sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
 `COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more
@@ -73,7 +87,7 @@ must be nonnegative. Writers emit exactly the fields below with no padding.
 | Byte | Direction | Payload |
 | --- | --- | --- |
 | 5 Execute | Client to server | string statement, i32 parameterCount, repeated (string name, i32 encodedLength, encoded scalar component) |
-| 6 ResultHeader | Server to client | i32 columnCount, repeated (string name, u8 DatabaseType) |
+| 6 ResultHeader | Server to client | i32 format marker -2, i32 columnCount, repeated (string name, u8 DatabaseType, i32 MaxLength; -1 when unbounded) |
 | 7 ResultRow | Server to client | Concatenated self-describing scalar components, in column order; no count prefix |
 | 8 ResultComplete | Server to client | i64 affectedCount; -1 for queries, n for writes including RETURNING |
 | 9 Transaction | Reserved model identifier | No implemented payload; send transaction commands through Execute where supported |
@@ -126,7 +140,7 @@ byte after the sign, including the terminator (FF). This is System.Decimal's
 
 Golden payload examples (hex): Execute("X", no parameters) =
 `00 00 00 01 58 00 00 00 00`; one header column ("id", Int64) =
-`00 00 00 01 00 00 00 02 69 64 05`; completion(42) =
+`FF FF FF FE 00 00 00 01 00 00 00 02 69 64 05 FF FF FF FF`; completion(42) =
 `00 00 00 00 00 00 00 2A`. The existing server tests exercise these model payloads;
 ProtocolMessageTests additionally fixes these payload bytes.
 

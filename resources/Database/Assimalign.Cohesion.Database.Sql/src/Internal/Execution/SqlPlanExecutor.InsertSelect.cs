@@ -175,8 +175,8 @@ internal sealed partial class SqlPlanExecutor
                     if (returned is not null) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }
                 AfterInsertApplied?.Invoke();
-                return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)
-                    : MaterializeProjected(returning!, returned, rows.Count);
+                return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)
+                    : MaterializeProjected(returning!, returned, rows.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)

@@ -24,7 +24,12 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   `COHSQLT005` until it is rolled back. A storage, I/O or index failure (`COHSQLE041`, or
   `COHDBS003` for corruption) is the exception: it aborts the explicit transaction, which
   then refuses work with `COHSQLT005` naming that cause until it is rolled back (#1364). In
-  autocommit the next statement can run.
+  autocommit the next statement can run. Writing statements prepare wire headers/rows before
+  commit; encoding failures roll back only the statement. Read-only statements encode during
+  delivery and can end partial results with a coded statement error. Both paths preserve the
+  connection and explicit transaction on result failures; uncoded failures use COHSQLE045.
+  Each header/row is bounded by the 16 MiB frame limit, with no aggregate result cap.
+  Transport failures during delivery are terminal (#1651).
 - **Database scope (A5)** — every session stays bound to the database that
   created it. Qualified table references resolve only within that database's
   catalog; SQL cannot switch databases or manage the server. Conformance tests

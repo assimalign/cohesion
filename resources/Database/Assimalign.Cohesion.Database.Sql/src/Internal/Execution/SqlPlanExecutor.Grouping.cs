@@ -84,9 +84,14 @@ internal sealed partial class SqlPlanExecutor
 
         int projectionStart = keys.Count + aggregates.Count;
         var matches = new List<object?[]>();
+        bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
+        var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
+            plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
+        Collation[]? projectionCollations = null;
         foreach (var (key, states) in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!correlatedOrdering && collected.IsComplete) { break; }
             var row = new object?[projectionStart + plan.Projections.Count];
             key.CopyTo(row, 0);
             for (int i = 0; i < states.Length; i++)
@@ -115,9 +120,23 @@ internal sealed partial class SqlPlanExecutor
                 row[projectionStart + i] = NormalizeGroupValue(
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
-            matches.Add(row);
+            if (correlatedOrdering) { matches.Add(row); }
+            else
+            {
+                if (plan.IsDistinct)
+                {
+                    projectionCollations = CaptureProjectionCollations(plan.Projections, evaluator, projectionCollations, cancellationToken);
+                }
+                var orderingKeys = plan.OrderBy.Count == 0 ? Array.Empty<object?>() : new object?[plan.OrderBy.Count];
+                for (int i = 0; i < orderingKeys.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    orderingKeys[i] = evaluator.Evaluate(plan.OrderBy[i].Key, row);
+                }
+                collected.Add(row[projectionStart..], orderingKeys);
+            }
         }
-        if (_subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0)
+        if (correlatedOrdering)
         {
             var output = plan.Projections.Select((projection, i) => projection with
             {
@@ -126,25 +145,8 @@ internal sealed partial class SqlPlanExecutor
             return await MaterializeCorrelatedSelectAsync(matches, output, plan.OrderBy, plan.Limit, plan.Offset,
                 plan.IsDistinct, evaluator, statement, cancellationToken).ConfigureAwait(false);
         }
-        if (plan.OrderBy.Count > 0)
-        {
-            // The ordering keys were bound over the grouped row, outputs included.
-            matches = SortRows(matches, plan.OrderBy, evaluator, cancellationToken);
-        }
-        var projected = matches.Select(row => row[projectionStart..]).ToList();
-        if (plan.IsDistinct)
-        {
-            projected = Deduplicate(projected, plan.Projections, evaluator);
-        }
-        var columns = plan.Projections.Select((projection, ordinal) => new DatabaseColumn
-        {
-            Name = projection.Name,
-            Ordinal = ordinal,
-            Type = projection.Type,
-            MaxLength = projection.MaxLength,
-            IsNullable = projection.IsNullable,
-        }).ToArray();
-        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
+        return FinishSelect(collected.Finish(), plan.Projections, plan.Limit, plan.Offset,
+            plan.IsDistinct, evaluator, cancellationToken, projectionCollations);
 
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
         GroupAggregateState[] CreateStates()

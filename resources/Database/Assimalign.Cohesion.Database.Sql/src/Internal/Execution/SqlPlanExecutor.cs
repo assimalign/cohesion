@@ -42,6 +42,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
     private bool _containsLike;
+    private SqlStatementMetrics? _metrics;
 
     /// <summary>Initializes an executor for one statement.</summary>
     /// <param name="storage">The database's data storage.</param>
@@ -79,6 +80,7 @@ internal sealed partial class SqlPlanExecutor
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;
+        _metrics = statement.Metrics;
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
@@ -169,37 +171,43 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var matches = new List<object?[]>();
-
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
         // scan results by construction.
-        foreach (var (_, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+        return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+
+        IEnumerable<object?[]> Matches()
         {
-            if (evaluator.Matches(plan.Where, values))
+            foreach (var (_, values) in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
             {
-                matches.Add(values);
+                if (evaluator.Matches(plan.Where, values)) { yield return values; }
             }
         }
-
-        return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
-    private static DatabaseResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
+    private DatabaseResult MaterializeSelect(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
         bool isDistinct, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, int>? orderByProjections, CancellationToken cancellationToken)
     {
-        var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken);
+        var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections, cancellationToken,
+            isDistinct ? null : limit, isDistinct ? null : offset);
 
+        return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
+    }
+
+    private static DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
+        SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
+        Collation[]? projectionCollations = null)
+    {
         if (isDistinct)
         {
-            projected = Deduplicate(projected, projections, evaluator);
+            projected = Deduplicate(projected, projections, evaluator, cancellationToken, projectionCollations);
         }
 
-        return MaterializeProjected(projections, ApplyRowWindow(projected, limit, offset));
+        return MaterializeProjected(projections, isDistinct ? ApplyRowWindow(projected, limit, offset) : projected);
     }
 
     private static DatabaseResult MaterializeProjected(IReadOnlyList<SqlProjection> projections,
@@ -226,49 +234,96 @@ internal sealed partial class SqlPlanExecutor
         // even at Int64.MaxValue, without adding the requested offset and limit.
         int start = checked((int)Math.Min(offset?.Count ?? 0, rows.Count));
         int count = checked((int)Math.Min(limit?.Count ?? rows.Count, rows.Count - start));
-        return rows.GetRange(start, count);
+        if (start + count < rows.Count) { rows.RemoveRange(start + count, rows.Count - start - count); }
+        if (start > 0) { rows.RemoveRange(0, start); }
+        return rows;
     }
 
     /// <summary>
     /// Keeps source columns available for scalar keys and materializes output values
     /// once for aliases and ordinals, matching grouped-query ordering semantics.
     /// </summary>
-    private static List<object?[]> ProjectAndSortRows(List<object?[]> matches,
+    private List<object?[]> ProjectAndSortRows(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy,
-        SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots, CancellationToken cancellationToken,
+        SqlRowCount? limit = null, SqlRowCount? offset = null)
     {
-        if (matches.Count == 0)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (orderBy.Count == 0)
         {
-            return [];
-        }
-        if (outputSlots is { Count: > 0 })
-        {
-            // The ordering keys were bound with the outputs at the ordinals after the source row
-            // (SqlPlanner.BindOrdering), which is the source relation's width.
-            int projectionStart = matches[0].Length;
-            var rows = new List<object?[]>(matches.Count);
+            // The common scan needs only its output list. Avoid allocating sort state
+            // for an unordered query, including the unlimited single-row lookup path.
+            var projected = new List<object?[]>();
+            long skip = offset?.Count ?? 0;
+            long remaining = limit?.Count ?? long.MaxValue;
+            if (remaining == 0) { return projected; }
             foreach (var source in matches)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var row = new object?[projectionStart + projections.Count];
-                source.CopyTo(row, 0);
-                ProjectRow(source, projections, evaluator, cancellationToken).CopyTo(row, projectionStart);
-                rows.Add(row);
+                var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                if (skip > 0) { skip--; continue; }
+                projected.Add(output);
+                if (--remaining == 0) { break; }
             }
-            return SortRows(rows, orderBy, evaluator, cancellationToken)
-                .Select(row => row[projectionStart..]).ToList();
+            cancellationToken.ThrowIfCancellationRequested();
+            return projected;
         }
-        if (orderBy.Count > 0)
+        if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
         {
-            matches = SortRows(matches, orderBy, evaluator, cancellationToken);
+            // Preserve the old sort-then-project path, including its call count before
+            // pagination. PostgreSQL planner.c:6649-6662 likewise postpones independent
+            // volatile outputs. Aliases/ordinals still require projection before sorting.
+            var sources = matches.ToList();
+            if (_metrics is not null) { _metrics.PeakOrderedRows = Math.Max(_metrics.PeakOrderedRows, sources.Count); }
+            if (sources.Count == 0) { return []; }
+            var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
+            var projected = new List<object?[]>(sorted.Count);
+            foreach (var source in sorted) { projected.Add(ProjectRow(source, projections, evaluator, cancellationToken)); }
+            cancellationToken.ThrowIfCancellationRequested();
+            return ApplyRowWindow(projected, limit, offset);
         }
+        var rows = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
+        if (rows.IsComplete) { return []; }
+        foreach (var source in matches)
+        {
+            var output = ProjectRow(source, projections, evaluator, cancellationToken);
+            var orderedRow = source;
+            if (outputSlots is { Count: > 0 })
+            {
+                // Output aliases/ordinals follow the source slots. This combined row is
+                // transient: only completed outputs and fixed keys survive this iteration.
+                orderedRow = new object?[source.Length + output.Length];
+                source.CopyTo(orderedRow, 0);
+                output.CopyTo(orderedRow, source.Length);
+            }
+            var keys = orderBy.Count == 0 ? Array.Empty<object?>() : new object?[orderBy.Count];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
+            }
+            rows.Add(output, keys);
+            if (rows.IsComplete) { break; }
+        }
+        // The base ordinary SELECT skips sort/collation resolution over empty input.
+        return rows.Finish(resolveEmptyCollations: false);
+    }
 
-        var projected = new List<object?[]>(matches.Count);
-        foreach (var row in matches)
+    private static bool ContainsVolatileCall(SqlBoundExpression? expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is null) { return false; }
+        if (expression is SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
+        if (expression is SqlBoundCase choice)
         {
-            projected.Add(ProjectRow(row, projections, evaluator, cancellationToken));
+            if (ContainsVolatileCall(choice.Input) || ContainsVolatileCall(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            {
+                if (ContainsVolatileCall(when.Condition) || ContainsVolatileCall(when.Result)) { return true; }
+            }
         }
-        return projected;
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(ContainsVolatileCall)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(ContainsVolatileCall)) { return true; }
+        return BoundChildren(expression).Any(ContainsVolatileCall);
     }
 
     private static object?[] ProjectRow(object?[] row, IReadOnlyList<SqlProjection> projections,
@@ -369,9 +424,36 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
     private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
-        SqlExpressionEvaluator evaluator)
-        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues))
-            .ToArray())).ToList();
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
+    {
+        var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
+            .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
+        int count = 0;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var row = rows[i];
+            if (seen.Add(row)) { rows[count++] = row; }
+        }
+        rows.RemoveRange(count, rows.Count - count);
+        return rows;
+    }
+
+    private static Collation[] CaptureProjectionCollations(IReadOnlyList<SqlProjection> projections,
+        SqlExpressionEvaluator evaluator, Collation[]? collations, CancellationToken cancellationToken)
+    {
+        bool first = collations is null;
+        collations ??= new Collation[projections.Count];
+        for (int i = 0; i < projections.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (first || !projections[i].Collation.IsFixed)
+            {
+                collations[i] = projections[i].Collation.Resolve(evaluator.SubqueryValues);
+            }
+        }
+        return collations;
+    }
 
     // ── DML ────────────────────────────────────────────────────────────
     //
@@ -541,8 +623,8 @@ internal sealed partial class SqlPlanExecutor
                     if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
-                return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
-                    : MaterializeProjected(plan.Returning!, returned, replacements.Count);
+                return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
+                    : MaterializeProjected(plan.Returning!, returned, replacements.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
@@ -635,8 +717,8 @@ internal sealed partial class SqlPlanExecutor
                     throw TranslateUniqueViolation(update.Table, exception);
                 }
             }
-            return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
-                : MaterializeProjected(plan.Returning!, returned, targets.Count);
+            return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
+                : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
         }, durable: false, cancellationToken).ConfigureAwait(false);
     }
 

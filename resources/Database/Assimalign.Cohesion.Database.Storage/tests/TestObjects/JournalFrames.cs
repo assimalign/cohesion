@@ -23,6 +23,21 @@ public static class JournalFrames
     private const int ChecksumSize = sizeof(uint);
     private const int Magic = 0x324C4157; // 'WAL2'
 
+    /// <summary>Fills the append buffer so the next record must first drain it.</summary>
+    /// <param name="journal">The journal whose append buffer to fill.</param>
+    /// <remarks>
+    /// Uses the public journal surface, so engine tests need no additional internals grant. The
+    /// 1 MiB capacity and frame overhead are pinned by the storage helper test; engine tests also
+    /// require COMMIT not to receive an LSN when the next write fails.
+    /// </remarks>
+    public static void FillAppendBuffer(StorageJournal journal)
+    {
+        journal.Flush();
+        const int capacity = 1024 * 1024;
+        const int bodyHeaderSize = TypeOffset + 1 + sizeof(long);
+        journal.AppendOperation(0, new byte[capacity - PrefixSize - bodyHeaderSize - ChecksumSize]);
+    }
+
     /// <summary>
     /// Gets whether <paramref name="written"/>, the bytes of one write to a journal file, carries a
     /// record of <paramref name="type"/>.

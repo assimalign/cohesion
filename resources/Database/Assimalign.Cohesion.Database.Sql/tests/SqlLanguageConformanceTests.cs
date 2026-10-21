@@ -355,6 +355,26 @@ public sealed class SqlLanguageConformanceTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - LIMIT: unordered scans stop before unvisited expression faults (#1523)")]
+    public async Task Select_UnorderedLimit_ShouldEvaluateOnlyVisitedRows()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sql-profile-bounded", new());
+        var database = await engine.CreateDatabaseAsync("audit", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE bounded_rows (id INT)");
+        await ExecuteAsync(session, "INSERT INTO bounded_rows VALUES (1), (3)");
+
+        // Act / Assert
+        await ExpectRowsAsync(session, "SELECT 10 / (id - 3) FROM bounded_rows LIMIT 1", [[-5L]]);
+        session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(1);
+        (await RowsAsync(session, "SELECT 10 / (id - 3) FROM bounded_rows LIMIT 0")).ShouldBeEmpty();
+        session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(0);
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+            "SELECT id FROM bounded_rows ORDER BY 10 / (id - 3) LIMIT 1", cancellationToken: CancellationToken.None));
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
+    }
+
     /// <summary>Keeps invalid count diagnostics unchanged before a row window executes.</summary>
     /// <param name="clause">The count clause.</param>
     /// <param name="count">The invalid count.</param>

@@ -1430,6 +1430,42 @@ over the SQL wire protocol (#1100). Negative and non-integer counts retain the
 `<clause> requires a non-negative integer.`
 diagnostics.
 
+For non-DISTINCT queries without ORDER BY, execution stops output evaluation after
+OFFSET + LIMIT qualifying rows (#1523). Stored-table
+and system-view scans also stop reading input. Grouped queries still consume their
+aggregate input, but stop group projection and HAVING evaluation at the window;
+correlated queries stop outer-row evaluation. Join inputs/results and set operands
+still materialize, while their final projection stops at the window. Unvisited
+projections and HAVING predicates raise no errors and make no volatile function
+calls, following PostgreSQL's Limit node (`src/backend/executor/nodeLimit.c:82-124`).
+Non-DISTINCT ORDER BY + a positive LIMIT
+with fixed ordering collations evaluates every input and retains only the best
+OFFSET + LIMIT rows, with stable input order for ties and the same collation/NULL
+placement as a full sort. Deferred collations keep full sorting, using the last
+qualifying row's resolved collations even when later rows fail WHERE or HAVING.
+Non-DISTINCT LIMIT 0, with or without ORDER BY, returns before the scan starts:
+no input row is read and no WHERE predicate, projection or ORDER BY key is
+evaluated. Grouped queries still consume their aggregate input but evaluate no
+group's HAVING or projection; correlated queries evaluate no outer row. Two cases
+do not short-circuit: the independent-volatile ORDER BY fallback below reads and
+sorts every input and projects every row before LIMIT 0 discards them, and a
+grouped query whose ORDER BY is correlated evaluates every group's HAVING and
+projection (but no ORDER BY key).
+DISTINCT still completes
+before pagination. Results remain fully evaluated before delivery; ordered index
+access and spillable sorting are separate work.
+
+For ordinary SELECT ordering without output-alias or ordinal dependencies,
+nonvolatile projections and keys evaluate together in input order, projection
+first. This can change which projection/key error appears first compared with
+sorting all source rows before projection. Independent volatile projections retain
+the full-sort fallback: keys evaluate in input order, then projections evaluate in
+sorted output order before pagination, including without LIMIT. This preserves
+the previous call order and count; PostgreSQL likewise postpones independent volatile
+outputs (`src/backend/optimizer/plan/planner.c:6649-6662`). When ordering references
+outputs, projections still evaluate once per input before keys. Grouped and correlated
+projections retain their existing evaluation before sorting.
+
 ## VALUES and counts have no column scope (#1165)
 
 A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL
@@ -3112,6 +3148,7 @@ pin in the same change.
 | `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
 | `COHSQLE043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
 | `COHSQLE044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as COHSQLE043 (#1231) |
+| `COHSQLE045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |

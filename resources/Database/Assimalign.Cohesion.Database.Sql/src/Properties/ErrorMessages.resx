@@ -225,6 +225,9 @@
   <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
+  <data name="ResultDeliveryFailed" xml:space="preserve"><value>The statement result could not be delivered.</value></data>
+  <data name="ResultRowTooLarge" xml:space="preserve"><value>The encoded result row is {0} bytes, exceeding the wire payload limit of {1} bytes.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
   <data name="StatementTableChanged" xml:space="preserve"><value>Table '{0}.{1}' changed while the statement was waiting. Retry the statement in a fresh transaction.</value></data>
+  <data name="ResultHeaderTooLarge" xml:space="preserve"><value>The encoded result header is {0} bytes, exceeding the wire payload limit of {1} bytes.</value></data>
 </root>

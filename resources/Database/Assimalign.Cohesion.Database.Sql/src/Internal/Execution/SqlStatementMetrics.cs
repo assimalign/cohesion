@@ -47,6 +47,9 @@ internal sealed class SqlStatementMetrics
     /// </summary>
     internal long RecordsExamined { get; set; }
 
+    /// <summary>Peak ordered candidate rows retained by any SELECT collector in this statement.</summary>
+    internal int PeakOrderedRows { get; set; }
+
     /// <summary>Candidate rows visited while building self-reference key sets.</summary>
     internal long SelfReferenceCandidateVisits { get; set; }
 
@@ -68,6 +71,9 @@ internal sealed class SqlStatementMetrics
     internal int LiveIndexBuilds { get; set; }
 
     internal SqlStatementReferences? References { get; set; }
+
+    // Keep wire-only state in the shared statement object, rather than every context copy.
+    internal SqlResultPreparation? ResultPreparation { get; set; }
 
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or

@@ -621,13 +621,17 @@ public class TransactionCoordinatorRecoveryTests
     /// for it: its own outcome was decided. The failure is thrown by the next bounded checkpoint,
     /// so the engine's checkpoint worker learns of it.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a deferred checkpoint's failure reaches the next checkpoint call, not the statement")]
-    public async Task TryCheckpoint_DeferredCheckpointFails_ShouldThrowFromTheNextCallNotTheStatement()
+    [Theory(DisplayName = "Cohesion Test [Database.Transactions] - Coordinator checkpoint: a deferred checkpoint's failure reaches the next checkpoint call, not the statement")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TryCheckpoint_DeferredCheckpointFails_ShouldThrowFromTheNextCallNotTheStatement(bool foreignStorage)
     {
         // Arrange
         using var storage = CoordinatorStorage.Create();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
-        var failure = new InvalidOperationException("Injected checkpoint failure.");
+        Exception failure = foreignStorage
+            ? new StorageTransactionException(StorageTransactionErrorCode.ForeignStorage, "Injected foreign storage checkpoint failure.")
+            : new InvalidOperationException("Injected checkpoint failure.");
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -646,7 +650,7 @@ public class TransactionCoordinatorRecoveryTests
         release.SetResult();
         var statementError = await Record.ExceptionAsync(() => statement.WaitAsync(TimeSpan.FromSeconds(10)));
         coordinator.BeforeCheckpoint = null;
-        var reported = Should.Throw<InvalidOperationException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None));
+        var reported = Record.Exception(() => coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None));
         bool ranAfterTheReport = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
 
         // Assert
