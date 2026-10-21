@@ -1646,8 +1646,7 @@ collation without borrowing a physical source ordinal or expression.
 Set bodies execute at the top level, in IN/NOT IN, EXISTS/NOT EXISTS, scalar subqueries,
 derived tables, CTE definitions and INSERT query sources, including correlated operands.
 `IN ((SELECT id FROM t))` is now membership, with redundant query parentheses removed
-by canonical rendering. Top-level SELECT operands still require FROM; the top-level operands
-of a CTE definition may use its implicit row. Each subquery counts once toward the existing
+by canonical rendering. SELECT operands may omit FROM in both top-level and nested queries (#1373). Each subquery counts once toward the existing
 32-level subquery limit; set nodes count individually toward the expression depth limit.
 Parenthesized scalar queries followed by arithmetic, comparison or a list comma remain values
 (PostgreSQL gram.y:15645,15899,15916). Parenthesized WITH retains the existing single subquery
@@ -1672,6 +1671,29 @@ UNION, INTERSECT and EXCEPT were already keywords; removing their unsupported ro
 keeping CORRESPONDING contextual changes no persisted identifier quoting, so the storage
 format is unchanged. Persisted-text drift tests pin these four spellings.
 
+### Boolean search conditions (#1190)
+
+WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN, truth tests
+(IS TRUE/FALSE/UNKNOWN) and operands of AND, OR and NOT require BOOLEAN. A known non-Boolean type, including arithmetic,
+CASE or aggregate results and supplied parameters, fails planning before rows are read
+with COHSQLE003 / SQLSTATE 42804, naming the construct. Runtime checks enforce the same
+rule for values whose types were unknown. An untyped NULL is UNKNOWN and retains SQL
+three-valued logic; CAST(NULL AS INT) is a non-Boolean typed expression and is refused.
+Only TRUE admits a row or selects a searched CASE arm. Boolean AND/OR keep their
+short-circuit order; simple CASE compares values and does not require Boolean WHEN values.
+
+Every CASE result and COALESCE alternative in a Boolean position must be Boolean, NULL,
+or a valid Boolean input string literal, even when short-circuiting skips it. Boolean
+string literals accept `t`, `true`, `f`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `y`
+and `n`, case-insensitively (PostgreSQL src/backend/utils/adt/bool.c:37-109). Other strings
+fail with COHSQLE003; text columns and text parameters do not acquire this literal coercion.
+Table CHECK and domain CHECK use COHSQLE003 / 42804 for every non-Boolean position.
+
+Opening a database binds stored SQL function bodies without reapplying declaration-only
+Boolean-position validation. An invalid legacy operand or an application function whose
+result is no longer Boolean fails when the stored body is invoked with COHSQLE003;
+it does not prevent the database from opening.
+
 ## Subqueries and query-source inserts (#1021)
 
 Subqueries are separate planned queries. An uncorrelated child materializes once
@@ -1681,7 +1703,10 @@ each outer row. Supported forms are correlated and uncorrelated
 `NOT EXISTS (SELECT ...)`, and scalar `(SELECT ...)` expressions. They compose
 with the supported SELECT projection, WHERE, INNER JOIN/ON, GROUP BY/HAVING,
 ORDER BY, LIMIT, and OFFSET surface, including nested queries and wire execution.
-Each SELECT still requires a FROM relation. Scalar and IN queries must return
+A SELECT without FROM reads one implicit row (#1373), so SELECT 1 and SELECT f(1)
+return one row. WHERE FALSE or NULL and LIMIT 0/OFFSET 1 can remove it; aggregates,
+ordering, DISTINCT, set operands, derived tables and views use ordinary query semantics.
+A wildcard without FROM fails with COHSQLE013. Scalar and IN queries must return
 exactly one column; EXISTS accepts any valid select list.
 
 | Form | Result semantics |
@@ -1772,11 +1797,10 @@ entry). A CTE and a stored relation with the same unaliased name conflict
 `WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
 only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
 FROM and operate on one implicit row; a wildcard still requires a relation.
-This implicit row applies to the definition's SELECT root and the top-level SELECT operands of a set-operation body. Subqueries and
-derived tables nested in that body retain the ordinary FROM requirement and
-ordinary diagnostics. Constant bodies run the same planning checks, including
+This implicit row applies to every FROM-less SELECT, including set-operation operands,
+subqueries and derived tables nested in that body (#1373). Constant bodies run the same planning checks, including
 COHSQLE017 for aggregates in WHERE even when the definition is unused.
-The ordinary top-level SELECT-without-FROM exclusion remains.
+FROM-less top-level and nested queries use the same implicit row (#1373).
 
 Every definition is bound before execution, including unused definitions. Duplicate
 names and unresolved references to later siblings use `COHSQLE026` before any row
@@ -2338,7 +2362,8 @@ Shared constants, function results, parameters, defaults and retained execution 
 when supplying a row value. Fresh stored payloads transfer directly; repeated uses detach
 at their source. Result materialization adds no blanket binary copy.
 
-The engine evaluates an integer literal as BIGINT and a fractional or exponent
+The engine infers and evaluates an integer literal as INTEGER when it fits, otherwise BIGINT,
+and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
 hold reports `COHSQLE002` and names itself, for example
 `integer literal 9223372036854775808 exceeds BIGINT.`: an integer literal above
@@ -2677,7 +2702,7 @@ Parameter-dependent result types are checked when evaluated, including CASE resu
 and polymorphic calls; parameters used only in CASE conditions leave its static result type
 intact. NULLIF now executes as an evaluator form; its result participates in the same CAST signature checks (#1120).
 A NULL operand returns NULL with target metadata; it does not bypass a statically
-unsupported pair or invalid target. SQL integer literals are Int64 and fractional
+unsupported pair or invalid target. SQL integer literals are Int32 when they fit, otherwise Int64, and fractional
 literals are Decimal, including exponent and leading decimal-point forms. To
 supply a floating operand, cast text to REAL or DOUBLE first.
 
@@ -3026,7 +3051,7 @@ pin in the same change.
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
+| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
 | `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 | `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
 | `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
@@ -3212,7 +3237,7 @@ Column defaults admit variable-free scalar expressions with Immutable, Stable or
 
 | Code | Meaning |
 | --- | --- |
-| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; non-Boolean CHECK predicate; absent function/domain requested by DROP. |
+| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; absent function/domain requested by DROP. |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
 | COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |

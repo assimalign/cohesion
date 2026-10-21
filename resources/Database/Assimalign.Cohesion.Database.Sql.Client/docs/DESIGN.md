@@ -26,6 +26,10 @@ Blank derived output names fail planning with COHSQLE013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
 transaction remain usable; the wire regression verifies pending writes and rollback.
 
+Boolean predicate errors (#1190) retain ExecutionFailure, COHSQLE003 diagnostics and
+connection reuse over InMemory and TCP. Coverage includes every clause, supplied string
+parameters and explicit transactions; failed writes preserve rows. No protocol changes.
+
 ## Constraint diagnostics (#1666)
 
 SqlConnection preserves the existing ExecutionFailure category and exposes the single
@@ -59,6 +63,10 @@ The existing query and command exchanges carry derived-table results and
 UPDATE/DELETE predicate-subquery affected counts. Server materialization preserves
 the existing column metadata and error taxonomy; no wire format changes. The
 subquery wire corpus covers a renamed derived join and both DML statement kinds.
+
+FROM-less SELECT (#1373) uses the existing query exchange, including scalar/IN/EXISTS
+children and aggregate results. Both transports verify the implicit row and empty filters.
+No client API or wire payload changes.
 
 ## Correlated children (#1113, part a)
 

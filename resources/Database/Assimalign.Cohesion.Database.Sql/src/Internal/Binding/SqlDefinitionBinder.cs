@@ -243,21 +243,31 @@ internal static class SqlDefinitionBinder
         {
             if (unavailableDomain is not null) { throw Refuse(unavailableDomain, expression.Location); }
             SqlPersistedExpression.Bind(expression, scope);
-            SqlPlanner.ValidateExpression(expression, scope);
+            SqlPlanner.ValidateExpression(expression, scope, validateBooleanPositions: false);
             _ = Dependencies(expression, scope, Volatility(function.Volatility, location));
         }
         catch (DatabaseException failure) when (unavailableDomain is not null || failure is SqlFunctionResultMismatchException ||
+            failure is SqlEvaluationException { IsBooleanRequired: true } ||
             HasUnavailableCall(expression, scope, Volatility(function.Volatility, location)))
         {
-            unresolved = $"Function '{function.Name}': {failure.Message}";
-            string reason = unresolved;
-            body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
+            if (failure is SqlEvaluationException { IsBooleanRequired: true } booleanFailure)
+            {
+                body = new SqlBoundFailure(() => throw booleanFailure.Duplicate());
+            }
+            else
+            {
+                unresolved = $"Function '{function.Name}': {failure.Message}";
+                string reason = unresolved;
+                body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
+            }
         }
         return new SqlExpressionFunction(function.Name, types, result, Volatility(function.Volatility, location), function.IsStrict,
             body, unresolved, notNullCheck, bodyCollation: collation, bindBody: body is null ? BindBody : null);
 
         SqlBoundExpression BindBody(Collation inputCollation, CancellationToken bindingToken)
-            => CreateScope(inputCollation, bindingToken).Bind(expression);
+            => bindingContext == SqlBindingContext.Domain
+                ? CreateScope(inputCollation, bindingToken).BindPredicate(expression)
+                : CreateScope(inputCollation, bindingToken).Bind(expression);
 
         SqlExpressionEvaluator CreateScope(Collation inputCollation, CancellationToken bindingToken)
         {

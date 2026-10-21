@@ -76,9 +76,9 @@ internal sealed partial class SqlPlanExecutor
                 var state = states[i];
                 if (state.Inputs is null && state.Distinct is null)
                 {
-                    AddRow(state.Accumulator, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken);
+                    AddRow(state.Accumulator, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart);
                 }
-                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken); }
+                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart); }
             }
         }
 
@@ -99,7 +99,7 @@ internal sealed partial class SqlPlanExecutor
                     foreach (var values in ordered)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        AddAggregateValues(state.Accumulator, aggregates[i], aggregateCollations[i], values, cancellationToken);
+                        AddAggregateValues(state.Accumulator, aggregates[i], aggregateCollations[i], values, cancellationToken, statement.TransactionStart);
                     }
                 }
                 row[key.Length + i] = state.Accumulator.Finish(cancellationToken).ToObject();
@@ -154,7 +154,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var aggregate = aggregates[i];
                 states[i] = new GroupAggregateState(aggregate.Function.CreateAccumulator(
-                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken)), aggregate, _subqueryValues);
+                    new SqlFunctionContext(aggregate.Database, aggregateCollations[i], cancellationToken, statement.TransactionStart)), aggregate, _subqueryValues);
             }
 
             return states;
@@ -186,7 +186,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static void AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
     {
         var values = new SqlValue[aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, source, values);
@@ -217,7 +217,7 @@ internal sealed partial class SqlPlanExecutor
         }
         if (state.Inputs is null)
         {
-            state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+            state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
             return;
         }
         if (aggregate.Function is SqlStringAggregateFunction)
@@ -244,11 +244,11 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static void AddAggregateValues(SqlAggregateAccumulator accumulator, SqlGroupAggregate aggregate,
-        Collation collation, object?[] row, CancellationToken cancellationToken)
+        Collation collation, object?[] row, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
     {
         var values = new SqlValue[aggregate.Arguments.Length];
         for (int i = 0; i < values.Length; i++) { values[i] = SqlValue.FromObject(row[i]); }
-        accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+        accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
     }
 
     /// <summary>
@@ -267,7 +267,7 @@ internal sealed partial class SqlPlanExecutor
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void AddRow(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
     {
         var arguments = aggregate.Arguments;
         switch (arguments.Length)
@@ -278,19 +278,19 @@ internal sealed partial class SqlPlanExecutor
                 if (argument is not null || aggregate.Function.NullBehavior != SqlNullBehavior.ReturnsNullOnNullInput)
                 {
                     // Converted, added and coded in one frame of the accumulator's; not evaluated again.
-                    state.AddResolved(argument, aggregate.FirstTarget, aggregate.Database, collation, cancellationToken);
+                    state.AddResolved(argument, aggregate.FirstTarget, aggregate.Database, collation, cancellationToken, transactionTimestamp);
                 }
 
                 return;
             case 0:
                 // COUNT(*): no argument, so no NULL for the strict rule to skip.
-                state.AddResolved(aggregate.Database, collation, cancellationToken);
+                state.AddResolved(aggregate.Database, collation, cancellationToken, transactionTimestamp);
                 return;
             case <= SqlValueBuffer.Length:
-                AddRowBuffered(state, aggregate, collation, evaluator, row, cancellationToken);
+                AddRowBuffered(state, aggregate, collation, evaluator, row, cancellationToken, transactionTimestamp);
                 return;
             default:
-                AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken);
+                AddRowPooled(state, aggregate, collation, evaluator, row, cancellationToken, transactionTimestamp);
                 return;
         }
     }
@@ -298,23 +298,23 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>Adds a row of a call of two to four arguments, converted into an inline buffer.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void AddRowBuffered(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
     {
         SqlValueBuffer buffer = default;
         Span<SqlValue> values = buffer[..aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, row, values);
-        state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+        state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
     }
 
     private static void AddRowPooled(SqlAggregateAccumulator state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, object?[] row, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
     {
         SqlValue[] rented = ArrayPool<SqlValue>.Shared.Rent(aggregate.Arguments.Length);
         try
         {
             Span<SqlValue> values = rented.AsSpan(0, aggregate.Arguments.Length);
             EvaluateArguments(aggregate, evaluator, row, values);
-            state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken));
+            state.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
         }
         finally
         {

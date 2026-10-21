@@ -147,7 +147,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken), update.Assigned.ToArray());
+                CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), update.Assigned.ToArray());
                 ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
             }
             // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted

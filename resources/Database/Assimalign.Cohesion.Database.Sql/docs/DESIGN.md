@@ -156,6 +156,32 @@ Character and length, following #1437. DATETIME,
 DATETIME2 and DATETIMEOFFSET add no SQL Server range/rounding behavior; every temporal
 precision, 7 included, and INTERVAL field restrictions stay unsupported under #1438.
 
+## Boolean search conditions (#1190)
+
+WHERE (including UPDATE/DELETE and FROM-less SELECT), JOIN ON, HAVING and ON CONFLICT
+DO UPDATE WHERE require BOOLEAN. The shared planner check uses StaticOperandType with
+binder inference as its fallback, so arithmetic, CASE results, aggregates and supplied
+parameters fail before reading even an empty relation. AND/OR/NOT operands, searched
+CASE conditions and IS TRUE/FALSE/UNKNOWN operands use the same rule, including ORDER BY output aliases. The error is
+COHSQLE003 (SQLSTATE 42804), names the construct and retains its source span. This follows
+PostgreSQL src/backend/parser/parse_coerce.c:1163-1184 without implicit non-Boolean coercion.
+Untyped NULL remains UNKNOWN; a typed non-Boolean NULL expression is refused. Every CASE result
+and COALESCE alternative in a Boolean position is checked, including unreachable alternatives.
+Valid Boolean input string literals are coerced only in Boolean positions (PostgreSQL
+src/backend/utils/adt/bool.c:37-109); text columns and parameters retain their declared types.
+
+Matches, logical chains, NOT and searched CASE also check values at runtime. Correlated
+branch preparation shares the check before selecting or evaluating another branch.
+Boolean short-circuiting and simple CASE value comparisons retain their existing rules.
+Invalid stored view predicates now fail binding with the same diagnostic; catalog/storage
+encoding is unchanged. SQL function declarations run the Boolean-position walk; stored bodies
+retain the load-only binding path, with COHSQLE003 isolated as a SqlBoundFailure. Legacy invalid
+CASE/logical operands and changed application return types therefore fail on invocation, while
+the database opens. Logical nodes, NOT and searched CASE conditions retain runtime error spans.
+The generic Matches runtime backstop on a bound root has no source span; known-type
+statement roots are checked with their AST spans during planning.
+No interface, visibility grant, reflection or dynamic code is added.
+
 ## Request parameters (#1102)
 
 Each execution copies request parameters into an ordinal, bare-name dictionary using
@@ -320,9 +346,9 @@ round away from zero for both signs (#1661).
 SqlSetOperationPlan implements SqlRelationPlan, publishing synthesized common-typed outputs
 to subquery, derived, CTE and INSERT-source consumers. Each operand binds through PlanQuery;
 CTE reachability, function validation, deferred-schema admission, aggregate scope discovery
-and EXPLAIN descend through both operands. CTE constant rows extend to top-level set operands.
+and EXPLAIN descend through both operands. All FROM-less SELECT operands use the constant-row plan (#1373).
 Each CTE body collects its direct SELECT operand identities once in a reference-equality set;
-constant-row admission uses membership checks, keeping FROM-less set-chain planning linear.
+projection metadata uses membership checks, keeping FROM-less set-chain planning linear.
 Combined ordering binds output names and ordinals directly, without source-expression lookup.
 USING's category/implicit-cast rule is reused, with unknown handling and a set-specific mismatch
 message (COHSQLE003 / 42804). Literal strings retain unknown provenance until the pair
@@ -371,8 +397,8 @@ provenance. One executor cache materializes uncorrelated relations by identity f
 whole statement; correlated derived relations rematerialize per outer frame. SqlWithPlan pre-materializes reachable definitions before the input's
 first write, under the same statement context. Binary values detach on retention
 and delivery. EXPLAIN maps WITH and constant-source plans. Scalar/aggregate bodies
-without FROM use one implicit row at the definition's SELECT root or its top-level set operands;
-nested queries keep their ordinary FROM requirement and diagnostics. All bodies,
+without FROM use one implicit row, as do top-level queries, set operands, views, derived tables
+and scalar/IN/EXISTS children (#1373). All bodies,
 including unused constant bodies, reject aggregates in WHERE during planning
 (COHSQLE017; PostgreSQL src/backend/parser/parse_agg.c:407).
 No interface, project reference or internal grant is added.
@@ -473,7 +499,7 @@ PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
 subqueries, quantified comparisons, recursive/nested CTEs and lateral joins remain
-outside the profile. Ordinary top-level SELECT continues to require FROM. Subquery resolution binds
+outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
@@ -544,7 +570,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | `With` | Reachable CTE materializations in declaration order, followed by the enclosing input |
 | `Materialize` | One named CTE's complete definition plan, evaluated once per statement |
 | `CteScan` | Read of an already materialized schema-less CTE relation |
-| `Constant` | One implicit input row for a FROM-less definition body; detail includes filter, order_keys, distinct, limit and offset |
+| `Constant` | One implicit input row for a FROM-less SELECT; detail includes filter, order_keys, distinct, limit and offset |
 | `SystemView` | A qualified virtual relation; no fabricated stored-table access |
 | `DerivedTable` | Aliased materialized query source with its complete child plan; a single source has a Select parent |
 | `Subqueries` | Uncorrelated child plans in execution order, followed by the enclosing input |
@@ -797,7 +823,7 @@ SqlDatabaseSession captures one UTC instant from EngineOptions.TimeProvider at
 explicit transaction start, or when beginning an automatic statement transaction.
 SqlDatabaseTransaction retains it; SqlStatementContext carries it to planning.
 The statement's SqlFunctionEnvironment and bound calls retain the same instant
-for seek-bound evaluation and row execution. An internal SqlFunctionContext field
+for seek-bound evaluation and row execution. SqlFunctionContext.TransactionTimestamp exposes it to application functions and
 passes it through SQL function bodies, whose shared bound trees take the invoking
 statement's clock, never their bind time. Correlated children inherit the statement
 environment. This capture/carrier/reader shape is the reuse point for #1121, #1137
@@ -920,7 +946,11 @@ flowchart LR
   `SqlFunctionContext`: the database, the call's input collation (resolved when the
   statement was bound) and the statement's cancellation token. Both have public
   constructors, so a test can call a function with a collation or a token. The context has
-  no transaction timestamp yet: no transaction carries its start time.
+  a nullable DateTimeOffset TransactionTimestamp (#1373): the explicit transaction's BEGIN instant,
+  or the autocommit statement's own start. Scalar calls, aggregate creation and aggregate row calls
+  receive that same instant, including table and domain CHECK evaluation. The public four-argument
+  constructor supplies a timestamp directly; the three-argument constructor and default return null
+  because no statement or transaction context exists. Aggregate row helpers require the timestamp argument.
 - **Registration.** `SqlDatabaseEngineBuilder.Functions` starts with the standard library,
   added through the same public `Add` (`SqlStandardLibrary.Register`). `Add` refuses
   (`ArgumentException`) a name that is not an identifier, a special form, a keyword, a type
@@ -955,7 +985,9 @@ flowchart LR
   converts to or from text), ten for a pseudo-type, one for a variadic overload.
   The unique cheapest wins; none is `COHSQLE006` (`has no overload that accepts argument
   types (TEXT)`), a tie `COHSQLE008` (SQLSTATE 42725). An integer literal is typed by its
-  magnitude, INTEGER when it fits, as PostgreSQL types one. Inside a grouping, a grouping
+  magnitude, INTEGER when it fits and BIGINT otherwise, as PostgreSQL types one
+  (src/backend/parser/scan.l:1335-1348). Both planner operand inference and the literal evaluator
+  use that same type. Inside a grouping, a grouping
   key or an aggregate result has the type it has over the input row (the group scope
   types a slot through the source scope, only when asked), so `describe(COUNT(*))` calls
   `describe(BIGINT)` as PostgreSQL's does. `ANYELEMENT` arguments of
@@ -1235,8 +1267,7 @@ win-arm64 by hand and for linux-x64 in CI (`resource-database.yml`), which runs 
 as it does a small-table smoke of the statement benchmark, and fails either publish on any
 `warning IL2xxx`/`IL3xxx` in its output.
 
-**Not yet.** The context's transaction timestamp (no transaction carries its start time; the
-statement-context track owns that change); the `FunctionCatalogFrozen`,
+**Not yet.** The `FunctionCatalogFrozen`,
 `PersistedDefinitionUnresolved` and `FunctionFailed` events (§8 of the design, the
 EventSource track's); an uncast string literal for a DATE, TIME, TIMESTAMP, INTERVAL or UUID
 parameter (E3's cast registry converts text to those types under `CAST`, so
@@ -5761,7 +5792,7 @@ locate their retained canonical body or type fragment when no declaration AST su
 walks retain the parsed node's span. DROP of an absent domain/function locates the DROP statement.
 The existing COHSQLD002/003 executor ownership and dependency checks are unchanged.
 
-A CHECK that is not Boolean is a definition-binding rejection under COHSQLD001, including
+A CHECK that is not Boolean reports COHSQLE003 / SQLSTATE 42804, including domain CHECK and
 CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
 PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
 position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.

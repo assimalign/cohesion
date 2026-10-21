@@ -101,11 +101,28 @@ public sealed partial class SqlCteExecutionTests
         rows.ShouldHaveSingleItem().ShouldBe([42L, 1]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - WITH: only the definition root receives an implicit row")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - WITH: nested FROM-less queries share ordinary implicit rows (#1373)")]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT 2)")]
     [InlineData("SELECT id FROM t WHERE EXISTS (SELECT 2)")]
     [InlineData("SELECT (SELECT 2) AS id FROM t")]
     [InlineData("SELECT * FROM (SELECT 2 AS id) d")]
+    public async Task Execute_NestedQueryWithoutFrom_ShouldShareOrdinaryResults(string body)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("cte-nested-constant", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session);
+        var ordinary = await RowsAsync(session, body);
+
+        // Act
+        var nested = await RowsAsync(session, $"WITH a AS ({body}) SELECT * FROM a");
+
+        // Assert
+        nested.ShouldBe(ordinary);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - WITH: FROM-less wildcards retain ordinary diagnostics (#1373)")]
     [InlineData("SELECT id FROM t WHERE id IN (SELECT *)")]
     [InlineData("SELECT * FROM (SELECT *) d")]
     public async Task Execute_NestedQueryWithoutFrom_ShouldKeepOrdinaryDiagnostic(string body)

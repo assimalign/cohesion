@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -210,7 +211,31 @@ internal sealed partial class SqlExpressionEvaluator
             return true;
         }
 
-        return Evaluate(predicate, row) is true;
+        return BooleanValue(Evaluate(predicate, row), "predicate") is true;
+    }
+
+    internal static bool? BooleanValue(object? value, string clause, Location? location = null) => value switch
+    {
+        null => null,
+        bool flag => flag,
+        _ => throw SqlEvaluationException.BooleanRequired(clause, OperandTypeName(value)).At(location),
+    };
+
+    // PostgreSQL src/backend/utils/adt/bool.c:37-109. These inputs apply to literals
+    // in Boolean positions only; text columns and supplied text parameters keep their types.
+    internal static bool TryBooleanLiteral(SqlExpression expression, out bool value)
+    {
+        value = false;
+        if (expression is not SqlLiteralExpression { LiteralType: SqlLiteralType.String } literal) { return false; }
+        switch (literal.Value.ToUpperInvariant())
+        {
+            case "T": case "TRUE": case "YES": case "ON": case "1": case "Y":
+                value = true;
+                return true;
+            case "F": case "FALSE": case "NO": case "OFF": case "0": case "N":
+                return true;
+            default: return false;
+        }
     }
 
     /// <summary>
@@ -684,11 +709,12 @@ internal sealed partial class SqlExpressionEvaluator
         };
     }
 
-    private static long ParseIntegerLiteral(string text)
+    private static object ParseIntegerLiteral(string text)
     {
         try
         {
-            return long.Parse(text, CultureInfo.InvariantCulture);
+            long value = long.Parse(text, CultureInfo.InvariantCulture);
+            return value is >= int.MinValue and <= int.MaxValue ? (object)(int)value : value;
         }
         catch (OverflowException exception)
         {
@@ -778,9 +804,9 @@ internal sealed partial class SqlExpressionEvaluator
     /// The first term that decides the chain (<see langword="false"/> for <c>AND</c>,
     /// <see langword="true"/> for <c>OR</c>) ends it, and no later term is evaluated, so a guard
     /// such as <c>d &lt;&gt; 0 AND x / d &gt; 1</c> never divides by zero. Otherwise the chain is
-    /// unknown when any term was unknown (a NULL, or a value that is not a Boolean), and the
-    /// operator's identity when none was. That is exactly what the nested binary operators the
-    /// chain replaces computed, in the same order and with the same faults: evaluating
+    /// unknown when any term was NULL. A non-null, non-Boolean term raises COHSQLE003. The
+    /// operator's identity is returned when no term was unknown. This preserves the nested
+    /// operators' order and faults: evaluating
     /// <c>(a AND b) AND c</c> left operand first visits a, b, c in turn and stops at the same
     /// term (the #1069 short-circuit contract).
     /// </remarks>
@@ -791,7 +817,7 @@ internal sealed partial class SqlExpressionEvaluator
         var operands = logical.Operands;
         for (int index = 0; index < operands.Length; index++)
         {
-            bool? value = EvaluateCore(operands[index], row) as bool?;
+            bool? value = BooleanValue(EvaluateCore(operands[index], row), logical.IsOr ? "OR" : "AND", logical.Location);
             if (value is null)
             {
                 unknown = true;
@@ -879,7 +905,7 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
                     ? operand
                     : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
-                SqlUnaryOperator.Not => operand is bool flag ? Box(!flag) : throw new SqlPlanningException("COHSQLE003", "NOT requires a boolean operand.", unary.Location),
+                SqlUnaryOperator.Not => Box(!BooleanValue(operand, "NOT", unary.Location)!.Value),
                 _ => throw new SqlPlanningException("COHSQLE013", $"Unary operator {unary.Operator} is not supported.", unary.Location),
             };
         }
@@ -1071,7 +1097,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             if (expression.Input is null)
             {
-                if (EvaluateCore(when.Condition, row) is true)
+                if (BooleanValue(EvaluateCore(when.Condition, row), "CASE WHEN", when.Location) is true)
                 {
                     return SqlTemporalArithmetic.Promote(EvaluateCore(when.Result, row, copySharedBinary), expression.ResultType);
                 }

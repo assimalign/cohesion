@@ -464,7 +464,8 @@ internal sealed partial class SqlPlanExecutor
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
         // trees, which carry their column ordinals, functions and collations.
         var bound = _definitions.Get(table, cancellationToken);
-        var evaluator = ExecutionEvaluator(null, cancellationToken, containsLike: bound.ChecksContainLike);
+        var evaluator = ExecutionEvaluator(null, cancellationToken, containsLike: bound.ChecksContainLike,
+            transactionTimestamp: statement.TransactionStart);
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
@@ -478,7 +479,7 @@ internal sealed partial class SqlPlanExecutor
                     object? result = evaluator.Evaluate(check.Bound, row);
                     if (result is not null and not bool)
                     {
-                        throw new DatabaseException($"CHECK '{constraint.Name}' must evaluate to BOOLEAN.");
+                        throw SqlEvaluationException.BooleanRequired("CHECK", SqlExpressionEvaluator.OperandTypeName(result)).At(check.Predicate.Location);
                     }
                     if (result is false)
                     {
@@ -959,7 +960,7 @@ internal sealed partial class SqlPlanExecutor
         SqlDefinitionBinder.PinCalls(expression, scope, functionCalls);
         SqlPersistedExpression.Bind(expression, scope);
         new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
-        return scope.Bind(expression);
+        return scope.BindPredicate(expression);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
@@ -1171,21 +1172,22 @@ internal sealed partial class SqlPlanExecutor
                 SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
                 SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
                 SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
-                SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null,
+                SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null
+                    || SqlExpressionEvaluator.TryBooleanLiteral(literal, out _),
                 SqlColumnReferenceExpression column => _table.Columns[FindColumnOrdinal(_table, column.ColumnName)].Type.Type == DatabaseType.Boolean,
                 // COALESCE over Boolean arguments, or a function declared to return BOOLEAN.
-                SqlFunctionCallExpression => called is null || ReferenceEquals(called.ReturnType, SqlType.Boolean),
+                SqlFunctionCallExpression => called is null || called.ReturnType.Storage.Type == DatabaseType.Boolean,
                 SqlCaseExpression => true,
                 _ => false,
             };
             if (!boolean)
             {
-                if (expression is SqlFunctionCallExpression call && called is not null && !SqlStandardLibrary.Contains(called))
+                if (!_declaring && expression is SqlFunctionCallExpression call && called is not null && !SqlStandardLibrary.Contains(called))
                 {
                     throw new SqlFunctionResultMismatchException(call, ResultName(call, called), "BOOLEAN");
                 }
 
-                throw SqlDefinitionBinder.Refuse("CHECK requires a BOOLEAN predicate.", expression.Location);
+                throw SqlEvaluationException.BooleanRequired("CHECK", SqlType.NameOf(_scope.StaticTypeOf(expression))).At(expression.Location);
             }
         }
 
