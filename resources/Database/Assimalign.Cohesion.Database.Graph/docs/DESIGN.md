@@ -2,6 +2,19 @@
 
 ## Runtime child-root diagnostics (#1247, #1364)
 
+An autocommit statement whose commit succeeded reports success even if releasing its
+ReadCommitted snapshot pin fails during disposal. Cleanup still releases the session hold;
+the coordinator owns any remaining pin until shutdown. Event 13, `StatementCleanupFailed`
+(Warning; database, exceptionType), records the cleanup failure without changing the durable
+outcome or inviting a duplicate retry.
+
+A CommitAsync or RollbackAsync that the closing coordinator refuses before claiming its
+end reports DatabaseException with structured COHDBG019 and ObjectDisposedException as
+its cause. The transaction ends without committing; database disposal aborts its context.
+An ODE from a protocol read/write is a transport failure and closes the session without an
+error write. A non-transport ODE during result streaming aborts an explicit transaction and
+reports COHDBG019 while keeping the authenticated session ready.
+
 Runtime storage failures, including wrapped I/O, use structured `COHDBG006` Diagnostics and
 plain embedded messages, matching open. Only the wire writer adds the prefix. Begin and
 operations share the translator. Attached-index damage leads with `COHDBS003`, retaining the
@@ -1795,6 +1808,7 @@ four servers.
 | 10 | `IndexRecoveryStart` | Informational | — | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
 | 11 | `IndexRecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (an offline refusal's model code; empty otherwise), `exceptionType` |
+| 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,

@@ -45,6 +45,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
 {
     private readonly GraphDatabaseEngine _engine;
 
+    // Per-database fault seam for the cleanup after a statement's commit.
+    internal Action<TransactionContext>? BeforeSnapshotPinRelease { get; set; }
+    internal Func<ValueTask>? BeforeTransactionEndAsync { get; set; }
+
     internal GraphDatabase(DatabaseName name, GraphDatabaseEngine engine, GraphStorage storage, bool recover)
         : base(name, engine)
     {
