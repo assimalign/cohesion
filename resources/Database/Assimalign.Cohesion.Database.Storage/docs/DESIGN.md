@@ -896,7 +896,9 @@ Every rule below is stated for a storage transaction (a *bracket*):
    first touch is an already-held structure latch and pin, then the transaction monitor;
    the pool monitor is released before that monitor is taken. Completion takes the owner
    directory and free-map locks inside the transaction monitor, and releases page locks
-   before publishing pending frees. No structure latch or pool I/O is acquired under it.
+   before publishing pending frees. These bracket paths acquire no structure latch under
+   the transaction monitor. An idle checkpoint instead takes transaction monitor, header,
+   pool flush gate, pool monitor and journal, as documented at `Checkpoint`.
 
    A page touched by an active transaction is
    write-locked to it (conflicts throw rather than wait). Record-level concurrency is

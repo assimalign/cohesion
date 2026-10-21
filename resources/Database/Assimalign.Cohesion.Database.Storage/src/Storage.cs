@@ -3030,11 +3030,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long pageId = (long)handle.Id;
         bool locked = false;
 
-        // Any structure latch and the page pin are already held; the pool monitor is not.
-        // Never acquire a structure latch or wait for pool I/O under _transactionLock.
-        // Completion takes _ownerLock (then the free-map lock) inside this monitor; page
-        // lookup/allocation releases those locks before it comes here. Owners are bracket
-        // identities, including their Storage, never per-storage sequence numbers (#1286).
+        // First-touch order: any structure latch -> page pin (pool monitor released) ->
+        // _transactionLock. This path and bracket completion never acquire a structure
+        // latch under that monitor. Completion takes _ownerLock -> free-map lock inside it;
+        // page lookup/allocation releases those locks before it comes here. Checkpoint's
+        // separate, idle-only transaction -> header -> pool -> journal order is documented
+        // at Checkpoint. Lock owners are bracket identities, including their Storage,
+        // never per-storage sequence numbers (#1286).
         lock (_transactionLock)
         {
             if (_pageWriteLocks.TryGetValue(pageId, out var owner))
