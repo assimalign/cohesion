@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -15,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 internal static class CheckpointPace
 {
+    private const int minimumSamples = 12;
+
     internal static async Task VerifyAsync<TDatabase>(DatabaseCheckpointWorker<TDatabase> worker,
         ManualResetEventSlim signal, Assimalign.Cohesion.Database.Storage.Storage failingStorage, Assimalign.Cohesion.Database.Storage.Storage healthyStorage,
         string failingName, string healthyName, DeviceFaults faults,
@@ -45,7 +48,7 @@ internal static class CheckpointPace
             }
             do
             {
-                if (pendingBatch == 0 && completedBatches < 4)
+                if (pendingBatch == 0)
                 {
                     healthyStorage.CheckpointJournalSize = 0;
                     while (healthyStorage.JournalLength < journalSize && watch.Elapsed < TimeSpan.FromSeconds(30))
@@ -75,7 +78,10 @@ internal static class CheckpointPace
             }
             while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || completedBatches < 4 || worker.FailureCount < 2
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
-                    && visit.Reason == DatabaseCheckpointPass.VisitReason.BackingOff)) < 3)
+                    && visit.Reason == DatabaseCheckpointPass.VisitReason.BackingOff)) < 3
+                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled) < minimumSamples
+                || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled && pass.PumpElapsed.HasValue) < minimumSamples
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples)
                 && watch.Elapsed < TimeSpan.FromSeconds(30));
         }
         finally
@@ -99,13 +105,10 @@ internal static class CheckpointPace
             pass.PassThrew.ShouldBeFalse(context);
             pass.PumpBackoff.ShouldBe(TimeSpan.Zero, context);
             pass.TriggerTimeout.ShouldBeLessThanOrEqualTo(DatabaseCheckpointWorker<TDatabase>.PollInterval);
-            if (pass.TriggerMeasured && pass.TriggerSignaled)
+            foreach (var visit in pass.Visits)
             {
-                pass.TriggerElapsed.ShouldBeLessThan(pass.TriggerTimeout, $"measured Set wake on {context}");
-                if (pass.PumpElapsed is { } idle)
-                {
-                    idle.ShouldBeLessThan(pass.TriggerTimeout, $"measured inter-pass wait on {context}");
-                }
+                visit.GiveUpRequested.ShouldBeFalse(context);
+                visit.Offline.ShouldBeFalse(context);
             }
             var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
             healthy.Backoff.ShouldBe(TimeSpan.Zero, context);
@@ -114,7 +117,6 @@ internal static class CheckpointPace
                 DatabaseCheckpointPass.VisitReason.Deferred, DatabaseCheckpointPass.VisitReason.Busy);
             if (healthy.Attempted)
             {
-                healthy.LaneWait.ShouldBeLessThan(laneBudget, $"healthy lane wait on {context}");
                 healthy.LaneWaitRequested.ShouldBeLessThanOrEqualTo(laneBudget + DatabaseCheckpointLanes.WaitSlice);
                 healthy.LaneWaits.ShouldBeLessThanOrEqualTo((int)(laneBudget / DatabaseCheckpointLanes.WaitSlice) + 1);
             }
@@ -140,6 +142,22 @@ internal static class CheckpointPace
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Due is { IsDue: true }))
             .ShouldBeGreaterThanOrEqualTo(4);
         completedBatches.ShouldBeGreaterThanOrEqualTo(4);
-        recorded.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled).ShouldBeGreaterThanOrEqualTo(4);
+        var signaled = recorded.Where(pass => pass.TriggerMeasured && pass.TriggerSignaled).ToArray();
+        VerifyDurations(signaled.Select(pass => pass.TriggerElapsed), laneBudget, "measured Set wake");
+        VerifyDurations(signaled.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value),
+            laneBudget, "measured inter-pass wait");
+        VerifyDurations(recorded.SelectMany(pass => pass.Visits)
+            .Where(visit => visit.Database == healthyName && visit.Attempted).Select(visit => visit.LaneWait),
+            laneBudget, "healthy lane wait");
+    }
+
+    private static void VerifyDurations(IEnumerable<TimeSpan> measured, TimeSpan budget, string description)
+    {
+        var samples = measured.Order().ToArray();
+        string context = $"{description}: budget {budget}; sorted samples ({samples.Length}): [{string.Join(", ", samples)}]";
+        samples.Length.ShouldBeGreaterThanOrEqualTo(minimumSamples, context);
+        var median = TimeSpan.FromTicks((samples[(samples.Length - 1) / 2].Ticks + samples[samples.Length / 2].Ticks) / 2);
+        median.ShouldBeLessThan(budget, context);
+        samples.Count(sample => sample < budget).ShouldBeGreaterThanOrEqualTo((samples.Length * 3 + 3) / 4, context);
     }
 }

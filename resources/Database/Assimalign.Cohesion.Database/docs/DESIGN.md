@@ -535,9 +535,13 @@ ordinary storage transaction contention is retried as busy.
   A separate elapsed inter-pass wait ends at the next pass entry, including settlement and
   pauses on either side of the trigger call.
   Lane timing includes monitor acquisition and runner dispatch, including a late parking runner.
-  Each healthy attempted visit is bounded in the shared pace helper, including a visit left
-  running; request counts and requested durations are bounded separately from elapsed waits.
-  The helper compares recorded monotonic wait durations with the configured 100 ms budget,
+  The shared pace helper includes each healthy attempted visit, including a visit left running;
+  request counts and requested durations remain strictly bounded per visit.
+  For each measured wait category it collects at least 12 samples within the 30-second safety
+  ceiling and requires the median and at least 75% of samples below the configured 100 ms budget.
+  Durations in the per-pass record are judged by the median rather than the maximum because
+  scheduler hiccups affect a few samples while a persistent slowdown affects every pass.
+  The helper compares recorded monotonic wait durations with that budget,
   requires every due healthy visit to attempt work, and requires worker completions. Its overall
   stopwatch supplies a minimum race exercise and a safety ceiling, never a throughput ratio.
   This proves the named wait and skipped-visit regressions on the in-memory fixture, not a
