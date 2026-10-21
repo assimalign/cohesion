@@ -139,15 +139,21 @@ public sealed class GraphEngineFailureWireTests
 
         // Assert
         retry.InnerException.ShouldBeSameAs(conflict);
-        retry.Message.ShouldStartWith("COHDBG007:", Case.Sensitive);
+        retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG007");
+        retry.Message.ShouldBe(conflict.Message);
         corruption.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
         corruption.InnerException!.InnerException.ShouldBeSameAs(malformed);
         lifetime.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG019");
         lifetime.InnerException.ShouldBeSameAs(disposed);
         database.TranslateFailure(lifetime).ShouldBeSameAs(lifetime);
-        database.TranslateFailure(new InvalidOperationException("Data mismatch.")).Message.ShouldStartWith("COHDBG003:", Case.Sensitive);
+        var mismatch = database.TranslateFailure(new InvalidOperationException("Data mismatch.")).ShouldBeOfType<DatabaseException>();
+        mismatch.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        mismatch.Message.ShouldBe("Data mismatch.");
         var mixed = database.TranslateFailure(new AggregateException(conflict, new IndexException("Index failed during cleanup.")))
             .ShouldBeOfType<DatabaseException>();
         mixed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        var storageAndDisposal = database.TranslateFailure(new AggregateException(disposed, new IndexException("Index failed.")))
+            .ShouldBeOfType<DatabaseException>();
+        storageAndDisposal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
     }
 }

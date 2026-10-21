@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,7 +33,7 @@ public sealed class GraphCatalog
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
     private readonly Dictionary<(byte Kind, Guid Parent, string Name), List<Reference>> _versions = new();
-    private readonly Dictionary<Guid, (byte Kind, string Name)> _definitions = new();
+    private readonly Dictionary<Guid, HashSet<(byte Kind, string Name)>> _definitions = new();
     private readonly Dictionary<(byte Kind, Guid Parent), SortedSet<string>> _children = new();
 
     // Per-instance fault/record-visit seam, reached only by this model's tests.
@@ -224,7 +225,8 @@ public sealed class GraphCatalog
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
         if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
         {
-            throw new GraphCatalogException($"Index '{index.Name}' already identifies property '{previous.PropertyKey}'.") { IsConflict = true };
+            throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
+                index.Name, previous.PropertyKey)) { IsCallerError = true };
         }
         return SaveAsync(record, prior, context, cancellationToken);
     }
@@ -260,7 +262,8 @@ public sealed class GraphCatalog
             RefuseSchemaOwner(found.Record, "ALTER");
             if (found.Record.Id != record.Id)
             {
-                throw new GraphCatalogException($"Definition '{record.Name}' already has a different identity.") { IsConflict = true };
+                throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
+                    record.Name)) { IsCallerError = true };
             }
         }
         var latestSnapshot = Latest(context);
@@ -269,9 +272,9 @@ public sealed class GraphCatalog
         FindDefinition(record.Id, latestSnapshot);
         lock (_sync)
         {
-            if (_definitions.TryGetValue(record.Id, out var same) && same != (record.Kind, record.Name))
+            if (_definitions.TryGetValue(record.Id, out var keys) && keys.Any(key => key != (record.Kind, record.Name)))
             {
-                throw new GraphCatalogException("A definition identity cannot be reused or renamed.") { IsConflict = true };
+                throw new GraphCatalogException(ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
             }
         }
         return SaveAsync(record, previous, context, cancellationToken);
@@ -349,7 +352,7 @@ public sealed class GraphCatalog
         var found = FindDefinition(id, snapshot, labelOnly ? (byte)1 : null) ?? default;
         if (found.Record is null)
         {
-            throw new GraphCatalogException("The owning graph definition does not exist.") { IsConflict = true };
+            throw new GraphCatalogException(ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
         }
         RefuseSchemaOwner(found.Record, operation);
     }
@@ -423,7 +426,11 @@ public sealed class GraphCatalog
         versions.Add(reference);
         if (record.Kind <= 2)
         {
-            _definitions[record.Id] = (record.Kind, record.Name);
+            if (!_definitions.TryGetValue(record.Id, out var keys))
+            {
+                _definitions[record.Id] = keys = [];
+            }
+            keys.Add((record.Kind, record.Name));
         }
         else
         {
@@ -441,14 +448,23 @@ public sealed class GraphCatalog
         ArgumentNullException.ThrowIfNull(snapshot);
         lock (_sync)
         {
-            if (!_definitions.TryGetValue(id, out var key) || kind is { } expected && key.Kind != expected)
+            if (!_definitions.TryGetValue(id, out var keys))
             {
                 return null;
             }
             // A dropped name may be recreated with another identity. The directory is only a
             // candidate selector: the visible record must still have the requested identity.
-            var found = Find(key.Kind, Guid.Empty, key.Name, snapshot);
-            return found?.Record.Id == id ? found : null;
+            Found? result = null;
+            foreach (var key in keys.ToArray())
+            {
+                if (kind is { } expected && key.Kind != expected) { continue; }
+                var found = Find(key.Kind, Guid.Empty, key.Name, snapshot);
+                if (found?.Record.Id == id && (result is null || found.Value.Reference.Writer > result.Value.Reference.Writer))
+                {
+                    result = found;
+                }
+            }
+            return result;
         }
     }
 
@@ -457,9 +473,10 @@ public sealed class GraphCatalog
         var removed = versions[index];
         versions.RemoveAt(index);
         if (key.Kind <= 2 && !versions.Any(item => item.Id == removed.Id) &&
-            _definitions.TryGetValue(removed.Id, out var definition) && definition == (key.Kind, key.Name))
+            _definitions.TryGetValue(removed.Id, out var keys))
         {
-            _definitions.Remove(removed.Id);
+            keys.Remove((key.Kind, key.Name));
+            if (keys.Count == 0) { _definitions.Remove(removed.Id); }
         }
         if (versions.Count == 0)
         {

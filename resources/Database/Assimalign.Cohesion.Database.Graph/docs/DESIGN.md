@@ -1160,13 +1160,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0010` | Unknown function spelling, reported while parsing |
 | `COHDBG001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
-| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation |
+| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
 | `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `COHDBG007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
-| `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
+| `COHDBG009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
@@ -1198,9 +1198,12 @@ Ownership uses the shared dedicated exception rather than an invented graph owne
 Catalog decode failures become `COHDBG006`, as do ordinary index and storage failures;
 index/page corruption retains the common `COHDBS003` corruption signal. Catalog mutation
 conflicts carry an internal classification and become `DatabaseTransactionAbortedException`
-(`COHDBG007`), retaining the catalog cause. Disposal inside an admitted operation is
+(`COHDBG007`), retaining the catalog cause. Only a snapshot-changed definition is retryable;
+identity reuse/rename, different identities for one name, retargeted index properties and missing
+owners are caller errors (`COHDBG003`). These translations and element-size failures
+(`COHDBG009`) attach structured Diagnostics and leave embedded messages unprefixed. Disposal inside an admitted operation is
 `COHDBG019`, checked before the general InvalidOperationException/schema mismatch mapping.
-An accompanying storage/index/I/O failure takes precedence over a retryable catalog conflict.
+An accompanying storage/index/I/O failure takes precedence over disposal or a retryable catalog conflict.
 Kernel transaction outcomes take precedence over disposal in their causes, preserving an
 unconfirmed commit's durability warning and a confirmed abort's retry semantics.
 The wire statement handler also maps ObjectDisposedException from the early lifetime guards
@@ -2069,12 +2072,15 @@ complete-recovery. The graph store separately scrubs physical index entries befo
 checkpoint. Catalog crash tests copy live data and WAL before disposal, proving that committed
 definitions survive and partial definition/child changes disappear.
 
-Identity discovery uses an in-memory id → (kind, name) dictionary for labels/types. Child
+Identity discovery uses an in-memory id → set of (kind, name) keys for labels/types. Child
 discovery uses (kind, parent id) → ordinal sorted names for properties/indexes. Both are built
 on open and maintained under the same catalog lock as the version directory; stale-reference
 removal prunes their entries. They select candidates only: every result still reloads and decodes
 the record and applies the original per-version MVCC checks. Recreating a dropped name with
 another id preserves old-snapshot lookup and never returns the replacement for the old id.
+Base databases can contain a dropped and a live name sharing one id; every candidate is checked,
+and purging one key never removes the other. New mutations refuse renaming an id, and reusing
+a dropped id for another name waits until version purge has reclaimed its old records.
 `FindLabel(Guid, snapshot)` and `FindRelationshipType(Guid, snapshot)` expose this lookup.
 Property validation uses these owner lookups once per entity and a local property-name set;
 it never lists the whole catalog per property. Saving N definitions is O(N log N) or better

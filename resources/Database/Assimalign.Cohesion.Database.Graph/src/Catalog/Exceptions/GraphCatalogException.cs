@@ -5,8 +5,9 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog;
 /// <summary>Reports invalid graph metadata or a conflicting catalog definition.</summary>
 public sealed class GraphCatalogException : Exception
 {
-    // Mutation conflicts are retryable; decode failures describe damaged catalog records.
+    // Only snapshot changes are retryable; caller errors and malformed records are distinct.
     internal bool IsConflict { get; init; }
+    internal bool IsCallerError { get; init; }
 
     /// <summary>Initializes a catalog error.</summary>
     /// <param name="message">The error description.</param>

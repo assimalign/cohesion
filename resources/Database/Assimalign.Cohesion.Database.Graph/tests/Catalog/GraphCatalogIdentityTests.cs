@@ -13,6 +13,93 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphCatalogIdentityTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Catalog: reused base identities retain live routing through reopen and purge")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FindById_BaseReusedIdentity_ShouldRetainLiveNameAfterPurge(bool tombstoneLast)
+    {
+        // Arrange: independent catalog instances reproduce the base API's two-name state,
+        // without bypassing catalog encoding or writing raw storage records.
+        await using var engine = GraphDatabaseEngine.Create("catalog-reused-id", new()
+        { MaintenanceInterval = TimeSpan.FromHours(1), CheckpointInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        var coordinator = database.Coordinator;
+        var first = database.Catalog;
+        var baseWriter = GraphCatalog.Open(database.DataStorage, coordinator);
+        var a = new GraphLabelMetadata(Guid.NewGuid(), "a");
+        var b = a with { Name = "b" };
+        if (tombstoneLast)
+        {
+            var earlier = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+            await baseWriter.SaveLabelAsync(b, earlier, CancellationToken.None);
+            await coordinator.CommitAsync(earlier, CancellationToken.None);
+        }
+        var create = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await first.SaveLabelAsync(a, create, CancellationToken.None);
+        await coordinator.CommitAsync(create, CancellationToken.None);
+        var drop = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await first.DeleteLabelAsync(a.Id, drop, CancellationToken.None);
+        await coordinator.CommitAsync(drop, CancellationToken.None);
+        if (!tombstoneLast)
+        {
+            var replace = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+            await baseWriter.SaveLabelAsync(b, replace, CancellationToken.None);
+            await coordinator.CommitAsync(replace, CancellationToken.None);
+        }
+        var reopened = GraphCatalog.Open(database.DataStorage, coordinator);
+        var read = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        reopened.FindLabel(a.Id, read.Snapshot).ShouldBe(b);
+        await coordinator.RollbackAsync(read, CancellationToken.None);
+
+        // Act: purge a's tombstone, then prune it through the identity lookup and mutate b.
+        coordinator.RunVersionPurgePass(CancellationToken.None);
+        var update = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        reopened.FindLabel(b.Id, update.Snapshot).ShouldBe(b);
+        await reopened.SaveLabelAsync(b, update, CancellationToken.None);
+        await reopened.SavePropertyKeyAsync(new(b.Id, "live"), update, CancellationToken.None);
+        await coordinator.CommitAsync(update, CancellationToken.None);
+
+        // Assert
+        var verify = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        reopened.FindLabel("a", verify.Snapshot).ShouldBeNull();
+        reopened.FindLabel(b.Id, verify.Snapshot).ShouldBe(b);
+        reopened.GetPropertyKeys(b.Id, verify.Snapshot).ShouldHaveSingleItem().Name.ShouldBe("live");
+        await coordinator.RollbackAsync(verify, CancellationToken.None);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: dropped identities wait for purge before reuse")]
+    public async Task SaveLabelAsync_DroppedIdentity_ShouldRefuseReuseUntilPurge()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("catalog-id-reuse", new()
+        { MaintenanceInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        var catalog = database.Catalog;
+        var coordinator = database.Coordinator;
+        var a = new GraphLabelMetadata(Guid.NewGuid(), "a");
+        var create = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await catalog.SaveLabelAsync(a, create, CancellationToken.None);
+        await coordinator.CommitAsync(create, CancellationToken.None);
+        var drop = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await catalog.DeleteLabelAsync(a.Id, drop, CancellationToken.None);
+        await coordinator.CommitAsync(drop, CancellationToken.None);
+        var before = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+
+        // Act
+        var refused = await Should.ThrowAsync<GraphCatalogException>(async () =>
+            await catalog.SaveLabelAsync(a with { Name = "b" }, before, CancellationToken.None));
+        await coordinator.RollbackAsync(before, CancellationToken.None);
+        coordinator.RunVersionPurgePass(CancellationToken.None);
+        var after = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        await catalog.SaveLabelAsync(a with { Name = "b" }, after, CancellationToken.None);
+
+        // Assert
+        refused.IsConflict.ShouldBeFalse();
+        refused.IsCallerError.ShouldBeTrue();
+        catalog.FindLabel(a.Id, after.Snapshot)!.Value.Name.ShouldBe("b");
+        await coordinator.RollbackAsync(after, CancellationToken.None);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: identity lookups retain MVCC through drop, recreation, rollback and reopen")]
     public async Task FindById_NameRecreated_ShouldRespectSnapshotsAndKinds()
     {

@@ -12,6 +12,11 @@ it retains the `IndexCorruptionException` and page, leads with `COHDBS003`, and 
 serves every B-tree model without a new child-to-root dependency or visibility grant.
 The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped failures.
 
+`DatabaseTransactionAbortedException` accepts the same copied, ordered diagnostic carrier
+as `DatabaseException`. Models can retain a retryable abort's exception kind and its plain
+message while attaching the model code; only the wire writer adds that code to the message.
+The abort remains a base because the shipped deadlock exception derives from it.
+
 
 ## Storage corruption (#1160)
 

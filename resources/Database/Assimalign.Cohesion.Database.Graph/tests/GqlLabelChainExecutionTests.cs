@@ -385,7 +385,7 @@ public sealed class GqlLabelChainExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
         error.Message.ShouldContain("8092 bytes one graph record can hold", Case.Sensitive);
         error.InnerException.ShouldBeOfType<GraphElementTooLargeException>();
         transaction.State.ShouldBe(TransactionState.Faulted);
@@ -437,9 +437,10 @@ public sealed class GqlLabelChainExecutionTests
         var equality = await ColumnAsync(session, "MATCH (n:X) WHERE n.name = '" + longName + "' RETURN n.name");
 
         // Assert
-        insert.Message.ShouldStartWith("COHDBG009: An indexed property value encodes to ", Case.Sensitive);
+        insert.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
+        insert.Message.ShouldStartWith("An indexed property value encodes to ", Case.Sensitive);
         insert.Message.ShouldContain("1016-byte index key", Case.Sensitive);
-        build.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
+        build.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
         inline.ShouldBeEmpty();
         equality.ShouldBeEmpty();
         (await ColumnAsync(session, "MATCH (n:X {name: 'x'}) RETURN n.name")).ShouldBe(["x"]);

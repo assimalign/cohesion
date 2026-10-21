@@ -247,7 +247,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             try
             {
-                frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+                frame = await ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
             {

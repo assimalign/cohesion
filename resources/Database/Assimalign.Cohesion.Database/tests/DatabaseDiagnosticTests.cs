@@ -11,6 +11,30 @@ namespace Assimalign.Cohesion.Database.Tests;
 
 public sealed class DatabaseDiagnosticTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database] - Diagnostics: transaction aborts snapshot and sort structured diagnostics")]
+    public void Constructor_AbortDiagnostics_ShouldCopyAndOrderEntries()
+    {
+        // Arrange
+        var diagnostics = new List<Diagnostic>
+        {
+            new() { Code = "unlocated" },
+            new() { Code = "late", Start = 20 },
+            new() { Code = "first", Start = 1 },
+        };
+        var cause = new InvalidOperationException();
+
+        // Act
+        var failure = new DatabaseTransactionAbortedException("Retry the transaction.", diagnostics, cause);
+        diagnostics.Clear();
+
+        // Assert
+        failure.Diagnostics.Select(item => item.Code).ShouldBe(["first", "late", "unlocated"]);
+        failure.Message.ShouldBe("Retry the transaction.");
+        failure.InnerException.ShouldBeSameAs(cause);
+        Should.Throw<NotSupportedException>(() => ((IList<Diagnostic>)failure.Diagnostics).Clear());
+        Should.Throw<ArgumentNullException>(() => new DatabaseTransactionAbortedException("message", diagnostics: null!));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Diagnostics: ordinary exceptions have an empty carrier")]
     public void Constructor_NoDiagnostics_ShouldExposeEmptyList()
     {

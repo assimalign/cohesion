@@ -179,7 +179,7 @@ public sealed class GraphQueryTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Person {name: 'isolated'}), (a:Person {name: 'connected'})-[:LINK]->(b:Other {name: 'target'})");
         var exception = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:Person) DELETE a"));
-        exception.Message.ShouldContain("COHDBG");
+        exception.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
         (await Rows(session, "MATCH (a:Person) RETURN a.name")).Select(row => row.GetString(0)).Order().ShouldBe(["connected", "isolated"]);
         (await Rows(session, "MATCH (a)-[r:LINK]->(b) RETURN r")).Count.ShouldBe(1);
     }
