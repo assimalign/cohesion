@@ -156,7 +156,7 @@ refuses on read was still read from the transport and is reported; one it refuse
 reaches the transport and is not reported. An application's own leaf over another transport is not
 traced. `FrameRead` follows a complete frame; the clean end of the stream writes nothing, and nor
 does a truncated or oversized frame, which the core refuses. `FrameWritten` follows a completed
-write, before any flush.
+stream write, before an explicit writer flush; the stream may already have flushed on write.
 
 **The trace costs nothing while nobody takes it.** The stream cores are already asynchronous
 methods, so the trace adds one `IsEnabled(Verbose, Frames)` check per frame and no wrapper, task
