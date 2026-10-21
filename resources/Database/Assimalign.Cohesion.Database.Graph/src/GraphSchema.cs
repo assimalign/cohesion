@@ -169,8 +169,8 @@ public sealed class GraphSchema
         => WriteAsync(async op =>
         {
             var latest = _database.LatestSnapshot(op.Context);
-            var label = _database.Catalog.GetLabels(latest).FirstOrDefault(item => item.Id == definition.DefinitionId);
-            var type = _database.Catalog.GetRelationshipTypes(latest).FirstOrDefault(item => item.Id == definition.DefinitionId);
+            var label = _database.Catalog.FindLabel(definition.DefinitionId, latest) ?? default;
+            var type = _database.Catalog.FindRelationshipType(definition.DefinitionId, latest) ?? default;
             if (label.Id != Guid.Empty) { EnsureMutable(label.Name, label.Owner, label.OwningSchema, "ALTER LABEL"); }
             if (type.Id != Guid.Empty) { EnsureMutable(type.Name, type.Owner, type.OwningSchema, "ALTER RELATIONSHIP TYPE"); }
             if (definition.Type is { } scalarType && !GraphDatabase.SupportsPropertyType(scalarType))

@@ -657,11 +657,9 @@ engine fails the statement with `COHDBG009`, element too large: the operation ab
 statement failure (an explicit transaction is aborted until the caller rolls back) and the session, in process and over the
 wire, stays open. A search for a value too long for its index matches nothing, since no write can
 store one. Neo4j instead spills labels to dynamic label records and long properties to property
-chains, which this store's format does not yet have. Defining a new label or relationship type
-checks identity uniqueness by listing every definition (`GraphCatalog.SaveDefinitionAsync`),
-so a statement that introduces N new labels costs time quadratic in N (measured in Release: 1,000
-new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
-both are follow-up storage items.
+chains, which this store's format does not yet have. Catalog discovery uses identity and parent
+directories (#1229), so introducing N definitions takes O(N log N) catalog work or better,
+including property discovery. Neither physical size limit counts expression length.
 
 GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
@@ -2046,8 +2044,23 @@ complete-recovery. The graph store separately scrubs physical index entries befo
 checkpoint. Catalog crash tests copy live data and WAL before disposal, proving that committed
 definitions survive and partial definition/child changes disappear.
 
-Definition discovery is linear in the number of known names plus visible version checks.
-This is deliberately a metadata directory; traversal uses graph adjacency and physical indexes.
+Identity discovery uses an in-memory id → (kind, name) dictionary for labels/types. Child
+discovery uses (kind, parent id) → ordinal sorted names for properties/indexes. Both are built
+on open and maintained under the same catalog lock as the version directory; stale-reference
+removal prunes their entries. They select candidates only: every result still reloads and decodes
+the record and applies the original per-version MVCC checks. Recreating a dropped name with
+another id preserves old-snapshot lookup and never returns the replacement for the old id.
+`FindLabel(Guid, snapshot)` and `FindRelationshipType(Guid, snapshot)` expose this lookup.
+Property validation uses these owner lookups once per entity and a local property-name set;
+it never lists the whole catalog per property. Saving N definitions is O(N log N) or better
+in catalog work for bounded version chains. Whole-kind SHOW discovery still enumerates that
+kind, and physical graph index maintenance has its own cost. The deterministic complexity
+tests count directory-key visits and physical record reads, including a 2,000-label/2,000-type
+INSERT spread over many nodes; they impose no machine-dependent wall-clock threshold.
+PostgreSQL's identity cache lookup was consulted, without copying code:
+`src/backend/catalog/namespace.c:933` uses SearchSysCache1(RELOID, relid), in the local clone
+at `C:/Source/repos/postgres/postgres`. No disk-format change is needed.
+This is a metadata directory; traversal uses graph adjacency and physical indexes.
 Catalog disposal and flushing remain owned by the engine and its shared storage/coordinator.
 
 #### Catalog: Scope
