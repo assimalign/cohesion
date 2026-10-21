@@ -150,12 +150,12 @@ flowchart LR
     Reg --> Prop
 ```
 
-A filtered incident lookup costs O(t log E + r) index work for t selected type/direction ranges
+A filtered incident lookup costs O(b log E + r) index work for b bounded batches across selected type/direction ranges
 and r retained entries in them, decoding k visible references; deterministic identity ordering adds O(k log k) CPU work. Direct
 traversal uses these same selections and ordering with O(Vvisited) visited state. A label scan seeks MVCC postings keyed by (catalog label GUID, node identity), decoding only
-visible matching references in identity order. Its index work is O(log P + r) for retained
+visible matching references in identity order. Its index work is O(b log P + r) for b bounded batches and retained
 postings r in the selected label range; unrelated nodes add no record decodes. A property equality anchor
-instead seeks its shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
+instead seeks its shared B+Tree in `O(b log N + candidates)` for b bounded batches after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
 filter index candidates using exact reduced numeric fractions across all numeric types, including
@@ -683,9 +683,10 @@ Each hop selects direction and catalog type IDs before decoding relationships or
 path states, including quantified bodies and TraverseAsync. Relationship bindings/properties and
 safe target-node constraints still run before a viable descent, with deferred references retaining
 their existing final checks. The statement ExpansionBudget has separate physical and viable
-counters: physical includes visited anchor candidates and selected relationship candidates as DFS
-visits them, after type/direction selection from storage or the overlay; loading a range charges
-nothing. Viable counts hops passing trail, binding, relationship and safe node
+counters: physical includes visited anchor candidates and selected relationship candidates,
+including heads required to initialize the identity-ordered merge, after type/direction selection
+from storage or the overlay. A discovered type and its first stream head share one charge;
+returning a primed head does not charge it again. Viable counts hops passing trail, binding, relationship and safe node
 checks before copying state. Physical work keeps the 1,000,000 safety cap, including dead ends.
 Its COHDBG004 message includes actual physical and viable totals; no EventSource counters are added.
 The 100,000-binding and 64-hop caps remain. Public TraverseAsync uses the filtered lookup without
@@ -698,10 +699,18 @@ semantics, not invented runtime totals; EXPLAIN ANALYZE remains unsupported. Tes
 per-budget totals and the store's internal decode counter. They also cover replacement/rollback,
 old snapshots, journal replay, self-loops, cancellation between ranges, deterministic retention
 across a commit between directions and independently running reader/writer loops with overlap
-counters. B+Tree OpenCursor still materializes a selected key/reference range under its own latch;
-#1542 owns incremental, cancellable collection inside that kernel call. Incident enumeration owns
-no writer locks; the current materialized cursor holds no pages or latches and disposal releases
-nothing, so these tests make no resource-release claim. The store's mutation-gate entry documents
+counters. B+Tree cursors now copy bounded batches and observe cancellation while acquiring the
+latch and reading entries (#1542). DFS merges selected type/direction streams and the statement
+overlay in relationship identity order, retaining one head per range instead of a full incident
+list. Incident types are discovered lazily with one-entry B+Tree probes. The merge opens each
+stream only when it needs its head and charges before decoding that head, so a small remaining
+budget bounds initialization even with hundreds of distinct incident types. Only pending head
+identities are retained for charge deduplication, including self-loops; no degree-sized visited
+set is built. Deterministic tests cover 500 incident types and wildcard first-hop allocation
+across twelve types with different degrees. Exhaustion, budget refusal, cancellation and evaluation/storage
+errors dispose every active parent stream in the frontier, attempting all disposals and retaining
+the first disposal exception; their cursors retain no page or latch
+between moves. The store's mutation-gate entry documents
 lock and latch order; no new lock, friend grant or public interface is introduced.
 
 Behavior consulted, no code copied: Neo4j
@@ -2092,15 +2101,17 @@ The filtered GetIncidentAsync overload streams per-direction, per-type closed ra
 (node, direction, type ID, 0) through (node, direction, type ID, UInt64.MaxValue). Null type
 selection reads all types within each requested direction; an empty selection reads none.
 Duplicate type IDs add no visits. For t selected type/direction ranges and r retained entries in those ranges, index work is
-O(t log E + r); only snapshot-visible references are decoded. Unrelated directions and types
+O(b log E + r) for b bounded cursor batches; only snapshot-visible references are decoded. Unrelated directions and types
 cause no record decodes. The instance-local IncidentRecordsDecoded counter proves this with
 leaf splits and minimum-of-three-round comparisons. The unfiltered list overload and engine
 materialization sort by relationship identity; the streaming overload specifies no cross-range
-ordering. The shared B+Tree currently materializes each entire selected key/reference range under
-its read latch while opening a cursor. Cancellation is checked before each range, but allocation and
-collection inside OpenCursor cannot be interrupted or stopped by the caller's work budget (#1542).
-Graph record decoding occurs afterward. The engine collects and sorts those decoded relationships
-before DFS visits them, so its candidate budget bounds visits, not range loading or decoding.
+ordering. Shared B+Tree cursors open without a page read and copy at most 64 visible entries per
+batch, examining at most 256 retained entries under each read-latch hold (#1542). Invisible runs
+and undo-empty leaves yield between batches too; cancellation is observed during latch acquisition and at page/entry
+reads. The executor merges single-type/direction streams by identity, preserving its deterministic
+order while decoding and charging candidates incrementally. Only one decoded head per selected
+range is prefetched; stopping at the expansion budget closes all streams instead of loading the
+whole range. List-returning storage APIs still materialize the result their contract requires.
 Creating, replacing or deleting a relationship maintains both entries in its single physical
 statement bracket, preserving the record's writer/deleter stamps.
 
@@ -2219,8 +2230,10 @@ Readers copy the token selection under directory _sync, release it, then acquire
 latches. Writers follow transaction mutation gate -> database writer lock -> coordinator apply
 gate -> B+Tree latch -> page latches. Directory publication never holds _sync across an await.
 Cursor cleanup is in finally for normal exhaustion, cancellation and exceptions. Current shared
-BTreeCursor operations complete synchronously; OpenCursor still materializes a selected range
-under its latch (#1542). Anchor tests bound selected posting visits so background maintenance
+BTreeCursor operations complete synchronously; OpenCursor is lazy and each move copies a bounded
+batch with cancellation (#1542). Posting counters advance as entries are consumed, and label
+scans observe cancellation between those reads. No tree latch crosses graph record decoding or
+the union priority-queue merge. Anchor tests bound selected posting visits so background maintenance
 cannot disturb their measurements. A nonparallel, iteration-bounded stress test holds a posting
 cursor across replacement, commit/rollback and purge, asserts overlap counters, and checks a
 one-node decode bound with unrelated nodes present after both tasks stop; interruption inside

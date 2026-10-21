@@ -71,7 +71,7 @@ entries and splits stay correct.
   (deleter stamp zero) can only be committed or our own — uncommitted others are
   excluded by the lock, and aborted writers' entries were physically reverted.
 - **Concurrency (MVP): a tree-level reader/writer latch.** Writers exclusive;
-  cursors materialize their range's visible entries under the read latch, so no
+  cursors copy bounded batches under the read latch, so no
   latch is held across awaits and readers never see a torn structure. The latch is
   the storage's `StoragePageLatch`, and every page write passes it to the storage,
   so a storage transaction's rollback restores the tree's pages under it too
@@ -95,6 +95,70 @@ entries and splits stay correct.
   catalogs' re-export at their persistence points remains as a backstop and
   normally finds nothing to write. Dropping an index is a directory operation;
   its pages await vacuum.
+
+### Incremental, cancellable cursors (#1542)
+
+OpenCursor captures the supplied visibility snapshot and copies its bounds, without visiting
+a page. It accepts an optional cancellation token after the direction parameter; that token
+applies throughout enumeration, alongside each MoveNextAsync token. Moves complete synchronously
+and copy one visible entry in the first batch, then at most 64 per batch, or examine 256
+entries per latch hold. The one-entry probe bounds Graph incident-type discovery without a
+public batch-size API; continuing scans grow to the normal batch size. Invisible entries
+count toward that work bound. Both directions descend to their starting bound, then follow
+NextLeaf or PrevLeaf; a reverse scan never collects the forward range. Each move returns with
+all page handles and the tree latch released.
+For b batches and tree height h, a full scan costs O(b h + visited leaf pages), including
+one descent per batch. Undo-empty leaves can require an extra descent per leaf to keep
+each latch hold bounded; this is the chosen concurrency trade-off.
+
+After a batch drains, the next descent starts strictly after (before for reverse) the last
+examined (key, reference, writer) identity. The writer tiebreaker distinguishes reused references.
+A split, erase, purge or physical rollback can replace every physical position between batches;
+the cursor retains no page id or slot. If undo left empty leaves, an exhausted first leaf resumes
+at its ancestor separator fence, inclusive forward and exclusive reverse. A separator remains
+a valid logical bound after its source entry is erased. Later empty leaves end the batch at the
+last examined identity. This bounds empty-chain latch holds too, without retaining a potentially
+rolled-back sibling id. Leaf-chain reads and separator descents use the same total entry order.
+Descent retains only a separator's page and slot while the latch is held; only the empty-leaf
+path reopens that page and copies the fence. Ordinary descent allocates no separator keys.
+
+Latch identity belongs to the physical tree, not its replaceable manager. An Indexing-owned
+weak registry keys latches by storage instance and fixed root page, retaining them for the
+storage's lifetime, including failed DDL and root-page reuse. Reattachment format checks,
+surviving cursors, replacement writers and physical rollback therefore use the same latch.
+No public member or shipped-assembly visibility grant is needed. A deterministic page-clear
+probe verifies the failed-apply/reattach/rewrite interleaving. Seeded differential tests mutate
+at every batch boundary with batch sizes 1, 2 and 64, both directions and all bound inclusivity
+combinations; Entry-tiebreaker fences are covered by a 600-version reused-reference run.
+
+The latch order remains transaction/key locks -> tree latch -> storage page pin/pool monitor.
+A cursor takes no transaction lock and never awaits under its latch. StoragePageLatch's token
+overload checks cancellation while waiting for a writer; moves also check at each descent page,
+leaf and examined entry. Cancellation and any read failure release the batch and dispose the
+cursor; disposal is idempotent and drops owned keys, bounds and snapshot references. Current
+values are invalid before the first move, after exhaustion and after disposal. A retained
+CurrentKey owns its bytes and survives later moves/disposal. Cursors have one reader; concurrent
+moves or disposal are unsupported.
+
+The caller retains its statement/transaction snapshot pin for the entire enumeration; the cursor
+does not create a second kernel transaction or extend a statement's lifetime. Future pruning must
+respect that same horizon before removing snapshot-visible entries. Physical page rollback remains
+the owner-selected default (#1393): continuation is by logical identity, with no statement stamps,
+logical-only page rollback, new interface or visibility grant.
+
+Entries carry the transaction stamp, so the snapshot owner must not mutate the scanned index while
+enumerating. SQL UPDATE/DELETE already collect all targets before apply, retaining Halloween
+protection. KV GET/EXISTS/SCAN, Documents index reads/unique probes, and Graph property, label and
+adjacency scans perform no index mutation during enumeration; their writes apply afterward.
+Future consumers must preserve this rule.
+
+The deterministic million-key regression opens without page visits, consumes ten results in both
+directions, and bounds page visits and examined entries independently of the selected range size.
+Allocation uses the minimum of three rounds comparing 10,000-key and million-key ranges. Tests
+also cover duplicate runs, writer ties, erased continuations, empty leaves, old snapshots,
+rollback-restored roots, cancellation while blocked/buffered/scanning, corruption, early disposal,
+and a nonparallel split/commit/purge race that requires overlap counters. Official SF10 digest
+verification remains the external hardening gate, not a local benchmark claim.
 
 ### Type shape: sealed types, no interfaces (#1258)
 
@@ -454,7 +518,7 @@ review rather than fenced with a new Documents or Graph marker.
 - **The latch protocol is unchanged, and the new order does not weaken it.** Every
   mutation — insert, delete, erase, clear-deleter, the build path and the purge —
   holds the tree's write latch from its descent until its page change is done, and a
-  cursor holds the read latch while it materializes its range. The unique key lock
+  cursor holds the read latch only while it copies one bounded batch. The unique key lock
   is acquired before the latch, never while holding it, so the order key lock → tree
   latch → storage page lock stays acyclic. The order change moves which leaf a lookup
   lands on, not when it holds the latch: `TryFindEntry`'s descent, its forward walk

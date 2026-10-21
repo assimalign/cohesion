@@ -60,6 +60,7 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
+                new("MATCH (a:Person)-[:KNOWS|SERVES]-(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Bob", "Alice"]]),
                 new("MATCH (a)-[r:KNOWS]->(b) MATCH (a)-[s:KNOWS]->(b) RETURN r.weight, s.weight", [[2L, 2L]]),
                 new("MATCH (a:Person)-[:KNOWS]->(b) WHERE b.age > 50 RETURN a.name", []),
                 new("MATCH (a:Person {name: $name}) RETURN a.name", [["Alice"]],

@@ -4,5 +4,6 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CursorNotPositioned" xml:space="preserve"><value>The cursor is not positioned on an entry.</value></data>
   <data name="LiveLookupRequiresUnique" xml:space="preserve"><value>Latest live-entry lookup requires a unique index.</value></data>
 </root>

@@ -1412,7 +1412,7 @@ internal sealed partial class SqlPlanExecutor
             _catalog.TryGetIndex(table.ObjectId, planned.Name, out var current) && ReferenceEquals(current, planned);
 
     /// <summary>
-    /// Drives an index seek: materializes the visible entries in the seek's key
+    /// Drives an index seek: incrementally reads visible entries in the seek's key
     /// range through the STATEMENT snapshot (the same snapshot the equivalent
     /// scan filters through — the equivalence anchor), fetches each entry's row
     /// version, and re-checks the row's stamps against the same snapshot
@@ -1432,16 +1432,16 @@ internal sealed partial class SqlPlanExecutor
         var snapshot = snapshotOverride ?? statement.Snapshot;
         var defaults = _definitions.Get(table, cancellationToken).MissingValues;
 
-        // OpenCursor materializes entries under the tree's read latch and releases it
-        // before returning. No latch is held across residual/subquery evaluation or
+        // Each cursor batch copies entries under the tree's read latch and releases it
+        // before a move returns. No latch is held across residual/subquery evaluation or
         // a DML row-lock wait. DML drains this cursor before taking sorted row locks,
         // then sorted unique-key locks, then the apply gate and storage/index latches.
         // The finally below also disposes on predicate failure and cancellation.
-        var cursor = index.OpenCursor(snapshot, range);
+        var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
 
         try
         {
-            while (cursor.MoveNextAsync(cancellationToken).AsTask().GetAwaiter().GetResult())
+            while (cursor.MoveNextAsync(cancellationToken).GetAwaiter().GetResult())
             {
                 statement.Metrics.RecordsExamined++;
 
@@ -1477,7 +1477,7 @@ internal sealed partial class SqlPlanExecutor
         }
         finally
         {
-            cursor.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            cursor.DisposeAsync().GetAwaiter().GetResult();
         }
     }
 

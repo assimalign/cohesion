@@ -74,6 +74,9 @@ viable descent; deferred predicates retain their final checks. Physical work cou
 candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
 dead ends. COHDBG004 includes actual physical and viable totals when that cap is exceeded;
 100,000-binding and 64-hop limits remain. The separate #1533 budget redesign is deferred.
+Incident ranges are read incrementally with cancellation, merging type/direction streams in
+relationship identity order. Reaching the expansion cap closes every active parent cursor;
+only bounded index batches and one decoded head per selected range are prefetched (#1542).
 
 EXPLAIN Expand details include adjacency=(node,direction,type_id,relationship), effective
 seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops and
