@@ -951,7 +951,6 @@ public sealed class DatabaseWorkerFailureWindowTests
         empty.ParamName.ShouldBe("name");
         engine.OfflineErrorLookups.ShouldBe(["a"]);
     }
-<<<<<<< HEAD
 
     [Fact(DisplayName = "Cohesion Test [Database] - Worker: a report-only refusal contributes neither passes nor elapsed time to the offline window")]
     public async Task ReportFailure_ObservationPrecedesOperationalFailures_ShouldStartANewOfflineWindowAndCount()
@@ -979,34 +978,15 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(Window / 2);
         worker.RunIteration(CancellationToken.None);
-        await Task.Delay(50);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
         var beforeTheWindow = engine.GiveUps;
         clock.Advance(Window / 2);
         worker.RunIteration(CancellationToken.None);
-        bool taken = await Eventually(() => engine.TakenOffline.Count == 1);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
 
         // Assert: both the operational minimum and its own elapsed window apply.
         beforeTheWindow.ShouldBeEmpty();
-        taken.ShouldBeTrue();
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain("4 passes in a row over 100 s", Case.Sensitive);
     }
 
-    // Polls a condition the engine's queued give-up makes true, for at most the timeout.
-    private static async Task<bool> Eventually(Func<bool> condition, TimeSpan? timeout = null)
-    {
-        var watch = Stopwatch.StartNew();
-        while (!condition())
-        {
-            if (watch.Elapsed > (timeout ?? Timeout))
-            {
-                return false;
-            }
-
-            await Task.Delay(10);
-        }
-
-        return true;
-    }
-=======
->>>>>>> feature/L03.02-database-pre-t2-wave-08
 }
