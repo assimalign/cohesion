@@ -303,6 +303,11 @@ Column DEFAULT expressions also admit Stable/Volatile functions since #1121.
 The cancellation wire theories cover that sequence and verify its committed state from a second
 connection, as well as checking the token on every planning and execution callback.
 
+Definition DDL's mandatory post-commit refresh uses CancellationToken.None (#1231). Caller
+cancellation cannot undo that publication or turn its in-process result into failure. A wire
+disconnect can lose the response while the definition remains committed. Later function/domain
+execution receives its own statement token; pre-commit table/default binding remains cancellable.
+
 A failed dial reaches `ConnectAsync` as the core's `DatabaseClientException` with
 `ProtocolErrorCode.ConnectionFailure` (owner decision 39; the core's `DESIGN.md`,
 "Lifecycle and errors"). The mapper translates it like a handshake rejection, to

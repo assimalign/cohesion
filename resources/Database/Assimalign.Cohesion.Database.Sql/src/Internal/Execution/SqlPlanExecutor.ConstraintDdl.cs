@@ -136,6 +136,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var created = new List<string>();
+        int commitsBeforePublication = statement.Metrics.SelfCommits;
         try
         {
             if (indexes.Count > 0)
@@ -182,7 +183,7 @@ internal sealed partial class SqlPlanExecutor
                 replaceExisting, cancellationToken) : _catalog.PublishTableAsync(table, indexes, PublishedRegistrations(indexes),
                 replaceExisting, publication, cancellationToken))).ConfigureAwait(false);
         }
-        catch
+        catch when (statement.Metrics.SelfCommits == commitsBeforePublication)
         {
             foreach (string index in created)
             {

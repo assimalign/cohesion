@@ -525,8 +525,10 @@ internal sealed partial class SqlPlanExecutor
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                int applied = 0;
                 foreach (var (pageId, slotIndex, oldValues, _, _) in replacements)
                 {
+                    if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
 
                     // MVCC update = version chain in the record space: tombstone the
@@ -542,8 +544,10 @@ internal sealed partial class SqlPlanExecutor
                 }
                 // Release every replaced unique mapping before inserting replacements,
                 // so statement-consistent key swaps do not fail on an old live entry.
+                applied = 0;
                 foreach (var (_, _, _, newValues, newVersion) in replacements)
                 {
+                    if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
@@ -612,8 +616,10 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
             }
+            int applied = 0;
             foreach (var deletion in deletions.Values)
             {
+                if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                 EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
                 TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                 await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
@@ -1238,6 +1244,7 @@ internal sealed partial class SqlPlanExecutor
 
         var definition = new IndexDefinition(plan.IndexName, IndexKind.BTree, plan.IsUnique);
         bool registered = false;
+        int commitsBeforePublication = statement.Metrics.SelfCommits;
 
         try
         {
@@ -1274,36 +1281,33 @@ internal sealed partial class SqlPlanExecutor
                     return true;
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }
+            // Metadata + registrations persist in ONE catalog self-commit: a crash
+            // cannot leave a described index without a tree registration (or the
+            // reverse). A crash before this write leaves only orphaned tree pages.
+            var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
+            await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
+                new SqlCatalogIndex(
+                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+                    statement.ProvisioningSchema),
+                registrations, cancellationToken) : _catalog.CreateIndexAsync(
+                new SqlCatalogIndex(
+                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+                    statement.ProvisioningSchema),
+                registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
         }
         catch
         {
-            // The bracket rolled back physically (the tree's pages reverted);
-            // unregister the in-memory directory entry it left behind. The
-            // catalog was never touched.
-            if (registered)
+            // A canceled build or publication must leave no unpublished directory entry.
+            // Once publication committed, its enforcing tree must remain registered.
+            if (registered && statement.Metrics.SelfCommits == commitsBeforePublication)
             {
                 await _indexManager.DropIndexAsync(statement.Transaction, plan.Table.ObjectId, plan.IndexName, CancellationToken.None).ConfigureAwait(false);
             }
 
             throw;
         }
-
-        // Metadata + registrations persist in ONE catalog self-commit: a crash
-        // cannot leave a described index without a tree registration (or the
-        // reverse). A crash before this write leaves only orphaned tree pages —
-        // a safe leak, never a re-attached index.
-        var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
-        await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
-            new SqlCatalogIndex(
-                plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                statement.ProvisioningSchema),
-            registrations, cancellationToken) : _catalog.CreateIndexAsync(
-            new SqlCatalogIndex(
-                plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                statement.ProvisioningSchema),
-            registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
 
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }

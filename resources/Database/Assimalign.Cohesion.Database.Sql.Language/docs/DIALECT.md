@@ -3110,6 +3110,8 @@ pin in the same change.
 | `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
 | `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
+| `COHSQLE043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
+| `COHSQLE044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as COHSQLE043 (#1231) |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
@@ -3136,6 +3138,20 @@ proposal, and DO UPDATE may replace it with a fitting row even if the proposal's
 non-arbiter UNIQUE key exceeds its limit. Lock hashes, arbiter lookups and old-value tombstones
 do not enforce write-size limits. This follows PostgreSQL's arbitration before insertion
 (`src/backend/executor/nodeModifyTable.c:1121-1232`).
+Server-side execution limits (#1231) are configured through SQL engine options and nullable
+session-object overrides, not SQL SET statements. StatementTimeout and LockTimeout default to
+zero (off); a null session override inherits its engine default. A statement timer is cooperative
+and begins after parsing; each contended lock wait gets its own lock-timeout budget. Timers may
+stop execution, never a started commit or mandatory cleanup after a DDL self-commit. SQL keeps
+its statement-atomic transaction contract after either timeout; grants from earlier statements
+and upgrades of already-held resources remain until transaction end. Caller cancellation keeps
+its cancellation meaning. The cause that ends a lock wait determines its diagnostic even if a
+later statement deadline expires before its continuation runs. Provisioning schema sessions set
+both timeouts to zero; their caller/lifecycle cancellation still applies, including to deferred
+index builds. CREATE/DROP FUNCTION and DOMAIN finish binding after self-commit without observing
+cancellation again. SqlTimeoutConformanceTests and SqlTimeoutRegressionTests are the executable conformance corpus for
+these engine-visible limits; no grammar/profile clause count changes.
+
 A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements
 intact. Failed upsert preparation releases its new key and row grants, including a row retained

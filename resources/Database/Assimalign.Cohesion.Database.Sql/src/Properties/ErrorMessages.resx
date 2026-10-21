@@ -23,6 +23,12 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
+  <data name="StatementTimeout" xml:space="preserve">
+    <value>Statement execution exceeded the configured statement timeout.</value>
+  </data>
+  <data name="LockTimeout" xml:space="preserve">
+    <value>A lock wait exceeded the configured lock timeout.</value>
+  </data>
   <data name="RowTooLarge" xml:space="preserve"><value>Row for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Index key for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="ColumnDefaultMissing" xml:space="preserve">

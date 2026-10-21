@@ -562,7 +562,11 @@ public sealed class SqlDatabase : DatabaseInstance
         ThrowIfOffline();
         cancellationToken.ThrowIfCancellationRequested();
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
-        return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema, ddlLockOwner);
+        return new SqlDatabaseSession(this, _coordinator, executor, _engine.ParserOptions, provisioningSchema, ddlLockOwner)
+        {
+            StatementTimeout = TimeSpan.Zero,
+            LockTimeout = TimeSpan.Zero,
+        };
     }
 
     /// <summary>

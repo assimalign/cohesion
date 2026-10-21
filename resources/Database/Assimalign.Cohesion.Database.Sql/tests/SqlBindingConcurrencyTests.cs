@@ -144,8 +144,17 @@ public sealed class SqlBindingConcurrencyTests
                 if (failureMode == "throw") { throw new InsufficientExecutionStackException("binding failed"); }
             };
             gate.Arm();
-            var computing = new SqlBindingCaller(() => QueryAsync(first, binding == "refresh"
-                ? "CREATE FUNCTION another_sql(p INT) RETURNS INT RETURN p" : sql, cancellation.Token));
+            var computing = new SqlBindingCaller(() =>
+            {
+                if (binding == "refresh")
+                {
+                    // Exercise cancellable cache work directly. DDL's post-commit refresh must
+                    // finish without caller cancellation and deliver its committed result (#1231).
+                    database.Definitions.RefreshDefinitions(cancellation.Token);
+                    return Task.CompletedTask;
+                }
+                return QueryAsync(first, sql, cancellation.Token);
+            });
             SqlBindingCaller? waiter = null;
             SqlBindingCaller? canceledWaiter = null;
             try
@@ -184,8 +193,12 @@ public sealed class SqlBindingConcurrencyTests
                 // Assert
                 if (failureMode == "throw")
                 {
-                    failure.ShouldBeAssignableTo<DatabaseException>();
-                    failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
+                    if (binding == "refresh") { failure.ShouldBeOfType<InsufficientExecutionStackException>(); }
+                    else
+                    {
+                        failure.ShouldBeAssignableTo<DatabaseException>();
+                        failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
+                    }
                 }
                 else { failure.ShouldBeAssignableTo<OperationCanceledException>(); }
                 retryFailure.ShouldBeNull();

@@ -211,7 +211,7 @@ public sealed class SqlFunctionCancellationTests
         committed.Select(row => row[0]).ShouldBe(new object[] { 1, 10, 30 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: folding uses the binding token and later execution uses its own token")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: pre-commit folding is cancellable, committed refresh completes and later execution uses its own token")]
     [MemberData(nameof(DefinitionCases))]
     public async Task ExecuteAsync_SharedDefinition_ShouldUseCurrentOperationToken(string? setup, string declaration, string sql, string function, bool canceled)
     {
@@ -229,10 +229,11 @@ public sealed class SqlFunctionCancellationTests
         using var binding = new CancellationTokenSource();
         using var statement = new CancellationTokenSource();
         bool defaultDeclaration = declaration.Contains(" DEFAULT ", StringComparison.Ordinal);
+        bool committedRefresh = IsDefinitionDeclaration(declaration);
         if (canceled) { functions.BeforeThrow = _ => binding.Cancel(); }
 
         // Act
-        if (canceled)
+        if (canceled && !committedRefresh)
         {
             await Should.ThrowAsync<OperationCanceledException>(() => ExecuteAsync(session, declaration, binding.Token));
         }
@@ -246,15 +247,16 @@ public sealed class SqlFunctionCancellationTests
             await ExecuteAsync(session, declaration, binding.Token);
         }
 
-        // Assert: every attempt to fold has the operation's token, even if its coded error is deferred.
+        // Assert: committed definition refresh detaches cancellation; pre-commit work retains it.
         functions.Calls.ShouldBeGreaterThan(0);
-        functions.Tokens.ShouldAllBe(token => token == binding.Token);
+        functions.Tokens.ShouldAllBe(token => token == (committedRefresh ? CancellationToken.None : binding.Token));
         binding.IsCancellationRequested.ShouldBe(canceled);
         if (defaultDeclaration) { await AssertDefaultAbsentAsync(database); }
-        if (canceled) { functions.Calls.ShouldBe(1); return; }
+        if (canceled && !committedRefresh) { functions.Calls.ShouldBe(1); return; }
 
         // Act: a failed fold must not retain the binding token in the cached expression.
         functions.Reset();
+        functions.BeforeThrow = null;
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, defaultDeclaration ? declaration : sql, statement.Token));
 
         // Assert
@@ -270,7 +272,7 @@ public sealed class SqlFunctionCancellationTests
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: wire binding observes cancellation and preserves coded failures for later execution")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: wire binding honors the commit boundary and preserves coded failures for later execution")]
     [MemberData(nameof(DefinitionCases))]
     public async Task ExecuteAsync_SharedWireDefinition_ShouldUseCurrentOperationToken(string? setup, string declaration, string sql, string function, bool canceled)
     {
@@ -296,6 +298,7 @@ public sealed class SqlFunctionCancellationTests
         var serverSession = server.Sessions.ShouldHaveSingleItem();
         var closing = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
         bool defaultDeclaration = declaration.Contains(" DEFAULT ", StringComparison.Ordinal);
+        bool committedRefresh = IsDefinitionDeclaration(declaration);
         if (canceled)
         {
             functions.BeforeThrow = _ =>
@@ -328,9 +331,22 @@ public sealed class SqlFunctionCancellationTests
 
         // Assert
         functions.Calls.ShouldBeGreaterThan(0);
-        functions.Tokens.ShouldAllBe(token => token.CanBeCanceled && token == functions.LastToken);
-        functions.LastToken.IsCancellationRequested.ShouldBe(canceled);
+        functions.Tokens.ShouldAllBe(token => committedRefresh ? token == CancellationToken.None
+            : token.CanBeCanceled && token == functions.LastToken);
+        functions.LastToken.IsCancellationRequested.ShouldBe(canceled && !committedRefresh);
         if (defaultDeclaration) { await AssertDefaultAbsentAsync(database); }
+        if (committedRefresh)
+        {
+            // A disconnect can lose the response, but cannot undo the catalog publication.
+            await using var observer = await database.CreateSessionAsync(timeout.Token);
+            await using var published = (await observer.ExecuteAsync(declaration.StartsWith("CREATE FUNCTION", StringComparison.Ordinal)
+                ? "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE FUNCTION_NAME = 'shared_body'"
+                : "SELECT DOMAIN_NAME FROM COHESION_SCHEMA.DOMAINS WHERE DOMAIN_NAME = 'shared_domain'",
+                cancellationToken: timeout.Token)).ShouldBeAssignableTo<DatabaseResultSet>();
+            int definitions = 0;
+            await foreach (var row in published.GetRowsAsync(timeout.Token)) { definitions++; }
+            definitions.ShouldBe(1);
+        }
         if (canceled) { functions.Calls.ShouldBe(1); return; }
 
         // Act
@@ -390,10 +406,10 @@ public sealed class SqlFunctionCancellationTests
         functions.Tokens.ShouldAllBe(token => token == second.Token);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: cancellation while binding a published definition allows the next statement to reload it")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Shared definitions: cancellation during committed refresh delivers success and later execution uses its own token")]
     [InlineData("CREATE FUNCTION shared_body(p INT) RETURNS INT RETURN cancel_fixed(1)", "SELECT shared_body(id) FROM t", "cancel_fixed")]
     [InlineData("CREATE DOMAIN shared_domain AS INT CHECK (cancel_check(1))", "SELECT CAST(id AS shared_domain) FROM t", "cancel_check")]
-    public async Task ExecuteAsync_CanceledDefinitionRefresh_ShouldReloadWithNextStatementToken(string declaration, string sql, string function)
+    public async Task ExecuteAsync_CancellationDuringCommittedRefresh_ShouldDeliverSuccessAndUseNextStatementToken(string declaration, string sql, string function)
     {
         // Arrange
         var functions = new CancellationFunctions();
@@ -407,7 +423,10 @@ public sealed class SqlFunctionCancellationTests
         using var binding = new CancellationTokenSource();
         using var statement = new CancellationTokenSource();
         functions.BeforeThrow = _ => binding.Cancel();
-        await Should.ThrowAsync<OperationCanceledException>(() => ExecuteAsync(session, declaration, binding.Token));
+        await ExecuteAsync(session, declaration, binding.Token);
+        binding.IsCancellationRequested.ShouldBeTrue();
+        functions.Calls.ShouldBe(1);
+        functions.Tokens.ShouldAllBe(token => token == CancellationToken.None);
         functions.Reset();
         functions.BeforeThrow = null;
 
@@ -420,6 +439,9 @@ public sealed class SqlFunctionCancellationTests
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);
     }
+
+    private static bool IsDefinitionDeclaration(string declaration)
+        => declaration.StartsWith("CREATE FUNCTION", StringComparison.Ordinal) || declaration.StartsWith("CREATE DOMAIN", StringComparison.Ordinal);
 
     private static async Task AssertDefaultAbsentAsync(SqlDatabase database)
     {

@@ -23,9 +23,14 @@ internal sealed partial class SqlPlanExecutor
         }
         statement.ProvisioningProgress!(0, total);
         var index = await statement.Coordinator.ApplyStatementAsync(statement.Transaction,
-            async bracket => await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false),
+            async bracket =>
+            {
+                var createdIndex = await _indexManager.CreateIndexAsync(statement.Transaction, table.ObjectId, definition, cancellationToken).ConfigureAwait(false);
+                // Track registration before the bracket's durable end can fail.
+                created();
+                return createdIndex;
+            },
             durable: true, cancellationToken).ConfigureAwait(false);
-        created();
         var keys = definition.IsUnique ? new HashSet<string>(StringComparer.Ordinal) : null;
         long processed = 0;
 
