@@ -94,9 +94,13 @@ internal readonly ref struct BTreeNode
     /// </summary>
     internal Span<byte> Body => _body;
 
+    // Deterministic rewrite interleaving probe, used only by this assembly's tests.
+    internal static Action<byte>? PageCleared { get; set; }
+
     internal static BTreeNode Initialize(Span<byte> body, byte kind)
     {
         body.Clear();
+        PageCleared?.Invoke(kind);
         var node = new BTreeNode(body);
         BinaryPrimitives.WriteUInt16LittleEndian(body[magicOffset..], Magic);
         body[versionOffset] = FormatVersion;

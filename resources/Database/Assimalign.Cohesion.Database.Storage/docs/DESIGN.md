@@ -82,6 +82,9 @@ transaction coordinator's internal test hooks), never protected surface on `Stor
 
 ## Cancellable structure reads (#1542)
 
+Cancelable latch acquisition checks the token between approximately 10 ms waits; a
+non-cancelable token blocks indefinitely until it can acquire the shared hold.
+
 StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writer or physical rollback owns the structure latch. Cancellation takes no shared hold, including the race where acquisition succeeds as cancellation arrives. The existing un-tokened API remains unchanged. B+Tree batches use this overload; lock order stays transaction locks -> tree latch -> page pin/pool monitor, with no awaits under the tree latch.
 
 ## The page model

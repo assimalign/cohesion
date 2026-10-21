@@ -68,7 +68,7 @@ public sealed class BTreeIndex
     private readonly Func<TransactionContext, StorageTransaction> _transactionSource;
     private readonly LockManager? _lockManager;
     private readonly ulong _objectId;
-    private readonly StoragePageLatch _latch = StoragePageLatch.Create();
+    private readonly StoragePageLatch _latch;
     private readonly long _rootPageId;
 
     internal BTreeIndex(
@@ -86,6 +86,7 @@ public sealed class BTreeIndex
         Name = definition.Name;
         IsUnique = definition.IsUnique;
         _rootPageId = rootPageId;
+        _latch = BTreeLatches.Get(storage, rootPageId);
     }
 
     /// <summary>
@@ -139,29 +140,35 @@ public sealed class BTreeIndex
     /// <exception cref="IndexFormatException">The root page is not a node of this format.</exception>
     internal static void EnsureFormat(Storage.Storage storage, BTreeIndexRegistration registration)
     {
-        int found;
-
-        using (var handle = storage.PageManager.GetPage((PageId)registration.RootPageId))
+        var latch = BTreeLatches.Get(storage, registration.RootPageId);
+        latch.EnterRead();
+        try
         {
-            found = handle.Page.Type == PageType.Index
-                ? BTreeNode.ReadFormatVersion(handle.Page.AsBodySpan())
-                : 0;
+            int found;
 
-            if (found == BTreeNode.FormatVersion)
+            using (var handle = storage.PageManager.GetPage((PageId)registration.RootPageId))
             {
-                if (BTreeNode.IsCurrentFormat(handle.Page.AsBodySpan()))
+                found = handle.Page.Type == PageType.Index
+                    ? BTreeNode.ReadFormatVersion(handle.Page.AsBodySpan())
+                    : 0;
+
+                if (found == BTreeNode.FormatVersion)
                 {
-                    return;
+                    if (BTreeNode.IsCurrentFormat(handle.Page.AsBodySpan()))
+                    {
+                        return;
+                    }
+
+                    // The current stamp over a body that is no node of this format (its
+                    // kind byte is neither leaf nor internal) is damage, not a format.
+                    found = 0;
                 }
-
-                // The current stamp over a body that is no node of this format (its
-                // kind byte is neither leaf nor internal) is damage, not a format.
-                found = 0;
             }
-        }
 
-        IndexEventSource.Log.IndexFormatRefused(storage, registration, found);
-        throw new IndexFormatException(registration.Definition.Name, registration.ObjectId, registration.RootPageId, found);
+            IndexEventSource.Log.IndexFormatRefused(storage, registration, found);
+            throw new IndexFormatException(registration.Definition.Name, registration.ObjectId, registration.RootPageId, found);
+        }
+        finally { latch.ExitRead(); }
     }
 
     /// <summary>
@@ -647,7 +654,13 @@ public sealed class BTreeIndex
                     if (firstLeaf)
                     {
                         cursor.Continuation = null;
-                        cursor.Boundary = leafBoundary;
+                        if (leafBoundary is { } fence)
+                        {
+                            using var fencePage = _storage.PageManager.GetPage((PageId)fence.PageId);
+                            cursor.PagesVisited++;
+                            cursor.Boundary = Separator.FromNode(OpenNode(fencePage.Page.AsBodySpan(), fence.PageId), fence.Slot);
+                        }
+                        else { cursor.Boundary = null; }
                         cursor.Completed = leafBoundary is null;
                     }
                     return;
@@ -684,7 +697,8 @@ public sealed class BTreeIndex
                         cursor.Boundary = null;
                         if (visible) { cursor.Entries[cursor.Count++] = entry; }
                     }
-                    if (cursor.Count == BTreeCursor.BatchSize || examined == BTreeCursor.ExaminationLimit) { return; }
+                    if (cursor.Count == (cursor.BatchSizeOverride > 0 ? cursor.BatchSizeOverride : cursor.ReadLimit) ||
+                        examined == BTreeCursor.ExaminationLimit) { return; }
                 }
                 if (lastExamined >= 0 && !lastVisible)
                 {
@@ -700,7 +714,7 @@ public sealed class BTreeIndex
     }
 
     private long DescendCursor(in BTreeSearchKey position, bool bounded, bool reverse, BTreeCursor cursor,
-        CancellationToken cancellationToken, out Separator? leafBoundary)
+        CancellationToken cancellationToken, out (long PageId, int Slot)? leafBoundary)
     {
         long current = RootPageId;
         leafBoundary = null;
@@ -716,7 +730,7 @@ public sealed class BTreeIndex
             // Equality with a separator therefore belongs in its left child.
             if (bounded && reverse && slot >= 0 && node.CompareToSeparator(position, slot) == 0) { slot--; }
             int fence = reverse ? slot : slot + 1;
-            if (fence >= 0 && fence < node.EntryCount) { leafBoundary = Separator.FromNode(node, fence); }
+            if (fence >= 0 && fence < node.EntryCount) { leafBoundary = (current, fence); }
             current = node.GetChildAt(slot);
         }
     }

@@ -71,6 +71,10 @@ public sealed class StoragePageLatch
 
     /// <summary>Holds the latch shared, observing cancellation while waiting for a writer.</summary>
     /// <param name="cancellationToken">Cancellation token for acquiring the shared hold.</param>
+    /// <remarks>
+    /// A cancelable token is checked between waits of approximately 10 milliseconds.
+    /// A non-cancelable token blocks indefinitely until the shared hold is available.
+    /// </remarks>
     /// <exception cref="System.OperationCanceledException">Acquisition is canceled; no hold is taken.</exception>
     /// <exception cref="LockRecursionException">The current thread already holds this non-recursive latch.</exception>
     public void EnterRead(CancellationToken cancellationToken)

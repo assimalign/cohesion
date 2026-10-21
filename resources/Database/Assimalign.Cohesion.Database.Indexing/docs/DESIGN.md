@@ -101,7 +101,9 @@ entries and splits stay correct.
 OpenCursor captures the supplied visibility snapshot and copies its bounds, without visiting
 a page. It accepts an optional cancellation token after the direction parameter; that token
 applies throughout enumeration, alongside each MoveNextAsync token. Moves complete synchronously
-and copy at most 64 visible entries or examine 256 entries per latch hold. Invisible entries
+and copy one visible entry in the first batch, then at most 64 per batch, or examine 256
+entries per latch hold. The one-entry probe bounds Graph incident-type discovery without a
+public batch-size API; continuing scans grow to the normal batch size. Invisible entries
 count toward that work bound. Both directions descend to their starting bound, then follow
 NextLeaf or PrevLeaf; a reverse scan never collects the forward range. Each move returns with
 all page handles and the tree latch released.
@@ -117,6 +119,17 @@ at its ancestor separator fence, inclusive forward and exclusive reverse. A sepa
 a valid logical bound after its source entry is erased. Later empty leaves end the batch at the
 last examined identity. This bounds empty-chain latch holds too, without retaining a potentially
 rolled-back sibling id. Leaf-chain reads and separator descents use the same total entry order.
+Descent retains only a separator's page and slot while the latch is held; only the empty-leaf
+path reopens that page and copies the fence. Ordinary descent allocates no separator keys.
+
+Latch identity belongs to the physical tree, not its replaceable manager. An Indexing-owned
+weak registry keys latches by storage instance and fixed root page, retaining them for the
+storage's lifetime, including failed DDL and root-page reuse. Reattachment format checks,
+surviving cursors, replacement writers and physical rollback therefore use the same latch.
+No public member or shipped-assembly visibility grant is needed. A deterministic page-clear
+probe verifies the failed-apply/reattach/rewrite interleaving. Seeded differential tests mutate
+at every batch boundary with batch sizes 1, 2 and 64, both directions and all bound inclusivity
+combinations; Entry-tiebreaker fences are covered by a 600-version reused-reference run.
 
 The latch order remains transaction/key locks -> tree latch -> storage page pin/pool monitor.
 A cursor takes no transaction lock and never awaits under its latch. StoragePageLatch's token

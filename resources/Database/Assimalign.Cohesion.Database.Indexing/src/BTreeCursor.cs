@@ -50,6 +50,10 @@ public sealed class BTreeCursor : IAsyncDisposable
     internal long PagesVisited { get; set; }
     internal long EntriesExamined { get; set; }
     internal Action? BatchRead { get; set; }
+    // The first result is commonly a probe (notably Graph type discovery). Grow only
+    // after it is consumed, without exposing a batching policy across assemblies.
+    internal int BatchSizeOverride { get; set; }
+    internal int ReadLimit { get; private set; } = 1;
 
     internal readonly record struct Entry(byte[] Key, ulong EntryReference, ulong Writer);
 
@@ -98,6 +102,7 @@ public sealed class BTreeCursor : IAsyncDisposable
             while (!Completed && Count == 0)
             {
                 _index!.ReadCursorBatch(this, token);
+                if (Count > 0) { ReadLimit = BatchSize; }
                 BatchRead?.Invoke(); // Test seam, after every page pin and the tree latch have left.
             }
             if (Count == 0) { Continuation = null; return new ValueTask<bool>(false); }

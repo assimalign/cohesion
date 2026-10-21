@@ -70,8 +70,8 @@ public sealed class BTreeCursorAllocationTests
                 (await cursor.MoveNextAsync(CancellationToken.None)).ShouldBeTrue();
                 cursor.CurrentEntryReference.ShouldBe(reverse ? 999_999UL - (ulong)i : (ulong)i);
             }
-            cursor.PagesVisited.ShouldBeLessThanOrEqualTo(5); // height 3, one leaf reopened for the batch
-            cursor.EntriesExamined.ShouldBe(BTreeCursor.BatchSize);
+            cursor.PagesVisited.ShouldBe(8); // Height 3 + leaf reopened, for the 1-entry probe and 64-entry batch.
+            cursor.EntriesExamined.ShouldBe(BTreeCursor.BatchSize + 1);
             _output.WriteLine($"{(reverse ? "reverse" : "forward")}: {cursor.PagesVisited} page visits, {cursor.EntriesExamined} examined entries.");
         }
         await harness.Manager.CommitAsync(reader);

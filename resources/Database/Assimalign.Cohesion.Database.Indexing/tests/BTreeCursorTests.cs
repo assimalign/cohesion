@@ -19,6 +19,84 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 [Collection(BTreeRollbackRaceCollection.Name)]
 public sealed class BTreeCursorTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Cursor: failed apply and manager replacement retain the physical tree latch (#1542)")]
+    public async Task MoveNextAsync_ManagerReplacedAfterFailedApply_ShouldExcludePausedRewrite()
+    {
+        // Arrange: the same failed-bracket/reattach sequence used by Graph and Documents.
+        await using var harness = new IndexTestHarness();
+        var index = await CreateAsync(harness);
+        var seed = await harness.BeginAsync();
+        for (int i = 0; i < 100; i++) { await index.InsertAsync(seed, IndexKey.FromInt64(i), (ulong)i); }
+        await harness.CommitAsync(seed);
+        var reader = await harness.Manager.BeginAsync();
+        await using var cursor = index.OpenCursor(reader.Snapshot, IndexKeyRange.All);
+        cursor.BatchSizeOverride = 64;
+        for (ulong i = 0; i < 64; i++)
+        {
+            (await cursor.MoveNextAsync()).ShouldBeTrue();
+            cursor.CurrentEntryReference.ShouldBe(i);
+        }
+        var failed = await harness.BeginAsync();
+        try
+        {
+            await index.InsertAsync(failed, IndexKey.FromInt64(100), 100);
+            throw new InvalidOperationException("forced apply failure");
+        }
+        catch (InvalidOperationException) { await harness.RollbackAsync(failed); }
+        var replacement = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = harness.Storage,
+            TransactionSource = harness.GetStorageTransaction,
+            LockManager = harness.LockManager,
+            ExistingIndexes = harness.IndexManager.ExportRegistrations(),
+        });
+        replacement.TryGetIndex(1, index.Name, out var attached).ShouldBeTrue();
+        using var cleared = new ManualResetEventSlim();
+        using var resumeWriter = new ManualResetEventSlim();
+        using var readerStarted = new ManualResetEventSlim();
+        BTreeNode.PageCleared = kind =>
+        {
+            if (kind != BTreeNode.InternalKind) { return; }
+            cleared.Set();
+            resumeWriter.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+        };
+        var writer = await harness.BeginAsync();
+        var rewrite = Task.Run(async () =>
+        {
+            for (int i = 100; i < 400; i++) { await attached.InsertAsync(writer, IndexKey.FromInt64(i), (ulong)i); }
+            await harness.CommitAsync(writer);
+        });
+        Task<bool>? move = null;
+        try
+        {
+            cleared.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            // Act: the root is cleared but has not been stamped as a node yet.
+            move = Task.Run(async () => { readerStarted.Set(); return await cursor.MoveNextAsync(); });
+            readerStarted.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+            if (!ReferenceEquals(index.Latch, attached.Latch))
+            {
+                // On the defective implementation this deterministically reads the cleared root.
+                // No scheduling window or timeout is the evidence for the failure.
+                await move;
+            }
+            index.Latch.ShouldBeSameAs(attached.Latch);
+        }
+        finally
+        {
+            resumeWriter.Set();
+            try { await rewrite; }
+            finally { BTreeNode.PageCleared = null; }
+        }
+
+        // Assert: the surviving cursor continues its pinned view after the replacement writes.
+        (await move!).ShouldBeTrue();
+        cursor.CurrentEntryReference.ShouldBe(64UL);
+        var remaining = new List<ulong> { cursor.CurrentEntryReference };
+        while (await cursor.MoveNextAsync()) { remaining.Add(cursor.CurrentEntryReference); }
+        remaining.ShouldBe(Enumerable.Range(64, 36).Select(i => (ulong)i));
+        await harness.Manager.CommitAsync(reader);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Cursor: borrowed bounds are captured when the cursor opens (#1542)")]
     public async Task OpenCursor_MutatedBoundMemory_ShouldKeepCapturedRange()
     {
@@ -241,6 +319,7 @@ public sealed class BTreeCursorTests
         var snapshot = new TransactionSnapshot(new TransactionSequence(1_000), TransactionSequence.None,
             new TransactionSequence(1_000), []);
         await using var cursor = index.OpenCursor(snapshot, IndexKeyRange.All, reverse);
+        cursor.BatchSizeOverride = 64;
 
         // Act: remove the batch's last identity, so continuation cannot depend on finding its slot.
         for (int i = 0; i < BTreeCursor.BatchSize; i++) { (await cursor.MoveNextAsync()).ShouldBeTrue(); }
@@ -437,7 +516,10 @@ public sealed class BTreeCursorTests
         var cursor = index.OpenCursor(reader.Snapshot, IndexKeyRange.All);
 
         // Act
-        await Should.ThrowAsync<IndexCorruptionException>(async () => await cursor.MoveNextAsync());
+        await Should.ThrowAsync<IndexCorruptionException>(async () =>
+        {
+            while (await cursor.MoveNextAsync()) { }
+        });
         if (!corruptRoot) { cursor.EntriesExamined.ShouldBeGreaterThan(0); }
         damage.Rollback(); // Must acquire the write latch: a leaked read hold fails here.
 
