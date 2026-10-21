@@ -1,7 +1,5 @@
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -121,56 +119,43 @@ public sealed class GraphConnection : IAsyncDisposable
         Exception? failure = null;
         try
         {
-            Stream stream;
+            using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task completion = exchange.RunAsync(_connection, operation.Token);
             try
             {
-                try
-                {
-                    stream = await _connection.ExecuteStreamingAsync(exchange, cancellationToken).ConfigureAwait(false);
-                }
-                catch (DatabaseClientException exception)
-                {
-                    throw new GraphClientException(exception.Code, exception.Message, exception);
-                }
-            }
-            catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
-            {
-                // Unreachable: the filter records the failure and declines it.
-                throw;
-            }
-
-            await using (stream.ConfigureAwait(false))
-            {
-                byte[] length = new byte[sizeof(int)];
                 while (true)
                 {
                     GraphPath? path;
                     try
                     {
-                        path = await ReadPathAsync(stream, length, cancellationToken).ConfigureAwait(false);
-                        if (path is null && exchange.Rejection is { } rejection)
-                        {
-                            // EOF has joined the shared worker and released the active exchange.
-                            throw new GraphClientException(rejection.Code, rejection.Message, rejection);
-                        }
+                        path = await exchange.ReadPathAsync(completion, cancellationToken).ConfigureAwait(false);
                     }
                     catch (Exception exception) when (GraphClientEventSource.CaptureFailure(exception, out failure))
                     {
                         // Unreachable: the filter records the failure and declines it.
                         throw;
                     }
-
-                    if (path is null)
-                    {
-                        break;
-                    }
-
+                    if (path is null) { break; }
                     paths++;
                     yield return path;
                 }
-
-                // The enumeration reached the server's terminal count: the query is complete.
                 completed = true;
+            }
+            finally
+            {
+                // No lease or pool lock is held here. Join all producer I/O before releasing
+                // cancellation state or decoded values, including an abandoned enumeration.
+                try
+                {
+                    if (!completed) { await operation.CancelAsync().ConfigureAwait(false); }
+                }
+                finally
+                {
+                    // A transport cancellation callback is an open seam and can throw. It must
+                    // still be joined before its lease, buffers or cancellation source are released.
+                    await completion.ConfigureAwait(false);
+                    exchange.ClearPending();
+                }
             }
         }
         finally
@@ -282,21 +267,4 @@ public sealed class GraphConnection : IAsyncDisposable
             => GraphClientEventSource.Log.QueryEnded(_connection, QueryPathsOperation, startWritten: true, _status, _failure, _paths, _startTimestamp);
     }
 
-    private static async ValueTask<GraphPath?> ReadPathAsync(Stream stream, byte[] length, CancellationToken cancellationToken)
-    {
-        try
-        {
-            int read = await stream.ReadAsync(length, cancellationToken).ConfigureAwait(false);
-            if (read == 0) { return null; }
-            await stream.ReadExactlyAsync(length.AsMemory(read), cancellationToken).ConfigureAwait(false);
-            var payload = new byte[BinaryPrimitives.ReadInt32BigEndian(length)];
-            await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
-            GraphProtocolPathMessage path = GraphProtocolPathMessage.Decode(payload);
-            return new GraphPath(path.Nodes, path.Relationships);
-        }
-        catch (DatabaseClientException exception)
-        {
-            throw new GraphClientException(exception.Code, exception.Message, exception);
-        }
-    }
 }

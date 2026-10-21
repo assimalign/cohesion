@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="PathPayloadTooLarge" xml:space="preserve"><value>The graph path exceeds the maximum frame payload length.</value></data>
+  <data name="PathDestinationTooSmall" xml:space="preserve"><value>The destination cannot hold the complete graph path payload.</value></data>
+  <data name="PathPropertyUnsupported" xml:space="preserve"><value>Unsupported graph property type or non-finite number.</value></data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>

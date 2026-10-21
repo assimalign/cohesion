@@ -8,6 +8,7 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Graph.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
@@ -18,6 +19,43 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// <summary>Malformed peers must never turn a failed graph exchange into a successful response or reusable lease.</summary>
 public sealed class GraphClientFailureTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - A terminal diagnostic received before cancellation retains its original failure")]
+    public async Task ReadPathAsync_TerminalFailureBeforeCancellation_ShouldPreserveDiagnostic()
+    {
+        // Arrange: finish the producer first, then cancel the handoff read deterministically.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = DatabaseClient.Create(new()
+        {
+            Family = GraphProtocol.Family,
+            Settings = new DatabaseConnectionSettings { Database = "graph", EndPoint = listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = listener.CreateFactory(),
+        });
+        Task server = ServeAsync(listener, async channel =>
+        {
+            (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
+            await WriteAsync(channel, ProtocolMessageType.Diagnostics, new ProtocolDiagnosticsMessage(
+                [new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Error, "COHDBG001", "Terminal failure.", null, null, 1)]).Encode(), timeout.Token);
+            await WriteAsync(channel, ProtocolMessageType.Error,
+                new ProtocolErrorMessage(ProtocolErrorCode.ExecutionFailure, "Terminal failure.").Encode(), timeout.Token);
+        }, timeout.Token, compositeValues: true);
+        await using var connection = await client.RentAsync(timeout.Token);
+        var exchange = new GraphPathsExchange("MATCH (n) RETURN n", null);
+        Task completion = exchange.RunAsync(connection, timeout.Token);
+        await completion.WaitAsync(timeout.Token);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        // Act
+        var failure = await Should.ThrowAsync<GraphClientException>(async () =>
+            await exchange.ReadPathAsync(completion, cancelled.Token));
+
+        // Assert
+        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        await server.WaitAsync(timeout.Token);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composite values: malformed rows are protocol violations")]
     [InlineData(0)]
     [InlineData(1)]

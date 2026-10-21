@@ -181,29 +181,36 @@ telemetry path before the disposed lease rejects execution. `AbortAsync` after a
 abandoned path stream joins the lease's original return, as repeated disposal does; it cannot
 abort another caller's rental.
 
-GraphPathsExchange derives from DatabaseStreamingExchange. OpenCoreAsync sends ExecutePaths and
-validates the initial Path or PathsComplete frame. A terminal ParseFailure or ExecutionFailure
-before any path frame is retained as the rejected statement's error, and CopyToCoreAsync completes
-without content. GraphConnection consumes EOF, which joins the shared worker and releases the
-active exchange, then raises GraphClientException with the retained code, message and diagnostics. The healthy
-connection can execute another statement immediately and returns to the pool when disposed.
-This completion handling stays entirely in Graph.Client; the shared streaming and pool code is unchanged.
-For successful responses, CopyToCoreAsync validates each existing path
-payload and verifies the final path count. Its private stream handoff prefixes each payload
-with its length to preserve boundaries through bounded byte buffering; this is entirely within
-the client and does not alter the graph wire protocol. GraphConnection decodes those same
-payloads into GraphPath values.
+GraphPathsExchange derives from DatabaseProtocolExchange<bool> and runs one worker under the
+shared rental's exchange admission. The worker reads borrowed pooled payloads when supported,
+decodes each Path exactly once, and hands independently owned GraphPath values to a single-slot
+bounded channel. It waits for room before reading another frame. The byte stream, private length
+prefix, per-chunk copies and second decode are removed (#1539); no wire bytes change.
 
-The shared ExecuteStreamingAsync owns frame I/O, applies backpressure, and keeps the connection
-busy through completion. Consuming EOF verifies terminal completion before another operation.
-Disposing an unfinished enumeration cancels the worker and discards the rental. Failures after
-path output, malformed frames, transport failures, cancellation and non-statement errors discard
-the connection under the existing shared streaming contract. InMemory and TCP tests verify an
-unbound parameter rejection followed by SHOW LABELS on the same connection and pooled session.
+EOF joins the worker after it verifies PathsComplete's count and releases exchange admission.
+A terminal ParseFailure or ExecutionFailure before path output certifies a complete response
+before throwing, preserving the healthy rental and its negotiated diagnostics. Later errors,
+malformed frames, count mismatches, truncation and cancellation discard the connection. An
+unfinished enumeration cancels and joins the worker before clearing pending values and disposing
+its cancellation source. Cleanup retains the original failure and reports a secondary rental
+return failure by exception type only (event 4, PathReleaseFailed).
 
-The client holds a bounded number of path payloads for materialization plus the shared bounded
-byte buffer. The engine currently materializes its path result, so end-to-end server memory still
-depends on the number of matched paths. A single path must fit the existing maximum frame size.
+No lease or pool lock is held during channel waits, cancellation callbacks or transport I/O.
+Only the producer uses the frame reader; decoded paths keep no references to pooled payload
+storage. Retained values survive subsequent reads, pool reuse and disposal. The client holds
+one queued path plus the consumer's current path; the engine still materializes its result.
+A single path retains the existing frame bound, without entity deduplication or an aggregate cap.
+The non-parallel regression observes queue-full counters before racing connection disposal and
+runs until a minimum duration and observed race count are met, with a cancellation ceiling.
+
+GraphClientEventSource publishes exact cumulative path-decode-calls, path-decode-milliseconds
+and path-backpressure-waits, including work before a listener attaches. Event 5,
+PathDecodeCompleted (Verbose, Queries), reports durationMilliseconds for each attempted decode.
+The TCP allocation regression takes the minimum of three whole-process rounds, retains the
+20-path digest and checks exactly one decode per path. It enforces a 40% allocation reduction
+against the pre-change fixture. Server phase counters and protocol transport counters provide
+the corresponding execution, encoding, send and flush evidence. SF10 remains the external
+#1511 gate; local TCP work does not establish quiet-host throughput acceptance.
 
 ## Supported surface and limits
 
@@ -249,6 +256,8 @@ written by GraphConnection's three public members. Start and stop carry the `Que
 | 1 | `QueryStart` | Verbose | `Queries` | `database`, `operation` (`Query`, `Execute` or `QueryPaths`) |
 | 2 | `QueryStop` | Verbose | `Queries` | `database`, `operation`, `status` (`Success`, `Error` or `Cancelled`), `rowCount` (rows; for `QueryPaths`, the paths read by then; -1 for a scalar query that did not return), `durationMilliseconds` |
 | 3 | `QueryFailed` | Error | — | `database`, `operation`, `code` (the wire code; empty for an uncoded failure), `exceptionType`, `durationMilliseconds` |
+| 4 | `PathReleaseFailed` | Error | — | `exceptionType` |
+| 5 | `PathDecodeCompleted` | Verbose | `Queries` | `durationMilliseconds` |
 
 QueryAsync and ExecuteAsync share one private core that names the operation, so an Execute is
 reported as such and not as the Query it runs. **Every start has a stop** (the area's convention,
@@ -270,7 +279,7 @@ listener that attaches mid-query sees no stop without its start; event 3 is writ
 The statement text and the parameter values are never written, nor is the server's message: a GQL
 parse error's quotes a fragment of the statement, so event 3 writes the wire code and the
 exception's type only (the area's failure rule). Timestamps are taken only while a listener takes
-the source. No counters.
+the source. Path decode and backpressure counters are described above.
 
 `GraphClientEventSourceTests` checks the name, the strict manifest, one event per query of each
 member, a refused statement included (its failure, then its `Error` stop, with no statement text and
@@ -293,7 +302,7 @@ The package has no public interface left and no `Abstractions/` folder
 
 The two exchanges stay internal sealed leaves of the shared bases: `GraphExecuteExchange` of
 `DatabaseProtocolExchange<GraphResultSet>` and `GraphPathsExchange` of
-`DatabaseStreamingExchange`. `GraphResultSet.Columns` and its rows are never null (`database-area.md`,
+`DatabaseProtocolExchange<bool>`. `GraphResultSet.Columns` and its rows are never null (`database-area.md`,
 rule 9): a statement without a result header yields empty ones. Studio's graph workspace was
 retyped to the sealed types.
 

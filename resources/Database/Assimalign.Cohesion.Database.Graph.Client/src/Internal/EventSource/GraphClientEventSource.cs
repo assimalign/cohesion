@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Client;
 
@@ -25,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 /// wire code and exception type only, never a message: the server's message for a parse error quotes
 /// the statement (the area's failure rule, <c>docs/resources/Database/DESIGN.md</c>). Every
 /// <c>QueryStart</c> is closed by one <c>QueryStop</c>, after <c>QueryFailed</c> for a failure. No
-/// counters (plan D6).
+/// path decode and backpressure counters attribute the streaming work (#1539).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Graph.Client")]
@@ -41,6 +42,58 @@ internal sealed class GraphClientEventSource : EventSource
     internal const string StatusCancelled = "Cancelled";
 
     public static readonly GraphClientEventSource Log = new();
+
+    private long _pathDecodeCalls;
+    private long _pathDecodeTicks;
+    private long _pathBackpressureWaits;
+    private PollingCounter? _decodeCounter;
+    private PollingCounter? _decodeTimeCounter;
+    private PollingCounter? _backpressureCounter;
+
+    internal long PathDecodeCalls => Volatile.Read(ref _pathDecodeCalls);
+    internal long PathBackpressureWaits => Volatile.Read(ref _pathBackpressureWaits);
+
+    [NonEvent]
+    internal void PathDecoded(long started)
+    {
+        Interlocked.Increment(ref _pathDecodeCalls);
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        Interlocked.Add(ref _pathDecodeTicks, elapsed);
+        if (IsEnabled(EventLevel.Verbose, Keywords.Queries))
+        {
+            PathDecodeCompleted(elapsed * 1000.0 / Stopwatch.Frequency);
+        }
+    }
+
+    [NonEvent]
+    internal void PathBackpressureWaited() => Interlocked.Increment(ref _pathBackpressureWaits);
+
+    [NonEvent]
+    internal void PathReleaseFailed(Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            PathReleaseFailed(exception.GetType().FullName ?? exception.GetType().Name);
+        }
+    }
+
+    [Event(4, Level = EventLevel.Error, Message = "Returning a failed path exchange's rental failed: {0}.")]
+    private void PathReleaseFailed(string exceptionType) => WriteEvent(4, exceptionType);
+
+    [Event(5, Level = EventLevel.Verbose, Keywords = Keywords.Queries, Message = "Decoded a path in {0} ms.")]
+    private void PathDecodeCompleted(double durationMilliseconds) => WriteEvent(5, durationMilliseconds);
+
+    protected override void OnEventCommand(EventCommandEventArgs command)
+    {
+        if (command.Command != EventCommand.Enable) { return; }
+        _decodeCounter ??= new PollingCounter("path-decode-calls", this, () => PathDecodeCalls)
+        { DisplayName = "Path Decode Calls" };
+        _decodeTimeCounter ??= new PollingCounter("path-decode-milliseconds", this,
+            () => Volatile.Read(ref _pathDecodeTicks) * 1000.0 / Stopwatch.Frequency)
+        { DisplayName = "Path Decode Milliseconds" };
+        _backpressureCounter ??= new PollingCounter("path-backpressure-waits", this, () => PathBackpressureWaits)
+        { DisplayName = "Path Backpressure Waits" };
+    }
 
     private GraphClientEventSource()
     {

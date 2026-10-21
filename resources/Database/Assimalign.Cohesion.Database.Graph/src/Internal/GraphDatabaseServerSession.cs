@@ -1,5 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -59,6 +61,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     // Per-session fault seams distinguish result materialization from transport I/O.
     internal Action? BeforeResultWrite { get; set; }
     internal Action? BeforeTransportWrite { get; set; }
+    internal Action? BeforeTransportFlush { get; set; }
 
     internal GraphDatabaseServerSession(
         GraphDatabaseServer server,
@@ -146,7 +149,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         try
         {
             Stream stream = _connection.AsStream();
-            _channel = new ProtocolChannel(stream, GraphProtocol.Family, leaveOpen: true);
+            _channel = new ProtocolChannel(stream, GraphProtocol.Family, leaveOpen: true, batchWrites: true);
             _reader = _channel.Reader;
             _writer = _channel.Writer;
 
@@ -451,11 +454,20 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // Negotiated warnings precede scalar or path completion.
             // The parse delegates write StatementParseFailed for a statement that fails to parse:
             // it fails before the root session sees it, so the root's statement events do not.
-            var result = paths
+            long executeStarted = Stopwatch.GetTimestamp();
+            DatabaseResult result;
+            try
+            {
+                result = paths
                 ? await _databaseSession!.ExecuteStatementAsync(
                     () => ParsePathsRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false)
                 : await _databaseSession!.ExecuteStatementAsync(
                     () => ParseScalarRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (paths) { GraphDatabaseEventSource.Log.PathPhaseCompleted(Id, 0, executeStarted); }
+            }
             try
             {
                 BeforeResultWrite?.Invoke();
@@ -562,14 +574,51 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             throw new GraphPlanningException("COHDBG001", "A path request did not produce a graph path result.", _statementLocation);
         }
         byte[]? diagnosticPayload = PrepareDiagnostics(paths.Diagnostics);
+        long batchStarted = Stopwatch.GetTimestamp();
         foreach (GraphPath path in paths.Paths)
         {
-            await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
-                new GraphProtocolPathMessage(path.Nodes, path.Relationships).Encode(), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            long encodeStarted = Stopwatch.GetTimestamp();
+            byte[]? payload = null;
+            try
+            {
+                int length;
+                try
+                {
+                    var message = new GraphProtocolPathMessage(path.Nodes, path.Relationships);
+                    length = message.GetEncodedLength();
+                    payload = ArrayPool<byte>.Shared.Rent(length);
+                    length = message.Encode(payload.AsSpan(0, length));
+                }
+                finally { GraphDatabaseEventSource.Log.PathPhaseCompleted(Id, 1, encodeStarted); }
+                long sendStarted = Stopwatch.GetTimestamp();
+                try
+                {
+                    bool flush = Stopwatch.GetElapsedTime(batchStarted) >= TimeSpan.FromMilliseconds(10);
+                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
+                        payload.AsMemory(0, length), cancellationToken, flush).ConfigureAwait(false);
+                    // Paths are already materialized: cooperative latency flushing adds no timer
+                    // or competing writer. Count/byte bounds are enforced by the protocol writer.
+                    if (flush)
+                    {
+                        batchStarted = Stopwatch.GetTimestamp();
+                    }
+                }
+                finally { GraphDatabaseEventSource.Log.PathPhaseCompleted(Id, 2, sendStarted); }
+            }
+            finally
+            {
+                if (payload is not null) { ArrayPool<byte>.Shared.Return(payload, clearArray: true); }
+            }
         }
-        await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
-        await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
-            new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
+        long completeStarted = Stopwatch.GetTimestamp();
+        try
+        {
+            await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
+            await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
+                new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
+        }
+        finally { GraphDatabaseEventSource.Log.PathPhaseCompleted(Id, 2, completeStarted); }
     }
 
     private async Task WriteResultAsync(DatabaseResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
@@ -708,13 +757,18 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
     }
 
-    private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload,
+        CancellationToken cancellationToken, bool flush = false)
     {
         try
         {
             BeforeTransportWrite?.Invoke();
             await _writer!.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken).ConfigureAwait(false);
-            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            if (flush || type != (ProtocolMessageType)GraphProtocolMessageType.Path)
+            {
+                BeforeTransportFlush?.Invoke();
+                await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (ObjectDisposedException)
         {

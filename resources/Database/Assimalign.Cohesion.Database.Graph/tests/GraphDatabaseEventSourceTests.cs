@@ -403,13 +403,54 @@ public sealed class GraphDatabaseEventSourceTests
     public async Task Counters_EnabledWithInterval_ShouldPublishServerSessionCounters()
     {
         // Arrange
-        string[] counters = ["current-server-sessions", "total-server-sessions", "total-rejected-sessions"];
+        string[] counters = ["current-server-sessions", "total-server-sessions", "total-rejected-sessions",
+            "path-execute-calls", "path-encode-calls", "path-send-calls", "path-execute-milliseconds",
+            "path-encode-milliseconds", "path-send-milliseconds"];
 
         // Act
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.LogAlways, counterInterval: TimeSpan.FromMilliseconds(100));
 
         // Assert
         await recorder.WaitForCountersAsync(counters, TestTimeout.Token(30));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Path execute encode and send phases report exact work")]
+    public async Task PathPhaseCompleted_TwoPaths_ShouldReportOneExecuteAndOneEncodePerPath()
+    {
+        // Arrange
+        await using var harness = await GraphServerHarness.StartAsync();
+        var database = await harness.Engine.OpenDatabaseAsync(GraphServerHarness.DatabaseName, TestTimeout.Token());
+        await using (var session = await database.CreateSessionAsync(TestTimeout.Token()))
+        {
+            await database.CreateNodeAsync(session, ["Person"], new System.Collections.Generic.Dictionary<string, object?>(), TestTimeout.Token());
+            await database.CreateNodeAsync(session, ["Person"], new System.Collections.Generic.Dictionary<string, object?>(), TestTimeout.Token());
+        }
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        long executes = GraphDatabaseEventSource.Log.PathExecuteCalls;
+        long encodes = GraphDatabaseEventSource.Log.PathEncodeCalls;
+        long sends = GraphDatabaseEventSource.Log.PathSendCalls;
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
+
+        // Act
+        await client.SendAsync((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+            GraphProtocolExecuteMessage.Create("MATCH (n:Person) RETURN n").Encode());
+        await client.ExpectAsync((ProtocolMessageType)GraphProtocolMessageType.Path);
+        await client.ExpectAsync((ProtocolMessageType)GraphProtocolMessageType.Path);
+        await client.ExpectAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+        await GraphServerHarness.WaitUntilAsync(() => recorder.Events.Count(item => item.EventId == 15
+            && Equals(item.Payload![1], "Send")) == 3);
+
+        // Assert
+        (GraphDatabaseEventSource.Log.PathExecuteCalls - executes).ShouldBe(1);
+        (GraphDatabaseEventSource.Log.PathEncodeCalls - encodes).ShouldBe(2);
+        (GraphDatabaseEventSource.Log.PathSendCalls - sends).ShouldBe(3);
+        var phases = recorder.Events.Where(item => item.EventId == 15).ToArray();
+        phases.Count(item => Equals(item.Payload![1], "Execute")).ShouldBe(1);
+        phases.Count(item => Equals(item.Payload![1], "Encode")).ShouldBe(2);
+        phases.Count(item => Equals(item.Payload![1], "Send")).ShouldBe(3);
+        phases.ShouldAllBe(item => item.PayloadNames!.SequenceEqual(new[] { "sessionId", "phase", "durationMilliseconds" }));
+        recorder.Events.ShouldNotContain(item => item.EventId == 0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should allocate nothing on any write while nobody listens")]
