@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -57,7 +58,62 @@ public sealed class BTreeShapeTests
         leaves.ShouldBeLessThanOrEqualTo(3_052);
     }
 
-    private async Task<BTreeShape> MeasureAsync(string order, int seed)
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Split: shuffled duplicate pairs retain midpoint utilization across three seeds (#1196)")]
+    public async Task Insert_ShuffledDuplicatePairs_ShouldNotIncreaseTotalLeafPages()
+    {
+        // Arrange
+        int leaves = 0;
+
+        // Act
+        foreach (int seed in new[] { 1196, 77, 42 })
+        {
+            var shape = await MeasureAsync("random-pairs", seed);
+            leaves += shape.LeafCounts.Count;
+            shape.Height.ShouldBe(4);
+        }
+
+        // Assert: the midpoint baseline used 1,037 + 1,047 + 1,053 pages.
+        leaves.ShouldBeLessThanOrEqualTo(3_137);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: new references for existing keys retain midpoint utilization (#1196)")]
+    [InlineData("random-load-random-updates", 1_024, 2_095)]
+    [InlineData("random-load-ascending-updates", 1_024, 2_228)]
+    [InlineData("random-load-random-updates", 500, 967)]
+    [InlineData("random-load-ascending-updates", 500, 1_075)]
+    [InlineData("random-load-random-updates", 52, 139)]
+    [InlineData("random-load-ascending-updates", 52, 139)]
+    [InlineData("random-updates", 1_024, 1_667)]
+    [InlineData("ascending-updates", 1_024, 1_667)]
+    [InlineData("random-updates", 500, 715)]
+    [InlineData("ascending-updates", 500, 715)]
+    [InlineData("random-updates", 52, 100)]
+    [InlineData("ascending-updates", 52, 100)]
+    public async Task Insert_NewReferenceForEveryKey_ShouldStayWithinMidpointTolerance(string order, int keyLength, int midpointLeaves)
+    {
+        // Arrange / Act: 5,000 keys, followed by 5,000 new references.
+        var shape = await MeasureAsync(order, 1196, keyLength);
+
+        // Assert: allow at most 5% more leaves than the base midpoint policy,
+        // including the effect of the unchanged rightmost-append load policy.
+        shape.LeafCounts.Count.ShouldBeLessThanOrEqualTo((int)Math.Floor(midpointLeaves * 1.05));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: descending and alternating shapes retain their packing (#1196)")]
+    [InlineData("descending", 1_250)]
+    [InlineData("zig-zag", 1_042)]
+    [InlineData("alternating-extremes", 1_458)]
+    [InlineData("descending-pairs", 1_250)]
+    public async Task Insert_AlternatingAndDescendingKeys_ShouldRetainPacking(string order, int maximumLeaves)
+    {
+        // Arrange / Act
+        var shape = await MeasureAsync(order, 1196);
+
+        // Assert
+        shape.LeafCounts.Count.ShouldBeLessThanOrEqualTo(maximumLeaves);
+    }
+
+    private async Task<BTreeShape> MeasureAsync(string order, int seed, int keyLength = BTreeIndex.MaxKeyLength)
     {
         // Arrange
         await using var harness = new IndexTestHarness();
@@ -65,39 +121,85 @@ public sealed class BTreeShapeTests
         var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_shape", IndexKind.BTree));
         await harness.CommitAsync(setup);
         var values = Enumerable.Range(0, 5_000).ToArray();
-        if (order.StartsWith("random", StringComparison.Ordinal))
+        bool updates = order.EndsWith("updates", StringComparison.Ordinal);
+        if (order.StartsWith("random", StringComparison.Ordinal) && (!updates || order.StartsWith("random-load", StringComparison.Ordinal)))
         {
             new Random(seed).Shuffle(values);
         }
+        else if (order == "descending")
+        {
+            Array.Reverse(values);
+        }
+        else if (order == "descending-pairs")
+        {
+            values = values.Select(value => 4_998 - value / 2 * 2 + value % 2).ToArray();
+        }
+        else if (order == "zig-zag")
+        {
+            values = values.Select(value => value % 2 == 0 ? 2_500 + value / 2 : 2_499 - value / 2).ToArray();
+        }
+        else if (order == "alternating-extremes")
+        {
+            values = values.Select(value => value % 2 == 0 ? value / 2 : 4_999 - value / 2).ToArray();
+        }
+        var entries = new List<(long Key, ulong Reference)>();
 
         // Act
         var writer = await harness.BeginAsync();
         foreach (int value in values)
         {
-            await index.InsertAsync(writer, PaddedKey(order.Contains("duplicates", StringComparison.Ordinal) ? 0 : value), (ulong)value, CancellationToken.None);
+            long key = order.Contains("duplicates", StringComparison.Ordinal) ? 0
+                : order == "random-pairs" ? value % 2_500
+                : order == "descending-pairs" ? value / 2 : value;
+            await index.InsertAsync(writer, PaddedKey(key, keyLength), (ulong)value, CancellationToken.None);
+            entries.Add((key, (ulong)value));
         }
         await harness.CommitAsync(writer);
+        if (updates)
+        {
+            var loaded = BTreeShape.Read(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
+            _output.WriteLine($"{order} load, keyLength={keyLength}: leaves={loaded.LeafCounts.Count}, fill={loaded.Fill:P3}, height={loaded.Height}");
+            if (order.EndsWith("random-updates", StringComparison.Ordinal))
+            {
+                new Random(seed + 1).Shuffle(values);
+            }
+            else
+            {
+                Array.Sort(values);
+            }
+            writer = await harness.BeginAsync();
+            foreach (int value in values)
+            {
+                ulong reference = (ulong)(value + values.Length);
+                await index.InsertAsync(writer, PaddedKey(value, keyLength), reference, CancellationToken.None);
+                entries.Add((value, reference));
+            }
+            await harness.CommitAsync(writer);
+        }
         var shape = BTreeShape.Read(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
-        _output.WriteLine($"{order}, seed={seed}: leaves={shape.LeafCounts.Count}, entries={shape.LeafCounts.Sum()}, fill={shape.Fill:P3}, height={shape.Height}");
+        _output.WriteLine($"{order}, seed={seed}, keyLength={keyLength}: leaves={shape.LeafCounts.Count}, entries={shape.LeafCounts.Sum()}, fill={shape.Fill:P3}, height={shape.Height}");
 
         // Assert
-        shape.LeafCounts.Sum().ShouldBe(5_000);
+        shape.LeafCounts.Sum().ShouldBe(entries.Count);
+        var expectedEntries = entries.OrderBy(entry => entry.Key).ThenBy(entry => entry.Reference).ToArray();
         var reader = await harness.BeginAsync();
         await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
         int expected = 0;
         while (await cursor.MoveNextAsync(CancellationToken.None))
         {
-            cursor.CurrentEntryReference.ShouldBe((ulong)expected++);
+            expected.ShouldBeLessThan(expectedEntries.Length);
+            cursor.CurrentKey.ShouldBe(PaddedKey(expectedEntries[expected].Key, keyLength));
+            cursor.CurrentEntryReference.ShouldBe(expectedEntries[expected++].Reference);
         }
-        expected.ShouldBe(5_000);
+        expected.ShouldBe(expectedEntries.Length);
         await harness.RollbackAsync(reader);
         return shape;
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: duplicate run ends before higher keys, through both insertion paths (#1196)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: a run sharing its leaf with higher keys retains the midpoint through both insertion paths (#1196)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Insert_DuplicateRunBeforeHigherKeys_ShouldSplitAtRunEnd(bool build)
+    public async Task Insert_MixedRunBeforeHigherKeys_ShouldKeepMidpointSplit(bool build)
     {
         // Arrange: neighbours remain on both sides. The run's last leaf initially
         // also contains the higher key, so its insertion slot is inside that leaf.
@@ -132,8 +234,8 @@ public sealed class BTreeShapeTests
 
         // Assert: seek and reverse continuation see every duplicate and neither neighbour.
         shape.LeafCounts.Sum().ShouldBe(5_002);
-        shape.LeafCounts.Count.ShouldBeLessThanOrEqualTo(835);
-        shape.Fill.ShouldBeGreaterThanOrEqualTo(0.78);
+        shape.LeafCounts.Count.ShouldBe(1_666);
+        shape.Fill.ShouldBeGreaterThanOrEqualTo(0.39);
         shape.Height.ShouldBeLessThanOrEqualTo(6);
         var reader = await harness.BeginAsync();
         var key = PaddedKey(50);
@@ -147,6 +249,72 @@ public sealed class BTreeShapeTests
                 count++;
             }
             count.ShouldBe(5_000);
+        }
+        await harness.RollbackAsync(reader);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: a single-value leaf uses its upper fence through both insertion paths (#1196)")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Insert_SingleValueLeaf_ShouldUseRunEndOnlyWithGreaterFence(bool build, bool greaterFence)
+    {
+        // Arrange: split at the higher references, then erase the higher keys
+        // remaining on the left. The fence survives erasure and the leaf is now
+        // entirely one key. An equal-key fence cannot prove the run ends here.
+        await using var harness = new IndexTestHarness();
+        var setup = await harness.BeginAsync();
+        var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_fence", IndexKind.BTree));
+        for (ulong i = 0; i < 4; i++)
+        {
+            await index.InsertAsync(setup, PaddedKey(50), i, CancellationToken.None);
+        }
+        var upper = PaddedKey(greaterFence ? 51 : 50);
+        for (ulong i = 9_000; i < 9_004; i++)
+        {
+            await index.InsertAsync(setup, upper, i, CancellationToken.None);
+        }
+        for (ulong i = 9_000; i < 9_002; i++)
+        {
+            await index.EraseAsync(harness.GetStorageTransaction(setup), upper, i, setup.Sequence, CancellationToken.None);
+        }
+        await harness.CommitAsync(setup);
+
+        // Act
+        var writer = await harness.BeginAsync();
+        for (ulong i = 4; i < 5_000; i++)
+        {
+            if (build)
+            {
+                await index.InsertVersionAsync(harness.GetStorageTransaction(writer), PaddedKey(50), i, writer.Sequence, TransactionSequence.None, CancellationToken.None);
+            }
+            else
+            {
+                await index.InsertAsync(writer, PaddedKey(50), i, CancellationToken.None);
+            }
+        }
+        await harness.CommitAsync(writer);
+        var shape = BTreeShape.Read(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
+        _output.WriteLine($"single-value bounded run, greaterFence={greaterFence}: leaves={shape.LeafCounts.Count}, fill={shape.Fill:P3}, height={shape.Height}");
+
+        // Assert
+        shape.LeafCounts.Sum().ShouldBe(5_002);
+        shape.LeafCounts.Count.ShouldBe(greaterFence ? 835 : 1_667);
+        shape.Fill.ShouldBeGreaterThanOrEqualTo(greaterFence ? 0.78 : 0.39);
+        var reader = await harness.BeginAsync();
+        foreach (bool reverse in new[] { false, true })
+        {
+            await using var cursor = index.OpenCursor(reader, IndexKeyRange.All, reverse);
+            int count = 0;
+            while (await cursor.MoveNextAsync(CancellationToken.None))
+            {
+                int position = reverse ? 5_001 - count : count;
+                cursor.CurrentKey.ShouldBe(position < 5_000 ? PaddedKey(50) : upper);
+                cursor.CurrentEntryReference.ShouldBe((ulong)(position < 5_000 ? position : position + 4_002));
+                count++;
+            }
+            count.ShouldBe(5_002);
         }
         await harness.RollbackAsync(reader);
     }
@@ -173,10 +341,10 @@ public sealed class BTreeShapeTests
         shape.Height.ShouldBe(2);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: run-end insertion uses its slot with two nonempty halves (#1196)")]
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Split: mixed leaves keep the midpoint and rightmost appends retain packing (#1196)")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Insert_AtRunEnd_ShouldKeepBothSeparatorEntries(bool higherKey)
+    public async Task Insert_MixedLeafOrRightmostAppend_ShouldChooseEligibleSplit(bool higherKey)
     {
         // Arrange: seven maximum-size entries exactly fill a leaf.
         await using var harness = new IndexTestHarness();
@@ -191,23 +359,23 @@ public sealed class BTreeShapeTests
         await index.InsertAsync(writer, PaddedKey(50), 7, CancellationToken.None);
         await harness.CommitAsync(writer);
 
-        // Assert: keep the existing entry on the right when appending, so the
-        // separator never reads a nonexistent entry or points to an empty half.
+        // Assert: a higher key makes this a mixed leaf, so use the midpoint.
+        // A rightmost append still keeps an existing entry on each side.
         var shape = BTreeShape.Read(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
-        shape.LeafCounts.ShouldBe(higherKey ? new[] { 7, 1 } : new[] { 6, 2 });
+        shape.LeafCounts.ShouldBe(higherKey ? new[] { 3, 5 } : new[] { 6, 2 });
         shape.Height.ShouldBe(2);
     }
 
-    private static IndexKey PaddedKey(long value)
+    private static IndexKey PaddedKey(long value, int keyLength = BTreeIndex.MaxKeyLength)
     {
-        var bytes = new byte[BTreeIndex.MaxKeyLength];
+        var bytes = new byte[keyLength];
         BinaryPrimitives.WriteInt64BigEndian(bytes, value);
         bytes.AsSpan(sizeof(long)).Fill(0x5A);
         return new IndexKey(bytes);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Split: a small entry beyond a run leaves room for the incoming duplicate in one split (#1196)")]
-    public async Task Insert_RunBeforeShortKey_ShouldLeaveRoomInOneSplit()
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Split: a short higher key keeps a mixed leaf on the midpoint (#1196)")]
+    public async Task Insert_RunBeforeShortKey_ShouldKeepMidpointSplit()
     {
         // Arrange: seven large duplicates and one small higher key fit together.
         // Moving only the small key will not free room for the next duplicate.
@@ -225,9 +393,10 @@ public sealed class BTreeShapeTests
         await index.InsertAsync(writer, PaddedKey(50), 7, CancellationToken.None);
         await harness.CommitAsync(writer);
 
-        // Assert: one split frees room and preserves both separator bounds.
+        // Assert: the whole-page duplicate precondition excludes this leaf,
+        // even though the higher key is short and the duplicate run dominates.
         var shape = BTreeShape.Read(harness.Storage, harness.IndexManager.ExportRegistrations().Single().RootPageId);
-        shape.LeafCounts.ShouldBe(new[] { 6, 3 });
+        shape.LeafCounts.ShouldBe(new[] { 4, 5 });
         var reader = await harness.BeginAsync();
         await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
         for (ulong i = 0; i < 9; i++)

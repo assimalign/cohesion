@@ -429,8 +429,12 @@ baseline.
   On real pages, loading 5,000 shuffled keys and adding one new reference per key
   in random/ascending order uses 2,093/2,228 leaves with 1,024-byte keys, versus
   midpoint's 2,095/2,228. Ascending initial loads retain a separate rightmost-fill
-  trade-off: with 64-byte keys, ascending updates use 175 leaves versus midpoint's
-  117 (the unrestricted run-end policy used 349); whole-page eligibility prevents
+  trade-off dependent on entry size: with 52-byte keys (100 entries per leaf),
+  random/ascending updates use 101/101 leaves, versus midpoint's 100/100 and the
+  unrestricted run-end policy's 193/301. With 1,024-byte keys, those counts are
+  1,944/2,500 versus midpoint's 1,667/1,667. With 64-byte keys, ascending updates
+  use 175 leaves versus midpoint's 117 (the unrestricted run-end policy used 349);
+  whole-page eligibility prevents
   mixed-leaf run-end splits but does not reserve headroom in rightmost appends.
   A 90% byte-fill target for rightmost appends retained the 834-leaf sequential
   result but increased that 64-byte ascending-update count from 175 to 192, so
