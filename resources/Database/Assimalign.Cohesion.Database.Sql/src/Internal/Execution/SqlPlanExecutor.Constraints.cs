@@ -137,66 +137,92 @@ internal sealed partial class SqlPlanExecutor
     // unwritten arbitration's new grants, waits through the lock manager, then restarts
     // the whole arbitration (#1668). Plain INSERT takes parent rows before unique keys.
 
-    /// <summary>
-    /// Takes the table-grain <see cref="LockMode.IntentShared"/> locks on the
-    /// parent tables this table's foreign keys point at, in object-id order.
-    /// Intent-shared is compatible with concurrent writers and blocks only
-    /// table-grain DDL, so the parent definitions the statement binds against
-    /// cannot change underneath it.
-    /// </summary>
-    private async ValueTask AcquireOutgoingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
+    // Prepare adjacent IS before own IX. Never wait while retaining grants from this
+    // unwritten preparation attempt: FK DDL takes own X then referenced-parent X.
+    // A failed try releases only new grants, waits, and rebuilds the live graph. Prior
+    // transaction/row grants remain protected and use ordinary deadlock detection.
+    private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
+        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true)
     {
-        await LockReferenceTableAsync(table, statement, cancellationToken).ConfigureAwait(false);
-        if (statement.References.OutgoingLocks.Contains(table.ObjectId)) { return; }
-        var parents = new SortedSet<ulong>();
-        foreach (var constraint in table.Constraints)
+        var references = statement.References;
+        incoming &= !references.IncomingLocks.Contains(table.ObjectId);
+        outgoing &= !references.OutgoingLocks.Contains(table.ObjectId);
+        if (!incoming && !outgoing) { return; }
+        var locks = statement.Coordinator.LockManager;
+        var owner = statement.Transaction.Sequence;
+        var mark = locks.MarkStatement(owner);
+        while (true)
         {
-            if (constraint.Kind != SqlCatalogConstraintKind.Reference)
+            cancellationToken.ThrowIfCancellationRequested();
+            ulong generation = _catalog.DdlGeneration;
+            var adjacent = new SortedSet<ulong>();
+            if (outgoing)
             {
+                foreach (var constraint in table.Constraints)
+                {
+                    if (constraint.Kind == SqlCatalogConstraintKind.Reference)
+                    {
+                        // Refresh after any wait; a parent version can change independently.
+                        references.Parents.Remove(constraint);
+                        if (ReferenceParent(table, constraint, statement) is { } parent) { adjacent.Add(parent.ObjectId); }
+                    }
+                }
+            }
+            if (incoming)
+            {
+                foreach (var reference in IncomingReferences(table, statement, cancellationToken))
+                {
+                    adjacent.Add(reference.Child.ObjectId);
+                }
+            }
+            adjacent.Remove(table.ObjectId);
+            ulong blocked = table.ObjectId;
+            LockMode mode = LockMode.IntentExclusive;
+            bool acquired = true;
+            foreach (ulong objectId in adjacent)
+            {
+                if (!locks.TryAcquire(owner, LockResource.Object(objectId), LockMode.IntentShared))
+                {
+                    blocked = objectId;
+                    mode = LockMode.IntentShared;
+                    acquired = false;
+                    break;
+                }
+            }
+            if (acquired) { acquired = locks.TryAcquire(owner, LockResource.Object(table.ObjectId), LockMode.IntentExclusive); }
+            if (!acquired)
+            {
+                locks.ReleaseSince(mark);
+                // Waiting owns no new table grants; completion is only a rendezvous.
+                // Reacquire the entire graph because publication can precede the wakeup.
+                await locks.AcquireAsync(owner, LockResource.Object(blocked), mode, cancellationToken).ConfigureAwait(false);
+                locks.ReleaseSince(mark);
+                if (incoming) { references.Incoming.Remove(table.ObjectId); }
                 continue;
             }
-
-            var parent = ReferenceParent(table, constraint, statement);
-
-            parents.Add(parent.ObjectId);
-        }
-
-        await AcquireIntentSharedLocksAsync(parents, statement, cancellationToken).ConfigureAwait(false);
-        foreach (var constraint in table.Constraints)
-        {
-            if (constraint.Kind == SqlCatalogConstraintKind.Reference) { EnsureCurrentDefinition(ReferenceParent(table, constraint, statement)); }
-        }
-        statement.References.OutgoingLocks.Add(table.ObjectId);
-        statement.Metrics.ReferenceIntentLockBatches++;
-    }
-
-    /// <summary>
-    /// Takes the table-grain <see cref="LockMode.IntentShared"/> locks on the
-    /// child tables that reference this table, in object-id order — the tables a
-    /// parent delete or key change reads for incoming references.
-    /// </summary>
-    private async ValueTask AcquireIncomingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
-    {
-        await LockReferenceTableAsync(table, statement, cancellationToken).ConfigureAwait(false);
-        if (statement.References.IncomingLocks.Contains(table.ObjectId)) { return; }
-        var children = new SortedSet<ulong>();
-        foreach (var (child, _) in IncomingReferences(table, statement, cancellationToken))
-        {
-            children.Add(child.ObjectId);
-        }
-
-        await AcquireIntentSharedLocksAsync(children, statement, cancellationToken).ConfigureAwait(false);
-        foreach (var (child, _) in IncomingReferences(table, statement, cancellationToken)) { EnsureCurrentDefinition(child); }
-        statement.References.IncomingLocks.Add(table.ObjectId);
-        statement.Metrics.ReferenceIntentLockBatches++;
-    }
-
-    private static async ValueTask AcquireIntentSharedLocksAsync(SortedSet<ulong> objectIds, SqlStatementContext statement, CancellationToken cancellationToken)
-    {
-        foreach (ulong objectId in objectIds)
-        {
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(objectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+            EnsureCurrentDefinition(table);
+            if (generation != _catalog.DdlGeneration)
+            {
+                // Under own IX no new incoming FK can publish (it needs parent X).
+                // Rebuild once under that lock and try any newly discovered children.
+                if (incoming) { references.Incoming.Remove(table.ObjectId); }
+                continue;
+            }
+            if (incoming)
+            {
+                foreach (var reference in IncomingReferences(table, statement, cancellationToken))
+                {
+                    EnsureCurrentDefinition(reference.Child);
+                }
+                references.IncomingLocks.Add(table.ObjectId);
+                statement.Metrics.ReferenceIntentLockBatches++;
+            }
+            if (outgoing)
+            {
+                references.OutgoingLocks.Add(table.ObjectId);
+                statement.Metrics.ReferenceIntentLockBatches++;
+            }
+            return;
         }
     }
 
@@ -287,6 +313,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             var parent = ReferenceParent(table, constraint, statement);
+            if (parent is null) { continue; }
             var reference = BindReference(table, constraint, parent, statement, cancellationToken);
 
             for (int index = 0; index < rows.Count; index++)
@@ -309,11 +336,11 @@ internal sealed partial class SqlPlanExecutor
 
     private void EnsureCurrentDefinition(SqlCatalogTable expected)
     {
-        var current = ReadCurrentTable(expected);
-        EnsureSameIdentity(expected, current);
-        if (!ReferenceEquals(expected, current))
+        if (!_catalog.TryGetTable(expected.Schema, expected.Name, out var current) || !ReferenceEquals(expected, current))
         {
-            throw new DatabaseException($"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementTableChanged, expected.Schema, expected.Name);
+            throw new DatabaseTransactionAbortedException(message,
+                [new Diagnostic { Code = "COHSQLT006", Severity = DiagnosticSeverity.Error, Message = message }]);
         }
     }
 
@@ -366,14 +393,14 @@ internal sealed partial class SqlPlanExecutor
         SqlCatalogTable parent, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var bindings = statement.References.Bindings;
-        if (bindings.TryGetValue(constraint, out var bound)) { return bound; }
-        bound = new SqlBoundReference(child, constraint, _definitions.Get(child, cancellationToken).GetKey(constraint.Columns),
-            _definitions.Get(parent, cancellationToken).GetKey(constraint.ReferencedColumns!));
-        bindings.Add(constraint, bound);
+        if (bindings.TryGetValue(constraint, out var bound) && ReferenceEquals(bound.Child, child) && ReferenceEquals(bound.Parent, parent)) { return bound; }
+        // Discovery must not bind an unlocked child that DDL can still drop/replace.
+        bound = new SqlBoundReference(child, constraint, parent, _definitions);
+        bindings[constraint] = bound;
         return bound;
     }
 
-    private SqlCatalogTable ReferenceParent(SqlCatalogTable child, SqlCatalogConstraint constraint, SqlStatementContext statement)
+    private SqlCatalogTable? ReferenceParent(SqlCatalogTable child, SqlCatalogConstraint constraint, SqlStatementContext statement)
     {
         var parents = statement.References.Parents;
         if (parents.TryGetValue(constraint, out var parent)) { return parent; }
@@ -381,22 +408,14 @@ internal sealed partial class SqlPlanExecutor
         {
             if (string.Equals(constraint.ReferencedSchema, child.Schema, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(constraint.ReferencedTable, child.Name, StringComparison.OrdinalIgnoreCase)) { parent = child; }
-            else { throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' does not exist."); }
+            // Preserve the original row-check continue for a missing non-self parent.
+            // Before locking, FK removal followed by parent DROP can invalidate the
+            // child's plan; preparation checks that target version under IX and codes
+            // the retry. A stable SQL FK cannot lose its parent under the adjacent IS.
+            else { return null; }
         }
         parents.Add(constraint, parent);
         return parent;
-    }
-
-    // Direct writers take own-table IX, adjacent-table IS in object-id order, then row
-    // locks. Cascades take IX and the discovered row before its adjacent-table IS locks.
-    // Both finish row locks before sorted unique-key locks, the apply gate and latches. No latch
-    // crosses a lock wait. DDL takes X on the child or referenced parent; recheck definitions
-    // after waiting for IS so a cached edge can never bind a replaced table version.
-    private async ValueTask LockReferenceTableAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
-    {
-        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-            LockResource.Object(table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-        EnsureCurrentDefinition(table);
     }
 
     private IEnumerable<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> IncomingReferences(SqlCatalogTable parent)
@@ -594,6 +613,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (checksOnly) { continue; }
             var parent = ReferenceParent(table, constraint, statement);
+            if (parent is null) { continue; }
             var reference = BindReference(table, constraint, parent, statement, cancellationToken);
 
             HashSet<object?[]>? selfKeys = null;
@@ -770,8 +790,7 @@ internal sealed partial class SqlPlanExecutor
         if (scannedTables.Add(table.ObjectId))
         {
             EnsureCurrentDefinition(table);
-            await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
-            await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         }
 
         // Deleting the row releases every reference it holds. The edge it was

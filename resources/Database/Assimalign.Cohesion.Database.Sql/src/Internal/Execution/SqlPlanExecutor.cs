@@ -422,11 +422,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireOutgoingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
-        await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
-        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
-            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-        EnsureCurrentDefinition(plan.Table);
+        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = GetLiveIndexes(plan.Table, statement);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
@@ -553,10 +549,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
-        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
-            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-        EnsureCurrentDefinition(plan.Table);
+        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, outgoing: false).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
         foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))

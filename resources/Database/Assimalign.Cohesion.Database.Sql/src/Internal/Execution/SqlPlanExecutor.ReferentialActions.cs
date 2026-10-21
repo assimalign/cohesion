@@ -117,8 +117,7 @@ internal sealed partial class SqlPlanExecutor
                         if (scannedTables.Add(child.ObjectId))
                         {
                             EnsureCurrentDefinition(child);
-                            await AcquireIncomingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
-                            await AcquireOutgoingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
+                            await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
                         }
                         update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
                         updates.Add(key, update);
