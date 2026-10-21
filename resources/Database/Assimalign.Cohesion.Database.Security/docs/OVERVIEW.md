@@ -2,8 +2,9 @@
 
 The model-agnostic security contracts of the Data Platform: who a connection is
 (`DatabaseAuthenticator`). Model-specific security features (SQL grants,
-document-collection ACLs, …) live in the per-model `*.Security` satellites and
-build on this seam.
+document-collection ACLs, …) belong to each model's own engine project
+(`Database.{Model}`) and build on this seam. The former per-model `*.Security`
+satellites were empty and were removed in the model consolidation.
 
 ## Scope
 
