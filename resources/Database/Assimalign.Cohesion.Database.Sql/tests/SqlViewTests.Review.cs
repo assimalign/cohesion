@@ -63,7 +63,8 @@ public sealed partial class SqlViewTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP VIEW target_v RESTRICT"));
         // Assert
-        error.Message.ShouldBe("COHSQLD002: Cannot drop 'dbo.target_v' because other objects depend on it: view 'dbo.dependent_v' depends on it.");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        error.Message.ShouldBe("Cannot drop 'dbo.target_v' because other objects depend on it: view 'dbo.dependent_v' depends on it.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: COLUMNS survives a trailing ordinal change after a transaction snapshot")]

@@ -293,7 +293,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];
             case SqlBoundExpressionKind.Default:
                 var defaultValue = (SqlBoundDefault)expression;
-                return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row, copySharedBinary), defaultValue.Column);
+                try { return SqlPlanExecutor.CoerceForColumn(EvaluateCore(defaultValue.Value, row, copySharedBinary), defaultValue.Column); }
+                catch (DatabaseException failure) { throw SqlExecutionException.FromPersisted(failure); }
             case SqlBoundExpressionKind.Constant:
                 return Deliver(((SqlBoundConstant)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Binary:
@@ -699,11 +700,11 @@ internal sealed partial class SqlExpressionEvaluator
             SqlLiteralType.Boolean => Box(literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase)),
             SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
             SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
-            SqlLiteralType.Date => SqlLiteralText.ParseDate(literal.Value),
-            SqlLiteralType.Time => SqlLiteralText.ParseTime(literal.Value),
-            SqlLiteralType.Timestamp => SqlLiteralText.ParseTimestamp(literal.Value),
-            SqlLiteralType.TimestampWithTimeZone => SqlLiteralText.ParseTimestampWithTimeZone(literal.Value),
-            SqlLiteralType.Interval => SqlLiteralText.ParseInterval(literal.Value),
+            SqlLiteralType.Date => SqlTemporalText.ParseDate(literal.Value),
+            SqlLiteralType.Time => SqlTemporalText.ParseTime(literal.Value),
+            SqlLiteralType.Timestamp => SqlTemporalText.ParseTimestamp(literal.Value),
+            SqlLiteralType.TimestampWithTimeZone => SqlTemporalText.ParseTimestampWithTimeZone(literal.Value),
+            SqlLiteralType.Interval => SqlTemporalText.ParseInterval(literal.Value),
             SqlLiteralType.Binary => SqlLiteralText.ParseBinary(literal.Value),
             _ => throw new SqlPlanningException("COHSQLE013", $"Literal type {literal.LiteralType} is not supported.", literal.Location),
         };
@@ -757,6 +758,10 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             return SqlCastConverter.Convert(value, cast, _cancellationToken, copySharedBinary);
+        }
+        catch (SqlExecutionException exception) when (exception.Diagnostics[0].Start is null && cast.Location is not null)
+        {
+            throw exception.At(cast.Location);
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && cast.Location is not null)
         {

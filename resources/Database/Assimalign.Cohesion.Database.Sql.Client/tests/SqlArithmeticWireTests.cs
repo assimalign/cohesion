@@ -126,7 +126,8 @@ public sealed class SqlArithmeticWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("Cannot compare values of types", Case.Sensitive);
+        failure.Message.ShouldStartWith("COHSQLE055: Cannot compare values of types", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE055");
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
     }

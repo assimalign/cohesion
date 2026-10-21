@@ -176,9 +176,9 @@ public sealed class SqlDefaultAssignmentTests
         diagnostic.Code.ShouldBe("COHSQLE024");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message.ShouldBe(failure.Message);
-        diagnostic.Start.ShouldBeNull();
-        diagnostic.End.ShouldBeNull();
-        diagnostic.Location.ShouldBeNull();
+        diagnostic.Start.ShouldBe(0);
+        diagnostic.End.ShouldBe(sql.Length);
+        diagnostic.Location.ShouldBe(DiagnosticLocation.Absolute);
         session.CurrentTransaction.ShouldNotBeNull();
         await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
         (await RowsAsync(session)).ShouldBe([[1, "old", 1]]);

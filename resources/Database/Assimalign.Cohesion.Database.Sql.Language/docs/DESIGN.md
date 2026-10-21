@@ -820,3 +820,12 @@ validated discarded zone; timestamp's clock reader remains zone-free. INTERVAL a
 days before hour units, @ and final ago. Both readers reject non-ASCII whitespace. Generated
 ErrorMessages resources hold literal-reader failures. DIALECT records the bounded zone vocabulary,
 TimeOnly/fraction limits, preserved CAST diagnostics and format-26/v8 fence.
+
+## Execution diagnostic corrections (#1653)
+
+Temporal readers live in the existing shared-source unit and report an explicit format, field-range
+or interval-overflow reason. The public literal facade preserves FormatException for grammar errors
+and now reports OverflowException for out-of-range calendar/clock/offset fields. SQL assignment, DEFAULT
+and CAST translate the same reason into 22007, 22008 or 22015 without adding a public bridge or assembly
+reference. Unknown COLLATE identifiers now reach binding (42704); unsupported collation creation
+retains COHDBL001. DIALECT records the corrected mappings and persisted-expression span provenance.

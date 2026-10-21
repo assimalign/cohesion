@@ -39,7 +39,7 @@ public sealed class SqlT1ScalarRegressionTests
                 }) { await session.ExecuteAsync(ddl, cancellationToken: CancellationToken.None); }
                 await session.ExecuteAsync("INSERT INTO t VALUES (1, DATE '2024-03-04', TIMESTAMP '2024-03-04 12:00:00')", cancellationToken: CancellationToken.None);
                 var dependency = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DROP FUNCTION passthrough(INT)", cancellationToken: CancellationToken.None).AsTask());
-                dependency.Message.ShouldContain("COHSQLD002", Case.Sensitive);
+                dependency.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
             }
 
             // Act

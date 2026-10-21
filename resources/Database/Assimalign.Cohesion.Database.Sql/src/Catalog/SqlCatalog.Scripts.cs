@@ -58,7 +58,7 @@ public sealed partial class SqlCatalog
             {
                 if (existing.Value.ContentHash != contentHash || existing.Value.StatementCount != statementCount || existing.Value.SchemaHash != schemaHash)
                 {
-                    throw new SqlCatalogException("COHSQLS001: A declared script checksum, statement count or typed schema identity changed.");
+                    throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptIdentityChanged);
                 }
                 return ValueTask.FromResult(existing.Value);
             }
@@ -133,13 +133,13 @@ public sealed partial class SqlCatalog
             existing.Value.StatementCount != receipt.StatementCount || existing.Value.BaseGeneration != receipt.BaseGeneration ||
             existing.Value.CompletedStatements > receipt.CompletedStatements))
         {
-            throw new SqlCatalogException("COHSQLS001: A declared script checksum, statement count or original generation changed, or its completed prefix regressed.");
+            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptPrefixRegressed);
         }
         var record = new DatabaseKeyWriter().AppendInt32(12)
             .AppendString(JsonSerializer.Serialize(receipt, SqlCatalogJsonContext.Default.SqlCatalogScript), Collation.Binary).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException("COHSQLS001: Declared script receipt exceeds the catalog record limit.");
+            throw new SqlCatalogException("COHSQLE042", ErrorMessages.ScriptReceiptTooLarge);
         }
         return new DefinitionSlot<SqlCatalogScript>(receipt, UpsertRecord(transaction, existing?.Location, record));
     }
@@ -154,7 +154,7 @@ public sealed partial class SqlCatalog
             previous is not null && (previous.Name != publication.Name || previous.ContentHash != publication.ContentHash ||
                 previous.StatementCount != publication.StatementCount || previous.SchemaHash != publication.SchemaHash))
         {
-            throw new SqlCatalogException("COHSQLS001: The statement target, script identity or expected preceding receipt state does not match this publication.");
+            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptPublicationMismatch);
         }
     }
 

@@ -36,7 +36,7 @@ public partial class SqlCatalogTests
         var error = await Should.ThrowAsync<SqlCatalogException>(() => catalog.PublishTableAsync(replacement, [], [],
             replaceExisting: true, cancellationToken: CancellationToken.None).AsTask());
         // Assert
-        error.Message.ShouldBe("COHSQLD002: Cannot change the object because view 'dbo.dependent_view' depends on it.");
+        error.Message.ShouldBe("Cannot change the object because view 'dbo.dependent_view' depends on it.");
         catalog.DdlGeneration.ShouldBe(generation);
         catalog.TryGetTable("dbo", "t", out var retained).ShouldBeTrue();
         retained.ShouldBeSameAs(table);

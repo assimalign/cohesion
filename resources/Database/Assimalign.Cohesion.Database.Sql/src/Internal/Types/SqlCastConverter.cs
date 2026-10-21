@@ -74,6 +74,10 @@ internal static class SqlCastConverter
             {
                 throw exception.WithContext($"CAST from {SqlType.NameOf(source)} to {cast.TargetText} failed");
             }
+            catch (SqlExecutionException exception)
+            {
+                throw exception.WithContext($"CAST from {SqlType.NameOf(source)} to {cast.TargetText} failed");
+            }
             catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
                 // The value's fault, the built-ins' only failures: the conversion contract's message.

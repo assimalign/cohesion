@@ -23,6 +23,9 @@ internal static class SqlDefinitionBinder
     internal static SqlPlanningException Refuse(string message, Location? location = null)
         => new(DefinitionCode, message, location);
 
+    private static SqlPlanningException MissingFunction(string name, Location? location)
+        => new(SqlEvaluationException.UnregisteredFunctionCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionMissing, name), location);
+
     // Reopened definitions retain canonical fragments, not their original declaration offsets.
     private static Location FragmentLocation(string text)
         => Location.Create(1, 1 + text.Count(character => character == '\n'), 0, text.Length);
@@ -88,14 +91,14 @@ internal static class SqlDefinitionBinder
             domainName: types[index].IsDomain ? types[index].Name : null)).ToArray();
         var scope = new SqlExpressionEvaluator(columns, null, defaultCollation: collation, functions: scopeEnvironment,
             bindingContext: SqlBindingContext.Function);
-        SqlPersistedExpression.Bind(create.Body, scope);
+        SqlPersistedExpression.Bind(create.Body, scope, declaring: true);
         SqlPlanner.ValidateExpression(create.Body, scope);
         var dependencies = Dependencies(create.Body, scope, volatility);
         foreach (var type in types.Append(result).Where(type => type.IsDomain))
         {
             if (UnresolvedDomainReason(type) is { } reason)
             {
-                throw Refuse(reason, create.Location);
+                throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, reason, create.Location);
             }
             dependencies.Add(DomainKey(type.Name));
         }
@@ -241,7 +244,7 @@ internal static class SqlDefinitionBinder
         var scope = CreateScope(collation, cancellationToken);
         try
         {
-            if (unavailableDomain is not null) { throw Refuse(unavailableDomain, expression.Location); }
+            if (unavailableDomain is not null) { throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, unavailableDomain, expression.Location); }
             SqlPersistedExpression.Bind(expression, scope);
             SqlPlanner.ValidateExpression(expression, scope, validateBooleanPositions: false);
             _ = Dependencies(expression, scope, Volatility(function.Volatility, location));
@@ -311,7 +314,7 @@ internal static class SqlDefinitionBinder
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
-                calls.Add(Key(scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.", call.Location)));
+                calls.Add(Key(scope.ResolveFunction(call) ?? throw MissingFunction(call.FunctionName, call.Location)));
             }
             foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
         }
@@ -357,14 +360,15 @@ internal static class SqlDefinitionBinder
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
             {
-                var function = scope.ResolveFunction(call) ?? throw Refuse($"Unknown function '{call.FunctionName}'.", call.Location);
+                var function = scope.ResolveFunction(call) ?? throw MissingFunction(call.FunctionName, call.Location);
                 if (function.Kind != SqlFunctionKind.Scalar || function.Volatility < volatility)
                 {
                     throw Refuse($"Function '{function.Name}' is not a scalar of volatility {volatility} or stronger.", call.Location);
                 }
                 if (function is SqlExpressionFunction { Unresolved: { } reason })
                 {
-                    throw Refuse($"Function '{function.Name}' has an unresolved SQL definition ({reason}).", call.Location);
+                    throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, string.Format(CultureInfo.CurrentCulture,
+                        ErrorMessages.SqlFunctionUnresolved, function.Name, reason), call.Location);
                 }
                 dependencies.Add(Key(function));
             }
@@ -372,7 +376,7 @@ internal static class SqlDefinitionBinder
             {
                 if (UnresolvedDomainReason(domain) is { } reason)
                 {
-                    throw Refuse(reason, cast.Location);
+                    throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, reason, cast.Location);
                 }
                 dependencies.Add(DomainKey(domain.Name));
             }
@@ -436,7 +440,8 @@ internal static class SqlDefinitionBinder
         }
         catch (Exception failure) when (failure is ArgumentException or InvalidOperationException)
         {
-            throw Refuse(failure.Message, location ?? FragmentLocation(function.Name));
+            throw new SqlPlanningException(SqlExecutionException.DuplicateFunctionCode, failure.Message,
+                location ?? FragmentLocation(function.Name), failure);
         }
     }
 }

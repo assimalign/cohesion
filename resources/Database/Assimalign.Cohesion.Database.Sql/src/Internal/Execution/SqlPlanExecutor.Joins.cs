@@ -226,7 +226,7 @@ internal sealed partial class SqlPlanExecutor
             { Table: { } table } => Scan(table, statement, cancellationToken).Select(row => row.Values),
             { View: { } view } => ReadSystemRelation(view, statement, cancellationToken),
             { Derived: { } derived } => derivedRows![derived],
-            _ => throw new DatabaseException("Internal invariant: unknown SQL relation source."),
+            _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.RelationSourceUnknown),
         };
 
     /// <summary>
