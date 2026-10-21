@@ -960,7 +960,7 @@ public sealed class BTreeIndex
                 return;
             }
 
-            SplitLeaf(transaction, path, leafId);
+            SplitLeaf(transaction, path, leafId, at, key);
             // Re-descend: the split changed the structure; the target leaf now has room.
         }
     }
@@ -1011,7 +1011,7 @@ public sealed class BTreeIndex
         }
     }
 
-    private void SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId)
+    private void SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId, int at, ReadOnlySpan<byte> key)
     {
         Separator separator;
         long siblingId;
@@ -1030,14 +1030,16 @@ public sealed class BTreeIndex
                 throw InvariantViolated(leafId, $"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
             }
 
-            int mid = ChooseLeafSplit(leaf);
+            bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(key)
+                && (leaf.NextLeaf < 0 || IsEndOfRun(parentPath, key));
+            int mid = ChooseLeafSplit(leaf, at, endOfRun);
             separator = BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid);
             EnsureLeafSeparator(leaf, leafId, mid, separator);
 
             var sibling = BTreeNode.Initialize(siblingHandle.Page.AsBodySpan(), BTreeNode.LeafKind);
             siblingId = (long)siblingHandle.Id;
 
-            // Move the upper half to the sibling.
+            // Move the entries after the split point to the sibling.
             for (int i = mid; i < count; i++)
             {
                 sibling.InsertLeafEntry(
@@ -1072,13 +1074,51 @@ public sealed class BTreeIndex
 
     /// <summary>
     /// Chooses where a full leaf splits: the number of entries that stay on the left.
-    /// The one place the leaf split point is decided, so a better policy (#1196: split
-    /// at the insertion point for rightmost and duplicate-run inserts, PostgreSQL's
-    /// <c>nbtsplitloc.c</c> <c>_bt_findsplitloc</c>) replaces this function alone. The
-    /// separator is built from the entries on either side of the point, and any point
-    /// in <c>[1, count - 1]</c> is valid: adjacent entries always differ.
+    /// Appends to the tree, or to a leaf containing only the incoming key whose
+    /// upper fence proves its duplicate run ends here, keep the last existing entry
+    /// on the right to supply that side of the separator. Since the insertion slot
+    /// is after every entry, equality with the first key proves the whole page,
+    /// including the new item, has one value. Mixed-key leaves retain the midpoint
+    /// unless this is a rightmost append. This adapts PostgreSQL's rightmost and
+    /// single-value strategies (<c>nbtsplitloc.c:287-292,971,987-1033</c>): its
+    /// single-value strategy also requires the whole page, including the new item,
+    /// to contain duplicates. Both existing halves must be nonempty; the incoming
+    /// entry follows on re-descent.
     /// </summary>
-    private static int ChooseLeafSplit(in BTreeNode leaf) => leaf.EntryCount / 2;
+    private static int ChooseLeafSplit(in BTreeNode leaf, int at, bool endOfRun)
+    {
+        int count = leaf.EntryCount;
+        if (!endOfRun && !(at == count && leaf.NextLeaf < 0))
+        {
+            return count / 2;
+        }
+
+        return count - 1;
+    }
+
+    /// <summary>
+    /// Uses the nearest upper separator as the leaf's high key. A strictly greater
+    /// key proves this is the last leaf of the incoming key's run; an equal key with
+    /// a reference or writer tiebreaker means the run can continue to the right.
+    /// Retained separators remain valid fences after erase/purge, including when
+    /// every entry in a neighbouring leaf has gone. No sibling-chain scan is needed.
+    /// </summary>
+    private bool IsEndOfRun(List<PathEntry> path, ReadOnlySpan<byte> key)
+    {
+        for (int i = path.Count - 1; i >= 0; i--)
+        {
+            var step = path[i];
+            using var handle = _storage.PageManager.GetPage((PageId)step.PageId);
+            var node = OpenNode(handle.Page.AsBodySpan(), step.PageId);
+            int next = step.Slot + 1;
+            if (next < node.EntryCount)
+            {
+                return key.SequenceCompareTo(node.GetKey(next)) < 0;
+            }
+        }
+
+        return true; // No upper fence: the tree's rightmost leaf.
+    }
 
     private static void RebuildLeaf(ref BTreeNode leaf, int keepCount, long prevLeaf, long nextLeaf)
     {

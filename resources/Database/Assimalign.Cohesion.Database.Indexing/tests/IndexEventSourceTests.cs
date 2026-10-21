@@ -220,8 +220,9 @@ public sealed class IndexEventSourceTests
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report a split whose separator would misorder its parent, once")]
     public async Task InsertAsync_SeparatorWouldMisorderParent_ShouldReportTheInvariantOnce()
     {
-        // Arrange: twenty wide keys split the root once; its only separator is then overwritten
-        // to sort above every key of the right child, so that child's next split promotes a
+        // Arrange: split the root once and fill its right child, independently of
+        // the split policy. Its only separator is then overwritten to sort above
+        // every key of the right child, so that child's next split promotes a
         // separator the parent cannot take (BTreeIndexTests, Split_SeparatorMisorderingParent_*).
         string name = UniqueName();
         var (harness, index) = await CreateIndexAsync(name, "ix_misorder");
@@ -232,8 +233,14 @@ public sealed class IndexEventSourceTests
             await index.InsertAsync(setup, WideKey(i * 100), (ulong)i);
         }
 
-        await harness.CommitAsync(setup);
         long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
+        int entries = 20 + 15 - BTreeShape.Read(harness.Storage, root).LeafCounts[^1];
+        for (long i = 20; i < entries; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i * 100), (ulong)i);
+        }
+        BTreeShape.Read(harness.Storage, root).LeafCounts[^1].ShouldBe(15);
+        await harness.CommitAsync(setup);
         OverwriteOnlySeparator(harness.Storage, root, WideKey(5_000));
         using var recorder = new IndexEventRecorder(EventLevel.Error);
 
