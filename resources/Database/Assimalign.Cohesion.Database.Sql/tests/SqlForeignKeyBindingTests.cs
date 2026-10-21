@@ -51,7 +51,7 @@ public sealed class SqlForeignKeyBindingTests
             await using var transaction = await session.BeginTransactionAsync();
             await session.ExecuteAsync("DELETE FROM p");
             var metrics = session.LastStatementMetrics.ShouldNotBeNull();
-            metrics.ConstraintLookupBuilds.ShouldBeLessThanOrEqualTo(2);
+            metrics.ConstraintLookupBuilds.ShouldBe(action == "CASCADE" ? 1 : 2);
             metrics.LiveIndexBuilds.ShouldBe(2);
             (await session.ExecuteAsync(action == "CASCADE" ? "DELETE FROM c" : "DELETE FROM c WHERE pa IS NULL AND pb IS NULL"))
                 .AffectedCount.ShouldBe(action == "CASCADE" ? 0 : 1);
