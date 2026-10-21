@@ -111,7 +111,7 @@ public sealed partial class BlobCatalogTests
         }
 
         // Assert
-        reads.ShouldBe(3);
+        reads.ShouldBe(2);
         catalog.FindBlob(parent, "item", pinned.Snapshot).ShouldBe(original);
         await coordinator.RollbackAsync(reader);
         await coordinator.RollbackAsync(pinned);

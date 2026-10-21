@@ -149,7 +149,7 @@ public sealed partial class DocumentCatalog
         }, cancellationToken).ConfigureAwait(false);
         lock (_sync)
         {
-            Add(new CatalogRecord(null, null, metadata), new Reference(location.PageId, location.SlotIndex, context.Sequence, context));
+            Add(new CatalogRecord(null, null, metadata), new Reference(location.PageId, location.SlotIndex, context.Sequence));
         }
         return metadata;
     }
@@ -300,7 +300,7 @@ public sealed partial class DocumentCatalog
     {
         if (!_indexDefinitions.TryGetValue((collectionId, name), out var versions)) { return null; }
         var found = Find(versions, snapshot, record => record.Index is { } index && index.CollectionId == collectionId && index.Name == name);
-        if (versions.Count == 0) { _indexDefinitions.Remove((collectionId, name)); }
+        if (versions.Count == 0) { Retire(versions); }
         return found;
     }
 

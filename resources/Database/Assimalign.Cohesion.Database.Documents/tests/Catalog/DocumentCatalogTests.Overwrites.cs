@@ -140,7 +140,7 @@ public sealed partial class DocumentCatalogTests
         }
 
         // Assert
-        reads.ShouldBe(3);
+        reads.ShouldBe(2);
         catalog.FindDocument(parent, "item", pinned.Snapshot).ShouldBe(original);
         await coordinator.RollbackAsync(reader);
         await coordinator.RollbackAsync(pinned);

@@ -34,6 +34,8 @@ public sealed partial class DocumentCatalog
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
     private long _recordReadCount;
+    private readonly LinkedList<Versions> _maintenance = new();
+    private LinkedListNode<Versions>? _maintenanceCursor;
 
     private readonly Dictionary<string, Versions> _collections = new(StringComparer.Ordinal);
     private readonly Dictionary<(Guid CollectionId, string Name), Versions> _documents = new();
@@ -69,6 +71,7 @@ public sealed partial class DocumentCatalog
             var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
+        foreach (var versions in catalog._maintenance) { versions.RebuildPublicationOrder(); }
         catalog.OpenIndexes();
         return catalog;
     }
@@ -323,7 +326,7 @@ public sealed partial class DocumentCatalog
         // so transaction rollback, purge and page reuse cannot stale the directory.
         lock (_sync)
         {
-            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence, context));
+            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence));
         }
     }
 
@@ -361,6 +364,7 @@ public sealed partial class DocumentCatalog
             if (!_collections.TryGetValue(collection.Name, out versions))
             {
                 _collections[collection.Name] = versions = new Versions();
+                Track(versions, value => value.Collection?.Name == collection.Name, () => _collections.Remove(collection.Name));
             }
         }
         else if (record.Index is { } index)
@@ -369,6 +373,7 @@ public sealed partial class DocumentCatalog
             if (!_indexDefinitions.TryGetValue(key, out versions))
             {
                 _indexDefinitions[key] = versions = new Versions();
+                Track(versions, value => value.Index is { } index && index.CollectionId == key.CollectionId && index.Name == key.Name, () => _indexDefinitions.Remove(key));
             }
         }
         else
@@ -378,6 +383,7 @@ public sealed partial class DocumentCatalog
             if (!_documents.TryGetValue(key, out versions))
             {
                 _documents[key] = versions = new Versions();
+                Track(versions, value => value.Document is { } document && document.CollectionId == key.CollectionId && document.Name == key.Name, () => _documents.Remove(key));
             }
         }
         versions.Add(reference, recoveredDeleter);
@@ -392,7 +398,7 @@ public sealed partial class DocumentCatalog
         var result = Find(versions, snapshot, record => record.Collection?.Name == name);
         if (versions.Count == 0)
         {
-            _collections.Remove(name);
+            Retire(versions);
         }
         return result;
     }
@@ -406,112 +412,137 @@ public sealed partial class DocumentCatalog
         var result = Find(versions, snapshot, record => record.Document is { } document && document.CollectionId == collectionId && document.Name == name);
         if (versions.Count == 0)
         {
-            _documents.Remove((collectionId, name));
+            Retire(versions);
         }
         return result;
     }
 
     private Found? Find(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
     {
-        // Lock order: engine writer lock (for mutations), then _sync, then storage page
-        // latches. Never enter the coordinator apply gate while holding _sync. Purge takes
-        // the apply gate and page latches but never _sync; publication takes _sync only
-        // after its physical bracket has released both.
-        //
-        // Early exit must not strand old references after purge. Two rotating probes per
-        // lookup (including the lookup before save) retire stale references faster than
-        // saves add them, with constant extra record reads even after a large purge.
-        // A logical rollback restores the head preceding all of that writer's own saves.
-        // No snapshot can need an ended writer's created versions. The prior head stays
-        // physical until that writer commits, since its tombstones are not prunable yet.
-        while (versions.Current is { Context.State: TransactionState.RolledBack or TransactionState.Faulted } aborted)
-        {
-            versions.Current = aborted.PriorHead;
-        }
-
-        int probes = Math.Min(2, versions.Count);
+        // Lock order: model writer lock, catalog monitor, storage page latches.
+        // Apply/undo never enter this monitor. Maintenance runs after the purge gate exits.
+        long before = _recordReadCount;
+        var result = Select(versions, snapshot, matches);
+        // Three reads suffice for a current lookup, including cleanup and an undone head.
+        int probes = (int)Math.Min(versions.Count, Math.Max(0L, 3 - (_recordReadCount - before)));
         for (int i = 0; i < probes; i++)
         {
             var candidate = versions.NextSweep()!;
-            if (Read(candidate, matches) is null)
-            {
-                if (Forget(versions, candidate)) { return null; }
-            }
+            if (Read(candidate, matches) is null) { versions.Remove(candidate); }
         }
+        return result;
+    }
 
-        // Model writers serialize publication, so this reference is also the current
-        // deletion marker. Re-read it: rollback can remove it or clear its deleter.
-        // A read-committed writer may have begun before the version it replaces, so
-        // publication order, rather than writer order, identifies the current head.
-        while (versions.Current is { } current)
-        {
-            var head = Read(current, matches);
-            if (head is null)
-            {
-                if (Forget(versions, current)) { return null; }
-                // Undo can remove a created head before the manager publishes its final
-                // state. Read its restored predecessor, whose deleter is still checked.
-                continue;
-            }
-            else if (snapshot.IsVisible(current.Writer))
-            {
-                return head.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(head.Value.Deleter)
-                    ? new Found(current, head.Value.Record) : null;
-            }
-            break;
-        }
-        if (versions.Current is null) { return null; }
-
-        for (var reference = versions.Last; reference is not null;)
+    private Found? Select(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
+    {
+        Found? best = null;
+        var head = versions.Current;
+        bool known = versions.TerminalKnown;
+        for (var reference = head; reference is not null;)
         {
             var previous = reference.Previous;
+            bool predecessorKnown = known && reference.PredecessorKnown;
+            // Query existing coordinator state by sequence; no directory reference owns a
+            // transaction or its snapshot. Deferred undo remains pending to every reader.
+            if (IsAborted(reference.Writer))
+            {
+                versions.Remove(reference);
+                known = predecessorKnown;
+                reference = previous;
+                continue;
+            }
             var record = Read(reference, matches);
             if (record is null)
             {
-                if (Forget(versions, reference)) { return null; }
-            }
-            else
-            {
-                if (snapshot.IsVisible(reference.Writer)
-                    && (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter)))
+                versions.Remove(reference);
+                if (known && !ReferenceEquals(reference, head))
                 {
-                    return new Found(reference, record.Value.Record);
+                    // This is the committed predecessor, not an aborted newest publication.
+                    // Its reclamation proves every older publication is below the purge
+                    // horizon too. A recreated head may still be pending above this suffix.
+                    if (versions.Current is null || ReferenceEquals(versions.Current, previous))
+                    {
+                        versions.Discard();
+                    }
+                    return null;
                 }
             }
+            else if (snapshot.IsVisible(reference.Writer))
+            {
+                if (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter))
+                {
+                    var found = new Found(reference, record.Value.Record);
+                    if (known) { return found; }
+                    if (best is null || reference.Writer > best.Value.Reference.Writer) { best = found; }
+                }
+                else if (known) { return null; }
+            }
+            known = predecessorKnown;
             reference = previous;
         }
-        return null;
+        return best;
     }
 
-    private static bool Forget(Versions versions, Reference reference)
+    private bool IsAborted(TransactionSequence writer)
     {
-        if (ReferenceEquals(versions.Current, reference))
+        if (_coordinator.VersionStore.PendingAbortedPurges.Contains(writer.Value)) { return true; }
+        foreach (var context in _coordinator.GetOpenContexts())
         {
-            if (reference.Committed || reference.Context?.State == TransactionState.Committed)
+            if (context.Sequence == writer)
             {
-                // A committed current head can disappear only after its committed delete
-                // became visible to every retained snapshot and purge reclaimed it.
-                // All preceding versions are then invisible too, so retire the name's
-                // directory value without reading or individually removing its history.
-                versions.Discard();
-                return true;
+                return context.State is TransactionState.RolledBack or TransactionState.Faulted;
             }
-            versions.Current = reference.PriorHead;
         }
-        versions.Remove(reference);
         return false;
+    }
+
+    private void Track(Versions versions, Func<CatalogRecord, bool> matches, Action retire)
+    {
+        versions.Matches = matches;
+        versions.Retire = retire;
+        versions.MaintenanceNode = _maintenance.AddLast(versions);
+    }
+
+    private void Retire(Versions versions)
+    {
+        var node = versions.MaintenanceNode!;
+        if (ReferenceEquals(_maintenanceCursor, node)) { _maintenanceCursor = node.Next; }
+        _maintenance.Remove(node);
+        versions.MaintenanceNode = null;
+        versions.Retire();
+    }
+
+    // Model-local pass: the worker and deterministic catalog tests use the same boundary.
+    internal long RunVersionPurgePass(CancellationToken cancellationToken)
+    {
+        try { return _coordinator.RunVersionPurgePass(cancellationToken); }
+        finally { MaintainPurgedReferences(); }
+    }
+
+    internal void MaintainPurgedReferences()
+    {
+        lock (_sync)
+        {
+            // One reference per key per turn, round-robin: at most 128 record reads per
+            // pass, independent of name count and historical peak. An idle name needs
+            // no subsequent lookup to relinquish its purged versions.
+            for (int probe = 0; probe < 128 && _maintenance.Count != 0; probe++)
+            {
+                var node = _maintenanceCursor ?? _maintenance.First!;
+                _maintenanceCursor = node.Next;
+                var versions = node.Value;
+                var reference = versions.NextSweep();
+                if (reference is not null && Read(reference, versions.Matches) is null)
+                {
+                    versions.Remove(reference);
+                }
+                if (versions.Count == 0) { Retire(versions); }
+            }
+        }
     }
 
     private (CatalogRecord Record, TransactionSequence Deleter)? Read(Reference reference, Func<CatalogRecord, bool> matches)
     {
-        if (reference.Context?.State == TransactionState.Committed)
-        {
-            // The writer can never roll back now. Avoid retaining its transaction,
-            // snapshot and predecessor through a committed directory reference.
-            reference.Committed = true;
-            reference.Context = null;
-            reference.PriorHead = null;
-        }
         // Reclaimed slots/pages and changed identities are absence. CRC, I/O and live
         // decoding failures propagate, including during the bounded cleanup probes.
         _recordReadCount++;
