@@ -693,6 +693,12 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 storage?.Dispose();
                 throw new DatabaseException(message, exception);
             }
+            catch (Blob.Catalog.BlobCatalogException exception)
+            {
+                storage?.Dispose();
+                throw new DatabaseException(exception.Message, [new Types.Diagnostic
+                { Code = "COHDBB006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+            }
             catch (StorageFormatException exception)
             {
                 // The storage refused the file set before recovery wrote anything; the refusal

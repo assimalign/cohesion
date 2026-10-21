@@ -1028,9 +1028,18 @@ behind its `Open` factory.
 
 ## Diagnostics
 
+Child-root storage and catalog failures cross the engine boundary as DatabaseException with
+Error entries in Diagnostics and the original InnerException (#1247). Offline and common
+COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
+transaction; after rollback the in-process session remains usable. Blob wire errors remain terminal: the Error message receives the first diagnostic code only when it lacks that prefix, then the connection closes.
+
+
 | Code | Meaning |
 | --- | --- |
 | `COHDBB004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
+| `COHDBB005` | Storage operation failure (including I/O); original cause retained |
+| `COHDBB006` | Malformed or unsupported catalog/index metadata |
+| `COHDBB007` | Upload stream is failed or its transaction is no longer active |
 
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and

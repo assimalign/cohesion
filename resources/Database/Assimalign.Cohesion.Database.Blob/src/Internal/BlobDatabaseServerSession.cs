@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.Tracing;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -477,7 +478,10 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             }
 
             await AbortHostTransactionAsync(exception).ConfigureAwait(false);
-            await TryWriteErrorAsync(code, exception.Message).ConfigureAwait(false);
+            var diagnostic = (exception as DatabaseException)?.Diagnostics.FirstOrDefault(item => item.Severity == Types.DiagnosticSeverity.Error);
+            string errorText = diagnostic?.Code is { } diagnosticCode && !exception.Message.StartsWith(diagnosticCode + ":", StringComparison.Ordinal)
+                ? $"{diagnosticCode}: {exception.Message}" : exception.Message;
+            await TryWriteErrorAsync(code, errorText).ConfigureAwait(false);
             return false;
         }
     }

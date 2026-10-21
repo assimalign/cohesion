@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -251,8 +252,15 @@ public sealed class BlobDatabase : DatabaseInstance
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
+        Assimalign.Cohesion.Database.Storage.StorageException or IOException => CodedFailure("COHDBB005", error),
+        BlobCatalogException catalog => CodedFailure("COHDBB006", catalog),
+        InvalidOperationException => CodedFailure("COHDBB007", error),
         _ => error,
     };
+
+    private static DatabaseException CodedFailure(string code, Exception error)
+        => new(error.Message, [new Types.Diagnostic
+        { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error);
 
     internal ValueTask<BlobContainer> CreateContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
     {
@@ -358,6 +366,7 @@ public sealed class BlobDatabase : DatabaseInstance
         catch (Exception error)
         {
             var reported = TranslateOffline(error);
+            if (ReferenceEquals(reported, error)) { reported = TranslateKernelFailure(error); }
             if (operation is not null)
             {
                 // The operation owns the session hold and the admission, and releases them as it ends.

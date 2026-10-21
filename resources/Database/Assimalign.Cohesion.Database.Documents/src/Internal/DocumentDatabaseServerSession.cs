@@ -414,7 +414,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 await RunCommandAsync(command!, cancellationToken).ConfigureAwait(false);
             }
         }
-        catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or DocumentCatalogException or StorageException or JsonException)
+        catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or JsonException)
         {
             ProtocolErrorCode code = exception is DatabaseParseException ? ProtocolErrorCode.ParseFailure :
                 exception is DatabaseOfflineException ? ProtocolErrorCode.Unavailable : ProtocolErrorCode.ExecutionFailure;

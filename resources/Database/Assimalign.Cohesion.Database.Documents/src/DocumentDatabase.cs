@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -83,7 +84,9 @@ public sealed class DocumentDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or DocumentCatalogException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "COHDBD005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
 
         if (recover)
@@ -356,6 +359,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         catch (Exception error)
         {
             var reported = TranslateOffline(error);
+            if (ReferenceEquals(reported, error)) { reported = TranslateKernelFailure(error); }
             if (operation is not null)
             {
                 // The operation owns the session hold and the admission, and releases them as it ends.
@@ -407,8 +411,14 @@ public sealed class DocumentDatabase : DatabaseInstance
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
+        Assimalign.Cohesion.Database.Storage.StorageException or IOException => CodedFailure("COHDBD004", error),
+        DocumentCatalogException catalog => CodedFailure(catalog.Code ?? "COHDBD005", catalog),
         _ => error,
     };
+
+    private static DatabaseException CodedFailure(string code, Exception error)
+        => new(error.Message, [new Types.Diagnostic
+        { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error);
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.

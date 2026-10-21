@@ -154,7 +154,7 @@ public sealed class DocumentUpsertTests
         // The third row is valid JSON, but its index entry fails after earlier rows were written.
         using var document = JsonDocument.Parse("{\"details\":{\"score\":\"" + new string('x', 2000) + "\"}}");
         // Act
-        await Should.ThrowAsync<DocumentCatalogException>(async () => await session.ExecuteAsync(
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "UPSERT INTO items (KEY, VALUE) VALUES ('a', {'details':{'score':7}}), ('e', 2), ('z', $doc)",
             new Dictionary<string, object?> { ["doc"] = document.RootElement }, CancellationToken.None));
         // Assert

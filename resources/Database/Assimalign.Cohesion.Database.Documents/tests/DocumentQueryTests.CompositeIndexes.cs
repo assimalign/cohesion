@@ -214,12 +214,12 @@ public sealed partial class DocumentQueryTests
         await PutAsync(collection, session, "a", large);
 
         // Act / Assert.
-        await Should.ThrowAsync<DocumentCatalogException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items (a,b)"));
+        await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("CREATE INDEX ix ON items (a,b)"));
         (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
         await collection.DeleteAsync(session, "a");
         await session.ExecuteAsync("CREATE INDEX ix ON items (a,b)");
         await PutAsync(collection, session, "a", "{\"a\":1,\"b\":2}");
-        await Should.ThrowAsync<DocumentCatalogException>(async () => await PutAsync(collection, session, "a", large));
+        await Should.ThrowAsync<DatabaseException>(async () => await PutAsync(collection, session, "a", large));
         (await RowsAsync(session, "SELECT a FROM items WHERE a = 1 AND b = 2")).ShouldHaveSingleItem().GetValue(0).ShouldBe(1m);
         foreach (string value in new[] { "[]", "{}" })
         {

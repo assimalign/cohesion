@@ -166,6 +166,10 @@ root bracket-string names such as ['x.y'], nested members and integer array subs
 UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (SELECT UNIQUE(a)
 is COHDBL001). Conditional creation skips an existing name regardless of its definition.
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
+Unconditional duplicate creation fails with COHDOC024; an absent unconditional DROP fails with
+COHDOC025. An encoded composite key beyond 1024 bytes fails with COHDOC026. These errors
+carry structured diagnostics, abort an explicit transaction, and leave the session usable after
+rollback. In autocommit the next statement can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
 
 Leading MISSING omits the entry. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
