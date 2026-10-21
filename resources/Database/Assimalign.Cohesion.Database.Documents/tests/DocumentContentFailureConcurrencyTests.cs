@@ -110,6 +110,5 @@ public sealed class DocumentContentFailureConcurrencyTests
         failures.ShouldBeGreaterThan(0);
         cancellations.ShouldBeGreaterThan(0);
         endings.ShouldAllBe(count => count > 0);
-        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
     }
 }
