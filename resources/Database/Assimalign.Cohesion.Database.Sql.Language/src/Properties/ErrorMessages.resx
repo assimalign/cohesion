@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="DateTextInvalid" xml:space="preserve"><value>DATE text must be a valid ISO 8601 date, yyyy-mm-dd.</value></data>
+  <data name="TimestampTextInvalid" xml:space="preserve"><value>TIMESTAMP text requires yyyy-mm-dd and an optional time.</value></data>
+  <data name="TimestampSeparatorInvalid" xml:space="preserve"><value>TIMESTAMP requires a space or T before the time.</value></data>
+  <data name="TimestampZoneRequired" xml:space="preserve"><value>TIMESTAMPTZ requires timestamp text.</value></data>
+  <data name="TimestampOffsetInvalid" xml:space="preserve"><value>An offset must be +/-HH:mm.</value></data>
+  <data name="TimestampOffsetRange" xml:space="preserve"><value>An offset must be within +/-14:00.</value></data>
+  <data name="TimestampRangeInvalid" xml:space="preserve"><value>TIMESTAMPTZ is outside its supported range.</value></data>
+  <data name="IntervalYearMonthUnsupported" xml:space="preserve"><value>Year-month INTERVAL literals are not supported.</value></data>
+  <data name="TimeTextInvalid" xml:space="preserve"><value>TIME requires a valid clock within 00:00:00 through 23:59:59.9999999, optionally with AM/PM and a supported zone.</value></data>
+  <data name="IntervalTextInvalid" xml:space="preserve"><value>Invalid day-time INTERVAL literal.</value></data>
+</root>

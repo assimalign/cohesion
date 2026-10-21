@@ -146,6 +146,7 @@ public sealed class SqlCastMatrixTests
         ["SELECT CAST(CAST('1.25' AS DOUBLE PRECISION) AS NUMERIC) FROM t WHERE id = 1;", 1.25m, DatabaseType.Decimal],
         ["SELECT CAST(DATE '2024-01-01' AS TIMESTAMP) FROM t WHERE id = 1;", new DateTime(2024, 1, 1), DatabaseType.DateTime],
         ["SELECT CAST(TIME '01:02:03' AS INTERVAL) FROM t WHERE id = 1;", new TimeSpan(1, 2, 3), DatabaseType.TimeSpan],
+        ["SELECT CAST('12' AS INTERVAL) FROM t WHERE id = 1;", TimeSpan.FromSeconds(12), DatabaseType.TimeSpan],
         ["SELECT CAST(CAST('00112233-4455-6677-8899-aabbccddeeff' AS UNIQUEIDENTIFIER) AS TEXT) FROM t WHERE id = 1;", "00112233-4455-6677-8899-aabbccddeeff", DatabaseType.String],
         ["SELECT CAST('\\x00ff' AS BYTEA) FROM t WHERE id = 1;", new byte[] { 0, 255 }, DatabaseType.Binary],
         ["SELECT CAST(CAST('{\"雪\":1}' AS JSONB) AS JSON) FROM t WHERE id = 1;", "{\"雪\":1}", DatabaseType.Json],
@@ -243,7 +244,7 @@ public sealed class SqlCastMatrixTests
     [InlineData("CAST(INTERVAL '25 hours' AS TIME)", "COHSQLE011")]
     [InlineData("CAST(INTERVAL '-0.0000001 seconds' AS TIME)", "COHSQLE011")]
     [InlineData("CAST('1 year' AS INTERVAL)", "COHSQLE022")]
-    [InlineData("CAST('12' AS INTERVAL)", "COHSQLE022")]
+    [InlineData("CAST('12.34.56' AS INTERVAL)", "COHSQLE022")]
     [InlineData("CAST('2024-01-01 00:00:00+02:00' AS TIMESTAMP)", "COHSQLE022")]
     [InlineData("CAST('00:00:00.12345678' AS TIME)", "COHSQLE022")]
     [InlineData("CAST('\\xZZ' AS BYTEA)", "COHSQLE022")]

@@ -7,6 +7,10 @@ namespace Assimalign.Cohesion.Database.Language;
 /// </summary>
 public readonly ref struct Token
 {
+    /// <summary>Initializes a token over a span of the original query source.</summary>
+    /// <param name="type">The token classification.</param>
+    /// <param name="value">The token text, borrowed from the source.</param>
+    /// <param name="position">The zero-based character offset at which the token begins.</param>
     public Token(TokenType type, ReadOnlySpan<char> value, int position)
     {
         Type = type;
@@ -29,5 +33,7 @@ public readonly ref struct Token
     /// </summary>
     public int Position { get; }
 
+    /// <summary>Formats the token classification and source text.</summary>
+    /// <returns>The classification followed by the token text.</returns>
     public override string ToString() => $"{Type}: {Value.ToString()}";
 }

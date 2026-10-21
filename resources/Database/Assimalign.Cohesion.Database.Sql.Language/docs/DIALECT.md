@@ -1302,7 +1302,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases are created on format 25. Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. New databases are created on format 26, which fences changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -2238,7 +2238,7 @@ when its operand starts with EXISTS: `NOT EXISTS (q) IS TRUE` means
 IS operands retain their earlier grouping, and LIKE pattern/ESCAPE concatenations
 remain parenthesized. Mixed arithmetic/concatenation trees may need additional
 parentheses under the new ladder: `(a || b) + c` keeps its left grouping rather
-than rendering the formerly ambiguous `a || b + c`. Format 25 gates this change
+than rendering the formerly ambiguous `a || b + c`. Format 26 gates this change
 along with the newly storable predicates. Executable primary forms include literals, parameters,
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
@@ -2351,7 +2351,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 25 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 26 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one COHDBL001; explicit AS aliases and ordinary
@@ -2398,19 +2398,32 @@ remains a column reference. X and N prefixes must touch the quote: `X '00'` is n
 X is the ISO binary string form; PostgreSQL instead treats X as a bit-string form.
 
 Times use 00..23 hours, 00..59 minutes and seconds, and at most seven fractional digits.
-TIME and TIMESTAMP literals reject zones. TIMESTAMPTZ accepts Z or an offset within
-+/-14:00; missing offsets mean UTC. Named zones, BC years, infinity, epoch, today and now
+TIME accepts single-digit hours (1:02), AM/PM (1 PM, 12:02 am), and a trailing
+fractional dot (13:45:00.). A written zone is validated and discarded, as PostgreSQL time_in
+does (date.c:1475-1510). Numeric zones accept +/-HH, +/-HHMM, +/-HHMMSS and colon-separated
+hours/minutes/seconds, within +/-15:59:59. The fixed abbreviation vocabulary is Z, UT, UTC, GMT,
+EST/EDT, CST/CDT, MST/MDT, PST/PDT, CET/CEST, EET/EEST and JST (case-insensitive). Other
+abbreviations and named regional zones remain unsupported: no server timezone database or
+date-dependent zone resolution is provided. TIMESTAMP literals reject zones. TIMESTAMPTZ accepts Z or an offset within
++/-14:00; missing offsets mean UTC. Regional named zones, BC years, infinity, epoch, today and now
 are outside the grammar. `SqlLiteralText` exposes the invariant text readers publicly in
-Sql.Language, for reuse by CAST. Existing plain-string assignment keeps its input grammar,
-including TIMESTAMP ignoring a written offset, through SqlTemporalText.
+Sql.Language, for reuse by CAST. Plain-string TIME and INTERVAL assignment use the same readers
+as CAST (#1422), including surrounding ASCII whitespace trimming; non-ASCII whitespace is rejected.
+24:00 remains rejected because TimeOnly cannot represent the following midnight. More than
+seven fractional digits remain rejected because storage preserves exact 100 ns ticks; PostgreSQL
+rounds to microseconds instead. DATE and timestamp assignment retain
+their input grammar through SqlTemporalText, including TIMESTAMP ignoring a written offset.
 
-INTERVAL is day-time only. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
+INTERVAL is day-time only. An unqualified bare signed number means seconds, as in PostgreSQL:
+INTERVAL '12' and CAST('12' AS INTERVAL) both yield twelve seconds. Qualifiers DAY, HOUR, MINUTE and SECOND and descending TO
 ranges are consumed greedily; multi-field values use a space after DAY and colons between
 clock fields. Subordinate hours are below 24, and subordinate minutes/seconds below 60.
 Only SECOND admits a fraction in qualified forms. A leading sign applies to the whole
 qualified value. Unit strings accept signed decimal weeks, days, hours, minutes, seconds, milliseconds
 and microseconds (including w/d/h/m/s, hr/hrs, min/mins, sec/secs, ms/msec and us/usec aliases),
-once per field, following PostgreSQL datetime.c:188-250. ISO durations use P with D and
+once per field, following PostgreSQL datetime.c:188-250. An implicit day before an hour
+unit is accepted: 1 2 hours is 1 day 02:00 (datetime.c:3748). Optional @ and final ago
+are accepted; ago negates the whole interval (datetime.c:3807-3818). ISO durations use P with D and
 T with H/M/S in descending order, or a standalone PnW week duration, with an optional leading sign. All durations must fit
 TimeSpan exactly at 100 ns resolution; fractions have at most seven digits. Canonical
 text is optional minus, PT, total seconds and S. Year/month fields in every spelling
@@ -2795,8 +2808,15 @@ supply a floating operand, cast text to REAL or DOUBLE first.
 - **Temporal input** calls the public strict literal readers in `SqlLiteralText`,
   trimming surrounding whitespace. DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL
   use the [typed-literal grammar](#literals); a TIMESTAMP input containing an offset
-  is rejected. INTERVAL input is day-time only; year-month fields and bare numbers
-  such as '12' fail. INSERT's plain-string assignment acceptance is unchanged.
+  is rejected. INTERVAL input is day-time only; year-month fields fail, and bare signed
+  numbers such as '12' mean seconds (PostgreSQL datetime.c:3625-3657). Plain-string TIME and
+  INTERVAL assignment use these same readers on INSERT, UPDATE, INSERT ... SELECT and
+  DEFAULTs, including domain columns. TIME accepts single-digit hours, AM/PM, a trailing dot,
+  and discarded written zones under the typed-literal grammar above. INTERVAL day-dot-clock
+  input such as '1.02:03:04' fails.
+  INTERVAL accepts unit/clock strings and ISO day-time durations. In particular, assigning
+  '12' now stores twelve seconds rather than twelve days (#1422). Typed schema TimeSpan defaults
+  render signed total seconds with a `seconds` unit, preserving the exact duration.
   All zone-dependent temporal conversions follow the
   [timestamp normalization rule](#timestamp-normalization-1110).
   TIMESTAMP to DATE/TIME extracts fields. INTERVAL to TIME requires
@@ -3281,7 +3301,7 @@ values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use i
 text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "DATE '2026-01-01'")`. All supported typed literal forms are accepted. Both declarations store the rendered literal text in the
-`cohesion/database-schema/v7` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
+`cohesion/database-schema/v8` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
 an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
 and pending targets are refused before hash comparison (SqlSchemaValidationException,
 InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
@@ -3389,7 +3409,7 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v7 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v8 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
 
 ## Quoted calls (#1103 review)
 
@@ -3441,3 +3461,18 @@ Before reading rows, DML refreshes adjacent foreign-key definitions changed duri
 object-lock wait, including ADD COLUMN and removal of a child table or constraint. A
 changed target table invalidates its already-bound plan: structured code `COHSQLT006`
 is a retryable transaction abort; retry the statement in a fresh transaction.
+
+### Text conversion diagnostics and persisted defaults (#1422)
+
+Plain-string TIME, INTERVAL, REAL and DOUBLE assignments and DEFAULTs use CAST's readers and
+failure translation. Malformed text uses COHSQLE022/22P02 and overflow uses COHSQLE002/22003.
+The established temporal CAST contract keeps malformed and out-of-range TIME fields in
+COHSQLE022; PostgreSQL datetime.c:4247-4290 uses 22007 for bad format, 22008 for datetime field
+overflow and 22015 for interval overflow. Cohesion retains its mapping for CAST compatibility.
+Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
+
+Catalog format 26 and compiled-schema v8 refuse earlier definitions rather than reinterpret
+retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
+'2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries COHSQLE041;
+a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,
+recreate, rebuild and reapply the declaration (#1152); no compatibility reader is provided.

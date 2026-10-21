@@ -41,7 +41,8 @@ internal static class SqlDefaultLiteralRenderer
             (DatabaseType.Time, TimeOnly time) => Quote(time.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture)),
             (DatabaseType.DateTime, DateTime dateTime) => Quote(dateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture)),
             (DatabaseType.DateTimeOffset, DateTimeOffset dateTime) => Quote(dateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture)),
-            (DatabaseType.TimeSpan, TimeSpan duration) => Quote(duration.ToString("c", CultureInfo.InvariantCulture)),
+            (DatabaseType.TimeSpan, TimeSpan duration) => Quote(
+                (duration.Ticks / (decimal)TimeSpan.TicksPerSecond).ToString("0.#######", CultureInfo.InvariantCulture) + " seconds"),
             (DatabaseType.Guid, Guid identifier) => Quote(identifier.ToString("D")),
             _ => null
         };

@@ -54,7 +54,7 @@ database that is no longer declared and touches no other file in it.
 as written. The SDK accepts compile-time constants for typed defaults, including enum members,
 characters, and `null`. A constructor, method call, or other nonconstant value fails with
 `COHDBSDK109` and points to `DefaultSql`. Runtime and SDK use the same literal renderer, and a
-typed value and its exact `DefaultSql` literal have identical v4 documents and hashes.
+typed value and its exact `DefaultSql` literal have identical v8 documents and hashes.
 
 Built-in tool sets are `Sql` and `KeyValuePair`. Model names are case-sensitive. SQL migration
 generation is explicit and names its database (optional when the project declares exactly one);
@@ -64,7 +64,7 @@ each database's migrations live under `Migrations/<database>/`:
 dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseName=sales -p:CohesionDatabaseMigrationName=add-orders
 ```
 
-SQL schema compilation uses the `cohesion/database-schema/v7` contract in `Database.Sql.Schema`
+SQL schema compilation uses the `cohesion/database-schema/v8` contract in `Database.Sql.Schema`
 without loading the SQL engine into MSBuild. Migration generation uses `Database.Sql.Language`
 to validate and render DEFAULT literals, and supports required column additions with non-null
 literal defaults, matching runtime migrations.

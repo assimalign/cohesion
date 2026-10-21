@@ -16,6 +16,26 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed class SqlSchemaFormatTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Schema v7 temporal defaults require rebuilding (#1422)")]
+    [InlineData("'12'")]
+    [InlineData("'2.03:04:05.1234567'")]
+    public void Deserialize_V7TemporalDefault_ShouldRefuseBeforeReinterpretingText(string literal)
+    {
+        // Arrange
+        var schema = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", false, [],
+            [new CompiledSchemaTable("items", "Items", [new("value", DatabaseType.TimeSpan, true, DefaultLiteral: literal)], null, [], [])], []);
+        string document = schema.CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v7", StringComparison.Ordinal);
+
+        // Act
+        var error = Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(document));
+
+        // Assert
+        var detail = error.Errors.ShouldHaveSingleItem();
+        detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
+        detail.Declaration.ShouldBe("schema.format");
+        error.Message.ShouldContain("cohesion/database-schema/v8");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema format: v4 SDK artifacts cannot enter Apply or Verify")]
     [InlineData(false)]
     [InlineData(true)]
@@ -144,7 +164,7 @@ public sealed class SqlSchemaFormatTests
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         error.Message.ShouldContain("recreate", Case.Sensitive);
     }

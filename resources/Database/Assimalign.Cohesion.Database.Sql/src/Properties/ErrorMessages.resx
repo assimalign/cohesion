@@ -230,4 +230,5 @@
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
   <data name="StatementTableChanged" xml:space="preserve"><value>Table '{0}.{1}' changed while the statement was waiting. Retry the statement in a fresh transaction.</value></data>
   <data name="ResultHeaderTooLarge" xml:space="preserve"><value>The encoded result header is {0} bytes, exceeding the wire payload limit of {1} bytes.</value></data>
+  <data name="ColumnTextConversionFailed" xml:space="preserve"><value>Column '{0}': cannot store text as {1}. {2}</value></data>
 </root>

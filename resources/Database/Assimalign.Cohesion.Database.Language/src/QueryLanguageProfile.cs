@@ -25,6 +25,7 @@ public sealed class QueryLanguageProfile
     /// <param name="isCaseSensitive">
     /// Whether keyword, function, and clause matching is case-sensitive.
     /// </param>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     public QueryLanguageProfile(
         string language,
         string[] keywords,
@@ -68,6 +69,7 @@ public sealed class QueryLanguageProfile
     /// <summary>Whether <paramref name="clause"/> is accepted by this model.</summary>
     /// <param name="clause">The language-specific clause name to inspect.</param>
     /// <returns><see langword="true"/> when the profile accepts the clause.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="clause"/> is null.</exception>
     public bool Supports(string clause)
     {
         ArgumentNullException.ThrowIfNull(clause);

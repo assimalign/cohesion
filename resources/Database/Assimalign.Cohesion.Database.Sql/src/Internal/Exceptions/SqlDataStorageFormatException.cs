@@ -20,7 +20,7 @@ internal sealed class SqlDataStorageFormatException : DatabaseException
     /// </summary>
     /// <param name="message">The refusal: the database, the format found, the format supported and the remedy.</param>
     public SqlDataStorageFormatException(string message)
-        : base(message)
+        : base(message, [new Diagnostic { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }])
     {
     }
 
