@@ -22,8 +22,10 @@ public sealed class ProtocolChannel : IAsyncDisposable
     /// <param name="stream">The connected duplex stream.</param>
     /// <param name="family">The immutable family selected by the endpoint.</param>
     /// <param name="leaveOpen">Whether disposal leaves the transport stream open.</param>
+    /// <param name="batchWrites">Whether complete frames are buffered up to 64 KiB or 32 frames.
+    /// The session must flush at result and latency boundaries.</param>
     /// <exception cref="ArgumentNullException">The stream or family is null.</exception>
-    public ProtocolChannel(Stream stream, ProtocolMessageFamily family, bool leaveOpen = false)
+    public ProtocolChannel(Stream stream, ProtocolMessageFamily family, bool leaveOpen = false, bool batchWrites = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(family);
@@ -36,7 +38,9 @@ public sealed class ProtocolChannel : IAsyncDisposable
             foreach (byte type in capability.MessageTypes) { _requiredCapabilities[type] = capability.Name; }
         }
         Reader = new FamilyReader(ProtocolFrameReader.Create(stream, leaveOpen: true), this);
-        Writer = new FamilyWriter(ProtocolFrameWriter.Create(stream, leaveOpen: true), this);
+        Writer = new FamilyWriter(batchWrites
+            ? ProtocolFrameWriter.CreateBatched(stream, leaveOpen: true)
+            : ProtocolFrameWriter.Create(stream, leaveOpen: true), this);
     }
 
     /// <summary>Gets the family fixed when the channel was created.</summary>
@@ -121,6 +125,7 @@ public sealed class ProtocolChannel : IAsyncDisposable
         /// <param name="reader">The framed reader whose frames are validated.</param>
         /// <param name="channel">The channel whose family every read identifier must belong to.</param>
         public FamilyReader(ProtocolFrameReader reader, ProtocolChannel channel)
+            : base(reader.SupportsBorrowedPayloads)
         {
             _reader = reader;
             _channel = channel;
@@ -129,6 +134,17 @@ public sealed class ProtocolChannel : IAsyncDisposable
         protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
         {
             ProtocolFrame? frame = await _reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            if (frame is { } value)
+            {
+                _channel.Validate(value.Type);
+                _channel.ValidateCapability(value.Type);
+            }
+            return frame;
+        }
+
+        protected override async ValueTask<ProtocolFrame?> ReadBorrowedFrameCoreAsync(CancellationToken cancellationToken)
+        {
+            ProtocolFrame? frame = await _reader.ReadBorrowedFrameAsync(cancellationToken).ConfigureAwait(false);
             if (frame is { } value)
             {
                 _channel.Validate(value.Type);

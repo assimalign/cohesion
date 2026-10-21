@@ -1,4 +1,5 @@
 using System.Diagnostics.Tracing;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Protocol.Internal;
 
@@ -21,16 +22,57 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// carries its message type and payload length only, never its payload.
 /// </para>
 /// <para>
-/// No counters: the SQL server writes one frame per result row, and a process-wide count updated per
-/// frame by every session would be a contention point (plan D6). Frame failures are not events here:
-/// the server session or the client that catches the <see cref="ProtocolException"/> reports it once,
-/// with its session or connection.
+/// Exact attempted stream writes, explicit flushes and outstanding pooled buffers are counted
+/// independently of listeners. Frame failures are reported by their owning session or client.
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Protocol")]
 internal sealed class ProtocolEventSource : EventSource
 {
     public static readonly ProtocolEventSource Log = new();
+
+    private long _transportWrites;
+    private long _transportFlushes;
+    private long _rentedBuffers;
+    private long _returnedBuffers;
+    private long _pooledBuffersInUse;
+    private PollingCounter? _writesCounter;
+    private PollingCounter? _flushesCounter;
+    private PollingCounter? _buffersCounter;
+
+    internal long TransportWrites => Volatile.Read(ref _transportWrites);
+    internal long TransportFlushes => Volatile.Read(ref _transportFlushes);
+    internal long RentedBuffers => Volatile.Read(ref _rentedBuffers);
+    internal long ReturnedBuffers => Volatile.Read(ref _returnedBuffers);
+    internal long PooledBuffersInUse => Volatile.Read(ref _pooledBuffersInUse);
+
+    [NonEvent]
+    internal void TransportWrite() => Interlocked.Increment(ref _transportWrites);
+    [NonEvent]
+    internal void TransportFlush() => Interlocked.Increment(ref _transportFlushes);
+    [NonEvent]
+    internal void BufferRented()
+    {
+        Interlocked.Increment(ref _rentedBuffers);
+        Interlocked.Increment(ref _pooledBuffersInUse);
+    }
+    [NonEvent]
+    internal void BufferReturned()
+    {
+        Interlocked.Decrement(ref _pooledBuffersInUse);
+        Interlocked.Increment(ref _returnedBuffers);
+    }
+
+    protected override void OnEventCommand(EventCommandEventArgs command)
+    {
+        if (command.Command != EventCommand.Enable) { return; }
+        _writesCounter ??= new PollingCounter("transport-write-calls", this, () => TransportWrites)
+        { DisplayName = "Transport Write Calls" };
+        _flushesCounter ??= new PollingCounter("transport-flush-calls", this, () => TransportFlushes)
+        { DisplayName = "Explicit Transport Flush Calls" };
+        _buffersCounter ??= new PollingCounter("pooled-buffers-in-use", this, () => PooledBuffersInUse)
+        { DisplayName = "Pooled Buffers In Use" };
+    }
 
     private ProtocolEventSource()
     {

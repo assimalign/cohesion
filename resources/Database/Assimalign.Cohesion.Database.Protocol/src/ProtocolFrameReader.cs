@@ -28,13 +28,39 @@ public abstract class ProtocolFrameReader : IAsyncDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="ProtocolFrameReader"/> class.
     /// </summary>
+    /// <param name="supportsBorrowedPayloads">Whether the leaf implements borrowed payload reads.</param>
     /// <remarks>
     /// Protected, not private protected: the readers that decorate one live in Database.Client
     /// and Blob.Client as well as here.
     /// </remarks>
-    protected ProtocolFrameReader()
+    protected ProtocolFrameReader(bool supportsBorrowedPayloads = false)
     {
+        SupportsBorrowedPayloads = supportsBorrowedPayloads;
     }
+
+    /// <summary>Gets whether this reader supports payloads borrowed until the next read or disposal.</summary>
+    public bool SupportsBorrowedPayloads { get; }
+
+    /// <summary>Reads a complete frame using reader-owned, reusable payload storage.</summary>
+    /// <param name="cancellationToken">Cancellation token for the read.</param>
+    /// <returns>The next frame, or null at a clean end of stream.</returns>
+    /// <exception cref="NotSupportedException">The reader does not support borrowed payloads.</exception>
+    /// <exception cref="ProtocolException">The frame is malformed or incomplete.</exception>
+    /// <remarks>The payload is valid only until the next read (of either kind) or reader disposal.
+    /// Decode or copy everything that must survive before that boundary. Reads and disposal must
+    /// be serialized by the caller. <see cref="ReadFrameAsync"/> continues to return owned payloads.</remarks>
+    public ValueTask<ProtocolFrame?> ReadBorrowedFrameAsync(CancellationToken cancellationToken = default)
+    {
+        if (!SupportsBorrowedPayloads) { throw new NotSupportedException(ErrorMessages.BorrowedPayloadsUnsupported); }
+        return ReadBorrowedFrameCoreAsync(cancellationToken);
+    }
+
+    /// <summary>Reads a frame whose payload remains valid until the next read or disposal.</summary>
+    /// <param name="cancellationToken">Cancellation token for the read.</param>
+    /// <returns>The next frame, or null at a clean end of stream.</returns>
+    /// <exception cref="NotSupportedException">The optional capability is unsupported.</exception>
+    protected virtual ValueTask<ProtocolFrame?> ReadBorrowedFrameCoreAsync(CancellationToken cancellationToken)
+        => throw new NotSupportedException(ErrorMessages.BorrowedPayloadsUnsupported);
 
     /// <summary>
     /// Creates a frame reader over a stream.

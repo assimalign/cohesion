@@ -58,6 +58,28 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
         return new ProtocolStreamFrameWriter(stream, leaveOpen);
     }
 
+    /// <summary>Creates a writer that coalesces complete frames into bounded transport writes.</summary>
+    /// <param name="stream">The transport stream.</param>
+    /// <param name="leaveOpen">Whether disposal leaves the stream open.</param>
+    /// <param name="maxBatchBytes">The byte bound, including frame headers.</param>
+    /// <param name="maxBatchFrames">The frame count bound.</param>
+    /// <returns>A sequential writer whose pending batch is sent by <see cref="FlushAsync"/>.</returns>
+    /// <exception cref="ArgumentNullException">The stream is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A batch bound is invalid.</exception>
+    /// <remarks>Callers must serialize writes, flushes and disposal. Flush at result and latency
+    /// boundaries, including before awaiting further result production. A frame larger than the
+    /// byte bound is written alone and retains the per-frame payload limit. Disposal discards an
+    /// unfinished batch; it never sends an unverified result.</remarks>
+    public static ProtocolFrameWriter CreateBatched(Stream stream, bool leaveOpen = false,
+        int maxBatchBytes = 64 * 1024, int maxBatchFrames = 32)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxBatchBytes, ProtocolFrameHeader.Size);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBatchBytes, (int)ProtocolFrameHeader.MaxPayloadLength + ProtocolFrameHeader.Size);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxBatchFrames, 1);
+        return new ProtocolStreamFrameWriter(stream, leaveOpen, maxBatchBytes, maxBatchFrames);
+    }
+
     /// <summary>
     /// Writes a frame to the transport.
     /// </summary>
