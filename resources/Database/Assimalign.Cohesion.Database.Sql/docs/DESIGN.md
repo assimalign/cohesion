@@ -4254,6 +4254,8 @@ SqlDatabaseSession exposes nullable overrides: null inherits the engine snapshot
 it, and a positive duration applies to subsequent statements. Both accept up to int.MaxValue
 milliseconds; negative or larger values are refused before execution. Session configuration,
 like statement execution, is single-threaded. SQL SET syntax is deferred.
+The provisioner's private schema sessions explicitly set both timeouts to zero. Provisioning,
+including deferred index builds, follows its caller/lifecycle cancellation instead of OLTP budgets.
 
 The statement timer links cancellation into execution, including deferred-table admission,
 planning, materialized reads, LIKE matching, application functions, cascades and physical applies.
@@ -4264,6 +4266,11 @@ its result even if a timer expires there. An explicit transaction's later commit
 timer. Timer cancellation becomes SqlTimeoutException with COHSQLE043 / SQLSTATE 57014 only
 when the caller did not cancel; caller cancellation remains OperationCanceledException and
 retains its existing locking behavior.
+Mandatory post-self-commit binding, including CREATE/DROP FUNCTION and DOMAIN refreshes, uses
+CancellationToken.None. Unindexed DELETE and both UPDATE apply loops poll every 64 rows, so a
+deadline during eviction rolls back the existing physical bracket. Index registration cleanup
+covers build and catalog publication and stops once publication commits; deferred builds track
+registration before their creation bracket ends. UNIQUE/PRIMARY KEY publication follows the same rule.
 
 LockManager.EnterLockTimeout scopes a duration to the execution flow, so nested BTreeIndex
 unique-key acquisitions use the same policy. Each contended wait arms a fresh timer; granted
@@ -4271,6 +4278,9 @@ requests allocate no timer. Lock expiration becomes SqlTimeoutException with COH
 SQLSTATE 55P03. Both errors carry a statement location and a public SqlState; existing negotiated
 wire diagnostics carry the COHSQLE code and ExecutionFailure without a wire-format change.
 The kernel's LockWaitStop outcome is Timeout for a lock timer, Cancelled for a statement token.
+The cause that removes a queued wait fixes its exception and event outcome. A later statement
+deadline cannot overwrite an earlier lock timeout while a continuation is delayed (PostgreSQL
+src/backend/tcop/postgres.c:3590-3600).
 
 A failed timed statement rolls back its physical bracket before returning. In an explicit
 transaction the session then releases resources first granted since its statement mark; earlier
@@ -4285,9 +4295,11 @@ The zero defaults and per-wait timing follow PostgreSQL guc_parameters.dat:1617-
 and src/backend/storage/lmgr/proc.c:1407-1425. Error mapping and lock cleanup follow
 src/backend/tcop/postgres.c:3599-3612. SQL deliberately keeps its own statement-atomic transaction
 contract rather than PostgreSQL's failed-transaction state. SqlTimeoutConformanceTests covers
-the 100,000-row cascade at one second, row/unique-key waits, caller cancellation, typed/text
-execution, overrides and durable success across late expiration. LockTimeoutTests exercises
-concurrent grant/cancellation/timer outcomes until all outcome counters move, with a time ceiling.
+a cascade blocked by TimeoutProbeFunction, row/unique-key waits, caller cancellation, typed/text
+execution, overrides and durable success across late expiration. SqlTimeoutRegressionTests covers
+definition self-commits, 600-row unindexed apply evictions, publication timeout/retry, provisioning
+and delayed lock continuations. LockTimeoutTests deterministically cancels between grant dequeue
+and notification until its interleaving and outcome counters move, with a time ceiling.
 
 ## SQL transaction control and the B7 seam
 

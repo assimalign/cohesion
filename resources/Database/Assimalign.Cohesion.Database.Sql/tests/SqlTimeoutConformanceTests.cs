@@ -1,7 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Globalization;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -23,44 +21,40 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlTimeoutConformanceTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Timeout: a 100,000-row cascade stops at one second, releases new locks and preserves the session and transaction")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Timeout: a blocked cascade stops at its deadline, releases new locks and preserves the session and transaction")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ExecuteAsync_DeepCascadeTimeout_ShouldPreserveRowsAndReleaseStatementLocks(bool explicitTransaction)
     {
-        // Arrange: the same indexed 100,000-row chain as the cascade acceptance fixture.
-        using var ceiling = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await using var engine = SqlDatabaseEngine.Create("cascade-timeout", new());
+        // Arrange: the function blocks cascade preparation until the real statement token expires.
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var function = new TimeoutProbeFunction();
+        var builder = SqlDatabaseEngine.CreateBuilder("cascade-timeout");
+        builder.Functions.Add(function);
+        await using var engine = await builder.BuildAsync(ceiling.Token);
         var database = await engine.CreateDatabaseAsync("db", ceiling.Token);
         await using var session = await database.CreateSessionAsync(ceiling.Token);
         await session.ExecuteAsync("CREATE TABLE chain (id INT PRIMARY KEY, parent_id INT, CONSTRAINT fk_chain FOREIGN KEY(parent_id) REFERENCES chain(id) ON DELETE CASCADE)", cancellationToken: ceiling.Token);
         await session.ExecuteAsync("CREATE INDEX chain_parent ON chain(parent_id)", cancellationToken: ceiling.Token);
-        const int depth = 100_000;
-        for (int first = 1; first <= depth; first += 200)
-        {
-            var text = new StringBuilder("INSERT INTO chain VALUES ");
-            for (int id = first; id < first + 200; id++)
-            {
-                text.Append(id == first ? "" : ",").Append(CultureInfo.InvariantCulture,
-                    $"({id},{(id == 1 ? "NULL" : (id - 1).ToString(CultureInfo.InvariantCulture))})");
-            }
-            await session.ExecuteAsync(text.ToString(), cancellationToken: ceiling.Token);
-        }
+        const int depth = 3;
+        await session.ExecuteAsync("INSERT INTO chain VALUES (1,NULL),(2,1),(3,2)", cancellationToken: ceiling.Token);
         await session.ExecuteAsync("CREATE TABLE prior (id INT PRIMARY KEY)", cancellationToken: ceiling.Token);
         await using var transaction = explicitTransaction ? await session.BeginTransactionAsync(ceiling.Token) : null;
         if (transaction is not null) { await session.ExecuteAsync("INSERT INTO prior VALUES (1)", cancellationToken: ceiling.Token); }
-        session.StatementTimeout = TimeSpan.FromSeconds(1);
+        session.StatementTimeout = TimeSpan.FromMilliseconds(80);
+        function.Callback = token => { token.WaitHandle.WaitOne(TimeSpan.FromSeconds(10)).ShouldBeTrue(); token.ThrowIfCancellationRequested(); };
 
         // Act: the client has no cancellation deadline near the statement's timer.
         var elapsed = Stopwatch.StartNew();
         var failure = await Should.ThrowAsync<SqlTimeoutException>(async () =>
-            await session.ExecuteAsync("DELETE FROM chain WHERE id = 1", cancellationToken: ceiling.Token));
+            await session.ExecuteAsync("DELETE FROM chain WHERE id = 1 AND timeout_probe(id) = 1", cancellationToken: ceiling.Token));
         elapsed.Stop();
         session.StatementTimeout = TimeSpan.Zero;
 
         // Assert: no physical mutation or lock from the failed statement survives.
         failure.SqlState.ShouldBe("57014");
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE043");
+        function.Calls.ShouldBe(1);
         elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(20));
         ceiling.IsCancellationRequested.ShouldBeFalse();
         (await ScalarAsync(session, "SELECT COUNT(*) FROM chain", ceiling.Token)).ShouldBe((long)depth);

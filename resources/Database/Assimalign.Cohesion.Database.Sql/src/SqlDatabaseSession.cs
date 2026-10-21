@@ -156,6 +156,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // Test-only observation of the real timer token, so commit-boundary proofs await its expiry.
     internal Action<CancellationToken>? StatementTimerArmed { get; set; }
 
+    // Move the real timer's deadline to a deterministic apply/publication boundary in tests.
+    internal void ExpireStatementTimerForTest() => _statementTimer!.CancelAfter(TimeSpan.FromMilliseconds(1));
+
     /// <summary>
     /// Begins an explicit transaction at the default isolation level, <see cref="IsolationLevel.Snapshot"/>.
     /// </summary>

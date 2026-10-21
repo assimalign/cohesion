@@ -59,6 +59,9 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// </summary>
     internal bool LoseUnconfirmedJournalOnReopen { get; set; }
 
+    // A page write on the statement's flow, including a dirty-page eviction during apply.
+    internal Action<long>? BeforeDataWrite { get; set; }
+
     /// <summary>
     /// Gets or sets whether every read of this strategy's data files fails, on every flow: the
     /// engine's background workers included, as a device that refuses reads for a while. A page the
@@ -248,7 +251,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     }
 
     private StorageStream DataStream(Files files, string key)
-        => _durable ? new StorageStream(FaultsOf(key).WrapData(new DurableMemoryHandle(files.Data, null, null))) : new StorageStream(files.Data);
+        => _durable ? new StorageStream(FaultsOf(key).WrapData(new DurableMemoryHandle(files.Data, null, null, offset => BeforeDataWrite?.Invoke(offset)))) : new StorageStream(files.Data);
 
     private StorageStream JournalStream(Files files, string key)
         => _durable ? new StorageStream(FaultsOf(key).WrapJournal(new DurableMemoryHandle(files.Journal, files.Journal, key))) : new StorageStream(files.Journal);
@@ -416,13 +419,15 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
         private readonly MemoryStream _stream;
         private readonly FaultInjectingStream? _journal;
         private readonly string? _storageName;
+        private readonly Action<long>? _beforeWrite;
         private readonly object _gate = new();
 
-        public DurableMemoryHandle(MemoryStream stream, FaultInjectingStream? journal, string? storageName)
+        public DurableMemoryHandle(MemoryStream stream, FaultInjectingStream? journal, string? storageName, Action<long>? beforeWrite = null)
         {
             _stream = stream;
             _journal = journal;
             _storageName = storageName;
+            _beforeWrite = beforeWrite;
         }
 
         public long Length { get { lock (_gate) { return _stream.Length; } } }
@@ -443,6 +448,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
 
         public void Write(ReadOnlySpan<byte> buffer, long offset)
         {
+            _beforeWrite?.Invoke(offset);
             lock (_gate)
             {
                 _stream.Position = offset;

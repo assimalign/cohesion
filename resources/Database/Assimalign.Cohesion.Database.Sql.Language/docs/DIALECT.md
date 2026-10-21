@@ -3145,7 +3145,11 @@ and begins after parsing; each contended lock wait gets its own lock-timeout bud
 stop execution, never a started commit or mandatory cleanup after a DDL self-commit. SQL keeps
 its statement-atomic transaction contract after either timeout; grants from earlier statements
 and upgrades of already-held resources remain until transaction end. Caller cancellation keeps
-its cancellation meaning. SqlTimeoutConformanceTests is the executable conformance corpus for
+its cancellation meaning. The cause that ends a lock wait determines its diagnostic even if a
+later statement deadline expires before its continuation runs. Provisioning schema sessions set
+both timeouts to zero; their caller/lifecycle cancellation still applies, including to deferred
+index builds. CREATE/DROP FUNCTION and DOMAIN finish binding after self-commit without observing
+cancellation again. SqlTimeoutConformanceTests and SqlTimeoutRegressionTests are the executable conformance corpus for
 these engine-visible limits; no grammar/profile clause count changes.
 
 A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
