@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,6 +27,7 @@ public abstract class QueryParser
     /// <summary>Whether the model this parser serves accepts <paramref name="clause"/>.</summary>
     /// <param name="clause">The language-specific clause name to inspect.</param>
     /// <returns><see langword="true"/> when the parser's profile accepts the clause.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="clause"/> is null.</exception>
     protected bool Supports(string clause) => Profile.Supports(clause);
 
     /// <summary>
@@ -38,6 +38,7 @@ public abstract class QueryParser
     /// <param name="clause">The language-specific clause name to require.</param>
     /// <param name="location">The clause's source location.</param>
     /// <returns><see langword="true"/> when the parser's profile accepts the clause.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="statement"/> or <paramref name="clause"/> is null.</exception>
     protected bool RequireClause(QueryStatement statement, string clause, Location location)
     {
         ArgumentNullException.ThrowIfNull(statement);
@@ -71,11 +72,18 @@ public abstract class QueryParser
     /// </summary>
     /// <param name="query">The query source to parse.</param>
     /// <returns>The parsed and analyzed query statement.</returns>
+    /// <exception cref="OperationCanceledException">An analyzer was canceled or the analyzer timeout expired.</exception>
+    /// <remarks>Analyzer failures propagate to the caller. Analyzers must observe cancellation and must not depend on the caller's synchronization context.</remarks>
     public virtual QueryStatement Parse(ReadOnlySpan<char> query)
     {
         TokenLexer lexer = CreateLexer(query);
 
         QueryStatement statement = ParseCore(lexer);
+
+        if (_options.Analyzers.Count == 0)
+        {
+            return statement;
+        }
 
         Analyze(new QueryAnalyzerContext(statement), _options.AnalyzerTimeout);
 
@@ -84,29 +92,25 @@ public abstract class QueryParser
 
     private void Analyze(QueryAnalyzerContext context, TimeSpan timeout)
     {
-        using var cancellationTokenSource = new CancellationTokenSource(timeout); // Max 10 seconds for analysis
-#if !DEBUG
+        using var cancellationTokenSource = new CancellationTokenSource(timeout);
         cancellationTokenSource.Token.ThrowIfCancellationRequested();
-#endif
         var analyzers = new List<Task>();
 
         foreach (var analyzer in _options.Analyzers)
         {
             analyzers.Add(analyzer.AnalyzeAsync(context, cancellationTokenSource.Token));
         }
-        while (analyzers.Any())
+        var completion = Task.WhenAll(analyzers);
+        try
         {
-            var task = Task.WhenAny(analyzers);
-
-            while (!task.IsCompleted)
-            {
-                if (cancellationTokenSource.IsCancellationRequested)
-                {
-                    throw new OperationCanceledException(cancellationTokenSource.Token);
-                }
-            }
-
-            analyzers.Remove(task.Result);
+            completion.WaitAsync(cancellationTokenSource.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) when (cancellationTokenSource.IsCancellationRequested)
+        {
+            // An analyzer may ignore cancellation and fault after the caller has left.
+            _ = completion.ContinueWith(static task => { _ = task.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
         }
     }
 }

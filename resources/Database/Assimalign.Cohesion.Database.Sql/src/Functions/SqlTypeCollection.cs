@@ -43,7 +43,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
 {
     private readonly List<SqlType> _types = new(SqlType.BuiltIn);
     private readonly List<SqlCast> _casts = [];
-    private readonly HashSet<string> _castKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<SqlCastKey> _castKeys = [];
     private readonly Action? _ensureMutable;
 
     /// <summary>Initializes a collection holding the built-in types and casts.</summary>
@@ -120,7 +120,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         if (!_castKeys.Add(SqlTypeCatalog.CastKey(cast.Source, cast.Target)))
         {
             bool builtIn = _casts.Exists(registered => SqlStandardCasts.Contains(registered)
-                && SqlTypeCatalog.CastKey(registered.Source, registered.Target) == SqlTypeCatalog.CastKey(cast.Source, cast.Target));
+                && SqlTypeCatalog.CastKey(registered.Source, registered.Target).Equals(SqlTypeCatalog.CastKey(cast.Source, cast.Target)));
             throw new InvalidOperationException(
                 $"A cast from {cast.Source.Name} to {cast.Target.Name} is already registered{(builtIn ? " by the standard library" : string.Empty)}; " +
                 "a cast cannot be replaced.");

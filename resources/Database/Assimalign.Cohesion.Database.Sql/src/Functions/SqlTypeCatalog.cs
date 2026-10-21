@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -29,7 +28,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     private readonly SqlType[] _types;
     private readonly SqlCast[] _casts;
     private readonly FrozenDictionary<string, SqlType> _domains;
-    private readonly FrozenDictionary<string, SqlCast> _castsByKey;
+    private readonly FrozenDictionary<SqlCastKey, SqlCast> _castsByKey;
 
     /// <summary>Freezes registrations into a catalog.</summary>
     /// <param name="types">The types, already validated, in registration order.</param>
@@ -40,7 +39,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
         _casts = casts.ToArray();
         _domains = _types.Where(static type => type.IsDomain)
             .ToFrozenDictionary(static type => type.Name, StringComparer.OrdinalIgnoreCase);
-        _castsByKey = _casts.ToFrozenDictionary(static cast => CastKey(cast.Source, cast.Target), StringComparer.Ordinal);
+        _castsByKey = _casts.ToFrozenDictionary(static cast => LookupKey(cast.Source, cast.Target));
         HasDomainChecks = _types.Any(static type => type.Check is not null);
         HasApplicationCasts = _casts.Any(static cast => !SqlStandardCasts.Contains(cast));
     }
@@ -98,7 +97,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(target);
-        return _castsByKey.TryGetValue(CastKey(source, target), out var cast) ? cast : null;
+        return _castsByKey.TryGetValue(LookupKey(source, target), out var cast) ? cast : null;
     }
 
     /// <summary>Returns the types in registration order: the built-in types, then the domains.</summary>
@@ -161,11 +160,9 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     internal SqlCast?[] ResolveCasts(SqlType? sourceDomain, SqlType target)
     {
         var casts = new SqlCast?[storageTypeCount];
-        string targetKey = TypeKey(target);
-        string? baseKey = target.IsDomain ? StorageKey(target.Storage.Type) : null;
         for (int storage = 1; storage < casts.Length; storage++)
         {
-            casts[storage] = ResolveCast(sourceDomain, (DatabaseType)storage, target, targetKey, baseKey);
+            casts[storage] = ResolveCast(sourceDomain, (DatabaseType)storage, target);
         }
 
         return casts;
@@ -184,9 +181,6 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     /// <param name="target">The target type.</param>
     /// <returns>The cast, or null when none applies.</returns>
     internal SqlCast? ResolveCast(SqlType? sourceDomain, DatabaseType storage, SqlType target)
-        => ResolveCast(sourceDomain, storage, target, TypeKey(target), target.IsDomain ? StorageKey(target.Storage.Type) : null);
-
-    private SqlCast? ResolveCast(SqlType? sourceDomain, DatabaseType storage, SqlType target, string targetKey, string? baseKey)
     {
         if (sourceDomain is not null && sourceDomain.Storage.Type == storage)
         {
@@ -195,29 +189,29 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
                 return null;
             }
 
-            string domainKey = TypeKey(sourceDomain);
-            if ((Lookup(domainKey, targetKey) ?? (baseKey is null ? null : Lookup(domainKey, baseKey))) is { } fromDomain)
+            if ((Lookup(storage, sourceDomain.Name, target)
+                ?? (target.IsDomain ? Lookup(storage, sourceDomain.Name, target, targetBase: true) : null)) is { } fromDomain)
             {
                 return fromDomain;
             }
         }
 
-        string storageKey = StorageKey(storage);
-        return Lookup(storageKey, targetKey) ?? (baseKey is null ? null : Lookup(storageKey, baseKey));
+        return Lookup(storage, null, target)
+            ?? (target.IsDomain ? Lookup(storage, null, target, targetBase: true) : null);
     }
 
     /// <summary>The identity of a cast's source and target: a domain by name, a built-in type by storage type.</summary>
     /// <param name="source">The source type.</param>
     /// <param name="target">The target type.</param>
     /// <returns>The key.</returns>
-    internal static string CastKey(SqlType source, SqlType target) => TypeKey(source) + "|" + TypeKey(target);
+    internal static SqlCastKey CastKey(SqlType source, SqlType target) => LookupKey(source, target);
 
-    private SqlCast? Lookup(string source, string target)
-        => _castsByKey.TryGetValue(source + "|" + target, out var cast) ? cast : null;
+    private static SqlCastKey LookupKey(SqlType source, SqlType target)
+        => new(source.Storage.Type, source.IsDomain ? source.Name : null,
+            target.Storage.Type, target.IsDomain ? target.Name : null);
 
-    // A cast's identity ignores length, precision and scale, as pg_cast's does: the engine applies them.
-    private static string TypeKey(SqlType type)
-        => type.IsDomain ? SqlObjectIdentity.Domain(type.Name.ToUpperInvariant()) : StorageKey(type.Storage.Type);
+    private SqlCast? Lookup(DatabaseType source, string? sourceDomain, SqlType target, bool targetBase = false)
+        => _castsByKey.TryGetValue(new SqlCastKey(source, sourceDomain, target.Storage.Type,
+            target.IsDomain && !targetBase ? target.Name : null), out var cast) ? cast : null;
 
-    private static string StorageKey(DatabaseType type) => "B:" + ((int)type).ToString(CultureInfo.InvariantCulture);
 }

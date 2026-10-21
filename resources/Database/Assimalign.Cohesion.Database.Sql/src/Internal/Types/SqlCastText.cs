@@ -48,7 +48,7 @@ internal static class SqlCastText
 
     internal static TimeSpan ParseInterval(string text)
     {
-        try { return SqlLiteralText.ParseInterval(text.Trim()); }
+        try { return SqlLiteralText.ParseInterval(text); }
         catch (NotSupportedException exception) { throw new FormatException(exception.Message, exception); }
     }
 

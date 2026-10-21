@@ -723,7 +723,7 @@ plain-string defaults persisted previously. Other expression defaults keep their
 The [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110)
 owns comparison, CAST and assignment behavior: zone-less clocks are UTC when meeting instants,
 and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Unspecified;
-TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
+TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves DATE and timestamp plain-string
 assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
 typed literals use its strict readers directly. No session zone or assembly access grant is added.
 The #1648 storage regression launches isolated Unix child test processes with TZ set to
@@ -1646,8 +1646,14 @@ flowchart LR
   the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
   being accidentally treated as text casts. All 19 shared SQL types are covered by the
   [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
-  CAST text reads temporal and interval input through public SqlLiteralText, independently of
-  SqlTemporalText's existing plain-string assignment reader. Zone-dependent conversions follow
+  CAST text reads temporal and interval input through public SqlLiteralText. TIME and INTERVAL
+  plain-string assignment use those same readers (#1422), including trimmed input, day-time
+  unit/clock/ISO intervals and bare signed seconds. PostgreSQL defaults an unqualified interval
+  number to seconds (src/backend/utils/adt/datetime.c:3625-3657); '12' therefore stores twelve
+  seconds rather than twelve days. DATE and timestamp assignment retain SqlTemporalText.
+  Typed schema TimeSpan defaults render signed total seconds with a seconds unit through the
+  existing Sql.Schema/SDK shared renderer, preserving every tick while supplying valid text to
+  this same assignment reader. Zone-dependent conversions follow
   the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
@@ -1663,6 +1669,11 @@ flowchart LR
   stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
   JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
   ownership path as application casts, including folded/shared constants and empty arrays.
+- **Allocation-free cast lookup (#1422).** The frozen cast index uses a value key holding storage
+  ordinals and case-insensitive domain names. Lookup preserves domain-to-domain, domain-to-base,
+  storage-to-domain and storage-to-base precedence, with no formatted or normalized key strings.
+  Binding allocates only its result vector; deterministic tests measure the minimum of three
+  allocation rounds for both individual lookup and full storage-vector resolution.
 - **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
   type of the value it may convert, chosen in this order: from the operand's domain when the
   plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;
@@ -1947,7 +1958,7 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v7`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v8`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -1958,7 +1969,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v7`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v8`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -2355,7 +2366,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 25 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3005,7 +3016,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 25 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3031,7 +3042,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-25 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-26 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -6185,7 +6196,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v7 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v8 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
@@ -6331,7 +6342,7 @@ Plans without LIKE or application code retain the allocation-free shared evaluat
 Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
-Format 25 admits the new persisted expression/view syntax and has no upgrade reader.
+Format 26 admits the new persisted expression/view syntax and has no upgrade reader.
 
 The #1394 resource regressions use 2,048 `%a` fragments and count search transitions
 and compared UTF-16 units instead of elapsed time. Index-backed search is bounded by
@@ -6367,7 +6378,7 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v7**, shared with the SDK;
+Applied/pending compiled documents use **cohesion/database-schema/v8**, shared with the SDK;
 v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
@@ -6417,7 +6428,7 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v7` (#1108), matching Sdk.Database.
+The compiled document is now `cohesion/database-schema/v8` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
 document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening
@@ -6444,7 +6455,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 25 requires the complete table extension 6 record,
+after the existing constraints. Current format 26 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -6524,7 +6535,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 25 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -7078,7 +7089,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 25. SQL requires its sql.create claim only when
+catalog record layout or record-space format 26. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.
@@ -7170,3 +7181,29 @@ The following public types move from their Catalog or Storage assembly into Assi
 SQL resource collisions retain the catalog keys and original messages; the engine accessors become `EngineIdentityIntegerRequired` (formerly `IdentityIntegerRequired`), `EngineNamespaceMissing` (formerly `NamespaceMissing`), `EngineNamespaceDependentObjects` (formerly `NamespaceDependentObjects`), `EngineViewDependent` (formerly `ViewDependent`), `EngineViewDropDependent` (formerly `ViewDropDependent`). These are internal resource identifiers.
 
 Identical resource keys `ViewMissing` are stored once with their unchanged values.
+
+## Temporal and floating text input fixes (#1422, #1267)
+
+Floating-point and UUID text forms were delivered by #1119 (f520e8160). This branch completes
+the remaining temporal forms and aligns floating assignment with that existing CAST reader.
+
+Record-space format 26 and compiled-schema v8 fence changed temporal DEFAULT and frozen
+missing-value spellings. Every noncurrent catalog is refused before stored expressions bind;
+SqlDataStorageFormatException carries the existing storage-failure code COHSQLE041. Rebuild old
+schema artifacts and recreate old databases with their writing engine's export; there is no
+upgrade path or legacy reader (#1152). Sql.Schema DESIGN records the schema-hash change.
+
+TIME and INTERVAL assignment, DEFAULT and CAST share readers and CastValueFailed translation.
+Established CAST diagnostics stay COHSQLE022 (22P02) for malformed or out-of-range clock fields
+and COHSQLE002 (22003) for duration overflow. PostgreSQL datetime.c:4247-4290 instead uses 22007
+for bad temporal format, 22008 for datetime field overflow, and 22015 for interval overflow;
+the existing CAST mappings are retained. Literal readers use generated resx messages.
+Floating text assignment calls CAST's ParseReal/ParseFloat, rejecting grouping, overflow and
+underflow. DATE and timestamp assignment retain their established SqlTemporalText grammar.
+
+TIME accepts single-digit hours, AM/PM, a trailing fractional dot and validated written zones
+that are discarded (PostgreSQL datetime.c:2345-2350,2666; date.c:1475-1510). Timestamp's separate
+strict clock reader still refuses a zone. INTERVAL accepts an implicit day before an hour unit,
+optional @ and final ago (datetime.c:3748,3807-3818); non-ASCII whitespace is refused before trimming.
+Cast registration and lookup both use SqlCastKey, including case-insensitive domain identity and
+modifier-independent built-in identity, without formatted duplicate-detection keys.
