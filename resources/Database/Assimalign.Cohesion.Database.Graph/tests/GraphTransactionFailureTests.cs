@@ -50,7 +50,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
-        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);
         currentWhileFaulted.ShouldBeSameAs(transaction);
@@ -97,7 +97,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.ShouldAllBe(error => error.Message.StartsWith("COHDBG007", StringComparison.Ordinal));
+        refusals.Select(error => ((DatabaseException)error).Diagnostics[0].Code).ShouldAllBe(code => code == "COHDBG007");
         (await database.GetNodeAsync(session, seed.Id)).ShouldNotBeNull();
         (await schema.GetLabelsAsync()).Select(label => label.Name).ShouldBe(["Keep"]);
         await using (var next = await session.BeginTransactionAsync())
@@ -124,7 +124,7 @@ public sealed class GraphTransactionFailureTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        error.Diagnostics[0].Code.ShouldBe("COHDBG007");
         error.InnerException.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
@@ -268,7 +268,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
         refused.Message.ShouldContain(failure.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);
@@ -300,7 +300,7 @@ public sealed class GraphTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await Rows(waiting, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker"]);
@@ -463,7 +463,8 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        first.Message.ShouldStartWith("COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        first.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        first.Diagnostics[0].Code.ShouldBe("COHDBG007");
         second.Message.ShouldBe(first.Message);
         second.InnerException.ShouldBeSameAs(failure);
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -499,7 +500,8 @@ public sealed class GraphTransactionFailureTests
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        commit.Message.ShouldStartWith("COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        commit.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        commit.Diagnostics[0].Code.ShouldBe("COHDBG007");
         if (failure is null)
         {
             commit.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
@@ -542,7 +544,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         statement.ShouldNotBeOfType<TimeoutException>();
-        commit.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        commit.Diagnostics[0].Code.ShouldBe("COHDBG007");
         commit.Message.ShouldEndWith("Cause: The graph session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
@@ -677,7 +679,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        begin.Diagnostics[0].Code.ShouldBe("COHDBG007");
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         text.ShouldNotBeNull();
         canceledRequest.CancellationToken.ShouldBe(canceled.Token);

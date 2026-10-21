@@ -257,9 +257,9 @@ public sealed class KeyValueTransactionFailureTests
         state.ShouldBe(TransactionState.Faulted);
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         canceledTyped.CancellationToken.ShouldBe(canceled.Token);
-        canceledBegin.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        text.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
-        typed.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        canceledBegin.Diagnostics[0].Code.ShouldBe("COHDBK001");
+        text.Diagnostics[0].Code.ShouldBe("COHDBK001");
+        typed.Diagnostics[0].Code.ShouldBe("COHDBK001");
         session.CurrentTransaction.ShouldBeNull();
     }
 
@@ -463,7 +463,7 @@ public sealed class KeyValueTransactionFailureTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        commit.Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+        commit.Diagnostics[0].Code.ShouldBe("COHDBK001");
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
         commit.Message.ShouldContain("The session closed before the transaction ended.", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();

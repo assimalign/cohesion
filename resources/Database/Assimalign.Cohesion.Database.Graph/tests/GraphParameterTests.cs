@@ -42,7 +42,7 @@ public sealed class GraphParameterTests
         failure.Message.ShouldContain("missing", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
-        refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
         refused.Message.ShouldContain(failure.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         await using var observer = await database.CreateSessionAsync(CancellationToken.None);

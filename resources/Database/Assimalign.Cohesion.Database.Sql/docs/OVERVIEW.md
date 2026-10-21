@@ -21,7 +21,10 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   transaction auto-commit. The session and transaction are sealed leaves of the root
   bases, which own the end state machine: a failed statement leaves the transaction
   active, and a transaction the kernel ended under its caller refuses work with
-  `COHSQLT005` until it is rolled back.
+  `COHSQLT005` until it is rolled back. A storage, I/O or index failure (`COHSQLE041`, or
+  `COHDBS003` for corruption) is the exception: it aborts the explicit transaction, which
+  then refuses work with `COHSQLT005` naming that cause until it is rolled back (#1364). In
+  autocommit the next statement can run.
 - **Database scope (A5)** — every session stays bound to the database that
   created it. Qualified table references resolve only within that database's
   catalog; SQL cannot switch databases or manage the server. Conformance tests

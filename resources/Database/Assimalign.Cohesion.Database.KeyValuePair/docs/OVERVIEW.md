@@ -35,7 +35,10 @@ keys order by unsigned lexicographic byte comparison.
   etag-conditional writes); `KeyValueDatabaseSession` and
   `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
-  active, so later commands stay inside it until the caller commits or rolls back. A
+  active, so later commands stay inside it until the caller commits or rolls back. The
+  exception is a storage, I/O or index failure (`COHDBK005`, or `COHDBS003` for corruption):
+  it aborts the transaction, which then refuses commands and COMMIT with `COHDBK001` naming
+  that cause until the caller rolls back (#1364). In autocommit the next command can run. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
   its abort record or its undo fails (an undo that fails keeps the written keys locked until
   a retry completes it: about 100 ms later, then at doubling delays up to the maintenance

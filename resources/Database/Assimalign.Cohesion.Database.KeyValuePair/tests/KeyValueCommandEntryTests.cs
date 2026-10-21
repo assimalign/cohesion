@@ -75,7 +75,7 @@ public sealed class KeyValueCommandEntryTests
                 error.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBK002");
                 break;
             case "Transaction":
-                error.ShouldBeAssignableTo<DatabaseException>().Message.ShouldStartWith("COHDBK001", Case.Sensitive);
+                error.ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("COHDBK001");
                 break;
             case "Parse":
                 error.ShouldBeOfType<DatabaseParseException>();
