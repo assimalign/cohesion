@@ -80,7 +80,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
 
     // Only passes touch this state: DatabaseEngineWorker serializes RunIteration before entering
     // the coordinator's apply gate and storage/page locks. The failure-record monitor never spans them.
-    private readonly Dictionary<SqlDatabase, (ulong Writer, string Refusal, long LastLsn, int Passes, bool Reported)> _busy = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<SqlDatabase, (ulong Writer, string Refusal, long LastLsn, int Passes, bool Reported, bool FullPassPending)> _busy = new(ReferenceEqualityComparer.Instance);
     private const int busyPassLimit = 3;
 
     internal SqlVersionPurgeWorker(SqlDatabaseEngine engine)
@@ -202,6 +202,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                 // once the backoff has passed (owner decision 46).
                 bool full = fullPass || (_fullPassFailed.TryGetValue(database, out long retryAt) && now >= retryAt);
                 long beforePassLsn = 0;
+                bool fullPassPending = full;
                 try
                 {
                     beforePassLsn = database.DataStorage.WriteAheadJournal.LastLsn;
@@ -211,6 +212,12 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                         database.TableReclamation.Request();
                         database.Coordinator.RunVersionPurgePass(cancellationToken);
                         _fullPassFailed.Remove(database);
+                        fullPassPending = false;
+                        if (_busy.TryGetValue(database, out var priorBusy))
+                        {
+                            priorBusy.FullPassPending = false;
+                            _busy[database] = priorBusy;
+                        }
                     }
                     else
                     {
@@ -222,8 +229,10 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                         database.TableReclamation.RunBatch(cancellationToken);
                     }
 
+                    // Reclamation runs between full passes too. Its successful bounded batch
+                    // completes that refusal even when no aborted writer identified the work.
                     if (full || (database.Coordinator.NextDeferredUndoRetry is null
-                        && _busy.TryGetValue(database, out var busy) && busy.Writer != 0))
+                        && _busy.TryGetValue(database, out var busy) && (busy.Writer != 0 || !busy.FullPassPending)))
                     {
                         _busy.Remove(database);
                     }
@@ -253,7 +262,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
                         ScheduleRetry(database);
                     }
 
-                    ReportBusy(database, exception, beforePassLsn);
+                    ReportBusy(database, exception, beforePassLsn, fullPassPending);
                     ReportUnfinished(database.Name);
                 }
                 catch (ObjectDisposedException) when (!_engine.IsOpen(database))
@@ -302,7 +311,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
     // bound. WAL activity between attempts also resets the count (our own retry appends are
     // excluded). The oldest pending writer changes when undo makes progress. A successful full
     // pass (or completed deferred undo) ends the episode; not-due retries do not count or reset it.
-    private void ReportBusy(SqlDatabase database, StorageTransactionException exception, long beforePassLsn)
+    private void ReportBusy(SqlDatabase database, StorageTransactionException exception, long beforePassLsn, bool fullPassPending)
     {
         ulong writer = database.Coordinator.VersionStore.PendingAbortedPurges.DefaultIfEmpty().Min();
         var prior = _busy.GetValueOrDefault(database);
@@ -317,7 +326,7 @@ internal sealed class SqlVersionPurgeWorker : DatabaseEngineWorker
             reported = true;
         }
 
-        _busy[database] = (writer, exception.Message, database.DataStorage.WriteAheadJournal.LastLsn, Math.Min(passes, busyPassLimit), reported);
+        _busy[database] = (writer, exception.Message, database.DataStorage.WriteAheadJournal.LastLsn, Math.Min(passes, busyPassLimit), reported, prior.FullPassPending || fullPassPending);
     }
 
     // Retries the database's full pass a backoff from now, on the engine's clock.

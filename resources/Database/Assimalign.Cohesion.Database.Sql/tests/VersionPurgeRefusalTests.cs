@@ -222,6 +222,64 @@ public sealed class VersionPurgeRefusalTests
         engine.HasFailingWorker(database.Name).ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Purge: a successful reclamation batch clears its refused-work report between full passes")]
+    public async Task RunIteration_ReclamationRefusalClears_ShouldRecoverBeforeTheNextFullPass()
+    {
+        // Arrange: only the short reclamation polling runs; the full-pass clock stays still.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        var clock = new ManualTimeProvider();
+        await using var engine = CreateEngine(clock);
+        var database = await engine.CreateDatabaseAsync("test", token);
+        await using var session = await database.CreateSessionAsync(token);
+        await SetupAsync(session, token);
+        await PutAsync(session, 1, token);
+        var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+        int fullPasses = 0;
+        int refused = 0;
+        worker.BeforeFullPass = _ => Interlocked.Increment(ref fullPasses);
+        database.TableReclamation.BeforeBatch = (_, _) =>
+        {
+            Interlocked.Increment(ref refused);
+            throw new StorageTransactionException("Injected unchanged reclamation refusal.");
+        };
+        try
+        {
+            // Act: keep the same batch refused until the bounded report was observed.
+            await session.ExecuteAsync("DROP TABLE items", cancellationToken: token);
+            var watch = Stopwatch.StartNew();
+            do
+            {
+                worker.RunIteration(token);
+                await Task.Delay(5, token);
+            }
+            while ((watch.Elapsed < TimeSpan.FromMilliseconds(100) || worker.FailureCount == 0)
+                && watch.Elapsed < TimeSpan.FromSeconds(5));
+            Volatile.Read(ref refused).ShouldBeGreaterThanOrEqualTo(3);
+            worker.Fault.ShouldBeOfType<StorageTransactionException>();
+            database.TableReclamation.BeforeBatch = null;
+            watch.Restart();
+            do
+            {
+                worker.RunIteration(token);
+                await Task.Delay(5, token);
+            }
+            while ((watch.Elapsed < TimeSpan.FromMilliseconds(100) || database.TableReclamation.HasWork || worker.Fault is not null)
+                && watch.Elapsed < TimeSpan.FromSeconds(3));
+
+            // Assert: a successful bounded batch finishes the refused work without an hourly pass.
+            database.TableReclamation.HasWork.ShouldBeFalse();
+            worker.Fault.ShouldBeNull();
+            worker.FailureCount.ShouldBe(1);
+            Volatile.Read(ref fullPasses).ShouldBe(0);
+            engine.HasFailingWorker(database.Name).ShouldBeFalse();
+        }
+        finally
+        {
+            database.TableReclamation.BeforeBatch = null;
+        }
+    }
+
     private static SqlDatabaseEngine CreateEngine(ManualTimeProvider clock, bool checkpoint = false)
         => SqlDatabaseEngine.Create("purge-refusal", new SqlDatabaseEngineOptions
         {

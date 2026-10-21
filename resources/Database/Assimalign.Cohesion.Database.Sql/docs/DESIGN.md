@@ -4083,7 +4083,9 @@ Persistent storage refusals (#1277) are reported once through the worker's per-d
 failure path after three refused attempts against the same blocked page/bracket and oldest
 pending writer without intervening WAL progress. Not-due retries do not count; changing lock
 owners or WAL activity between attempts reset the bound, so sustained writes remain ordinary
-busy work. Completion, close, drop or replacement ends the episode. This report sets the
+busy work. Completion, close, drop or replacement ends the episode. Reclamation tracks whether
+a full purge is still owed: a successful reclamation batch between full passes clears its own
+refusal report without waiting for the maintenance interval. This report sets the
 observational worker fault until the work completes, but never starts the offline window or
 increments its minimum-pass count (owner default). A foreign-storage refusal is an operational error
 and is reported immediately through the normal offline-capable failure path. The shared
