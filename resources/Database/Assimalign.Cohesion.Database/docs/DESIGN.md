@@ -624,10 +624,14 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
     `GiveUpOnDatabase` therefore queues the leaf's `TakeDatabaseOfflineCore` to the thread pool,
     at most one per database at a time, and the pass goes on; until the database is offline the
     worker's record of it still backs it off. A failure of the leaf's core is recorded on the
-    worker (`Fault`, until its next pass runs to its end) as that database's failure, not the
-    worker's own: the database's record stays and names it, `HasEngineWideFailure` does not read
+    worker (`Fault`, until a pass begun after the failure runs to its end) as that database's
+    failure, not the worker's own: the database's record stays and names it, `HasEngineWideFailure` does not read
     it (owner decision 42 review), and the database's next failure asks again. The engine's
     disposal waits for a give-up still running before the leaf closes its databases.
+    The failure records the pass current when it arrived, so settlement of that already-running
+    pass cannot erase it. Tests await the engine's internal give-up completion task before reading
+    the fault, per-database health or state, and force completion both before and after the
+    queuing pass settles.
   - *What does not count.* A failure of a database already offline or closed (the workers
     skip both, and the leaf refuses them), a worker no engine owns, and an engine whose
     disposal started. Only the failing database goes offline; the workers keep serving the

@@ -1138,6 +1138,11 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
         return true;
     }
 
+    // Observes the request already queued by a pass. Once its entry is removed, its state changes
+    // are published and the next request may be queued, even if its completion is still being set.
+    internal Task WaitForGiveUpAsync(string database)
+        => _givingUp.TryGetValue(database, out var completion) ? completion : Task.CompletedTask;
+
     // The queued give-up: the leaf takes the database offline, then the engine forgets the
     // workers' records of it and writes the event. It ends its entry whatever happens, and lets
     // nothing escape the thread-pool thread but an OutOfMemoryException.
