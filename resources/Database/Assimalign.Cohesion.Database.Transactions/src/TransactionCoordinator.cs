@@ -154,6 +154,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     internal Action? SequenceReserved { get; set; }
 
     /// <summary>
+    /// Test hook: awaited after manager registration, before coordinator tracking, with neither
+    /// lock held. Null unless this assembly's tests pause a begin across coordinator disposal.
+    /// </summary>
+    internal Func<TransactionContext, ValueTask>? BeforeContextTrackedAsync { get; set; }
+
+    /// <summary>
     /// Test hook: invoked with a transaction's sequence just before its abort record is
     /// appended; a throw rejects the record, as a failed journal append would.
     /// </summary>
@@ -388,6 +394,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         var context = isSnapshotPin
             ? await _manager.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false)
             : await _manager.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+
+        if (BeforeContextTrackedAsync is { } beforeTracking)
+        {
+            await beforeTracking(context).ConfigureAwait(false);
+        }
 
         lock (_sync)
         {

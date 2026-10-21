@@ -216,64 +216,48 @@ public sealed class TransactionEventSourceTests
         long total = source.TotalTransactions;
         long commits = source.TotalCommits;
         long rollbacks = source.TotalRollbacks;
-        int begun = 0;
-        int refused = 0;
-        int aborted = 0;
-        int rounds = 0;
-        var elapsed = Stopwatch.StartNew();
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-
-        // Act: cover both admission before disposal and refusal after it, for at least 250 ms.
-        do
+        using var storage = EventStorage.Create(UniqueName());
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var registered = new TaskCompletionSource<TransactionContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int observed = 0;
+        coordinator.BeforeContextTrackedAsync = context =>
         {
-            using var storage = EventStorage.Create(UniqueName());
-            await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
-            var initial = await coordinator.BeginSnapshotPinAsync(ceiling.Token);
-            using var start = new ManualResetEventSlim();
-            var beginning = Task.Run(async () =>
-            {
-                start.Wait(ceiling.Token);
-                for (int attempt = 0; attempt < 32; attempt++)
-                {
-                    try
-                    {
-                        var pin = await coordinator.BeginSnapshotPinAsync(ceiling.Token);
-                        Interlocked.Increment(ref begun);
-                        // Keep every admitted pin for disposal, including one returned after
-                        // the coordinator cleared its table: BeginAsync must untrack it itself.
-                        pin.IsSnapshotPin.ShouldBeTrue();
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        Interlocked.Increment(ref refused);
-                    }
-                    await Task.Yield();
-                }
-            }, ceiling.Token);
-            var disposing = Task.Run(async () =>
-            {
-                start.Wait(ceiling.Token);
-                await coordinator.DisposeAsync();
-            }, ceiling.Token);
-            start.Set();
-            await Task.WhenAll(beginning, disposing).WaitAsync(ceiling.Token);
-            if (initial.State == TransactionState.Faulted) { aborted++; }
+            Interlocked.Increment(ref observed);
+            registered.SetResult(context);
+            return new ValueTask(resume.Task.WaitAsync(ceiling.Token));
+        };
+
+        // Act: finish disposal after manager registration but before coordinator tracking.
+        var beginning = coordinator.BeginSnapshotPinAsync(ceiling.Token).AsTask();
+        TransactionContext pin;
+        try
+        {
+            pin = await registered.Task.WaitAsync(ceiling.Token);
+            pin.State.ShouldBe(TransactionState.Active);
             coordinator.GetOpenContexts().ShouldBeEmpty();
             source.CurrentTransactions.ShouldBe(current);
-            rounds++;
+            await coordinator.DisposeAsync().AsTask().WaitAsync(ceiling.Token);
+            pin.State.ShouldBe(TransactionState.Faulted);
         }
-        while (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || begun == 0 || refused == 0 || aborted == 0);
+        finally
+        {
+            resume.TrySetResult();
+        }
+        var returned = await beginning.WaitAsync(ceiling.Token);
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await coordinator.BeginSnapshotPinAsync(ceiling.Token));
 
-        // Assert
-        begun.ShouldBeGreaterThan(0);
-        refused.ShouldBeGreaterThan(0);
-        aborted.ShouldBe(rounds);
-        (begun + refused).ShouldBe(rounds * 32);
+        // Assert: the begin that resumed after disposal must untrack its already-ended pin.
+        observed.ShouldBe(1);
+        returned.ShouldBeSameAs(pin);
+        returned.IsSnapshotPin.ShouldBeTrue();
+        coordinator.GetOpenContexts().ShouldBeEmpty();
         source.CurrentTransactions.ShouldBe(current);
         source.TotalTransactions.ShouldBe(total);
         source.TotalCommits.ShouldBe(commits);
         source.TotalRollbacks.ShouldBe(rollbacks);
-        _output.WriteLine($"Rounds={rounds}; begun={begun}; refused={refused}; aborted={aborted}");
+        _output.WriteLine($"Registration/tracking windows crossed by disposal={observed}");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should return the transaction gauge for a transaction the coordinator's disposal aborts")]

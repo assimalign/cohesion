@@ -1151,17 +1151,18 @@ interfaces: they re-implemented `IStorage.Checkpoint` and
 `Storage.Checkpoint`, `Storage.ReserveTransactionSequence` and
 `StorageJournal.AppendRollback` are non-virtual, and a test cannot hand `Storage` a journal
 of its own, so the interception moved to the type that makes the calls
-(`database-area.md`, "Test doubles"). The coordinator carries three internal hooks, reached
+(`database-area.md`, "Test doubles"). The coordinator carries four internal hooks, reached
 only through this package's `InternalsVisibleTo` grant to its own tests:
 
 | Hook | Where it runs | Used for |
 |---|---|---|
 | `BeforeCheckpoint(long[] writers)` | under the lifecycle append gate, just before `storage.Checkpoint(writers)`, inside the same `try` | the writers a checkpoint lists, a checkpoint held open against a concurrent lifecycle append, a failed checkpoint |
 | `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the context returns | a begin that reached the coordinator while a checkpoint holds the append gate (the reader may now finish; its first apply waits) |
+| `BeforeContextTrackedAsync(TransactionContext context)` | after manager registration, before coordinator tracking, with neither lock held | pause begin while disposal aborts its context and clears the coordinator table (#1351) |
 | `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
 
-Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation or
-abort record, never per row. Each rewritten test asserts that its hook fired: the
+Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation,
+context begin or abort record, never per row. Each rewritten test asserts that its hook fired: the
 `Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
 
 **Stream-level triggers cover the rest.** #1252 made every journal append a write into a
@@ -1302,10 +1303,10 @@ its table, counting each one out of the gauge. A context the manager's disposal 
 `BeginAsync` added it would be added after that clearing and never counted out, so `BeginAsync`
 runs `UntrackEnded` right after adding it: a context that is no longer active leaves the gauge
 there, and one the later clearing counts is no longer in the table when `UntrackEnded` looks. No
-hook makes the race deterministic (the sequence hook runs under the manager's lock,
-which disposal takes). A non-parallel stress test races pin begins and disposal for a minimum
-duration and until its admission, refusal and abort counters all move, with a ceiling; the gauge
-must return after every round and all rates stay fixed. Cancellation before begin, a refused
+timing assumption is needed: the internal `BeforeContextTrackedAsync` hook pauses begin after
+manager registration, and a non-parallel test completes disposal before resuming tracking. The
+test requires one observed crossing of that window; its timeout is only a hang ceiling. The
+gauge must return and all rates stay fixed. Cancellation before begin, a refused
 second end, a canceled rollback followed by disposal, and each successful end path are covered
 by exact counter deltas. Each model also checks published rates for read hits and misses and
 verifies that its real explicit rollback still counts.
