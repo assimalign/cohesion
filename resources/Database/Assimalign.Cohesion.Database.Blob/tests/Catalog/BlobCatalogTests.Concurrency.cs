@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,12 +25,15 @@ public sealed partial class BlobCatalogTests
         await coordinator.CommitAsync(seed);
         var pinned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var expected = original;
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var stop = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         int writes = 0;
         int reads = 0;
         int rollbacks = 0;
         int passes = 0;
         long purged = 0;
+        int releasedWrites = 0;
+        int releasedReads = 0;
+        int releasedPasses = 0;
 
         async Task Run(Func<Task> iteration)
         {
@@ -78,17 +80,16 @@ public sealed partial class BlobCatalogTests
         }), CancellationToken.None);
         var purgeTask = Task.Run(() => Run(() =>
         {
-            Interlocked.Add(ref purged, coordinator.RunVersionPurgePass(stop.Token));
+            Interlocked.Add(ref purged, catalog.RunVersionPurgePass(stop.Token));
             Interlocked.Increment(ref passes);
             return Task.CompletedTask;
         }), CancellationToken.None);
         var all = Task.WhenAll(writerTask, readerTask, purgeTask);
-        var elapsed = Stopwatch.StartNew();
 
         // Act: retain an old snapshot first, then release it while the same tasks keep racing.
         try
         {
-            while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || Volatile.Read(ref writes) < 64
+            while ((Volatile.Read(ref writes) < 64
                 || Volatile.Read(ref reads) < 64 || Volatile.Read(ref passes) < 4)
                 && !all.IsCompleted && !stop.IsCancellationRequested)
             {
@@ -97,8 +98,11 @@ public sealed partial class BlobCatalogTests
             }
             catalog.FindBlob(parent, "item", pinned.Snapshot).ShouldBe(expected);
             await coordinator.RollbackAsync(pinned);
-            var released = elapsed.Elapsed;
-            while ((elapsed.Elapsed - released < TimeSpan.FromMilliseconds(250) || Interlocked.Read(ref purged) == 0)
+            releasedWrites = Volatile.Read(ref writes);
+            releasedReads = Volatile.Read(ref reads);
+            releasedPasses = Volatile.Read(ref passes);
+            while ((Volatile.Read(ref writes) - releasedWrites < 64 || Volatile.Read(ref reads) - releasedReads < 64
+                || Volatile.Read(ref passes) - releasedPasses < 4 || Interlocked.Read(ref purged) == 0)
                 && !all.IsCompleted && !stop.IsCancellationRequested)
             {
                 await Task.Delay(5, CancellationToken.None);
@@ -117,7 +121,10 @@ public sealed partial class BlobCatalogTests
         rollbacks.ShouldBeGreaterThan(0);
         passes.ShouldBeGreaterThanOrEqualTo(4);
         purged.ShouldBeGreaterThan(0);
-        coordinator.RunVersionPurgePass(default);
+        (writes - releasedWrites).ShouldBeGreaterThanOrEqualTo(64);
+        (reads - releasedReads).ShouldBeGreaterThanOrEqualTo(64);
+        (passes - releasedPasses).ShouldBeGreaterThanOrEqualTo(4);
+        catalog.RunVersionPurgePass(default);
         var fresh = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         int retained = catalog.CachedReferenceCount;
         for (int probe = 0; probe < retained; probe++) { catalog.FindBlob(parent, "item", fresh.Snapshot).ShouldNotBeNull(); }
