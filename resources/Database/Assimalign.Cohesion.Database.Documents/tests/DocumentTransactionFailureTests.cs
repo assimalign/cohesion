@@ -31,6 +31,63 @@ public sealed class DocumentTransactionFailureTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Transaction: A chunk failure aborts through the engine end path (#1244)")]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task PutAsync_ContentChunkFailure_ShouldRefuseUntilRollbackAndPersistNothing(int failAt, bool cancel)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("chunk-failure", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var collection = await session.CreateCollectionAsync("items", cancellationToken: CancellationToken.None);
+        await collection.PutAsync(session, "keep", Doc("keep"), cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+        await collection.PutAsync(session, "pending", Doc("pending"), cancellationToken: CancellationToken.None);
+        int chunks = 0;
+        using var cancellation = new CancellationTokenSource();
+        var cause = new StorageIOException("Injected content chunk failure.");
+        database.DataStorage.BeforeContentChunkWrite = () =>
+        {
+            if (++chunks != failAt) { return; }
+            if (cancel) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
+            throw cause;
+        };
+        byte[] bytes = Encoding.UTF8.GetBytes("\"" + new string('x', 2 * Internal.DocumentChunkCodec.PayloadSize) + "\"");
+
+        // Act
+        Exception failure;
+        try
+        {
+            failure = cancel
+                ? await Should.ThrowAsync<OperationCanceledException>(() => collection.PutAsync(session, "failed", bytes, cancellationToken: cancellation.Token).AsTask())
+                : await Should.ThrowAsync<DatabaseException>(() => collection.PutAsync(session, "failed", bytes, cancellationToken: CancellationToken.None).AsTask());
+        }
+        finally { database.DataStorage.BeforeContentChunkWrite = null; }
+        var refused = await Should.ThrowAsync<DatabaseException>(() => collection.GetAsync(session, "keep", CancellationToken.None).AsTask());
+
+        // Assert
+        chunks.ShouldBe(failAt);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeSameAs(transaction);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        if (cancel)
+        {
+            refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>().ShouldNotBeNull().CancellationToken.ShouldBe(cancellation.Token);
+        }
+        else { refused.InnerException.ShouldBeSameAs(failure); }
+        database.IsOffline.ShouldBeFalse();
+        if (!cancel) { ((DatabaseException)failure).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004"); }
+        await transaction.RollbackAsync(CancellationToken.None);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        session.CurrentTransaction.ShouldBeNull();
+        (await IdsAsync(session)).ShouldBe(["keep"]);
+        await collection.PutAsync(session, "after", Doc("after"), cancellationToken: CancellationToken.None);
+        (await IdsAsync(session)).ShouldBe(["after", "keep"]);
+    }
+
     /// <summary>The issue's reproduction: a failure, then a write, then ROLLBACK leaves the documents unchanged.</summary>
     /// <param name="failure">The kind of statement that fails inside the transaction.</param>
     /// <param name="isolation">The isolation level the explicit transaction runs under.</param>

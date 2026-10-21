@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -10,11 +11,61 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
+using Assimalign.Cohesion.Database.Documents.Internal;
 
 namespace Assimalign.Cohesion.Database.Documents.Storage.Tests;
 
 public sealed class DocumentContentTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Content: A failed chunk leaves the caller's transaction active (#1244)")]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task WriteContentAsync_ChunkFailure_ShouldLeaveCallerContextActive(int failAt, bool cancel)
+    {
+        // Arrange: chunk three is a partial buffer persisted by DisposeAsync.
+        using var storage = Create();
+        await using var coordinator = Coordinate(storage);
+        using var cancellation = new CancellationTokenSource();
+        var context = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        byte[] bytes = Encoding.UTF8.GetBytes("\"" + new string('x', 2 * DocumentChunkCodec.PayloadSize) + "\"");
+        int chunks = 0;
+        var cause = new IOException("Injected content chunk failure.");
+        storage.BeforeContentChunkWrite = () =>
+        {
+            if (++chunks != failAt) { return; }
+            if (cancel) { cancellation.Cancel(); cancellation.Token.ThrowIfCancellationRequested(); }
+            throw cause;
+        };
+
+        // Act
+        try
+        {
+            if (cancel)
+            {
+                await Should.ThrowAsync<OperationCanceledException>(() => storage.WriteContentAsync(coordinator, context, bytes, cancellation.Token).AsTask());
+            }
+            else
+            {
+                (await Should.ThrowAsync<IOException>(() => storage.WriteContentAsync(coordinator, context, bytes, CancellationToken.None).AsTask())).ShouldBeSameAs(cause);
+            }
+
+            // Assert: storage neither ends nor undoes the logical transaction it borrowed.
+            chunks.ShouldBe(failAt);
+            context.State.ShouldBe(TransactionState.Active);
+            Count(storage).ShouldBe(failAt - 1);
+        }
+        finally
+        {
+            storage.BeforeContentChunkWrite = null;
+            if (context.State == TransactionState.Active) { await coordinator.RollbackAsync(context, CancellationToken.None); }
+        }
+        Count(storage).ShouldBe(0);
+    }
+
     [Theory]
     [InlineData("{\"nested\":{\"values\":[1,true,null,\"hello\"]},\"empty\":{}}")]
     [InlineData("[{},[],\"text\",-2.5,false]")]
@@ -49,6 +100,7 @@ public sealed class DocumentContentTests
         var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await Should.ThrowAsync<JsonException>(() => storage.WriteContentAsync(coordinator, context, Encoding.UTF8.GetBytes(json)).AsTask());
         Count(storage).ShouldBe(0);
+        context.State.ShouldBe(TransactionState.Active);
         await coordinator.RollbackAsync(context);
     }
 
