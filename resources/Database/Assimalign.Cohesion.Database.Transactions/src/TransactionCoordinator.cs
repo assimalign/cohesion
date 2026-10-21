@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -1064,10 +1065,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         // The active transactions that applied a statement: the only ones that can have
         // stamped row versions, so the only ones a checkpoint must list. A rolled-back
         // writer whose undo is deferred stays here until its abort record is appended.
-        private readonly HashSet<long> _writers = new();
+        private readonly ConcurrentDictionary<long, byte> _writers = new();
 
         // Lock order: apply admission/checkpoint holds _applyGate before this gate;
-        // checkpoint then takes Storage's transaction lock and the journal's monitor.
+        // checkpoint then takes Storage's transaction/header locks and pool flush gate.
+        // Pool I/O releases its monitor before taking journal/stream locks.
         // Enrollment and lifecycle appends take this gate before the journal's monitor.
         // No manager/context lock is held here, and durability waits run outside this gate.
         private readonly object _gate = new();
@@ -1097,13 +1099,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             lock (_gate)
             {
                 long writer = (long)sequence.Value;
-                if (_writers.Contains(writer))
+                if (_writers.ContainsKey(writer))
                 {
                     return;
                 }
 
                 _coordinator._journal.AppendBegin(writer);
-                _writers.Add(writer);
+                _writers.TryAdd(writer, 0);
             }
         }
 
@@ -1111,10 +1113,18 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // End has drained every admitted apply before calling the log. No later apply
+            // can enroll this sequence, so absence is stable without the checkpoint gate.
+            // The concurrent table permits this read; all mutations still hold _gate.
+            if (!_writers.ContainsKey((long)sequence.Value))
+            {
+                return default;
+            }
+
             long lsn;
             lock (_gate)
             {
-                if (!_writers.Contains((long)sequence.Value))
+                if (!_writers.ContainsKey((long)sequence.Value))
                 {
                     Forget((long)sequence.Value);
                     return default;
@@ -1152,9 +1162,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // As at commit, end admission has closed and drained the transaction's applies.
+            if (!_writers.ContainsKey((long)sequence.Value))
+            {
+                return default;
+            }
+
             lock (_gate)
             {
-                if (!_writers.Contains((long)sequence.Value))
+                if (!_writers.ContainsKey((long)sequence.Value))
                 {
                     Forget((long)sequence.Value);
                     return default;
@@ -1191,9 +1207,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     : new long[_writers.Count];
 
                 int index = 0;
-                foreach (long sequence in _writers)
+                foreach (var writer in _writers)
                 {
-                    writers[index++] = sequence;
+                    writers[index++] = writer.Key;
                 }
 
                 writers.Sort();
@@ -1205,7 +1221,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         private void Forget(long sequence)
         {
-            _writers.Remove(sequence);
+            _writers.TryRemove(sequence, out _);
         }
     }
 }

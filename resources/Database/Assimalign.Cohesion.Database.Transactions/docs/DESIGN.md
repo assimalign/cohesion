@@ -966,12 +966,22 @@ nothing and tracks no reader. The first admitted apply calls EnterWriter before 
 physical bracket: it appends one logical begin record and adds the sequence to the writer set.
 An apply remains a writer even if its callback makes no changes or its bracket rolls back; this
 conservative classification avoids inspecting model mutations. Later applies append no second
-logical begin. A commit or abort of a sequence outside that set merely forgets it: no lifecycle
+logical begin. A commit or abort of a sequence outside that set returns without the log gate: no lifecycle
 record and no durable wait. This includes autocommit reads, explicit read-only transactions,
 read-committed snapshot pins and readers aborted during disposal. They still end through the
 manager, leave the active table and release their locks; visibility and pruning horizons do not
 change. A reader cannot report an unconfirmed commit because it appends no commit record. The
 engines' offline refusal and the storage sequence allocator's offline check still apply.
+
+**Checkpoint-independent readers (#1269).** Storage reservations use Interlocked rather than
+the checkpoint's transaction lock. Sequence assignment, snapshot capture and active-table
+insertion still happen together under the manager's begin lock, preserving visibility and
+pruning horizons. Writer enrollment is a concurrent membership table whose mutations and
+checkpoint enumeration still hold the log gate. End admission has closed and drained every
+apply before commit/abort reads that table, so an absent sequence cannot become a writer;
+the reader fast path needs no checkpoint gate. A blocked-data-I/O test completes 32 reader
+begins, cached pins and mixed commit/rollback ends while both checkpoint gates remain held,
+then promotes a reader reserved above the captured header floor and verifies crash recovery.
 
 A reader's sequence number may be reissued after a crash: allocation resumes above the
 maximum sequence in the surviving journal and the persisted storage sequence floor, which
@@ -988,8 +998,10 @@ JournalTransactionLog follows the same rule, enrolled by the manager's apply adm
 not own checkpoints. Its internal callers must admit every stamped write and provide any
 checkpoint's writer list themselves. Public standalone managers use an in-memory log.
 
-The lock order is apply semaphore, log monitor, storage transaction lock for checkpoint, then
-journal monitor. Manager and context locks are released before enrollment. If its begin append
+The lock order is apply semaphore, log monitor, storage transaction lock for checkpoint,
+header lock, pool flush gate and pool monitor, then journal medium/append locks. Pool flush
+I/O releases the monitor, and eviction waits on a frame lease with that monitor released.
+Manager and context locks never wait on the checkpoint gates and are released before enrollment. If its begin append
 fails, admission is released before the error escapes, so end and disposal can still drain.
 Commit appends and removes its writer under the log monitor, then waits for durability outside
 it; a checkpoint that truncates first has already durably flushed the outcome. The manager keeps

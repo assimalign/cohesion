@@ -1312,7 +1312,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long sequence;
         lock (_transactionLock)
         {
-            sequence = ++_nextTransactionSequence;
+            sequence = Interlocked.Increment(ref _nextTransactionSequence);
 
             // Counted under the same lock the checkpoint holds, so a checkpoint can
             // never truncate the journal between a transaction's begin and its
@@ -1356,10 +1356,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         ThrowIfOffline();
-        lock (_transactionLock)
-        {
-            return ++_nextTransactionSequence;
-        }
+        // Manager begin holds its snapshot/active-table lock while reserving. Taking the
+        // checkpoint's transaction lock here would stall every begin and transaction end.
+        // All sequence producers use Interlocked, including physical brackets and adoption.
+        return Interlocked.Increment(ref _nextTransactionSequence);
     }
 
     /// <summary>
@@ -1389,9 +1389,16 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // Adopted sequences normally come from ReserveTransactionSequence, but
             // keep the counter monotonic even for a caller that minted its own —
             // a later internally assigned sequence must never collide.
-            if (sequence > _nextTransactionSequence)
+            long observed = Interlocked.Read(ref _nextTransactionSequence);
+            while (sequence > observed)
             {
-                _nextTransactionSequence = sequence;
+                long previous = Interlocked.CompareExchange(ref _nextTransactionSequence, sequence, observed);
+                if (previous == observed)
+                {
+                    break;
+                }
+
+                observed = previous;
             }
 
             _activeTransactionCount++;
@@ -1573,8 +1580,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // The whole checkpoint runs under the transaction lock: BeginTransaction
         // increments the active count under the same lock, so no transaction can
         // start (and journal no page image) between the emptiness check and the
-        // journal truncation. Lock order is transaction lock → header → buffer pool →
-        // journal, and transaction lock → owner lock → free-space map for commit-time
+        // journal truncation. Lock order is transaction lock → header → pool flush gate →
+        // pool monitor → journal; flush I/O releases the monitor, and eviction never takes
+        // the flush gate. Also transaction lock → owner lock → free-space map for commit-time
         // frees; no other path takes them in the opposite order.
         lock (_transactionLock)
         {
@@ -3242,6 +3250,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             int target = 1 - _headerSlot;
             long generation = _headerGeneration + 1;
             long sequenceFloor = Math.Max(_sequenceFloor, Interlocked.Read(ref _nextTransactionSequence));
+
+            // Checkpoint excludes physical brackets and the coordinator excludes writer
+            // enrollment through truncation. Thus this floor bounds every stamp whose WAL
+            // the checkpoint can discard. A concurrent reservation above it stamps nothing;
+            // promotion after checkpoint appends BEGIN and page records to the retained WAL.
+            // A non-checkpoint header write truncates nothing, so its later stamps likewise
+            // retain their journal witness. Reopen resumes above max(header floor, WAL max).
 
             int inline = Math.Min(anchor.Length, StorageHeaderPage.InlineAnchorCapacity);
             var overflow = anchor[inline..];

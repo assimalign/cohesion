@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
@@ -15,8 +20,63 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// across a checkpoint-then-reopen (row version stamps persist in data pages, so
 /// a recycled sequence would corrupt snapshot visibility).
 /// </summary>
+[Collection(StorageRaceCollection.Name)]
 public sealed class StorageSequenceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Sequences: concurrent reservations and physical brackets remain unique and survive the header floor (#1269)")]
+    public async Task ReserveTransactionSequence_ConcurrentWithPhysicalBrackets_ShouldRemainUnique()
+    {
+        // Arrange
+        var data = new CrashSimulationStream(writeThrough: true);
+        var journal = new CrashSimulationStream();
+        using var storage = SequenceStorage.Create(data, journal);
+        var minted = new ConcurrentDictionary<long, byte>();
+        int reservations = 0;
+        int brackets = 0;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var reserving = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                minted.TryAdd(storage.ReserveTransactionSequence(), 0).ShouldBeTrue();
+                Interlocked.Increment(ref reservations);
+                Thread.Yield();
+            }
+        });
+
+        // Act: mixed producers share the same atomic counter, with adoption in between.
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
+            do
+            {
+                using var bracket = storage.BeginTransaction();
+                minted.TryAdd(bracket.Sequence, 0).ShouldBeTrue();
+                long reserved = storage.ReserveTransactionSequence();
+                minted.TryAdd(reserved, 0).ShouldBeTrue();
+                using var adopted = storage.BeginTransaction(reserved);
+                adopted.Commit();
+                bracket.Commit();
+                brackets++;
+            }
+            while (!stop.IsCancellationRequested && (elapsed.Elapsed < TimeSpan.FromMilliseconds(250) ||
+                Volatile.Read(ref reservations) < 100 || brackets < 100));
+        }
+        finally
+        {
+            stop.Cancel();
+            await reserving.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        storage.Checkpoint();
+
+        // Assert
+        reservations.ShouldBeGreaterThanOrEqualTo(100);
+        brackets.ShouldBeGreaterThanOrEqualTo(100);
+        minted.Count.ShouldBe(reservations + (brackets * 2));
+        using var reopened = SequenceStorage.Open(data.CaptureDurable(), journal.CaptureDurable());
+        reopened.ReserveTransactionSequence().ShouldBeGreaterThan(minted.Keys.Max());
+    }
+
     private sealed class SequenceStorage : Storage
     {
         private SequenceStorage(StorageStream data, StorageStream journal)
