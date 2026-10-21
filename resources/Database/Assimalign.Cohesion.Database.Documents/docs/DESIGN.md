@@ -1696,6 +1696,15 @@ type behind its `Open` factory. DocumentDatabaseServer is a sealed DatabaseServe
 
 ## Diagnostics
 
+After a successful automatic commit, snapshot cleanup failures preserve the committed result
+and emit `StatementCleanupFailed` (13), following Graph's guard. `OutOfMemoryException` still
+propagates; cleanup failures before a successful commit or in an explicit transaction still fail
+the operation. The session hold is released in all cases. `DocumentOperationOutcomeTests`
+injects failures at the internal cleanup boundary and checks warnings and reopen persistence.
+The warning carries only the exception type because its message may echo document input.
+The late-flush and explicit-transaction `DocumentCommitCancellationTests` are regression guards;
+SQL and Key-Value execution-completion cases prove the session cancellation fix (#1246).
+
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and
 create telemetry, with no per-call options allocation or additional model event.
@@ -1719,6 +1728,7 @@ B5). Engine sessions, statements, transactions and storage remain reported by th
 | 10 | `SessionCleanupFailed` | Warning | sessionId, exceptionType, exceptionMessage, suppressedCount |
 | 11 | `SessionsAborted` | Warning | engineName, sessions, drainTimeoutMilliseconds, suppressedCount |
 | 12 | `StatementParseFailed` | Error | sessionId, database, code, exceptionType, suppressedCount |
+| 13 | `StatementCleanupFailed` | Warning | database, exceptionType; snapshot cleanup failed after a successful automatic commit |
 
 Every open of an existing database writes both around `DocumentCatalog.RecoverIndexesAsync`,
 from the constructor that recovers it; a create writes neither. The stop is written from a

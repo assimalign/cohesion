@@ -77,16 +77,23 @@ internal sealed class DocumentOperation
         try
         {
             EnsureActive();
+            bool committed = false;
             try
             {
                 if (_transaction is null)
                 {
                     await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
+                    committed = true;
                 }
             }
             finally
             {
-                await FinishAsync().ConfigureAwait(false);
+                try { await FinishAsync().ConfigureAwait(false); }
+                catch (Exception error) when (committed && error is not OutOfMemoryException)
+                {
+                    // A durable success must reach the caller so a retry cannot apply it twice.
+                    DocumentDatabaseEventSource.Log.StatementCleanupFailed(_database.Name, error);
+                }
             }
         }
         finally { _completionGate.Release(); }
@@ -146,6 +153,7 @@ internal sealed class DocumentOperation
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
+        _database.BeforeSnapshotPinRelease?.Invoke();
         if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);

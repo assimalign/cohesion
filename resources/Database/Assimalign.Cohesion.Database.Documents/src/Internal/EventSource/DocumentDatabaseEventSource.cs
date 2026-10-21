@@ -404,6 +404,19 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     private void StatementParseFailed(Guid sessionId, string database, string code, string exceptionType, int suppressedCount)
         => WriteEvent(12, sessionId, database, code, exceptionType, suppressedCount);
 
+    [NonEvent]
+    public void StatementCleanupFailed(DatabaseName database, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            StatementCleanupFailed(database.ToString(), exception.GetType().FullName ?? exception.GetType().Name);
+        }
+    }
+
+    [Event(13, Level = EventLevel.Warning, Message = "Database '{0}' committed a statement whose snapshot cleanup failed: {1}.")]
+    private void StatementCleanupFailed(string database, string exceptionType)
+        => WriteEvent(13, database, exceptionType);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
