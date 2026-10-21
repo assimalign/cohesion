@@ -515,6 +515,13 @@ ordinary storage transaction contention is retried as busy.
   and PostgreSQL from one checkpointer per cluster and WAL
   (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
   workers still visit their databases on their own thread (follow-up).
+- **Checkpoint pass observations (#1284).**
+  An opt-in internal pass observation records database decisions, lane wait requests and
+  elapsed time, database backoff and the preceding trigger wait. The worker retains no history.
+  Root pump delays use one internal operation observed through the existing root test grant;
+  a test-only adapter forwards requested delays to the model's record without a shipped API or
+  visibility change. Pending wait state belongs to the pump thread, and publication follows lane
+  cleanup outside lane and failure monitors.
 - **Collecting a deferred checkpoint rechecks due work in the same pass (#1283).** A lane
   that ended without finishing no longer consumes a size wake and leaves the due journal until
   the next poll: after settling it, the worker checks the backoff and due state, and attempts at

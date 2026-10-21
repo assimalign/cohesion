@@ -26,5 +26,9 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<!-- Keep unconditional pump waits observable, including direct-wait slowdown mutants. -->
+		<EmbeddedResource Include="..\src\DatabaseEngineWorker.cs" LogicalName="WorkerPumpSource" />
+		<EmbeddedResource Include="..\shared\DatabaseCheckpointWorker.cs" LogicalName="CheckpointPumpSource" />
+		<EmbeddedResource Include="..\shared\DatabaseCheckpointLanes.cs" LogicalName="CheckpointLaneSource" />
 	</ItemGroup>
 </Project>

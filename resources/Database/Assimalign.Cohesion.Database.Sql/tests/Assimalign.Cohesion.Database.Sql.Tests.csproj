@@ -42,6 +42,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Database.Tests" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->

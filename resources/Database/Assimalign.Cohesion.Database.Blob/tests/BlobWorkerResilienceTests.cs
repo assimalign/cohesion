@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// failed header slot write take only their database offline, and every later operation on it is
 /// refused with COHDBB002 while nothing more is written to it.
 /// </summary>
+[CollectionDefinition(nameof(BlobWorkerResilienceTests), DisableParallelization = true)]
+[Collection(nameof(BlobWorkerResilienceTests))]
 public sealed class BlobWorkerResilienceTests
 {
     private const string Failing = "failing";
@@ -78,113 +80,91 @@ public sealed class BlobWorkerResilienceTests
     }
 
     /// <summary>
-    /// One database whose checkpoints keep failing must not slow the checkpoints of the engine's
-    /// other databases (#1268 review): only the failing database is backed off. A worker-wide
-    /// backoff held the healthy database to one checkpoint a second, and its journal grew to
-    /// hundreds of times the trigger. The guarantee is the floor: over the window the healthy
-    /// database must take more than twice the checkpoints such a backoff allows,
-    /// 2 × (window / backoff + 1) = 14, which fails every worker-wide backoff or stall of one
-    /// backoff a pass. A smaller slowdown can pass (the remarks).
+    /// Every pass visits the healthy database while another database fails and backs off.
+    /// Requested waits, rather than a ratio between independently scheduled writers, distinguish
+    /// a database backoff from a worker-wide stall, including a partial 250 ms slowdown (#1284).
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The two engines write over the same window, so whatever else the machine runs slows both
-    /// alike. Measured one after the other, the parallel test run alone moved the ratio anywhere
-    /// from a quarter to four times, with no fault in either window, and failed the bound on a
-    /// three-core runner.
-    /// </para>
-    /// <para>
-    /// Measured together, the share of the no-fault checkpoints still moved with the machine, not
-    /// the fault. Under load an engine's checkpoints come in phases: for stretches of a few hundred
-    /// milliseconds to several seconds its writer runs ahead and it takes up to ten times fewer
-    /// per write, and the two engines enter those phases independently. Over a two-second window
-    /// the share fell to 0.29-0.44 beside another engine's suite and to 0.37 pinned to three cores,
-    /// against a bound of half. The window is now six seconds, compared second by second, so a
-    /// stall of a second or two in one engine moves only the seconds it covers; but two engines in
-    /// different phases for the whole window still held the median second's share at 0.28 in a
-    /// parallel run of the whole suite.
-    /// </para>
-    /// <para>
-    /// So the bound that decides comes from the worker-wide backoff's signature instead of from
-    /// half: the floor the test always had. The backoff leaves the healthy database about one
-    /// checkpoint a second whatever it writes, 5 to 7 in the window, where a healthy database took
-    /// 105 to 3,203 in 100 runs pinned to three cores, half of them beside another engine's suite.
-    /// A worker-wide backoff, a pass that stalls a backoff for each failure, and a pass that waits
-    /// out the failing database's backoff instead of skipping it failed the floor in all 45 of
-    /// their runs across the five engines. A smaller slowdown can pass: before storage format 3
-    /// (#1253), a worker-wide pause of 250 ms after every pass left 17 to 23 checkpoints in the
-    /// window and passed 34 of 65 runs on three cores, because a loaded engine with no fault drops
-    /// to a few checkpoints a second itself, and no bound on a count tells the two apart. Catching
-    /// it needs a deterministic signal from the worker, which is required follow-up work (the SQL
-    /// engine's DESIGN.md, "Engine-owned background workers").
-    /// </para>
-    /// <para>
-    /// The median second's share of the no-fault checkpoints is a secondary signal, asserted when
-    /// at least two seconds count: it must reach a tenth, where the backoff's share is near 0.001
-    /// on a three-core runner and 0.03 to 0.06 beside three busy threads. It adds little to the
-    /// floor: the backoff and stall passed it in 2 of their 45 runs. A second counts only when the
-    /// no-fault engine took a checkpoint in it and neither engine's writer was starved in it,
-    /// writing nothing or under a tenth of its mean second. Scored as zero, the seconds in which
-    /// the scheduler gave the faulted engine's writer no CPU failed a run with the engine
-    /// unchanged, its writer idle four seconds of six. It is no rare stall: in 100 runs with the
-    /// engine unchanged, the no-fault engine's writer went a whole second without a write in 14
-    /// and the faulted engine's in 17.
-    /// </para>
-    /// <para>
-    /// Each counted second's share is taken over the second and per write, whichever is larger.
-    /// Now and then the scheduler starved one engine's writer (920 writes against 50,790 over a
-    /// window pinned to three cores): its checkpointer kept up with what little was written, in
-    /// far fewer checkpoints, so the count compared the writers. Per write the comparison is the
-    /// checkpointers' again, except when the starved writer is the no-fault engine's: a
-    /// checkpointer with little to do keeps up better per write than a busy one, and there the
-    /// count is the fair one.
-    /// </para>
-    /// <para>
-    /// The journal peak is no longer compared with the no-fault peak: over six seconds beside
-    /// another suite, a healthy engine's journal peaked at 544 MB, within what the worker-wide
-    /// backoff reached (470 MB to 1.1 GB), while the checkpoint counts still told the two apart by
-    /// hundreds of times. It is reported.
-    /// </para>
-    /// <para>
-    /// The window ends early once the healthy database's data file and journal hold
-    /// <see cref="PaceFileBound"/> bytes together, so the test double's memory streams stay far
-    /// from their 2 GiB capacity on any runner, but never before two backoffs. The window starts
-    /// after the failing database's first failure, and the worker retries it a backoff later, so
-    /// that retry and two seconds that can count toward the share always fall inside the window: a
-    /// window the bound ended in under a second failed a healthy engine for want of a failed pass,
-    /// in 3 of 10 runs with the bound forced to 4 MiB, and in none of 10 once the window ran two
-    /// backoffs. An early end only shortens the time in which a worker-wide backoff takes its
-    /// checkpoint a second, so the floor still exceeds twice what such a backoff allows, and the
-    /// seconds after the end have no writes and do not count toward the share. The bound is a
-    /// backstop, not the window's usual end: the report gives the data file's length, and says when
-    /// the bound ended the window.
-    /// </para>
-    /// </remarks>
-    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a database whose checkpoints keep failing does not slow the other database's checkpoints")]
+    [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a failing database leaves every healthy pass unthrottled")]
     public async Task CheckpointWorker_OneDatabaseKeepsFailing_ShouldKeepTheOthersAtFullPace()
     {
-        // Act: the same load with no fault and with the failing database's page writes failing,
-        // in two engines whose windows start together, on the thread pool.
-        var baselineReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var faultedReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var start = Task.WhenAll(baselineReady.Task, faultedReady.Task);
-        var paces = await Task.WhenAll(
-            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: false, baselineReady, start)),
-            Task.Run(() => MeasureHealthyCheckpointsAsync(fault: true, faultedReady, start)));
-        var baseline = paces[0];
-        var faulted = paces[1];
+        // Arrange: observe the actual engine pump and its database lanes, without changing waits.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.CheckpointJournalSize = PaceJournalSize;
+        await using var engine = BlobDatabaseEngine.Create("pace-engine", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var worker = (BlobCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
+        var passes = new ConcurrentQueue<DatabaseCheckpointPass>();
+        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff);
+        worker.PassCompleted = passes.Enqueue;
+        var faults = strategy.Faults(Failing);
+        var healthyFaults = strategy.Faults(Healthy);
+        long healthyCheckpoints = healthyFaults.HeaderWrites;
+        faults.FailPageWrites = true;
 
-        // Assert: the fault fired and was retried, and the healthy database kept a pace a
-        // worker-wide backoff cannot reach: more than twice its checkpoints over the window. The
-        // median counted second's share of the no-fault engine's is a secondary signal (the remarks).
-        double[] shares = faulted.SharesOf(baseline);
-        string report = $"no fault: {baseline}; fault: {faulted}; shares of the {shares.Length} seconds that count {string.Join(" ", shares.Select(share => $"{share:F2}"))}";
-        faulted.FailedPasses.ShouldBeGreaterThanOrEqualTo(1, report);
-        ((double)faulted.Checkpoints).ShouldBeGreaterThan(2 * (PaceWindow / DatabaseEngineWorker.FailureBackoff + 1), report);
-        if (shares.Length >= 2)
+        // Act: run for a minimum interval, then until retry, skip and completion counters move.
+        // The ceiling diagnoses a broken pump; it is never the pace assertion.
+        var watch = Stopwatch.StartNew();
+        int writes = 0;
+        try
         {
-            CheckpointPace.Median(shares).ShouldBeGreaterThanOrEqualTo(PaceShareBound, report);
+            for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize; id += 10)
+            {
+                await UploadAsync(failing, id, 10);
+                watch.Elapsed.ShouldBeLessThan(Timeout);
+            }
+            do
+            {
+                // Limit each uncheckpointed batch, and produce another only after a header
+                // proves progress. Deferred checkpoints count even when a statement finishes them.
+                long healthyProgress = healthyFaults.HeaderWrites - healthyCheckpoints;
+                if (healthyProgress < 3 && writes < (healthyProgress + 1) * 1000)
+                {
+                    await UploadAsync(healthy, writes, 10);
+                    writes += 10;
+                }
+                else
+                {
+                    engine.CheckpointNeededSignal.Set();
+                }
+                await Task.Delay(5);
+            }
+            while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || worker.FailureCount < 2
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == Failing && visit.Reason == "BackingOff")) < 3
+                || healthyFaults.HeaderWrites - healthyCheckpoints < 3)
+                && watch.Elapsed < Timeout
+                && !passes.Any(pass => pass.PumpBackoff > TimeSpan.Zero));
         }
+        finally
+        {
+            worker.PassCompleted = null;
+            faults.Clear();
+        }
+
+        // Assert: every recorded decision has a database, and no failure delays the whole pump.
+        var recorded = passes.ToArray();
+        foreach (var pass in recorded)
+        {
+            pass.Cancelled.ShouldBeFalse();
+            pass.Failed.ShouldBeFalse();
+            pass.PumpBackoff.ShouldBe(TimeSpan.Zero, $"pass {pass.Number}");
+            pass.TriggerTimeout.ShouldBeLessThanOrEqualTo(DatabaseCheckpointWorker<BlobDatabase>.PollInterval);
+            var healthyVisit = pass.Visits.Single(visit => visit.Database == Healthy);
+            healthyVisit.Backoff.ShouldBe(TimeSpan.Zero);
+            healthyVisit.Reason.ShouldBeOneOf("Completed", "NotDue", "Running", "Deferred", "Busy");
+            var failingVisit = pass.Visits.Single(visit => visit.Database == Failing);
+            if (failingVisit.Reason == "BackingOff")
+            {
+                failingVisit.Backoff.ShouldBe(DatabaseEngineWorker.FailureBackoff);
+                failingVisit.LaneWaits.ShouldBe(0);
+                failingVisit.LaneWaitRequested.ShouldBe(TimeSpan.Zero);
+            }
+        }
+        worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2);
+        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == Failing && visit.Reason == "BackingOff"))
+            .ShouldBeGreaterThanOrEqualTo(3);
+        (healthyFaults.HeaderWrites - healthyCheckpoints).ShouldBeGreaterThanOrEqualTo(3);
     }
 
     /// <summary>
@@ -1094,193 +1074,17 @@ public sealed class BlobWorkerResilienceTests
             .ParamName.ShouldBe(nameof(BlobDatabaseEngineOptions.JournalSizeLimit));
     }
 
-    // The checkpoint trigger, the load window of the pace test, compared second by second, and the
-    // share of the no-fault checkpoints the median counted second must keep (the test's remarks).
-    // The writer outpaces the checkpointer in memory, so even with no fault the journal peaks at
-    // many times the trigger.
+    // Journal size used to exercise checkpoint lanes and failure retries.
     private const long PaceJournalSize = 64 * 1024;
-    private const double PaceShareBound = 0.1;
-    private static readonly TimeSpan PaceWindow = TimeSpan.FromSeconds(6);
-    private static readonly TimeSpan PaceSecond = TimeSpan.FromSeconds(1);
 
-    // The most the healthy database's data file and journal hold together before the pace window
-    // ends early. Each file is one MemoryStream in the test double, which cannot pass 2 GiB: while
-    // every transaction took a content page of its own, a six-second window on a fast runner grew
-    // the document engine's data file past that and failed its test with
-    // ArgumentOutOfRangeException. A quarter of the cap keeps both files, and the memory of two
-    // engines' file sets, clear of it on any runner. It is a backstop, not the window's usual end,
-    // and the window runs two backoffs before it applies: passing 2 GiB in those two seconds would
-    // take more than 1 GB/s. Blob's uploads are small so that a six-second window stays far below
-    // it too (UploadSize).
-    private const long PaceFileBound = 512L * 1024 * 1024;
-
-    // The bytes of each blob UploadAsync writes. The pace test's healthy data file grows with them.
-    // At 2 KiB, three to a page, an upload took 2.8 KB of it, and one window inside a full suite
-    // pinned to three cores grew it to 343 MB in 121,000 uploads: on a runner a few times faster,
-    // the bound would have ended most windows. At 512 bytes an upload takes 0.69 KB, 129 MB in the
-    // fastest such window seen (187,000 uploads).
     private const int UploadSize = 512;
 
     // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
     private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// Writes to the healthy database for <see cref="PaceWindow"/>, with checkpoints triggered by
-    /// journal size, while the failing database's checkpoint is due and, under the fault, fails.
-    /// The window starts with <paramref name="start"/>, once the engine reported itself
-    /// <paramref name="ready"/>.
-    /// </summary>
-    private static async Task<CheckpointPace> MeasureHealthyCheckpointsAsync(bool fault, TaskCompletionSource ready, Task start)
-    {
-        try
-        {
-            var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
-            var options = Options(strategy);
-            options.CheckpointJournalSize = PaceJournalSize;
-            await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-            var failing = await CreateAsync(engine, Failing);
-            var healthy = await CreateAsync(engine, Healthy);
-            var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-            var failingFaults = strategy.Faults(Failing);
-            var healthyFaults = strategy.Faults(Healthy);
-
-            failingFaults.FailPageWrites = fault;
-            try
-            {
-                // The failing database's journal reaches the trigger (or, with no fault, is checkpointed).
-                long failingCheckpoints = failingFaults.HeaderWrites;
-                for (int id = 0; failing.DataStorage.JournalLength < PaceJournalSize && failingFaults.HeaderWrites == failingCheckpoints; id += 10)
-                {
-                    await UploadAsync(failing, id, 10);
-                }
-
-                if (fault)
-                {
-                    (await Eventually(() => worker.FailureCount >= 1)).ShouldBeTrue();
-                }
-
-                // Both windows start together, each on a thread of its own.
-                ready.SetResult();
-                await start;
-                await Task.Yield();
-
-                long checkpoints = healthyFaults.HeaderWrites;
-                long failedPasses = worker.FailureCount;
-                long peak = 0;
-                long writes = 0;
-                var checkpointsBySecond = new long[(int)(PaceWindow / PaceSecond)];
-                var writesBySecond = new long[checkpointsBySecond.Length];
-                int second = 0;
-                TimeSpan? endedByBound = null;
-                var watch = Stopwatch.StartNew();
-                for (int id = 0; watch.Elapsed < PaceWindow; id += 10)
-                {
-                    if (watch.Elapsed >= 2 * DatabaseEngineWorker.FailureBackoff && FileBytes(healthy) >= PaceFileBound)
-                    {
-                        endedByBound = watch.Elapsed;
-                        break;
-                    }
-
-                    await UploadAsync(healthy, id, 10);
-                    writes += 10;
-                    peak = Math.Max(peak, healthy.DataStorage.JournalLength);
-                    for (; second < checkpointsBySecond.Length && watch.Elapsed >= PaceSecond * (second + 1); second++)
-                    {
-                        checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
-                        writesBySecond[second] = writes;
-                    }
-                }
-
-                for (; second < checkpointsBySecond.Length; second++)
-                {
-                    checkpointsBySecond[second] = healthyFaults.HeaderWrites - checkpoints;
-                    writesBySecond[second] = writes;
-                }
-
-                return new CheckpointPace(checkpointsBySecond, writesBySecond, peak, worker.FailureCount - failedPasses,
-                    healthy.DataStorage.Data.Length, endedByBound);
-            }
-            finally
-            {
-                failingFaults.Clear();
-            }
-        }
-        catch (Exception exception)
-        {
-            // An engine whose setup failed must not leave the other one's window waiting.
-            ready.TrySetException(exception);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// The healthy database's checkpoints and writes counted at the end of each second of the
-    /// window, its journal peak, the worker's failed passes over the window, the healthy data
-    /// file's length at the end, and when <see cref="PaceFileBound"/> ended the window, if it did.
-    /// </summary>
-    private sealed record CheckpointPace(long[] CheckpointsBySecond, long[] WritesBySecond, long PeakJournal, long FailedPasses,
-        long DataLength, TimeSpan? EndedByBound)
-    {
-        /// <summary>Gets the checkpoints over the window.</summary>
-        public long Checkpoints => CheckpointsBySecond[^1];
-
-        /// <summary>
-        /// Gets, for each second of the window that counts, the share of
-        /// <paramref name="baseline"/>'s checkpoints this pace kept, over the second or per write,
-        /// whichever is larger. A second in which the baseline took no checkpoint, or in which
-        /// either engine's writer was starved (it wrote nothing, or under a tenth of its mean
-        /// second), says nothing about the fault: it is left out, not scored as zero or infinity.
-        /// </summary>
-        /// <param name="baseline">The pace with no fault, over the same window.</param>
-        /// <returns>The shares of the seconds that count, in order.</returns>
-        public double[] SharesOf(CheckpointPace baseline)
-        {
-            double starved = WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
-            double baselineStarved = baseline.WritesBySecond[^1] / (10.0 * WritesBySecond.Length);
-            var shares = new List<double>(CheckpointsBySecond.Length);
-            for (int second = 0; second < CheckpointsBySecond.Length; second++)
-            {
-                long baselineCheckpoints = InSecond(baseline.CheckpointsBySecond, second);
-                long baselineWrites = InSecond(baseline.WritesBySecond, second);
-                long writes = InSecond(WritesBySecond, second);
-                if (baselineCheckpoints == 0 || writes == 0 || writes < starved || baselineWrites < baselineStarved)
-                {
-                    continue;
-                }
-
-                double perSecond = (double)InSecond(CheckpointsBySecond, second) / baselineCheckpoints;
-                shares.Add(Math.Max(perSecond, perSecond * baselineWrites / writes));
-            }
-
-            return [.. shares];
-        }
-
-        /// <summary>Gets the median of <paramref name="values"/>.</summary>
-        /// <param name="values">The values.</param>
-        /// <returns>The median.</returns>
-        public static double Median(double[] values)
-        {
-            var sorted = values.Order().ToArray();
-            int middle = sorted.Length / 2;
-            return sorted.Length % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-        }
-
-        /// <inheritdoc />
-        public override string ToString()
-            => $"{Checkpoints} checkpoints in {WritesBySecond[^1]} writes (by second {string.Join(" ", CheckpointsBySecond.Select((count, second) => $"{InSecond(CheckpointsBySecond, second)}/{InSecond(WritesBySecond, second)}"))}), " +
-               $"journal peak {PeakJournal}, {FailedPasses} failed passes, data file {DataLength}" +
-               (EndedByBound is { } ended ? $", window ended by the file bound at {ended.TotalSeconds:F1} s" : "");
-
-        private static long InSecond(long[] counts, int second) => counts[second] - (second == 0 ? 0 : counts[second - 1]);
-    }
-
-    // What a database's two growing files hold together: the bound the pace window keeps under.
-    private static long FileBytes(BlobDatabase database)
-        => database.DataStorage.Data.Length + database.DataStorage.JournalLength;
-
     // The worker failure minimum of passes and the journal cap are out of reach unless a test sets
     // them (owner decisions 25 and 42): the retry tests keep a database failing for seconds on purpose, and the pace
-    // test's failing database fails for its whole window.
+    // pace test observes its failures, retries and backoff skips.
     private static BlobDatabaseEngineOptions Options(FaultInjectingJournalStorageStrategy strategy, TimeSpan? checkpoint = null, TimeSpan? writeBack = null) => new()
     {
         StorageStrategy = strategy,

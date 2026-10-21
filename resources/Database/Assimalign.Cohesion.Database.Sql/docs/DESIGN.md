@@ -3851,36 +3851,29 @@ or a busy storage, keeps the record of a database that failed and records nothin
 did not. Before the review the backoff was the worker's: while one database's page writes kept
 failing, a second database got at most one checkpoint a second (a probe with a 256 KiB size
 trigger measured 6 truncations in 6 s instead of 458, and a journal peak 700-884 times the
-trigger); `SqlWorkerResilienceTests` now checks that the healthy database keeps checkpointing at a
-pace the worker-wide backoff cannot reach (measured: 4,332 against 4,199 no-fault checkpoints in
-two seconds, where the worker-wide backoff gave 1, with a journal peak of 210 MB). Both engines
-write over the same six-second window. The guarantee is the floor: the healthy database must take
-more than twice the checkpoints the backoff allows over the window, 2 × (window / backoff + 1) =
-14, which fails every worker-wide backoff or stall of one backoff a pass. A worker-wide backoff, a
-pass that stalls a backoff for each failure, and a pass that waits out the failing database's
-backoff instead of skipping it failed it in all 45 runs across the five engines, while a healthy
-database took 105 to 3,203 checkpoints in 100 runs on three cores, half of them beside another
-engine's suite (34 to 12,444 before storage format 3, #1253). The median second's share of
-the no-fault checkpoints, which must reach a tenth, is a secondary signal (the backoff and stall
-passed it in 2 of their 45 runs). A second counts only when the no-fault engine checkpointed in it
-and neither engine's writer was starved in it, since the scheduler sometimes gives one writer no
-CPU for seconds, and a counted second's share is taken over the second and per write, the larger
-counting. A bound of half measured the machine, not the fault: each engine's checkpoints come in
-phases the two engines enter independently, and scheduling alone took the share to 0.29 over two
-seconds and the median second to 0.28 over six in loaded runs, while the backoff's share is about
-0.001. The journal peak is reported, no longer compared: beside another suite a healthy engine's
-peak reached the worker-wide backoff's.
+trigger). The five engines' resilience tests now read an opt-in internal checkpoint pass record
+(#1284). Each pass records every database's visit or skip reason, its backoff, lane wait requests
+and elapsed time, and the preceding pump trigger wait and unconditional backoff. The record
+retains names rather than database instances and the worker keeps no history. Publication follows
+lane cleanup, outside lane and failure monitors. Pending pump waits are local to their thread so
+an explicit concurrent pass cannot consume another thread's wait.
 
-The pace test cannot be relied on to catch a slowdown smaller than one backoff a pass. Before
-storage format 3, a worker-wide pause of 250 ms after every pass left the healthy database 17 to
-23 checkpoints in the window and passed 34 of 65 runs on three cores (8 of 25 with starved seconds
-left out), because a loaded engine with no fault drops to a few checkpoints a second itself (as
-low as 0 to 9 in some seconds of 100 runs since): no bound on a count tells the two apart.
-**Required follow-up:** a deterministic signal from the checkpoint worker that does not depend on
-the machine's speed, such as an internal record of each pass and of the databases it skipped for a
-backoff, so the engines' tests can require that while one database's failures last every pass
-still visits the healthy database and the passes keep the worker's pace. The worker exposes no
-per-pass record today, so this is an engine change with a ticket of its own, not a test change.
+Tests require every pass to visit the healthy database with no backoff, and a backing-off database
+to consume no lane waits. They run until
+failure retries, skips and healthy completions have all occurred, after a minimum duration and
+before a diagnostic ceiling. Producer batches are bounded until a new header proves a healthy
+checkpoint, including one a statement completed after deferral. Requested waits make worker-wide backoff, a stall while skipping a
+failed database, and an extra 250 ms pump pause deterministic failures, independent of writer
+throughput or scheduler latency. Lane wait elapsed time remains available for diagnosis.
+
+Unconditional pump delays use one internal wait operation observed through the root's existing
+test grant; a test-only adapter connects it to the model-local record. Model test projects reference
+the root test assembly for that adapter. Its source guard embeds the pump and lane sources and
+rejects raw blocking waits outside their observed operations, so a direct WaitOne or Sleep cannot
+bypass the record. No shipped API, interface or visibility grant is added.
+The old six-second checkpoint floor and median timing ratio are removed: the SQL test passed an
+injected 250 ms pause before this change. Observation uses concrete types and delegates and stays
+NativeAOT- and trimming-safe.
 
 A failure that took a database offline (a failed durable flush, #1243, a failed drain of the
 journal's append buffer, #1252, or a failed header slot write, #1268) is not the worker's: the

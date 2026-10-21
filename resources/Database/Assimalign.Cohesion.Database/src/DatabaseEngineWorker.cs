@@ -192,6 +192,10 @@ public abstract class DatabaseEngineWorker
     private int _consecutiveFailures;
     private long _failureCount;
 
+    // Test-only observation of requested pump delays, before the blocking wait. The owning
+    // test assembly can connect this to a model-local checkpoint pass without a shipped grant.
+    internal Action<TimeSpan>? DelayRequested;
+
     /// <summary>
     /// Initializes a new worker with its diagnostic name, its role and its cadence.
     /// </summary>
@@ -1006,8 +1010,14 @@ public abstract class DatabaseEngineWorker
         }
     }
 
-    private static void BackOff(CancellationToken cancellationToken)
-        => cancellationToken.WaitHandle.WaitOne(FailureBackoff);
+    private void BackOff(CancellationToken cancellationToken)
+        => Delay(FailureBackoff, cancellationToken);
+
+    internal void Delay(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        Volatile.Read(ref DelayRequested)?.Invoke(duration);
+        cancellationToken.WaitHandle.WaitOne(duration);
+    }
 
     /// <summary>
     /// Gets the cause a database goes offline with when a worker of <paramref name="kind"/> keeps
