@@ -5,6 +5,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
 /// File-based storage strategy: each database is one directory under the root path, named for its
@@ -123,4 +124,9 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
     /// <inheritdoc />
     public override bool StorageExists(string databaseName, bool catalog)
         => File.Exists(DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog)).Data);
+
+    // As in Documents, at most one page means creation stopped before both initial pages
+    // reached disk. Inspect only the length: a refused open must not recover either set.
+    internal bool HasIncompleteCreation(string databaseName)
+        => new FileInfo(DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), DataFileSet).Data).Length <= Page.Size;
 }

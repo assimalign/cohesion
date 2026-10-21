@@ -31,8 +31,10 @@ keys order by unsigned lexicographic byte comparison.
   build, never dropped while declared), and its servers (`AddServer(options => ...)` or a
   factory) and workers. `KeyValueDatabaseEngine.Create(name, options)` creates a standalone
   engine; no options type carries the engine name. Open refuses a missing catalog with
-  `COHDBK006`, naming `keyvalue.dat` and `catalog.dat`, before opening either file set,
-  even when the data set is empty (#1238). Existing catalogs are validated before the
+  `COHDBK006` before opening either storage (#1238). File-system data of at most one page
+  indicates interrupted creation and requires `DropDatabaseAsync`, then `CreateDatabaseAsync`;
+  longer data with a missing catalog requires preserving storage and restoring the complete
+  backup. Messages are storage-neutral, including in memory. Existing catalogs are validated before the
   data set opens or recovers (#1270); create still creates both file sets.
 - `KeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
   etag-conditional writes); `KeyValueDatabaseSession` and

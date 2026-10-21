@@ -60,7 +60,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     private readonly BTreeIndexManager _indexManager;
     private readonly BTreeIndex _primaryIndex;
 
-    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false)
+    internal KeyValueDatabase(DatabaseName name, KeyValueDatabaseEngine engine, KeyValueStorage storage, KeyValueStorage catalogStorage, bool recover = false, KeyValueCatalog? catalog = null)
         : base(name, engine)
     {
         _engine = engine;
@@ -78,7 +78,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             _catalogStorage.TakeOffline(alreadyOffline);
         }
 
-        _catalog = KeyValueCatalog.Open(catalogStorage);
+        _catalog = catalog ?? KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
         // A wait for a lock of the database ends when it goes offline (#1268 review): an offline

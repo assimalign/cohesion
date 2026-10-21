@@ -410,8 +410,9 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         }
         // Assert
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK006");
-        failure.Message.ShouldContain("keyvalue.dat", Case.Sensitive);
-        failure.Message.ShouldContain("catalog.dat", Case.Sensitive);
+        failure.Message.ShouldContain("data set", Case.Sensitive);
+        failure.Message.ShouldContain("catalog", Case.Sensitive);
+        failure.Message.ShouldContain("restore the complete database from backup", Case.Sensitive);
         reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
         await reopened.DisposeAsync();
         Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ShouldBe(before.Keys, ignoreOrder: true);

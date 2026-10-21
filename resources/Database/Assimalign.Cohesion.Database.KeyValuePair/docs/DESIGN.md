@@ -708,9 +708,14 @@ the invariant lower case of its name:
   `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
   now it is `catalog.*` inside the database's own directory, and a drop deletes the
   directory, both sets at once. An open whose data set exists without a catalog set
-  is refused with `COHDBK006` before either set is opened, including an empty data set
-  left by interrupted creation (#1238). The error names `keyvalue.dat` and `catalog.dat`;
-  surviving files remain byte-identical and no replacement catalog is created.
+  is refused with `COHDBK006` before either set is opened (#1238). Following Documents,
+  file-system data of at most one page means creation stopped before both initial
+  pages were flushed: the remedy is `DropDatabaseAsync`, then `CreateDatabaseAsync`.
+  Longer data with no catalog requires preserving storage and restoring the complete
+  backup. Messages name the data set and catalog without file-system-specific names,
+  including for in-memory storage. Surviving files remain byte-identical and no
+  replacement catalog is created. An existing catalog is decoded once, validated
+  before data recovery, and passed into the internal database constructor.
   Create still creates both sets. A directory without the data set, which an
   interrupted create or drop leaves, is no database: an open does not find it, a
   create refuses it with a message that names the remedy (a stale catalog set must
@@ -1173,6 +1178,11 @@ removing the directory. Open requires each existing file set's original journal 
 missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
 all files and restore the complete backup, since a lost journal may hold acknowledged commits.
 An entirely missing catalog receives `COHDBK006` at the engine's earlier existence gate (#1238).
+Before either storage opens, file-system data of at most one page also receives `COHDBK006`,
+with `DropDatabaseAsync` then `CreateDatabaseAsync` as the interrupted-creation remedy
+(Documents' `DocumentDatabaseEngine` creation check). Longer data with a missing catalog
+retains the restore-from-backup remedy; a missing journal or backup on longer data retains
+`COHDBK004`. The messages are storage-neutral, including on in-memory engines.
 As with PostgreSQL's refusal of a missing database directory
 (`src/backend/utils/init/postinit.c:1198-1212`), open reports the missing durable identity
 instead of creating it. The model-specific two-file-set gate follows SQL's catalog-first open.

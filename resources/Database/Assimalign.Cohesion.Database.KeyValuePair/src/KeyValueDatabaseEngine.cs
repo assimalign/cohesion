@@ -387,7 +387,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">The catalog is missing (<c>COHDBK006</c>), or a file set or the entry-space format of the database was refused.</exception>
+    /// <exception cref="DatabaseException">Creation is incomplete or the catalog is missing (<c>COHDBK006</c>), or a file set or the entry-space format of the database was refused.</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -575,10 +575,11 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             }
 
             string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);
-            if (!_strategy.StorageExists(name, catalog: true))
+            bool incompleteCreation = _strategy is FileSystemKeyValueStorageStrategy files && files.HasIncompleteCreation(name);
+            if (incompleteCreation || !_strategy.StorageExists(name, catalog: true))
             {
                 string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.DatabaseCatalogMissing, name, catalogLabel);
+                    incompleteCreation ? ErrorMessages.DatabaseCreationIncomplete : ErrorMessages.DatabaseCatalogMissing, name);
                 throw new DatabaseException(message, [new Types.Diagnostic
                 { Code = "COHDBK006", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
             }
@@ -603,7 +604,8 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 }
 
                 ConfigureStorage(catalogStorage, catalogLabel, catalog: true);
-                KeyValueDatabase.ThrowIfFormatIsNotCurrent(name, KeyValueCatalog.Open(catalogStorage));
+                var catalog = KeyValueCatalog.Open(catalogStorage);
+                KeyValueDatabase.ThrowIfFormatIsNotCurrent(name, catalog);
                 try
                 {
                     storage = _strategy.OpenStorage(name, catalog: false);
@@ -617,7 +619,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
                 // The spelling the database was created with, which its data set's header kept,
                 // whatever spelling opened it (#1392).
-                var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true);
+                var database = new KeyValueDatabase(DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, catalogStorage, recover: true, catalog: catalog);
                 _databases[name] = database;
                 return new ValueTask<DatabaseInstance>(database);
             }
