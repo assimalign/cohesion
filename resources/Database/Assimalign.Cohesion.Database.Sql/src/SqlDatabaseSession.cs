@@ -358,7 +358,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 }
                 TraceStatementCompletion(request, previousMetrics);
             }
-            finally { _database.TableReclamation.ExitStatement(readerEpoch); }
+            finally
+            {
+                // The session retains metrics after execution, but wire buffers belong to delivery.
+                if (_lastStatementMetrics is not null) { _lastStatementMetrics.ResultPreparation = null; }
+                _database.TableReclamation.ExitStatement(readerEpoch);
+            }
         }
     }
 

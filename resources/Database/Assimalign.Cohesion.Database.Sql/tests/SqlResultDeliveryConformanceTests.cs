@@ -17,6 +17,41 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlResultDeliveryConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result preparation: retained metrics release wire buffers after successful and failed writes")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_WriteCompletes_ShouldReleasePreparationFromMetrics(bool explicitTransaction, bool fail)
+    {
+        // Arrange
+        await using var harness = await ServerTestHarness.StartAsync();
+        await using var client = SqlClient.Create(new()
+        {
+            Settings = new() { Database = ServerTestHarness.DatabaseName, EndPoint = harness.Listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = harness.Listener.CreateFactory(),
+        });
+        await using var connection = await client.ConnectAsync(TestTimeout.Token());
+        var serverSession = (SqlDatabaseServerSession)harness.Server.Sessions.ShouldHaveSingleItem();
+        if (explicitTransaction) { await connection.ExecuteAsync("BEGIN", cancellationToken: TestTimeout.Token()); }
+        if (fail) { serverSession.ExecuteResultOverride = () => new ResultDeliveryFailureSet("value"); }
+
+        // Act
+        const string statement = "INSERT INTO users VALUES (5, 'prepared') RETURNING id";
+        if (fail)
+        {
+            var failure = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.QueryAsync(statement, cancellationToken: TestTimeout.Token()));
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE045");
+        }
+        else { (await connection.QueryAsync(statement, cancellationToken: TestTimeout.Token())).Count.ShouldBe(1); }
+
+        // Assert: inspect the write's metrics before any later statement can replace them.
+        var metrics = serverSession.DatabaseSession!.LastStatementMetrics.ShouldNotBeNull();
+        metrics.IsPlanned.ShouldBeTrue();
+        metrics.ResultPreparation.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Result delivery: read encoding failures end partial results and the same session is reused")]
     [InlineData("value", false)]
     [InlineData("value", true)]
