@@ -687,8 +687,9 @@ public class BTreeIndexTests
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Splits: a separator that would misorder its parent fails the insert, and rollback discards the half-done split")]
     public async Task Split_SeparatorMisorderingParent_ShouldThrowAndRollBack()
     {
-        // Arrange: twenty wide keys in ascending order split the root once, leaving
-        // one separator over two leaves; the right leaf holds thirteen entries.
+        // Arrange: twenty wide keys split the root once. Fill the right leaf
+        // before corrupting its separator, independently of the split policy:
+        // its next split must promote an existing key below the corrupted fence.
         var (harness, index) = await CreateIndexAsync();
         await using var harnessLifetime = harness;
 
@@ -697,13 +698,19 @@ public class BTreeIndexTests
         {
             await index.InsertAsync(setup, WideKey(i * 100), (ulong)i);
         }
+        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
+        int entries = 20 + 15 - BTreeShape.Read(harness.Storage, root).LeafCounts[^1];
+        for (long i = 20; i < entries; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i * 100), (ulong)i);
+        }
+        BTreeShape.Read(harness.Storage, root).LeafCounts[^1].ShouldBe(15);
         await harness.CommitAsync(setup);
 
         // The defect this guards against, simulated: the separator now sorts above
         // every key of the child to its right. Keys past it route to that child, and
         // the child's next split promotes one of its own keys, which sorts below the
         // separator it would be placed after.
-        long root = harness.IndexManager.ExportRegistrations().Single().RootPageId;
         OverwriteOnlySeparator(harness.Storage, root, WideKey(5_000));
 
         // Act
@@ -724,7 +731,7 @@ public class BTreeIndexTests
 
         var reader = await harness.BeginAsync();
         (await ScanAsync(index, reader, IndexKeyRange.All)).Select(x => x.Key)
-            .ShouldBe(Enumerable.Range(0, 20).Select(i => i * 100L));
+            .ShouldBe(Enumerable.Range(0, entries).Select(i => i * 100L));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Manager: duplicate names rejected, drop removes, registry exports")]

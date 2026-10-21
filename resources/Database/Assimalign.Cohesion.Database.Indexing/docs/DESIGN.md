@@ -405,14 +405,23 @@ baseline.
   tiebreaker attributes); the promoted separator is the
   first at which the entries before it would exceed half the node, so both halves
   keep room for the largest separator.
-- **The leaf split point is one function, `ChooseLeafSplit`** — currently the middle
-  of the leaf, which any split point in `[1, count - 1]` may replace, since adjacent
-  entries always differ. #1196 replaces it with PostgreSQL's strategy for rightmost
-  and single-value splits (`nbtsplitloc.c:130`, `_bt_strategy` `:935`). Measured
-  for 5,000 equal 1,024-byte keys inserted in reference order, before and after this
-  change alike: 1,666 leaves holding 3.0 of a possible 7 entries (39.2% full),
-  height 6, internal fan-out 4.0 — every insert reaches the rightmost leaf, and a
-  middle split leaves the left half half-empty for good.
+- **The leaf split point is one function, `ChooseLeafSplit` (#1196).** An insert
+  after a duplicate run splits at its insertion slot; an append to the tree or a run
+  keeps `count - 1` entries left, since the separator needs an existing entry on
+  each side. At a boundary before a shorter key, it moves one more duplicate if
+  needed so the incoming entry fits after one split. Other inserts keep the midpoint.
+  This adapts PostgreSQL's rightmost
+  and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:95-105`,
+  `:390-418`, `:1012-1033`). The nearest upper ancestor separator serves as the
+  leaf's high key: a greater key proves the run ends here; an equal key retains
+  the midpoint. This takes at most one extra ancestor walk per split, without a
+  sibling-chain scan, page-format change or change to cursor continuation.
+  Deterministic 5,000-entry, 1,024-byte-key tests halve ordered leaves from 1,666
+  (39.153% full) to 834 (78.211%) with duplicate/ascending heights still 6/3, and
+  show the same packing improvement for a run bounded by other keys. Three random
+  seeds improve from 3,052 to 3,047 leaves at height 3 while shuffled duplicate
+  references retain their fill and height (`BTreeShapeTests`, page/byte counts
+  without pruning or timing thresholds; the external SF10 gate remains separate).
 - **Order is checked in every build.** A leaf split fails unless its separator
   falls strictly after the last entry kept left and at or before the first entry
   moved right, and every separator written into a parent must be strictly between
