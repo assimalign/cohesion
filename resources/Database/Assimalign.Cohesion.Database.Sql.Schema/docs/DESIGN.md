@@ -144,7 +144,10 @@ types, chars map to String and enums map by underlying numeric range: sbyte to I
 to Int16, ushort/int to Int32, uint/long to Int64, and ulong to Decimal. This preserves every
 enum value exactly without adding unsigned scalar column types. Temporal defaults are quoted
 invariant text: DateOnly `yyyy-MM-dd`, TimeOnly `HH:mm:ss.fffffff`, DateTime
-`yyyy-MM-ddTHH:mm:ss.fffffff`, DateTimeOffset the same with `zzz`, and TimeSpan the `c` format.
+`yyyy-MM-ddTHH:mm:ss.fffffff`, DateTimeOffset the same with `zzz`, and TimeSpan signed total
+seconds followed by `seconds` (#1422). Decimal tick arithmetic preserves the full TimeSpan range
+and every 100 ns tick, so these typed defaults use the same PostgreSQL input grammar as CAST and
+plain-string INTERVAL assignment; no shared parser dependency or visibility grant is needed.
 DateTime keeps wall-clock ticks without its CLR kind, matching SQL TIMESTAMP semantics;
 DateTimeOffset keeps its written offset. Guid uses the lowercase `D` form. Binary values use
 quoted `\x` followed by uppercase hexadecimal bytes, which the SQL DEFAULT binder decodes.

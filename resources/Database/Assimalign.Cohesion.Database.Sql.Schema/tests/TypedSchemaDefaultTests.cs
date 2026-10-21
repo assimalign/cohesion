@@ -93,7 +93,17 @@ public sealed class TypedSchemaDefaultTests
         ShouldRender(timestamp, "'2026-01-02T13:45:30.1234567'", DatabaseType.DateTime);
         ShouldRender(new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified), TimeSpan.FromHours(-5)),
             "'2026-01-02T13:45:30.1234567-05:00'", DatabaseType.DateTimeOffset);
-        ShouldRender(-new TimeSpan(2, 3, 4, 5).Add(TimeSpan.FromTicks(1234567)), "'-2.03:04:05.1234567'", DatabaseType.TimeSpan);
+        ShouldRender(-new TimeSpan(2, 3, 4, 5).Add(TimeSpan.FromTicks(1234567)), "'-183845.1234567 seconds'", DatabaseType.TimeSpan);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Typed DEFAULT: INTERVAL limits retain exact PostgreSQL seconds (#1422)")]
+    public void Default_IntervalLimits_ShouldPreserveEveryTick()
+    {
+        // Arrange / Act / Assert
+        ShouldRender(TimeSpan.MinValue, "'-922337203685.4775808 seconds'", DatabaseType.TimeSpan);
+        ShouldRender(TimeSpan.MaxValue, "'922337203685.4775807 seconds'", DatabaseType.TimeSpan);
+        ShouldRender(TimeSpan.Zero, "'0 seconds'", DatabaseType.TimeSpan);
+        ShouldRender(TimeSpan.FromTicks(1), "'0.0000001 seconds'", DatabaseType.TimeSpan);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Typed DEFAULT: GUIDs and binary values have deterministic literal spellings")]

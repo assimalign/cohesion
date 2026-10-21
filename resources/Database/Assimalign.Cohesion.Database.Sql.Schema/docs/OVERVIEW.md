@@ -28,6 +28,7 @@ it builds; the migration planner plans `AddDomain` and `DropDomain`.
 `table.Default(row => row.Status, "pending")` declares a string value and renders `'pending'`;
 `Default(row => row.Quantity, 7)` renders `7`. The typed API also accepts Boolean, nullable,
 numeric, char, enum, date/time, Guid and binary values, using invariant SQL literals.
+TimeSpan defaults use signed total seconds with a `seconds` unit, retaining exact ticks.
 `table.DefaultSql(selector, "'pending'")` supplies raw SQL literal text as an escape hatch.
 The compiled column keeps the rendered text in `DefaultLiteral`, so equivalent typed and raw
 declarations have identical documents and hashes in the [current schema format](DESIGN.md#fixed-length-schema-columns-1437). The SDK uses the same

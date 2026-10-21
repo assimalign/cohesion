@@ -2803,7 +2803,8 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   DEFAULTs, including domain columns. TIME accepts HH:mm[:ss[.fffffff]] without a zone;
   .NET spellings such as '1 PM' and interval day-dot-clock input such as '1.02:03:04' fail.
   INTERVAL accepts unit/clock strings and ISO day-time durations. In particular, assigning
-  '12' now stores twelve seconds rather than twelve days (#1422).
+  '12' now stores twelve seconds rather than twelve days (#1422). Typed schema TimeSpan defaults
+  render signed total seconds with a `seconds` unit, preserving the exact duration.
   All zone-dependent temporal conversions follow the
   [timestamp normalization rule](#timestamp-normalization-1110).
   TIMESTAMP to DATE/TIME extracts fields. INTERVAL to TIME requires

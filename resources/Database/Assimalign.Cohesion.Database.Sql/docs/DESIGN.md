@@ -723,7 +723,7 @@ plain-string defaults persisted previously. Other expression defaults keep their
 The [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110)
 owns comparison, CAST and assignment behavior: zone-less clocks are UTC when meeting instants,
 and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Unspecified;
-TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
+TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves DATE and timestamp plain-string
 assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
 typed literals use its strict readers directly. No session zone or assembly access grant is added.
 The #1648 storage regression launches isolated Unix child test processes with TZ set to
@@ -1650,7 +1650,10 @@ flowchart LR
   plain-string assignment use those same readers (#1422), including trimmed input, day-time
   unit/clock/ISO intervals and bare signed seconds. PostgreSQL defaults an unqualified interval
   number to seconds (src/backend/utils/adt/datetime.c:3625-3657); '12' therefore stores twelve
-  seconds rather than twelve days. DATE and timestamp assignment retain SqlTemporalText. Zone-dependent conversions follow
+  seconds rather than twelve days. DATE and timestamp assignment retain SqlTemporalText.
+  Typed schema TimeSpan defaults render signed total seconds with a seconds unit through the
+  existing Sql.Schema/SDK shared renderer, preserving every tick while supplying valid text to
+  this same assignment reader. Zone-dependent conversions follow
   the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
