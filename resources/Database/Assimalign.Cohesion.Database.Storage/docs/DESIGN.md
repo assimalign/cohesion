@@ -141,10 +141,12 @@ from Voron (`src/Voron/Impl/FileHeaders/HeaderAccessor.cs:71-86`) to a sector re
 
 After any half-page read error, a valid other slot is accepted only if the verified journal
 still covers that generation: its first retained LSN is at or below the slot's `LsnFloor`,
-or it retains that generation's checkpoint record, at `LsnFloor + 1` with the same complete
-anchor. Checkpoints truncate their entire prefix, so this record must be first. The proof
-runs before recovery writes any pages. An empty/torn prefix or a newer checkpoint proves
-nothing; open rethrows the header read error without writing either file. This is an I/O
+or it retains a checkpoint record indistinguishable from that generation's: at `LsnFloor + 1`
+with the same complete anchor. A newer idle checkpoint with the same floor and anchor matches
+too; equal floors mean no journal records were discarded between the two generations, so only
+the newer generation's higher `SequenceFloor` (reservations that stamped nothing) is lost. Checkpoints truncate their entire prefix, so this record must be first. The proof
+runs before recovery writes any pages. An empty/torn prefix, or a newer checkpoint with a different floor or anchor,
+proves nothing; open rethrows the header read error without writing either file. This is an I/O
 refusal when the readable slot verifies, distinct from an unrecoverable page 0 with known
 checksum damage. Every accepted fallback emits Warning `HeaderReadFallback` (18), including
 consecutive opens; a device degradation must not silently roll back the checkpoint anchor
