@@ -183,9 +183,10 @@ public abstract class DatabaseEngineWorker
 
     // The failure of the owning engine's give-up on a database for this worker, which the leaf
     // could not complete, and how many in a row: held in Fault, but one database's, not the
-    // worker's as a whole (owner decision 42 review); cleared by the next pass that runs to its end.
+    // worker's as a whole (owner decision 42 review); cleared by a pass begun after the failure.
     private Exception? _giveUpFault;
     private int _giveUpFailures;
+    private long _giveUpFaultPass;
 
     private Exception? _fault;
     private int _consecutiveFailures;
@@ -719,7 +720,7 @@ public abstract class DatabaseEngineWorker
     /// <summary>
     /// Records that the owning engine's give-up on <paramref name="database"/> failed in the leaf
     /// (owner decision 25): held in <see cref="Fault"/>, so the engine stays
-    /// <see cref="EngineState.Faulted"/>, until the worker's next pass runs to its end. It concerns
+    /// <see cref="EngineState.Faulted"/>, until a pass begun after the failure runs to its end. It concerns
     /// that database alone (owner decision 42 review): the database's failure record stays, so
     /// <see cref="DatabaseEngine.HasFailingWorker"/> keeps naming it and its next failure asks the
     /// engine again, while <see cref="DatabaseEngine.HasEngineWideFailure"/> does not read it.
@@ -732,6 +733,7 @@ public abstract class DatabaseEngineWorker
         lock (_sync)
         {
             _giveUpFault = exception;
+            _giveUpFaultPass = _pass;
             giveUpFailures = ++_giveUpFailures;
             PublishFaultLocked();
         }
@@ -843,10 +845,13 @@ public abstract class DatabaseEngineWorker
                     _passFailures = 0;
                 }
 
-                // A give-up the leaf failed ends here too; the database's record, which asks again
-                // at its next failure, is settled below with the others.
-                _giveUpFault = null;
-                _giveUpFailures = 0;
+                // Only a pass begun after the give-up failed can clear it. The pool can record
+                // the failure before the pass that queued it settles; that pass has not retried it.
+                if (_giveUpFaultPass != _pass)
+                {
+                    _giveUpFault = null;
+                    _giveUpFailures = 0;
+                }
 
                 // A cancelled pass stopped early: what it did not visit is not done.
                 if (!cancelled && _databases.Count > 0)
