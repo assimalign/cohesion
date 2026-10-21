@@ -324,6 +324,19 @@ internal static class Program
         Check("in process: expression DEFAULT transaction clock", await RowsAsync(session,
             "SELECT id, stamp = CAST(CURRENT_TIMESTAMP AS TIMESTAMP) FROM expression_clock"), [[3, true]]);
         await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE temporal_text_guard (t TIME DEFAULT '1 PM', i INTERVAL DEFAULT '-922337203685.4775808 seconds', f DOUBLE)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO temporal_text_guard DEFAULT VALUES", cancellationToken: CancellationToken.None);
+        Check("in process: temporal text defaults preserve ticks", await RowsAsync(session,
+            "SELECT t, i FROM temporal_text_guard"), [[new TimeOnly(13, 0), TimeSpan.MinValue]]);
+        Check("in process: PostgreSQL TIME and INTERVAL forms", await RowsAsync(session,
+            "SELECT CAST('1:02' AS TIME), CAST('13:45:00.' AS TIME), CAST('10:00Z' AS TIME), CAST('1 2 hours' AS INTERVAL), CAST('@ 1 day 2 hours ago' AS INTERVAL)"),
+            [[new TimeOnly(1, 2), new TimeOnly(13, 45), new TimeOnly(10, 0), TimeSpan.FromHours(26), TimeSpan.FromHours(-26)]]);
+        CheckFailure("in process: temporal assignment diagnostics", await FailureAsync(async () =>
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "COHSQLE022");
+        CheckFailure("in process: floating assignment grouping", await FailureAsync(async () =>
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "COHSQLE022");
+        CheckFailure("in process: floating assignment overflow", await FailureAsync(async () =>
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "COHSQLE002");
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);

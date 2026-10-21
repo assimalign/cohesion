@@ -1766,8 +1766,8 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
                 DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
                 DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
-                DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
-                DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float32 => value is string realText ? SqlStandardCasts.ParseReal(realText) : Convert.ToSingle(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float64 => value is string floatText ? SqlStandardCasts.ParseFloat(floatText) : Convert.ToDouble(value, CultureInfo.InvariantCulture),
                 DatabaseType.Decimal => value is string numericText
                     ? SqlCastConverter.ParseNumericText(numericText, column.Type)
                     : Convert.ToDecimal(value, CultureInfo.InvariantCulture),
@@ -1788,7 +1788,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     TimeOnly time => time,
                     DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
-                    string text => SqlLiteralText.ParseTime(text.Trim()),
+                    string text => SqlLiteralText.ParseTime(text),
                     _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
                 },
                 DatabaseType.DateTime => value switch
@@ -1824,6 +1824,13 @@ internal sealed partial class SqlPlanExecutor
         catch (SqlEvaluationException exception)
         {
             throw exception.WithContext($"Column '{column.Name}'{(column.DomainName is null ? string.Empty : $" (domain '{column.DomainName}')")}");
+        }
+        catch (Exception exception) when (value is string
+            && column.Type.Type is DatabaseType.Time or DatabaseType.TimeSpan or DatabaseType.Float32 or DatabaseType.Float64
+            && exception is FormatException or OverflowException or InvalidCastException)
+        {
+            throw SqlEvaluationException.CastValueFailed(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ColumnTextConversionFailed, column.Name, column.Type.Type, exception.Message), exception);
         }
         catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
             or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)

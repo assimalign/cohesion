@@ -15,6 +15,13 @@ public sealed class SqlTypedLiteralTests
     public static IEnumerable<object[]> Literals() =>
     [
         ["DATE '2024-01-01'", SqlLiteralType.Date, "2024-01-01"],
+        ["TIME '1:02'", SqlLiteralType.Time, "01:02:00"],
+        ["TIME '1 PM'", SqlLiteralType.Time, "13:00:00"],
+        ["TIME '13:45:00.'", SqlLiteralType.Time, "13:45:00"],
+        ["TIME '10:00Z'", SqlLiteralType.Time, "10:00:00"],
+        ["TIME '10:00:00+01:00'", SqlLiteralType.Time, "10:00:00"],
+        ["INTERVAL '1 2 hours'", SqlLiteralType.Interval, "PT93600S"],
+        ["INTERVAL '@ 1 day 2 hours ago'", SqlLiteralType.Interval, "-PT93600S"],
         ["TIME '12:30'", SqlLiteralType.Time, "12:30:00"],
         ["TIME WITHOUT TIME ZONE '12:30:01.1234567'", SqlLiteralType.Time, "12:30:01.1234567"],
         ["TIMESTAMP '2024-01-01 10:00:00'", SqlLiteralType.Timestamp, "2024-01-01 10:00:00"],
@@ -104,8 +111,6 @@ public sealed class SqlTypedLiteralTests
     [InlineData("DATE '2024-1-1'")]
     [InlineData("TIME '24:00:00'")]
     [InlineData("TIME '10:00:00.12345678'")]
-    [InlineData("TIME '10:00:00Z'")]
-    [InlineData("TIME '10:00:00+01:00'")]
     [InlineData("TIMESTAMP '2024-01-01 10:00:00Z'")]
     [InlineData("TIMESTAMP '2024-01-01 10:00:00+01:00'")]
     [InlineData("TIMESTAMPTZ '2024-01-01 10:00 Europe/Paris'")]
@@ -115,6 +120,8 @@ public sealed class SqlTypedLiteralTests
     [InlineData("TIMESTAMP 'now'")]
     [InlineData("X'0'")]
     [InlineData("X'0G'")]
+    [InlineData("INTERVAL '12\u00a0'")]
+    [InlineData("INTERVAL '1\u20032 hours'")]
     [InlineData("INTERVAL 'garbage'")]
     [InlineData("INTERVAL '12.34.56'")]
     [InlineData("INTERVAL '0.00000001'")]

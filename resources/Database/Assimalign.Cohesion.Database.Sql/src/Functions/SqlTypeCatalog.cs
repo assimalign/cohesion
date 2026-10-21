@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -205,7 +204,7 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
     /// <param name="source">The source type.</param>
     /// <param name="target">The target type.</param>
     /// <returns>The key.</returns>
-    internal static string CastKey(SqlType source, SqlType target) => TypeKey(source) + "|" + TypeKey(target);
+    internal static SqlCastKey CastKey(SqlType source, SqlType target) => LookupKey(source, target);
 
     private static SqlCastKey LookupKey(SqlType source, SqlType target)
         => new(source.Storage.Type, source.IsDomain ? source.Name : null,
@@ -215,9 +214,4 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
         => _castsByKey.TryGetValue(new SqlCastKey(source, sourceDomain, target.Storage.Type,
             target.IsDomain && !targetBase ? target.Name : null), out var cast) ? cast : null;
 
-    // A cast's identity ignores length, precision and scale, as pg_cast's does: the engine applies them.
-    private static string TypeKey(SqlType type)
-        => type.IsDomain ? SqlObjectIdentity.Domain(type.Name.ToUpperInvariant()) : StorageKey(type.Storage.Type);
-
-    private static string StorageKey(DatabaseType type) => "B:" + ((int)type).ToString(CultureInfo.InvariantCulture);
 }

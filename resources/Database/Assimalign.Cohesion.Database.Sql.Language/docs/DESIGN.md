@@ -812,3 +812,11 @@ grammar before choosing the compact leaf. DIALECT.md specifies behavior.
 
 Concurrent FK catalog refresh is engine-owned. DIALECT records retryable COHSQLT006
 for an invalidated target plan; adjacent definition changes rebuild before row reads.
+
+## Temporal text conformance (#1422)
+
+The shared TIME reader accepts single-digit hours, AM/PM, a trailing fractional dot and a
+validated discarded zone; timestamp's clock reader remains zone-free. INTERVAL accepts implicit
+days before hour units, @ and final ago. Both readers reject non-ASCII whitespace. Generated
+ErrorMessages resources hold literal-reader failures. DIALECT records the bounded zone vocabulary,
+TimeOnly/fraction limits, preserved CAST diagnostics and format-26/v8 fence.
