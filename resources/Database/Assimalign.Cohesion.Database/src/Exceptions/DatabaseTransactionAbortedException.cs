@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -36,4 +39,12 @@ public class DatabaseTransactionAbortedException : DatabaseException
     /// <param name="innerException">The underlying cause.</param>
     public DatabaseTransactionAbortedException(string message, Exception? innerException)
         : base(message, innerException) { }
+
+    /// <summary>Initializes an aborted transaction with its complete structured diagnostics.</summary>
+    /// <param name="message">The error message, without a diagnostic code prefix.</param>
+    /// <param name="diagnostics">The diagnostics, copied and ordered by start offset; unlocated diagnostics follow located ones.</param>
+    /// <param name="innerException">The underlying cause, or null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="diagnostics"/> is null.</exception>
+    public DatabaseTransactionAbortedException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException = null)
+        : base(message, diagnostics, innerException) { }
 }

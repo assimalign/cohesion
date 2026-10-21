@@ -1,5 +1,9 @@
 # The Declared SQL Dialect
 
+Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
+`a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
+An escaped final quote without a closing delimiter is SQL0003 (#1235).
+
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
@@ -2316,8 +2320,11 @@ binding while retaining their identifier token classification. Schema/table
 qualification uses a dot **outside** the delimiters: `"dbo"."order details"` is
 qualified, while `"order.details"` names one table. This applies to DML target
 columns, expression references, aliases and DDL table/index/constraint names.
-Embedded double quotes inside an identifier are outside the current lexer subset;
-the mapper diagnoses such retained names before emitting SQL.
+Embedded double quotes are doubled: `"a""x"` names one identifier, `a"x`.
+Before #1235, the base lexer read that adjacent spelling as column `a` followed by alias `x`.
+Persisted base view text containing it can rebind differently or fail on reopen; no stored-text
+migration is provided. Recreate an affected view with `"a" "x"` or `"a" AS "x"` to retain the
+column/alias interpretation. Whitespace between delimited identifiers remains significant.
 
 | Form | Examples | AST literal type |
 |---|---|---|

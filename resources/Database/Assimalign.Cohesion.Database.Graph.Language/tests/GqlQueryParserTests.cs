@@ -50,6 +50,7 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a:Person) DETACH DELETE a")]
     [InlineData("MATCH (a)-[r]->(b) DELETE r, a")]
     [InlineData("match (a:Person {\"with space\": 'it''s fine'}) return a.\"with space\";")]
+    [InlineData("MATCH (\"a\"\"b\":\"L\"\"X\" {\"p\"\"q\": 1}) RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"")]
     [InlineData("/* outer /* inner */ */ MATCH (a) -- comment\n RETURN a")]
     // ISO comments after a pattern keep their meaning when whitespace separates them, and a ')'
     // that closes a predicate is not a pattern element (#1139).
@@ -66,6 +67,7 @@ public class GqlQueryParserTests
     [Theory]
     [InlineData("", "GQL0001")]
     [InlineData("MATCH (a RETURN a", "GQL0002")]
+    [InlineData("MATCH (a:\"a\"\"", "GQL0003")]
     [InlineData("MATCH a RETURN a", "GQL0002")]
     [InlineData("MATCH (a)-[r->(b) RETURN a", "GQL0002")]
     [InlineData("MATCH (a)<--(b) RETURN a", "GQL0002")]

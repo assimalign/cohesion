@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -6,6 +7,8 @@ using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
@@ -37,6 +40,11 @@ internal static class GraphCatalogCodec
         else
         {
             WriteString(binary, record.Index!.Value.PropertyKey);
+        }
+        if (stream.Length > SlottedPage.MaxRecordSize)
+        {
+            throw new GraphElementTooLargeException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CatalogRecordTooLarge, stream.Length, SlottedPage.MaxRecordSize));
         }
         return stream.ToArray();
     }

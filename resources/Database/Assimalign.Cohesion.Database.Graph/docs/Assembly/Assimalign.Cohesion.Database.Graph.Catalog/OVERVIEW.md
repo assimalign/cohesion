@@ -1,5 +1,10 @@
 # Graph catalog API
 
+`GraphCatalog.FindLabel(Guid, snapshot)` and `FindRelationshipType(Guid, snapshot)` use the
+identity directory and return only the requested identity's visible version. Property/index
+lists select only their parent's names. Reclaimed references are pruned lazily; old snapshots
+retain the original definitions when a dropped name is recreated with a new id.
+
 `GraphCatalog.Open` creates the sealed `GraphCatalog` over graph storage and its transaction
 coordinator. `GraphLabelMetadata` and `GraphRelationshipTypeMetadata` carry stable GUIDs,
 case-sensitive names, ownership, and owning schema. `GraphPropertyKeyMetadata` declares

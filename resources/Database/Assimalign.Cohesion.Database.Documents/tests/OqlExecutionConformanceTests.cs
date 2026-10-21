@@ -20,6 +20,24 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// <summary>Measures every advertised OQL clause through a real document session.</summary>
 public sealed class OqlExecutionConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - Conformance: doubled identifier quotes preserve collection, property and alias names (#1235)")]
+    public async Task ExecuteAsync_DoubledIdentifierQuotes_ShouldPreserveDocumentNames()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("quoted-identifiers", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.CreateCollectionAsync("t\"x", CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO \"t\"\"x\" (KEY, VALUE) VALUES ('k', {\"a\"\"b\": 7})", cancellationToken: CancellationToken.None);
+
+        // Act
+        var result = await session.ExecuteAsync("SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\"", cancellationToken: CancellationToken.None);
+
+        // Assert
+        result.ShouldBeAssignableTo<DatabaseResultSet>().Columns.ShouldHaveSingleItem().Name.ShouldBe("c\"d");
+        await VerifyRowsAsync(result, [[7m]], "Embedded identifier quotes", CancellationToken.None);
+    }
+
     private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {

@@ -95,7 +95,8 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// <inheritdoc />
     /// <remarks>
     /// While the database closes, the kernel refuses every end before it starts: a commit then
-    /// fails with <see cref="ObjectDisposedException"/>, and the base reports the transaction ended
+    /// fails with a <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// <see cref="ObjectDisposedException"/> cause, and the base reports the transaction ended
     /// with nothing committed. A commit whose record was written but could not be made durable
     /// throws <see cref="DatabaseTransactionCommitUnconfirmedException"/> and leaves the transaction
     /// <c>Committed</c>.
@@ -104,6 +105,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     {
         try
         {
+            if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
             // Like a rollback, a commit that started runs to completion: a cancellation here would
             // only turn into a kernel abort of work the caller asked to keep.
             await _coordinator.CommitAsync(_context).ConfigureAwait(false);
@@ -126,12 +128,15 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// The caller's token is not passed on (PostgreSQL holds interrupts through
     /// <c>AbortTransaction</c> for the same reason), and the kernel ends the context whatever
     /// fails once it starts (#1226). Only a closing database refuses the rollback before it starts,
-    /// and its disposal then aborts the context itself.
+    /// and its disposal then aborts the context itself. The refusal is a
+    /// <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// <see cref="ObjectDisposedException"/> cause.
     /// </remarks>
     protected override async ValueTask RollbackCoreAsync()
     {
         try
         {
+            if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
             await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
         }
         catch (Exception error)

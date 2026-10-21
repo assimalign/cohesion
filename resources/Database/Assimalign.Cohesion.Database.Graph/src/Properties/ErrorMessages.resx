@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
+  <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
+  <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
+  <data name="CatalogOwnerMissing" xml:space="preserve"><value>The owning graph definition does not exist.</value></data>
+  <data name="CatalogSnapshotChanged" xml:space="preserve"><value>The graph catalog changed since this transaction's snapshot. Retry the transaction.</value></data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="DatabaseFilesIncomplete" xml:space="preserve"><value>Database '{0}' has a directory without a database in it, or creation stopped before both initial data pages were flushed. Creation never completed. Clear this incomplete file set with DropDatabaseAsync, then call CreateDatabaseAsync again.</value></data>
   <data name="DatabaseOpenRefused" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
+  <data name="GraphDisposed" xml:space="preserve"><value>The graph database or one of its resources has been disposed.</value></data>
+  <data name="CatalogRecordTooLarge" xml:space="preserve"><value>Graph catalog metadata encodes to {0} bytes, more than the {1} bytes one graph record can hold.</value></data>
+  <data name="RelationshipTypeUnknown" xml:space="preserve"><value>Unknown relationship type '{0}'.</value></data>
   <data name="ArithmeticFailure" xml:space="preserve"><value>Graph arithmetic failed: division by zero, overflow or a non-finite result.</value></data>
   <data name="BooleanRequired" xml:space="preserve"><value>A Boolean expression requires TRUE, FALSE or NULL.</value></data>
   <data name="NumericRequired" xml:space="preserve"><value>A numeric sign requires a numeric operand.</value></data>

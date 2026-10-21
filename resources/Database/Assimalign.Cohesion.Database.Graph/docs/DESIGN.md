@@ -2,6 +2,20 @@
 
 ## Runtime child-root diagnostics (#1247, #1364)
 
+An autocommit statement whose commit succeeded reports success even if releasing its
+ReadCommitted snapshot pin fails during disposal. Cleanup still releases the session hold;
+the coordinator owns any remaining pin until shutdown. Event 13, `StatementCleanupFailed`
+(Warning; database, exceptionType), records the cleanup failure without changing the durable
+outcome or inviting a duplicate retry.
+
+A CommitAsync or RollbackAsync that the closing coordinator refuses before claiming its
+end reports DatabaseException with structured COHDBG019 and ObjectDisposedException as
+its cause. The transaction ends without committing; database disposal aborts its context.
+An ODE from a protocol read/write faults the server session without any further error write,
+including the generic pump's best-effort Internal response. A non-transport ODE during result
+streaming aborts an explicit transaction and reports COHDBG019 while keeping the authenticated
+session ready.
+
 Runtime storage failures, including wrapped I/O, use structured `COHDBG006` Diagnostics and
 plain embedded messages, matching open. Only the wire writer adds the prefix. Begin and
 operations share the translator. Attached-index damage leads with `COHDBS003`, retaining the
@@ -662,11 +676,9 @@ engine fails the statement with `COHDBG009`, element too large: the operation ab
 statement failure (an explicit transaction is aborted until the caller rolls back) and the session, in process and over the
 wire, stays open. A search for a value too long for its index matches nothing, since no write can
 store one. Neo4j instead spills labels to dynamic label records and long properties to property
-chains, which this store's format does not yet have. Defining a new label or relationship type
-checks identity uniqueness by listing every definition (`GraphCatalog.SaveDefinitionAsync`),
-so a statement that introduces N new labels costs time quadratic in N (measured in Release: 1,000
-new labels in one `INSERT` take 7.5 s, 2,000 take 42 s). Neither limit counts expression length;
-both are follow-up storage items.
+chains, which this store's format does not yet have. Catalog discovery uses identity and parent
+directories (#1229), so introducing N definitions takes O(N log N) catalog work or better,
+including property discovery. Neither physical size limit counts expression length.
 
 GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
@@ -1143,7 +1155,12 @@ deleted. Discovery sees the session snapshot. New data introduces ad-hoc definit
 property definition can require a value and its database scalar type; adding a constraint
 validates existing objects first. Unsigned integer values map to the next wider signed database
 type (`byte` to Int16, `ushort` to Int32, `uint` to Int64, `ulong` to Decimal); persisted CLR types
-remain unchanged. Unsupported property types are refused. Dropping an in-use label/type is refused. Schema ownership is
+remain unchanged. This conversion is a lossless database-type classification, not a store-time
+rewrite (#1235 owner default): graph.composite-values carries the original unsigned CLR type,
+and an unnegotiated scalar projection fails with COHDBG016 before output. GraphHygieneTests
+pins all four maximum unsigned values through storage and the negotiated value codec.
+Unsupported property types are refused. Dropping an unknown relationship type names it in
+the COHDBG002 diagnostic, as the unknown-label path does. Dropping an in-use label/type is refused. Schema ownership is
 enforced on drop and every alter/index/property-metadata path with `DatabaseObjectLockedException`,
 naming the object, owning schema and operation. An initial directly marked definition is supported
 to exercise that enforcement path; compiled provisioning is not included.
@@ -1158,13 +1175,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `GQL0010` | Unknown function spelling, reported while parsing |
 | `COHDBG001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
-| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation |
+| `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
 | `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
-| `COHDBG006` | Storage failure translated at the engine boundary |
-| `COHDBG007` | The session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
+| `COHDBG006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
+| `COHDBG007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
 | `COHDBG008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
-| `COHDBG009` | Element too large: a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
+| `COHDBG009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
 | `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
@@ -1174,6 +1191,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
+| `COHDBG019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 | `COHDBS003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
@@ -1189,6 +1207,34 @@ or message prefixes: they are `Diagnostic` objects with a `Code` and `Diagnostic
 a successful result. Kernel aborts cross the engine
 boundary as `DatabaseTransactionAbortedException`; deadlocks retain their specialized subtype.
 Ownership uses the shared dedicated exception rather than an invented graph ownership code.
+
+### Statement boundaries and programmatic arguments (#1199)
+
+Catalog decode failures become `COHDBG006`, as do ordinary index and storage failures;
+index/page corruption retains the common `COHDBS003` corruption signal. Catalog mutation
+conflicts carry an internal classification and become `DatabaseTransactionAbortedException`
+(`COHDBG007`), retaining the catalog cause. Only a snapshot-changed definition is retryable;
+identity reuse/rename, different identities for one name, retargeted index properties and missing
+owners are caller errors (`COHDBG003`). These translations and element-size failures
+(`COHDBG009`) attach structured Diagnostics and leave embedded messages unprefixed. Disposal inside an admitted operation is
+`COHDBG019`, checked before the general InvalidOperationException/schema mismatch mapping.
+An accompanying storage/index/I/O failure takes precedence over disposal or a retryable catalog conflict.
+Kernel transaction outcomes take precedence over disposal in their causes, preserving an
+unconfirmed commit's durability warning and a confirmed abort's retry semantics.
+The wire statement handler also maps ObjectDisposedException from the early lifetime guards
+to that code. Each is an ExecutionFailure and keeps the authenticated session ready. An
+explicit transaction aborts on a failed admitted statement and must be rolled back.
+The per-catalog internal record-read hook exercises these engine-to-wire boundaries without
+changing stored bytes or exposing a fault-injection API.
+
+`CreateNodeAsync` rejects a null label list and null, empty or whitespace label names before
+admitting a statement; `CreateRelationshipAsync` rejects a null, empty or whitespace type.
+These are ArgumentException (ArgumentNullException for null) caller-contract failures and
+leave an explicit transaction active. Session binding/null checks also precede admission.
+GQL never calls these public argument guards: its planner validates inserted label/type names,
+property keys, finite literals and parameter values before the executor uses the core methods.
+Invalid wire text therefore receives a located parse/planning diagnostic. Direct schema and
+catalog APIs validate metadata identities, names, ownership and types as documented in XML.
 
 ## Lifecycle and delivery
 
@@ -1780,6 +1826,7 @@ four servers.
 | 10 | `IndexRecoveryStart` | Informational | — | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
 | 11 | `IndexRecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
 | 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (an offline refusal's model code; empty otherwise), `exceptionType` |
+| 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 
 `SessionClosed`'s `reason` is `PeerClosed`, `Terminated`, `IdleTimeout`, `Shutdown` (the
 graceful drain closed it at a frame boundary), `HandshakeTimedOut`, `HandshakeRefused`,
@@ -2013,7 +2060,10 @@ UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 re
 null, accepted only for owning schema. Definition IDs must be nonempty; names and index keys
 must be nonblank. Only schema-owned definitions may carry a schema name, and they must carry
 one. Unknown kinds, versions, enum values, invalid lengths, malformed UTF-8, and trailing bytes
-are rejected with `GraphCatalogException`. Decoding has no reflection or dynamic serialization.
+are rejected with `GraphCatalogException`. Encoding checks the complete UTF-8 record size against
+SlottedPage.MaxRecordSize before any physical apply; oversized names, schema names and index keys
+throw GraphElementTooLargeException, reported by the engine as COHDBG009. Exact-fit records are
+accepted. Decoding has no reflection or dynamic serialization.
 
 #### Catalog: MVCC, mutation, and recovery
 
@@ -2037,8 +2087,26 @@ complete-recovery. The graph store separately scrubs physical index entries befo
 checkpoint. Catalog crash tests copy live data and WAL before disposal, proving that committed
 definitions survive and partial definition/child changes disappear.
 
-Definition discovery is linear in the number of known names plus visible version checks.
-This is deliberately a metadata directory; traversal uses graph adjacency and physical indexes.
+Identity discovery uses an in-memory id → set of (kind, name) keys for labels/types. Child
+discovery uses (kind, parent id) → ordinal sorted names for properties/indexes. Both are built
+on open and maintained under the same catalog lock as the version directory; stale-reference
+removal prunes their entries. They select candidates only: every result still reloads and decodes
+the record and applies the original per-version MVCC checks. Recreating a dropped name with
+another id preserves old-snapshot lookup and never returns the replacement for the old id.
+Base databases can contain a dropped and a live name sharing one id; every candidate is checked,
+and purging one key never removes the other. New mutations refuse renaming an id, and reusing
+a dropped id for another name waits until version purge has reclaimed its old records.
+`FindLabel(Guid, snapshot)` and `FindRelationshipType(Guid, snapshot)` expose this lookup.
+Property validation uses these owner lookups once per entity and a local property-name set;
+it never lists the whole catalog per property. Saving N definitions is O(N log N) or better
+in catalog work for bounded version chains. Whole-kind SHOW discovery still enumerates that
+kind, and physical graph index maintenance has its own cost. The deterministic complexity
+tests count directory-key visits and physical record reads, including a 2,000-label/2,000-type
+INSERT spread over many nodes; they impose no machine-dependent wall-clock threshold.
+PostgreSQL's identity cache lookup was consulted, without copying code:
+`src/backend/catalog/namespace.c:933` uses SearchSysCache1(RELOID, relid), in the local clone
+at `C:/Source/repos/postgres/postgres`. No disk-format change is needed.
+This is a metadata directory; traversal uses graph adjacency and physical indexes.
 Catalog disposal and flushing remain owned by the engine and its shared storage/coordinator.
 
 #### Catalog: Scope

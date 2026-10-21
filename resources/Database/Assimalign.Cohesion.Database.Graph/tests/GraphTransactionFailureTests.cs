@@ -49,8 +49,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        if (code == "COHDBG001") { failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code); }
-        else { failure.Message.ShouldStartWith(code, Case.Sensitive); }
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);

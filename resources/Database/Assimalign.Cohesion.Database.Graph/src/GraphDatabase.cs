@@ -45,6 +45,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
 {
     private readonly GraphDatabaseEngine _engine;
 
+    // Per-database fault seam for the cleanup after a statement's commit.
+    internal Action<TransactionContext>? BeforeSnapshotPinRelease { get; set; }
+    internal Func<ValueTask>? BeforeTransactionEndAsync { get; set; }
+
     internal GraphDatabase(DatabaseName name, GraphDatabaseEngine engine, GraphStorage storage, bool recover)
         : base(name, engine)
     {
@@ -535,14 +539,16 @@ public sealed partial class GraphDatabase : DatabaseInstance
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.
+        var knownKeys = keys.Select(key => key.Name).ToHashSet(StringComparer.Ordinal);
+        bool? schemaOwned = null;
         foreach (var property in properties ?? new Dictionary<string, object?>())
         {
-            if (!keys.Any(key => key.Name == property.Key))
+            if (!knownKeys.Contains(property.Key))
             {
                 // Schema-owned definitions remain closed to ad-hoc metadata changes.
-                bool schemaOwned = Catalog.GetLabels(operation.Context.Snapshot).Any(item => item.Id == definition && item.Owner == DatabaseObjectOwner.Schema) ||
-                    Catalog.GetRelationshipTypes(operation.Context.Snapshot).Any(item => item.Id == definition && item.Owner == DatabaseObjectOwner.Schema);
-                if (!schemaOwned)
+                schemaOwned ??= Catalog.FindLabel(definition, operation.Context.Snapshot)?.Owner == DatabaseObjectOwner.Schema ||
+                    Catalog.FindRelationshipType(definition, operation.Context.Snapshot)?.Owner == DatabaseObjectOwner.Schema;
+                if (!schemaOwned.Value)
                 {
                     await Catalog.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(definition, property.Key), operation.Context, token).ConfigureAwait(false);
                 }

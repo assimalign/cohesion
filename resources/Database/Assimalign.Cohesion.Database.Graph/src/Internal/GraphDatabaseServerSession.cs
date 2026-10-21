@@ -50,6 +50,11 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     // Set by Abort before it cancels the lifetime, so the pump can tell the server's own teardown
     // from a transport that closed under it.
     private bool _abortRequested;
+    private bool _transportDisposed;
+
+    // Per-session fault seams distinguish result materialization from transport I/O.
+    internal Action? BeforeResultWrite { get; set; }
+    internal Action? BeforeTransportWrite { get; set; }
 
     internal GraphDatabaseServerSession(
         GraphDatabaseServer server,
@@ -158,6 +163,13 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             // The server stopped or aborted the session mid-frame.
             _closeReason = GraphDatabaseEventSource.CloseReason.Cancelled;
         }
+        catch (ObjectDisposedException exception) when (_transportDisposed)
+        {
+            // A disposed channel is a session fault. No error frame can be sent through
+            // that channel, including the generic pump's best-effort Internal response.
+            _closeReason = GraphDatabaseEventSource.CloseReason.Faulted;
+            GraphDatabaseEventSource.Log.SessionFaulted(this, exception);
+        }
         catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
             // The transport failed under the pump: a peer that hung up or reset the connection, or
@@ -197,7 +209,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             try
             {
-                frame = await _reader!.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+                frame = await ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
             {
@@ -243,7 +255,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             try
             {
-                frame = await _reader.ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
+                frame = await ReadFrameAsync(handshakeSource.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested && !softStop.IsCancellationRequested)
             {
@@ -313,7 +325,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
                 try
                 {
-                    frame = await _reader!.ReadFrameAsync(idleSource.Token).ConfigureAwait(false);
+                    frame = await ReadFrameAsync(idleSource.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested)
                 {
@@ -420,6 +432,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     () => ParseScalarRequest(message.Statement, parameters), cancellationToken).ConfigureAwait(false);
             try
             {
+                BeforeResultWrite?.Invoke();
                 if (paths)
                 {
                     await WritePathsAsync(result, cancellationToken).ConfigureAwait(false);
@@ -429,12 +442,16 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
+            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException
+                || exception is ObjectDisposedException && !_transportDisposed)
             {
                 // The client sees this statement fail, so it aborts an explicit transaction as an
                 // execution failure does, although its operation already completed. Bolt marks the
                 // transaction failed on any failure of the exchange, result streaming included.
-                await _databaseSession!.AbortTransactionAsync(exception).ConfigureAwait(false);
+                var reported = exception is ObjectDisposedException
+                    ? _databaseSession!.Database.TranslateKernelFailure(exception) : exception;
+                await _databaseSession!.AbortTransactionAsync(reported).ConfigureAwait(false);
+                if (!ReferenceEquals(reported, exception)) { throw reported; }
                 throw;
             }
         }
@@ -462,6 +479,15 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             string errorText = diagnostic?.Code is { } code && !exception.Message.StartsWith(code + ":", StringComparison.Ordinal) ? $"{code}: {exception.Message}" : exception.Message;
             await WriteDiagnosticsAsync(PrepareDiagnostics(exception.Diagnostics), cancellationToken).ConfigureAwait(false);
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        catch (ObjectDisposedException exception) when (!_transportDisposed)
+        {
+            // Early session/database guards precede the engine's statement bracket. Preserve
+            // their direct-API contract while answering a disposed wire statement with a code.
+            var reported = (DatabaseException)_databaseSession!.Database.TranslateKernelFailure(exception);
+            await WriteDiagnosticsAsync(PrepareDiagnostics(reported.Diagnostics), cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, "COHDBG019: " + reported.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseTypeException exception)
@@ -646,10 +672,31 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private ValueTask WriteDiagnosticsAsync(byte[]? payload, CancellationToken cancellationToken)
         => payload is null ? ValueTask.CompletedTask : WriteFrameAsync(ProtocolMessageType.Diagnostics, payload, cancellationToken);
 
+    private async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken)
+    {
+        try { return await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false); }
+        catch (ObjectDisposedException)
+        {
+            _transportDisposed = true;
+            throw;
+        }
+    }
+
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        await _writer!.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken).ConfigureAwait(false);
-        await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            BeforeTransportWrite?.Invoke();
+            await _writer!.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken).ConfigureAwait(false);
+            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Only this transport boundary classifies a disposed writer as a session
+            // failure. The execution handler must never try to write another frame to it.
+            _transportDisposed = true;
+            throw;
+        }
     }
 
     private ValueTask WriteErrorAsync(ProtocolErrorCode code, string message, CancellationToken cancellationToken)

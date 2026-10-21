@@ -83,16 +83,24 @@ internal sealed class GraphOperation
         try
         {
             EnsureActive();
+            bool committed = false;
             try
             {
                 if (_transaction is null)
                 {
                     await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
+                    committed = true;
                 }
             }
             finally
             {
-                await FinishAsync().ConfigureAwait(false);
+                try { await FinishAsync().ConfigureAwait(false); }
+                catch (Exception error) when (committed && error is not OutOfMemoryException)
+                {
+                    // The commit is durable. Cleanup cannot turn it into a failed statement
+                    // that a caller might retry and apply twice.
+                    GraphDatabaseEventSource.Log.StatementCleanupFailed(_database.Name, error);
+                }
             }
         }
         finally { _completionGate.Release(); }
@@ -154,6 +162,7 @@ internal sealed class GraphOperation
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
         if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
+            _database.BeforeSnapshotPinRelease?.Invoke(pin);
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }
     }

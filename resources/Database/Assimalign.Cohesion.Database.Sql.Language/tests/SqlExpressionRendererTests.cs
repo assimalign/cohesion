@@ -155,6 +155,8 @@ public sealed class SqlExpressionRendererTests
     [InlineData("\"select\"(1)", "\"select\"(1)")]
     [InlineData("\"CAST\"(1)", "\"CAST\"(1)")]
     [InlineData("my_function(a, 'b', NULL)", "my_function(a, 'b', NULL)")]
+    [InlineData("\"a\"\"b\"", "\"a\"\"b\"")]
+    [InlineData("\"f\"\"x\"(\"a\"\"b\")", "\"f\"\"x\"(\"a\"\"b\")")]
     [InlineData("(SELECT MAX(qty) FROM t) + 1", "(SELECT MAX(qty) FROM t) + 1")]
     [InlineData("EXISTS (SELECT 1 FROM t WHERE qty > 0)", "EXISTS (SELECT 1 FROM t WHERE qty > 0)")]
     [InlineData("NOT EXISTS (SELECT 1 FROM t)", "NOT EXISTS (SELECT 1 FROM t)")]
@@ -375,8 +377,8 @@ public sealed class SqlExpressionRendererTests
         SqlTreeDump.Dump(other).ShouldNotBe(SqlTreeDump.Dump(original));
     }
 
-    /// <summary>A name the dialect cannot delimit, and a node it cannot spell, are refused rather than mis-rendered.</summary>
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Renderer: names and nodes the dialect cannot spell are refused")]
+    /// <summary>Quoted names render reversibly; foreign nodes and null still fail.</summary>
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Renderer: embedded quotes render and foreign nodes are refused")]
     public void Render_Unspellable_ShouldThrowNotSupported()
     {
         // Arrange
@@ -384,7 +386,10 @@ public sealed class SqlExpressionRendererTests
         var foreign = new ForeignExpression();
 
         // Act / Assert
-        Should.Throw<NotSupportedException>(() => SqlExpressionRenderer.Render(quoted)).Message.ShouldContain("double quote");
+        string rendered = SqlExpressionRenderer.Render(quoted);
+        rendered.ShouldBe("\"a\"\"b\"");
+        ParseSelectColumn(rendered, out var diagnostics).ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe("a\"b");
+        diagnostics.ShouldBeEmpty();
         Should.Throw<NotSupportedException>(() => SqlExpressionRenderer.Render(foreign)).Message.ShouldContain(nameof(ForeignExpression));
         Should.Throw<ArgumentNullException>(() => SqlExpressionRenderer.Render((SqlExpression)null!));
         Should.Throw<ArgumentNullException>(() => SqlExpressionRenderer.Render((SqlSelectExpression)null!));

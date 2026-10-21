@@ -594,7 +594,7 @@ public sealed partial class GqlQueryParser : QueryParser
         if (Take(TokenType.QuotedIdentifier))
         {
             if (token.Text.Length <= 2) { Error("GQL0002", "An identifier cannot be empty.", token); }
-            return token.Text.Length >= 2 ? token.Text[1..^1] : string.Empty;
+            return token.Text.Length >= 2 ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : string.Empty;
         }
         if ((allowKeyword || !IsReservedTemporal(token)) && (token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
             token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_'))
@@ -650,7 +650,7 @@ public sealed partial class GqlQueryParser : QueryParser
         for (int i = 1; i < text.Length; i++)
         {
             if (text[i] != quote) { continue; }
-            if (quote == '\'' && i + 1 < text.Length && text[i + 1] == quote) { i++; continue; }
+            if (i + 1 < text.Length && text[i + 1] == quote) { i++; continue; }
             return i == text.Length - 1;
         }
         return false;
