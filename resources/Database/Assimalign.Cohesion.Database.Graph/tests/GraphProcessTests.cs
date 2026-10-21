@@ -10,13 +10,15 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphProcessTests
 {
-    [Fact]
-    public async Task Committed_graph_and_secondary_index_survive_process_exit_without_disposal()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Recovery: committed graph and postings survive process exit with uncommitted creates and relabels (#1534)")]
+    public async Task Recover_UncommittedGraphAndLabelPostings_ShouldRestoreCommittedStateAsync()
     {
+        // Arrange
         string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-crash-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
+            // Act / Assert: the fixture checks label scans before the crash and after recovery.
             await Run("seed", root);
             await Run("verify", root);
             // The recovery checkpoint must itself leave a clean reusable file set.

@@ -227,6 +227,9 @@ public sealed partial class GraphStore
             TransactionSource = ResolveStatementBracket,
             ExistingIndexes = registrations
         });
+        // Labeled records require their persisted postings; never silently reopen a graph
+        // whose tree registration was lost, or treat a pre-index development file as empty.
+        if (_labelTokens.Count != 0) { _ = ResolveIndex(labelsId); }
     }
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot)> ReadRegistrations(GraphStorage storage)

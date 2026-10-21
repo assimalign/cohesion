@@ -16,19 +16,22 @@ public sealed partial class GraphStore
     /// <param name="id">The existing node identity.</param>
     /// <param name="labels">The complete resulting label set.</param>
     /// <param name="properties">The complete resulting property map.</param>
+    /// <param name="labelIds">The nonempty catalog identity for each resulting label.</param>
     /// <param name="context">The owning transaction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A replacement version even when the supplied values are identical, or null if absent.</returns>
     /// <remarks>GQL filters pure no-op assignments before calling storage; every storage update publishes a replacement.</remarks>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="ArgumentException">A name or scalar value is invalid.</exception>
+    /// <exception cref="ArgumentException">A name, label catalog identity or scalar value is invalid.</exception>
     /// <exception cref="InvalidOperationException">The transaction is not active.</exception>
     /// <exception cref="TransactionAbortedException">The node changed since the snapshot.</exception>
     /// <exception cref="GraphElementTooLargeException">The record or an index key is too large.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public async ValueTask<StoredGraphNode?> UpdateNodeAsync(ulong id, IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?> properties, TransactionContext context, CancellationToken cancellationToken = default)
+        IReadOnlyDictionary<string, object?> properties, IReadOnlyDictionary<string, Guid> labelIds,
+        TransactionContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(labelIds);
         ArgumentNullException.ThrowIfNull(labels);
         ArgumentNullException.ThrowIfNull(properties);
         foreach (string label in labels) { ArgumentException.ThrowIfNullOrWhiteSpace(label); }
@@ -38,6 +41,7 @@ public sealed partial class GraphStore
         if (Find(1, id, context.Snapshot) is not { } prior) { return null; }
         var record = new GraphRecord(1, id, new StoredGraphNode(id,
             labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(), properties), Revision: checked(prior.Record.Revision + 1));
+        record = record with { LabelIds = ResolveLabelIds(record.Node!.Value.Labels, labelIds) };
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         record = GraphRecordCodec.Decode(bytes);
         var node = record.Node!.Value;
@@ -49,7 +53,10 @@ public sealed partial class GraphStore
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), id))).ToArray();
         var inserted = await ApplyAsync(context, async bracket =>
         {
+            if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
+            await DeleteLabelsAsync(prior.Record, prior.Reference.Location, context, cancellationToken).ConfigureAwait(false);
+            await InsertLabelsAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             foreach (var definition in definitions)
             {
                 if (old.Labels.Contains(definition.Label!, StringComparer.Ordinal) && old.Properties.TryGetValue(definition.PropertyKey!, out var value))

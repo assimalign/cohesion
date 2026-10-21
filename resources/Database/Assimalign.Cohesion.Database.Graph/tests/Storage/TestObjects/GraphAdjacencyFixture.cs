@@ -22,7 +22,7 @@ internal sealed class GraphAdjacencyFixture : IAsyncDisposable
     }
 
     internal ValueTask<StoredGraphNode> NodeAsync(TransactionContext context, CancellationToken token)
-        => Store.CreateNodeAsync(new StoredGraphNode((ulong)Storage.ReserveTransactionSequence(), [], new Dictionary<string, object?>()), context, token);
+        => Store.CreateNodeAsync(new StoredGraphNode((ulong)Storage.ReserveTransactionSequence(), [], new Dictionary<string, object?>()), TestLabelIds.All, context, token);
 
     internal ValueTask<StoredGraphRelationship> EdgeAsync(ulong from, ulong to, int value, TransactionContext context, CancellationToken token)
         => Store.CreateRelationshipAsync(new StoredGraphRelationship((ulong)Storage.ReserveTransactionSequence(), from, to, "T",

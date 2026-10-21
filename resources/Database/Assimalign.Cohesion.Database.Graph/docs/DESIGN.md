@@ -91,8 +91,8 @@ Each logical database owns `graph.dat`, `graph.log` and `graph.bak`, in the dire
 `<RootPath>/<storage name>` when it is file-backed (see "Database names and directories" below).
 All records start with the
 shared 16-byte little-endian writer/deleter transaction stamp. The graph payload's byte 16 is the
-kind, byte 17 is format version 3, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
-26–33 hold the entity's increasing revision. Formats 1 and 2 are refused before record recovery writes,
+kind, byte 17 is format version 4, bytes 18–25 are a nonzero unsigned 64-bit identity and bytes
+26–33 hold the entity's increasing revision. Formats 1, 2 and 3 are refused before logical recovery scrub,
 with COHDBG017 and the remedy to recreate the database; no upgrade path exists. Graph
 identities are reserved from the shared storage sequence allocator, so rollback does not recycle
 an identity. Database-local IDs must always be paired with the correct session.
@@ -100,7 +100,7 @@ an identity. Database-local IDs must always be paired with the correct session.
 | Page owner / kind | Payload after the stamp |
 | --- | --- |
 | Owner 0, catalog | Catalog-specific version, discriminant and encoded definition; see Graph.Catalog's format |
-| Owner 2, kind 1 | Common graph header, label count and strings, then scalar property map |
+| Owner 2, kind 1 | Common graph header, label count and (string, catalog GUID) pairs, then scalar property map |
 | Owner 2, kind 2 | Common graph header, source ID, target ID, catalog type GUID, type string, scalar property map |
 | Owner 2, kind 3 | Common graph header, indexed label and property key |
 | Owner 1, kind 4 | Zero stamps, kind/version, tree object ID, signed 64-bit root page; 34 bytes total |
@@ -139,10 +139,9 @@ flowchart LR
 
 A filtered incident lookup costs O(t log E + r) index work for t selected type/direction ranges
 and r retained entries in them, decoding k visible references; deterministic identity ordering adds O(k log k) CPU work. Direct
-traversal uses these same selections and ordering with O(Vvisited) visited state. A label scan
-still decodes every node record and filters by label in `GraphStore.GetNodes(label, snapshot)`
-(`src/Storage/GraphStore.cs:150-154`), then sorts its matches. There is no label index yet;
-reducing label-scan decoding through a label index belongs to #1534. A property equality anchor
+traversal uses these same selections and ordering with O(Vvisited) visited state. A label scan seeks MVCC postings keyed by (catalog label GUID, node identity), decoding only
+visible matching references in identity order. Its index work is O(log P + r) for retained
+postings r in the selected label range; unrelated nodes add no record decodes. A property equality anchor
 instead seeks its shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
@@ -163,7 +162,7 @@ INSERT reserves stable identities from storage, stages the complete entities, th
 final working copies once, nodes before relationships. A cascade discards pending relationship
 updates just as explicit relationship deletion does; the affected count includes explicit targets.
 
-Each persisted replacement tombstones the old record and moves every property-index entry or
+Each persisted replacement tombstones the old record and moves every label posting and property-index entry or
 both direction-specific adjacency entries (also for a self-loop) to the new location in one physical bracket.
 The identity directory retains all versions newest first, ordered by the format-3 revision on
 reopen. Older snapshots retain the old records and index entries; rollback removes replacements
@@ -282,12 +281,17 @@ GQL transaction-control syntax is outside the profile. Wire transactions are del
 `ProtocolViolation`. No connection-level transaction API is exposed. Results materialize before
 the statement transaction is released, so result iteration cannot race record reclamation.
 
-Open defers the storage checkpoint, performs physical WAL recovery, then invokes coordinator
-record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery
+Open defers the storage checkpoint, performs physical WAL recovery, validates graph/index formats
+before coordinator record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery
 plan, and checkpoints last. The process fixture exits after committed graph/index creation and
 after uncommitted detach/insertion page write-back, without disposal. Restart must recover the
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
+
+Recovery fixtures compare selected-label reads before and after an uncommitted labeled create
+and relabel: the committed label ranges and properties survive, while partial postings disappear.
+The process fixture exits after page write-back with both operations still uncommitted and
+checks the same committed label membership after recovery and a second reopen.
 
 The Database solution includes `Graph.RecoveryFixture` so solution builds keep the fixture in
 the selected configuration. The Graph test build copies that configuration's outputs beside the
@@ -558,16 +562,18 @@ Label expressions (#1139, #1245) supply required labels from a pattern's pure co
 whose label expression is a pure conjunction (`WHERE n:Keep`, `n IS LABELED Keep&Tagged`).
 Pattern labels precede WHERE labels in source order. Every required label participates in property
 index selection with inline or WHERE equality values. Bound entities still take precedence;
-without a seek, the first required label by node position anchors a label scan. This choice is
-positional, not cardinality-based; choosing by cardinality waits for label counts. Thus
+without a seek, the smallest retained-posting estimate across required labels and pure pattern
+unions anchors a label scan, breaking ties by source position. Estimates include historical
+and rolled-back versions and affect cost only; snapshot visibility remains authoritative. Thus
 `(a)->(b:Keep)` and `(a)->(b) WHERE b:Keep` can both start at `b`, expanding right then left.
 EXPLAIN reports the actual LabelScan or IndexSeek label and node ordinal. Every candidate still
 passes the full pattern and WHERE residual, including other required labels.
-A disjunction (`:A|B`), negation (`:!A`) or wildcard (`:%`) leaves that node's `Labels` empty.
-When the path has no required label and no bound entity takes precedence,
-`(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with no label and no property and scan every
-node. Another node's required label can still anchor the path: `(n:A|B)->(m:C)` anchors at `m`.
-Anchoring the disjunction or negation on `A`'s index would silently drop the `B` or non-`A` rows.
+A pure pattern disjunction (`:A|B`, including nested disjunctions) merges all selected label
+ranges in identity order and decodes each identity once. EXPLAIN uses LabelScan with entity
+`A|B` and `combine=union`. Its summed estimate competes with other pattern positions. A
+conjunction (`:A&B`) seeks the cheapest required label and evaluates the complete conjunction
+as a residual, avoiding work on a common label's range. Negation, wildcard and mixed Boolean
+expressions retain a full scan unless another safe anchor is available.
 Predicates under OR, XOR, NOT or truth tests, and label expressions using
 disjunction, negation or wildcard, supply no required labels. Collection is clause-local and
 only node variables can supply node anchors; a relationship's labeled predicate tests its type. The
@@ -604,11 +610,12 @@ planner likewise groups predicates once and visits only each label's own index d
 (`NodeIndexLeafPlanner.scala`:184, :201, :248-296). Selection agrees with a per-pair search: the
 first label with an index on a key the node has a value for, then that label's key whose value comes
 first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
-through a hash set built once per evaluation. Label scans still decode every node record;
-filtering by the anchor label occurs before charging expansion work. #1245 reduces the expansion
-budget charge and the expansion work after that scan, not the scan's decoding cost. A deterministic
-2,010-node fixture with ten Keep nodes still decodes all 2,010 nodes but charges ten anchor
-candidates for the WHERE label scan, as for its pattern form. Label-index decoding is #1534.
+through a hash set built once per evaluation. Label scans decode only selected visible postings
+and charge those candidates to expansion work. The deterministic sparse-label proxy compares
+4,359 full-scan node decodes with 30 label-index decodes and 30 posting visits, using the R4
+Person fraction and the minimum of three rounds. The external SF10 benchmark remains a
+separate program gate. Statement-local label maps select pending additions and replacements;
+merging them suppresses replaced stored identities without scanning unrelated stored or pending nodes.
 Neo4j likewise builds label scans from selections' HasLabels predicates for any pattern node
 (`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`,
 relative to C:/Source/repos/neo4j/neo4j; behavior consulted, no code copied).
@@ -1138,7 +1145,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
@@ -2084,17 +2091,17 @@ protection against a duplicate-key lower-bound seek starting in a later leaf aft
 shared B+Tree split. A regression creates 240 incident edges, forces splits, reopens the
 file set, and checks all edges. There is no kernel change.
 
-#### Storage: Version 3 record format
+#### Storage: Version 4 record format
 
 All multibyte fixed-width values below are little-endian unless a key explicitly says
 otherwise. Every slotted record starts with the shared 16-byte stamp prefix: writer
 sequence at offsets 0-7, deleter sequence at offsets 8-15. Zero deleter means live.
-Graph records have kind at offset 16, format version `3` at offset 17 and a nonzero
+Graph records have kind at offset 16, format version `4` at offset 17 and a nonzero
 64-bit logical identity at offsets 18-25 and a UInt64 revision at offsets 26-33. Revision starts at zero and increases with each replacement. The remaining payload is:
 
 | Kind | Meaning | Payload after identity |
 | --- | --- | --- |
-| 1 | Node | Int32 label count, label strings, property map |
+| 1 | Node | Int32 label count, (label string, 16-byte catalog GUID in Guid.ToByteArray order) pairs, property map |
 | 2 | Relationship | UInt64 source, UInt64 target, 16-byte catalog type GUID (Guid.ToByteArray order), type string, property map |
 | 3 | Property index definition | Label string, property-key string |
 
@@ -2130,17 +2137,20 @@ replacement even when the supplied values equal the visible version. The engine 
 whose assignments were all no-ops; a changed-then-restored entity retains its write conflict. Creation accepts complete StoredGraphNode/StoredGraphRelationship
 records whose nonzero identities the caller reserves from the backing storage's durable sequence;
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
-changes before first publication. Formats 1 and 2 are refused before recovery scrub with COHDBG017
+changes before first publication. Formats 1, 2 and 3 are refused before logical recovery scrub with COHDBG017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
 StorageCorruptionException carries the code in its message; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
-The graph record and tree-registration version is 3; catalog and B-tree page formats are unchanged.
+The graph record and tree-registration version is 4; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
-The owner-directed #1532 bump is shared with #1534: that later label-index tree extends version 3
-and the existing directory reconstruction/OpenIndexes path, without another bump, rebuild of
-legacy files, upgrade path or legacy reader.
+Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
+catalog GUID after each node label and a label-postings tree; format-3 databases must be recreated.
+The version fence refuses the old labeled-node layout with COHDBG017 before scrub can write,
+leaving a cleanly closed file set byte-identical. There is no backfill, upgrade path or legacy reader.
+Open reconstructs label-name/token mappings
+and advisory posting counts from retained records and attaches persisted trees.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
-kind `4`, version `3`, UInt64 object ID, and Int64 root page ID. Every tree is named
+kind `4`, version `4`, UInt64 object ID, and Int64 root page ID. Every tree is named
 `graph`; its object ID distinguishes it. A tree's root page stays fixed through splits
 (#1159), so a registration changes only when a tree is created; every mutation bracket
 still saves changed registrations as a backstop, and registrations are reloaded after
@@ -2169,6 +2179,34 @@ page-type, owner and slot checks are `Storage.TryReadRecord` with owner 2, the s
 shared reclamation check (#1342), which the store made inline before.
 
 #### Storage: Secondary indexes
+
+The label-postings B+Tree is registered under UInt64.MaxValue - 1, name `graph`. Its fixed
+24-byte key is a big-endian catalog label GUID followed by the UInt64 node identity in
+big-endian order; its value is the packed record location. Label bytes never enter a key,
+so a long label still fits. CreateNodeAsync and UpdateNodeAsync require a label-name/catalog-ID
+map resolved by the caller, like CreateRelationshipAsync's type ID; Storage takes no Catalog
+dependency. The store trusts this pairing and persists each ID beside its name.
+
+Creation, replacement (including property-only replacement) and deletion insert or tombstone
+every posting through the same coordinator bracket and version ledger as property entries.
+Logical rollback and safe-bound purge restore or erase postings together with records; recovery
+scrubs unproven label writers through the existing index-manager pass. A missing tree on an
+empty or wholly unlabeled graph matches nothing; labeled records without their tree registration
+refuse open as corruption. Trees and token names can remain after logical
+rollback; their stamped entries determine visibility. Historical catalog IDs for a reused name
+merge through a priority queue with duplicate suppression, without a full-store identity array
+or a final sort. Pure pattern unions reuse this merge.
+
+Readers copy the token selection under directory _sync, release it, then acquire tree/page
+latches. Writers follow transaction mutation gate -> database writer lock -> coordinator apply
+gate -> B+Tree latch -> page latches. Directory publication never holds _sync across an await.
+Cursor cleanup is in finally for normal exhaustion, cancellation and exceptions. Current shared
+BTreeCursor operations complete synchronously; OpenCursor still materializes a selected range
+under its latch (#1542). Anchor tests bound selected posting visits so background maintenance
+cannot disturb their measurements. A nonparallel, iteration-bounded stress test holds a posting
+cursor across replacement, commit/rollback and purge, asserts overlap counters, and checks a
+one-node decode bound with unrelated nodes present after both tasks stop; interruption inside
+a mutation bracket is tested separately.
 
 Each label/property definition owns a B+Tree whose object ID is its durable definition
 identity. Keys consist of the shared `DatabaseKeyWriter` scalar encoding followed by
@@ -2231,10 +2269,11 @@ available to older snapshots until the shared version-purge worker's safe bound 
 Opening follows this order:
 
 1. `GraphStorage.Open(..., checkpointOnOpen: false)` runs shared physical recovery.
-2. Construct the coordinator and call `AnalyzeAndScrub()` to undo unproven record writers.
-3. `GraphStore.Open` loads owner-two record directories and owner-one registrations.
-4. `RecoverIndexesAsync(plan.Aborted)` scrubs aborted index writers and deleters.
-5. `CompleteRecovery()` checkpoints after lifecycle classification has been consumed.
+2. Construct the coordinator and call `GraphStore.EnsureIndexFormat` before logical recovery writes.
+3. `AnalyzeAndScrub()` undoes unproven record writers.
+4. `GraphStore.Open` loads owner-two record directories and owner-one registrations.
+5. `RecoverIndexesAsync(plan.Aborted)` scrubs aborted index writers and deleters.
+6. `CompleteRecovery()` checkpoints after lifecycle classification has been consumed.
 
 Crash tests ordinarily flush the journal and clone data and journal memory streams
 without disposing the live database. MemoryStream has no durable-flush contract;
@@ -2248,11 +2287,12 @@ linked history, so publication prepends in constant time. A rotating sweep check
 older references per publication; it validates fixed identity headers without decoding properties.
 Lookup also removes encountered reclaimed or reused references and decodes only visible records.
 Repeated updates in one transaction therefore allocate and decode linearly in their count.
-Label scans examine node identities and retained versions and sort their `m` visible matches in `O(m log m)`. Traversal path
+Label scans visit only the selected label's retained postings, decode visible references and
+retain key identity order; unfiltered scans still enumerate node identities. Traversal path
 enumeration and cycle limits are owned and documented by the Graph root.
 
 Updates encode the replacement and every new index key before mutation. They move every
-property-index entry, or both direction-specific adjacency entries (also for a self-loop), to the new physical
+label posting and property-index entry, or both direction-specific adjacency entries (also for a self-loop), to the new physical
 location and tombstone the old record in one physical bracket. Rollback restores old stamps
 and removes new versions. Relationship insertion checks endpoint existence in the latest
 committed view, so property updates do not conflict with insertion. Snapshot pins protect

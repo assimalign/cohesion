@@ -75,7 +75,8 @@ internal static partial class GraphPlanExecutor
         }
         else if (anchor.Property is { } property)
         { candidates = await operation.Updates.SearchIndexAsync(anchor.Label!, property, anchor.Value!, token).ConfigureAwait(false); }
-        else { candidates = operation.Updates.GetNodes(anchor.Label); }
+        else if (anchor.UnionLabels is { } labels) { candidates = operation.Updates.GetUnionNodes(labels, token); }
+        else { candidates = operation.Updates.GetNodes(anchor.Label, token); }
 
         foreach (var candidate in candidates)
         {

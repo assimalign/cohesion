@@ -125,9 +125,14 @@ The Storage component is part of `Assimalign.Cohesion.Database.Graph`, with publ
 ### Storage: Graph storage component
 
 The `src/Storage/` component stores property-graph nodes, relationships,
-endpoint adjacency and secondary node-property indexes. Filtered incident reads seek by
+endpoint adjacency, MVCC label postings and secondary node-property indexes. Filtered incident reads seek by
 node, direction and catalog type GUID before decoding relationships; self-loops appear once. It targets .NET 10, is AOT
 compatible, and uses explicit binary codecs without reflection.
+
+Graph record and tree-registration format 4 adds catalog label GUIDs and label postings to
+format 3, which shipped with #1532's typed adjacency and entity revisions. Opening an earlier
+format fails with COHDBG017 before logical recovery scrub writes; recreate the database with
+this engine. There is no upgrade path.
 
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,
 checksums and physical recovery to `Database.Storage`. Construct a `TransactionCoordinator`
@@ -138,7 +143,8 @@ or rollback to that caller. Reads take an immutable `TransactionSnapshot`.
 The store exposes creation, MVCC replacement through `UpdateNodeAsync` and `UpdateRelationshipAsync`, lookup, restricted or cascading deletion, incident-edge
 lookup, and exact node-property index creation/search/drop/listing. An incident-edge lookup is
 a B+Tree range seek and does not scan every relationship. Property index searches return
-scalar-verified candidates in identity order. The graph root maps storage DTO identities
+scalar-verified candidates in identity order. Label scans seek catalog-ID/node-ID ranges and
+decode only matching visible nodes; node create/update calls take the caller-resolved label IDs. The graph root maps storage DTO identities
 to the frozen `GraphNodeId` and `GraphRelationshipId` contracts and plans traversals.
 
 Dependencies are `Database.Storage`, `Database.Transactions` and `Database.Indexing`.

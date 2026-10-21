@@ -132,10 +132,10 @@ public sealed class GqlLabelDirectionExecutionTests
     }
 
     /// <summary>
-    /// A disjunction or negation must never feed the index anchor, or rows of the other labels
-    /// would be dropped; a conjunction still anchors on a member's index.
+    /// A disjunction must merge all label ranges; negation cannot use a single label range, or rows
+    /// would be dropped. A conjunction still anchors on a member's property index.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph] - Planner: | and ! never anchor on an index, & anchors on a member's index")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - Planner: | merges label ranges, ! scans nodes, & can use a member's property index")]
     public async Task Plan_LabelExpressionWithIndex_ShouldAnchorOnlyConjunctionsAsync()
     {
         // Arrange
@@ -155,7 +155,8 @@ public sealed class GqlLabelDirectionExecutionTests
 
         // Assert
         disjunction.Property.ShouldBeNull();
-        disjunction.Label.ShouldBeNull();
+        disjunction.Label.ShouldBe("A");
+        disjunction.UnionLabels.ShouldBe(["A", "B"]);
         (await ColumnAsync(session, "MATCH (n:A|B {k: 1}) RETURN n.name")).ShouldBe(["a1", "b1", "ab1"], ignoreOrder: true);
         negation.Property.ShouldBeNull();
         negation.Label.ShouldBeNull();
