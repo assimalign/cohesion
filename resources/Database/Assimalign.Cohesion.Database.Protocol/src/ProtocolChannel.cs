@@ -22,8 +22,10 @@ public sealed class ProtocolChannel : IAsyncDisposable
     /// <param name="stream">The connected duplex stream.</param>
     /// <param name="family">The immutable family selected by the endpoint.</param>
     /// <param name="leaveOpen">Whether disposal leaves the transport stream open.</param>
+    /// <param name="batchWrites">Whether complete frames are buffered up to 64 KiB or 32 frames.
+    /// The session must flush at result and latency boundaries.</param>
     /// <exception cref="ArgumentNullException">The stream or family is null.</exception>
-    public ProtocolChannel(Stream stream, ProtocolMessageFamily family, bool leaveOpen = false)
+    public ProtocolChannel(Stream stream, ProtocolMessageFamily family, bool leaveOpen = false, bool batchWrites = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(family);
@@ -36,7 +38,9 @@ public sealed class ProtocolChannel : IAsyncDisposable
             foreach (byte type in capability.MessageTypes) { _requiredCapabilities[type] = capability.Name; }
         }
         Reader = new FamilyReader(ProtocolFrameReader.Create(stream, leaveOpen: true), this);
-        Writer = new FamilyWriter(ProtocolFrameWriter.Create(stream, leaveOpen: true), this);
+        Writer = new FamilyWriter(batchWrites
+            ? ProtocolFrameWriter.CreateBatched(stream, leaveOpen: true)
+            : ProtocolFrameWriter.Create(stream, leaveOpen: true), this);
     }
 
     /// <summary>Gets the family fixed when the channel was created.</summary>
@@ -114,6 +118,8 @@ public sealed class ProtocolChannel : IAsyncDisposable
     {
         private readonly ProtocolFrameReader _reader;
         private readonly ProtocolChannel _channel;
+        private readonly Action<ProtocolFrame> _consumeBorrowedFrame;
+        private Action<ProtocolFrame>? _consumer;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FamilyReader"/> class.
@@ -121,9 +127,11 @@ public sealed class ProtocolChannel : IAsyncDisposable
         /// <param name="reader">The framed reader whose frames are validated.</param>
         /// <param name="channel">The channel whose family every read identifier must belong to.</param>
         public FamilyReader(ProtocolFrameReader reader, ProtocolChannel channel)
+            : base(reader.SupportsBorrowedPayloads)
         {
             _reader = reader;
             _channel = channel;
+            _consumeBorrowedFrame = ConsumeBorrowedFrame;
         }
 
         protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
@@ -135,6 +143,23 @@ public sealed class ProtocolChannel : IAsyncDisposable
                 _channel.ValidateCapability(value.Type);
             }
             return frame;
+        }
+
+        protected override async ValueTask<bool> ReadBorrowedFrameCoreAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken)
+        {
+            _consumer = consume;
+            try
+            {
+                return await _reader.ReadBorrowedFrameAsync(_consumeBorrowedFrame, cancellationToken).ConfigureAwait(false);
+            }
+            finally { _consumer = null; }
+        }
+
+        private void ConsumeBorrowedFrame(ProtocolFrame frame)
+        {
+            _channel.Validate(frame.Type);
+            _channel.ValidateCapability(frame.Type);
+            _consumer!(frame);
         }
 
         protected override ValueTask DisposeAsyncCore() => _reader.DisposeAsync();

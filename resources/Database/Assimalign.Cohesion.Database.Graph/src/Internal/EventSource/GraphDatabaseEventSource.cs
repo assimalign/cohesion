@@ -27,13 +27,51 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// why this source writes <c>StatementParseFailed</c> for it. Every write sits
 /// behind <see cref="EventSource.IsEnabled(EventLevel, EventKeywords)"/>, and every argument that
 /// allocates is computed inside that check. The counters' backing fields are maintained whether or
-/// not anyone listens, on the accept and close transitions only, never per frame or per row.
+/// not anyone listens. Path phase counters also attribute execute, encode and send work (#1539).
 /// </para>
 /// </remarks>
 [EventSource(Name = "Assimalign.Cohesion.Database.Graph")]
 internal sealed class GraphDatabaseEventSource : EventSource
 {
     public static readonly GraphDatabaseEventSource Log = new();
+
+    private long _pathExecuteCalls;
+    private long _pathEncodeCalls;
+    private long _pathSendCalls;
+    private long _pathExecuteTicks;
+    private long _pathEncodeTicks;
+    private long _pathSendTicks;
+    private PollingCounter? _pathExecuteCounter;
+    private PollingCounter? _pathEncodeCounter;
+    private PollingCounter? _pathSendCounter;
+    private PollingCounter? _pathExecuteTimeCounter;
+    private PollingCounter? _pathEncodeTimeCounter;
+    private PollingCounter? _pathSendTimeCounter;
+
+    internal long PathExecuteCalls => Volatile.Read(ref _pathExecuteCalls);
+    internal long PathEncodeCalls => Volatile.Read(ref _pathEncodeCalls);
+    internal long PathSendCalls => Volatile.Read(ref _pathSendCalls);
+
+    [NonEvent]
+    internal void PathPhaseCompleted(Guid sessionId, int phase, long started)
+    {
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        switch (phase)
+        {
+            case 0: Interlocked.Increment(ref _pathExecuteCalls); Interlocked.Add(ref _pathExecuteTicks, elapsed); break;
+            case 1: Interlocked.Increment(ref _pathEncodeCalls); Interlocked.Add(ref _pathEncodeTicks, elapsed); break;
+            case 2: Interlocked.Increment(ref _pathSendCalls); Interlocked.Add(ref _pathSendTicks, elapsed); break;
+        }
+        if (IsEnabled(EventLevel.Verbose, Keywords.Sessions))
+        {
+            PathPhaseCompleted(sessionId, phase == 0 ? "Execute" : phase == 1 ? "Encode" : "Send",
+                elapsed * 1000.0 / Stopwatch.Frequency);
+        }
+    }
+
+    [Event(15, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "Session {0} completed path phase {1} in {2} ms.")]
+    private void PathPhaseCompleted(Guid sessionId, string phase, double durationMilliseconds)
+        => WriteEvent(15, sessionId, phase, durationMilliseconds);
 
     // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
     // carries. Each can quote what a peer sent, before authentication too,
@@ -436,6 +474,21 @@ internal sealed class GraphDatabaseEventSource : EventSource
         // Created on the first enable command and kept for the source's lifetime. The backing
         // fields are maintained whether or not anyone listens, so a tool that attaches late still
         // reads exact values.
+        _pathExecuteCounter ??= new PollingCounter("path-execute-calls", this, () => PathExecuteCalls)
+        { DisplayName = "Path Execute Calls" };
+        _pathEncodeCounter ??= new PollingCounter("path-encode-calls", this, () => PathEncodeCalls)
+        { DisplayName = "Path Encode Calls" };
+        _pathSendCounter ??= new PollingCounter("path-send-calls", this, () => PathSendCalls)
+        { DisplayName = "Path Send Calls" };
+        _pathExecuteTimeCounter ??= new PollingCounter("path-execute-milliseconds", this,
+            () => Volatile.Read(ref _pathExecuteTicks) * 1000.0 / Stopwatch.Frequency)
+        { DisplayName = "Path Execute Milliseconds" };
+        _pathEncodeTimeCounter ??= new PollingCounter("path-encode-milliseconds", this,
+            () => Volatile.Read(ref _pathEncodeTicks) * 1000.0 / Stopwatch.Frequency)
+        { DisplayName = "Path Encode Milliseconds" };
+        _pathSendTimeCounter ??= new PollingCounter("path-send-milliseconds", this,
+            () => Volatile.Read(ref _pathSendTicks) * 1000.0 / Stopwatch.Frequency)
+        { DisplayName = "Path Send Milliseconds" };
         _terminalDrainTimeoutsCounter ??= new PollingCounter("total-terminal-drain-timeouts", this, () => Volatile.Read(ref _terminalDrainTimeouts))
         {
             DisplayName = "Total Terminal Drain Timeouts",
