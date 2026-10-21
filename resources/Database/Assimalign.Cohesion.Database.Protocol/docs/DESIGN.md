@@ -177,11 +177,16 @@ miss work that moved to another thread.
 Each frame's header and payload cross the Stream boundary in one WriteAsync. The stream may
 flush on write (DuplexPipeStream does), so an explicit FlushAsync does not promise batching.
 The writer rents contiguous payload storage and returns it only after the write completes,
-including cancellation and failure; empty frames use the existing header buffer.
+including cancellation and failure, with clearArray: true because payloads include row data and
+authentication evidence; empty frames use the existing header buffer. DuplexPipeStream hides its
+PipeWriter, so writing directly into GetMemory would require a new transport surface or a broader
+pipe-based channel API. The contained stream writer retains that extra copy.
 
 After a terminal Error, every model completes connection Output before disposal can abort the
 transport send pump. A single ShutdownDrainTimeout budget covers write, flush, completion and
-peer-input drain. Hard abort or expiry aborts blocked transport I/O, which teardown joins before
+peer-input drain. After output completion, a separate TerminalDrainLinger (two seconds by default)
+bounds the peer-close wait; an unread pooled notice does not consume the whole outer budget.
+Both timer options are positive, finite and within the runtime timer range. Hard abort or expiry aborts blocked transport I/O, which teardown joins before
 releasing its registrations and connection. Soft stop allows the shutdown notice to drain.
 Over-capacity rejections use the same close sequence and remain tracked until disposal ends.
 This is a server-side rule over the existing Connections contract, independent of #1086.

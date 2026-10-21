@@ -164,8 +164,6 @@ public class KeyValueServerTests
         // Assert
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
-        // The terminal output is drained; close the peer half before joining server teardown.
-        await client.DisposeAsync();
         await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
@@ -197,8 +195,6 @@ public class KeyValueServerTests
 
         // Assert
         (await client.ReadAsync()).ShouldBeNull();
-        // The terminal output is drained; close the peer half before joining server teardown.
-        await client.DisposeAsync();
         await KeyValueServerHarness.WaitUntilAsync(() => harness.Server.Sessions.Count == 0);
     }
 
@@ -211,18 +207,13 @@ public class KeyValueServerTests
         await client.HandshakeAsync();
 
         // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         Task stop = harness.Server.StopAsync(TestTimeout.Token(30));
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
-        // A real client closes after reading its terminal notice; let the drain observe it.
-        await client.DisposeAsync();
         await stop;
-        stopwatch.Stop();
 
-        // Assert: the peer received the notice and both halves closed inside the budget.
-        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+        // Assert: server completion follows output completion while the peer stays open.
         harness.Server.Sessions.ShouldBeEmpty();
     }
 

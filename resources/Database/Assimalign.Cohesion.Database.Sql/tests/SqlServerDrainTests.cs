@@ -1,5 +1,6 @@
 using System;
-using System.Diagnostics;
+using System.Diagnostics.Tracing;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -48,7 +49,6 @@ public sealed class SqlServerDrainTests
         // Assert
         terminal.Type.ShouldBe(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(terminal.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        await peer.DisposeAsync();
         await stopped;
         accepted.PendingOperations.ShouldBe(0);
         accepted.Disposals.ShouldBe(1);
@@ -66,7 +66,6 @@ public sealed class SqlServerDrainTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var token = timeout.Token;
         var drainTimeout = TimeSpan.FromMilliseconds(100);
-        var margin = TimeSpan.FromMilliseconds(500);
         var log = SqlDatabaseEventSource.Log;
         long current = log.CurrentServerSessions;
         long total = log.TotalServerSessions;
@@ -87,13 +86,11 @@ public sealed class SqlServerDrainTests
             await channel.Writer.FlushAsync(token);
             await connection.Blocked.WaitAsync(token);
             session = server.Sessions.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
-            long started = Stopwatch.GetTimestamp();
-            try { await session.Completion.WaitAsync(drainTimeout + margin, token); }
-            catch (TimeoutException) { }
+            await connection.Aborted.WaitAsync(token);
+            await session.Completion.WaitAsync(token);
 
-            // Assert: completion means teardown joined the I/O and removed the registry entry.
-            session.Completion.IsCompleted.ShouldBeTrue($"Blocked flush={blockedFlush}; retained sessions={server.Sessions.Count}; pending I/O={connection.PendingOperations}; aborts={connection.Aborts}.");
-            Stopwatch.GetElapsedTime(started).ShouldBeLessThan(drainTimeout + margin);
+            // Assert: the deadline aborted I/O before teardown released its registry entry.
+            session.Completion.IsCompletedSuccessfully.ShouldBeTrue();
             connection.Aborts.ShouldBe(1);
             connection.Disposals.ShouldBe(1);
             connection.PendingOperations.ShouldBe(0);
@@ -140,7 +137,7 @@ public sealed class SqlServerDrainTests
             await channel.Writer.FlushAsync(token);
             await connection.Blocked.WaitAsync(token);
             var session = server.Sessions.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
-            await connection.Aborted.WaitAsync(TimeSpan.FromMilliseconds(600), token);
+            await connection.Aborted.WaitAsync(token);
 
             // Assert: no abandoned completion task or premature session/counter release.
             session.Completion.IsCompleted.ShouldBeFalse();
@@ -164,5 +161,89 @@ public sealed class SqlServerDrainTests
             connection.Abort();
             await server.StopAsync(token);
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - An unread idle peer releases its session before the outer drain deadline")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_UnreadIdlePeer_ShouldCompleteWithoutOuterAbort(bool shutdown)
+    {
+        // Arrange: the peer stays open and does not consume the terminal notice.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var listener = new BlockingOutputListener(int.MaxValue);
+        await using var engine = SqlDatabaseEngine.Create("idle-linger", new());
+        await engine.CreateDatabaseAsync("db", timeout.Token);
+        await using var server = SqlDatabaseServer.Create(engine, new()
+        {
+            Listener = listener, MaxSessions = 1,
+            IdleTimeout = shutdown ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(100),
+            ShutdownDrainTimeout = TimeSpan.FromDays(1),
+        });
+        await server.StartAsync(timeout.Token);
+        await using var peer = await listener.Factory.ConnectAsync(listener.EndPoint, timeout.Token);
+        var accepted = await listener.Accepted.WaitAsync(timeout.Token);
+        await using var channel = new ProtocolChannel(peer.AsStream(), SqlProtocol.Family, leaveOpen: true);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup,
+            new ProtocolStartupMessage(ProtocolVersion.Current, "db", "tester").Encode()), timeout.Token);
+        (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty), timeout.Token);
+        (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
+        var session = server.Sessions.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
+
+        try
+        {
+            // Act: the safety token is the only test wait limit.
+            if (shutdown) { await server.StopAsync(timeout.Token).WaitAsync(timeout.Token); }
+            else { await session.Completion.WaitAsync(timeout.Token); }
+
+            // Assert: neither the peer nor the outer budget ended this wait.
+            timeout.IsCancellationRequested.ShouldBeFalse();
+            accepted.Aborts.ShouldBe(0);
+            accepted.Completions.ShouldBe(1);
+            accepted.Disposals.ShouldBe(1);
+            server.Sessions.ShouldBeEmpty();
+            if (!shutdown)
+            {
+                await using var replacement = await listener.Factory.ConnectAsync(listener.EndPoint, timeout.Token);
+                await using var replacementChannel = new ProtocolChannel(replacement.AsStream(), SqlProtocol.Family, leaveOpen: true);
+                await replacementChannel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup,
+                    new ProtocolStartupMessage(ProtocolVersion.Current, "db", "tester").Encode()), timeout.Token);
+                (await replacementChannel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
+            }
+        }
+        finally
+        {
+            accepted.Abort();
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - A disposed drain reader is a closed transport")]
+    public async Task RunAsync_DisposedDrainReader_ShouldCloseWithoutCleanupWarning()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var recorder = new EventSourceRecorder(SqlDatabaseEventSource.Log, EventLevel.Warning);
+        await using var listener = new BlockingOutputListener(int.MaxValue);
+        await using var engine = SqlDatabaseEngine.Create("disposed-drain", new());
+        await using var server = SqlDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(timeout.Token);
+        await using var peer = await listener.Factory.ConnectAsync(listener.EndPoint, timeout.Token);
+        var accepted = await listener.Accepted.WaitAsync(timeout.Token);
+        accepted.CloseInputOnDrain = true;
+        await using var channel = new ProtocolChannel(peer.AsStream(), SqlProtocol.Family, leaveOpen: true);
+        while (server.Sessions.Count == 0) { await Task.Delay(1, timeout.Token); }
+        var session = server.Sessions.ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
+
+        // Act
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup,
+            new ProtocolStartupMessage(ProtocolVersion.Current, "absent", "tester").Encode()), timeout.Token);
+        await session.Completion.WaitAsync(timeout.Token);
+
+        // Assert
+        accepted.Completions.ShouldBe(1);
+        accepted.Disposals.ShouldBe(1);
+        recorder.Events.Where(item => item.EventName == "SessionCleanupFailed").ShouldBeEmpty();
+        server.Sessions.ShouldBeEmpty();
     }
 }

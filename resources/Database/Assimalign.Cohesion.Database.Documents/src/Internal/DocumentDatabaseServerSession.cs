@@ -50,6 +50,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     private DocumentDatabaseSession? _databaseSession;
     private bool _terminalResponseWritten;
     private CancellationTokenSource? _terminalDrainSource;
+    private CancellationTokenSource? _terminalDeadlineSource;
     private CancellationTokenRegistration _terminalDrainRegistration;
     private Task _completion = Task.CompletedTask;
     private string _closeReason = DocumentDatabaseEventSource.CloseReason.Unknown;
@@ -104,11 +105,17 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     /// Tears the session down immediately: cancels any in-flight execution and
     /// aborts the connection (the drain-budget escalation path).
     /// </summary>
-    internal void Abort()
+    internal void Abort() => Abort(terminalDeadline: false);
+
+    private void Abort(bool terminalDeadline)
     {
         // The drain deadline, connection close and hard abort can converge here. Claim abort
         // before cancelling the lifetime, whose linked terminal deadline calls back here too.
         if (Interlocked.Exchange(ref _abortRequested, 1) != 0) { return; }
+        if (terminalDeadline)
+        {
+            DocumentDatabaseEventSource.Log.TerminalDrainTimedOut(this, _options.ShutdownDrainTimeout);
+        }
         try
         {
             _lifetimeSource.Cancel();
@@ -194,12 +201,13 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             await DrainTerminalResponseAsync().ConfigureAwait(false);
             // A token-aware write can resume the pump inline while cancellation callbacks are
             // still running. Abort here too, before detaching a callback that has not run yet.
-            if (_terminalDrainSource?.IsCancellationRequested == true) { Abort(); }
+            if (_terminalDeadlineSource?.IsCancellationRequested == true) { OnTerminalDrainDeadline(); }
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);
             await _terminalDrainRegistration.DisposeAsync().ConfigureAwait(false);
             _terminalDrainSource?.Dispose();
+            _terminalDeadlineSource?.Dispose();
             await CleanupAsync().ConfigureAwait(false);
         }
     }
@@ -659,9 +667,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             // transports whose write/flush ignores tokens or whose completion has no token.
             if (_terminalDrainSource is null)
             {
-                _terminalDrainSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token);
-                _terminalDrainRegistration = _terminalDrainSource.Token.Register(static state => ((DocumentDatabaseServerSession)state!).Abort(), this);
-                _terminalDrainSource.CancelAfter(_options.ShutdownDrainTimeout);
+                _terminalDeadlineSource = new CancellationTokenSource();
+                _terminalDrainSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token, _terminalDeadlineSource.Token);
+                _terminalDrainRegistration = _terminalDeadlineSource.Token.Register(static state => ((DocumentDatabaseServerSession)state!).OnTerminalDrainDeadline(), this);
+                _terminalDeadlineSource.CancelAfter(_options.ShutdownDrainTimeout);
             }
             await WriteErrorAsync(code, message, _terminalDrainSource.Token).ConfigureAwait(false);
             _terminalResponseWritten = true;
@@ -730,6 +739,10 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         _ => null,
     };
 
+    // Claim the same abort transition as hard stop. A deadline that loses that race
+    // cannot report a second cause for an already aborted transport.
+    private void OnTerminalDrainDeadline() => Abort(terminalDeadline: true);
+
     private async ValueTask DrainTerminalResponseAsync()
     {
         if (!_terminalResponseWritten) { return; }
@@ -741,17 +754,19 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             // the abort registrations while joining completion: cancellation must abort the
             // transport, not abandon a pending operation that still owns its output.
             await _connection.Output.CompleteAsync().ConfigureAwait(false);
-            // The frame reader has exited. Consume pending peer input so receive
-            // back-pressure cannot hide the peer's close. Soft stop triggers the notice;
-            // only hard abort or the terminal deadline cuts its delivery short.
+            // Output is complete. Bound the peer-close wait separately so an unread
+            // pooled notice cannot hold StopAsync or a session slot for the outer budget.
+            using var linger = CancellationTokenSource.CreateLinkedTokenSource(_terminalDrainSource!.Token);
+            linger.CancelAfter(_options.TerminalDrainLinger);
             while (true)
             {
-                var result = await _connection.Input.ReadAsync(_terminalDrainSource!.Token).ConfigureAwait(false);
+                var result = await _connection.Input.ReadAsync(linger.Token).ConfigureAwait(false);
                 _connection.Input.AdvanceTo(result.Buffer.End);
                 if (result.IsCompleted || result.IsCanceled) { break; }
             }
         }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { /* Output completion can close a TLS reader. */ }
         catch (Exception exception) when (TransportCloseReason(exception) is not null)
         {
             // A terminal peer can reset or abort after consuming its error frame.

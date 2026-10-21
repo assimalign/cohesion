@@ -55,6 +55,13 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
     /// <summary>Every wire command parse failure, including suppressed and disabled events.</summary>
     internal long TotalStatementParseFailures => Volatile.Read(ref _statementParseFailures);
 
+    private PollingCounter? _terminalDrainTimeoutsCounter;
+    private long _terminalDrainTimeouts;
+    private long _lastTerminalDrainWarning;
+    private int _suppressedTerminalDrainWarnings;
+
+    internal long TotalTerminalDrainTimeouts => Volatile.Read(ref _terminalDrainTimeouts);
+
     private KeyValueDatabaseEventSource()
     {
     }
@@ -348,6 +355,29 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
     private void StatementParseFailed(Guid sessionId, string database, string code, string exceptionType, int suppressedCount)
         => WriteEvent(10, sessionId, database, code, exceptionType, suppressedCount);
 
+    [NonEvent]
+    public void TerminalDrainTimedOut(DatabaseServerSession session, TimeSpan drainTimeout)
+    {
+        Interlocked.Increment(ref _terminalDrainTimeouts);
+        if (!IsEnabled(EventLevel.Warning, EventKeywords.None)) { return; }
+
+        long now = Stopwatch.GetTimestamp();
+        long last = Volatile.Read(ref _lastTerminalDrainWarning);
+        if ((last != 0 && now - last < Stopwatch.Frequency)
+            || Interlocked.CompareExchange(ref _lastTerminalDrainWarning, now, last) != last)
+        {
+            Interlocked.Increment(ref _suppressedTerminalDrainWarnings);
+            return;
+        }
+
+        TerminalDrainTimedOut(session.Id, drainTimeout.TotalMilliseconds,
+            Interlocked.Exchange(ref _suppressedTerminalDrainWarnings, 0));
+    }
+
+    [Event(12, Level = EventLevel.Warning, Message = "Session {0} exceeded its {1} ms terminal drain deadline; aborting transport ({2} warnings suppressed).")]
+    private void TerminalDrainTimedOut(Guid sessionId, double drainTimeoutMilliseconds, int suppressedCount)
+        => WriteEvent(12, sessionId, drainTimeoutMilliseconds, suppressedCount);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
@@ -362,6 +392,10 @@ internal sealed class KeyValueDatabaseEventSource : EventSource
         _statementParseFailuresCounter ??= new PollingCounter("total-statement-parse-failures", this, () => Volatile.Read(ref _statementParseFailures))
         {
             DisplayName = "Total Statement Parse Failures",
+        };
+        _terminalDrainTimeoutsCounter ??= new PollingCounter("total-terminal-drain-timeouts", this, () => Volatile.Read(ref _terminalDrainTimeouts))
+        {
+            DisplayName = "Total Terminal Drain Timeouts",
         };
         _currentSessionsCounter ??= new PollingCounter("current-server-sessions", this, () => Volatile.Read(ref _currentSessions))
         {

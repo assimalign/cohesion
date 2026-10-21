@@ -68,6 +68,9 @@ public sealed class GraphDatabaseServer : DatabaseServer
             throw new ArgumentException("The session limit must be positive.", nameof(options));
         }
 
+        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
+        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+
         _engine = engine;
         _options = options;
         _listener = options.Listener;
@@ -99,6 +102,7 @@ public sealed class GraphDatabaseServer : DatabaseServer
     /// </param>
     /// <returns>The server.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="engine"/> or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The drain timeout or peer-close linger is not positive and finite within the runtime timer range.</exception>
     /// <exception cref="ArgumentException">Thrown when the options carry no listener or a non-positive session limit.</exception>
     public static GraphDatabaseServer Create(GraphDatabaseEngine engine, GraphDatabaseServerOptions options)
     {
@@ -254,9 +258,10 @@ public sealed class GraphDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken hardAbort)
+    internal async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken hardAbort)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(hardAbort, connection.ConnectionClosed);
+        CancellationTokenSource? deadline = null;
+        CancellationTokenRegistration abort = default;
         int abortRequested = 0;
         void AbortConnection()
         {
@@ -266,10 +271,11 @@ public sealed class GraphDatabaseServer : DatabaseServer
             try { connection.Abort(); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
         }
-        using CancellationTokenRegistration abort = deadline.Token.Register(AbortConnection);
-        deadline.CancelAfter(_options.ShutdownDrainTimeout);
         try
         {
+            deadline = CancellationTokenSource.CreateLinkedTokenSource(hardAbort, connection.ConnectionClosed);
+            abort = deadline.Token.Register(AbortConnection);
+            deadline.CancelAfter(_options.ShutdownDrainTimeout);
             var stream = connection.AsStream();
             await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
@@ -279,9 +285,11 @@ public sealed class GraphDatabaseServer : DatabaseServer
             // Complete output before disposal can abort the send pump. One deadline covers
             // write, flush, completion and peer drain; its callback releases tokenless I/O.
             await connection.Output.CompleteAsync().ConfigureAwait(false);
+            using var linger = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            linger.CancelAfter(_options.TerminalDrainLinger);
             while (true)
             {
-                ReadResult result = await connection.Input.ReadAsync(deadline.Token).ConfigureAwait(false);
+                ReadResult result = await connection.Input.ReadAsync(linger.Token).ConfigureAwait(false);
                 connection.Input.AdvanceTo(result.Buffer.End);
                 if (result.IsCompleted || result.IsCanceled) { break; }
             }
@@ -292,9 +300,10 @@ public sealed class GraphDatabaseServer : DatabaseServer
         }
         finally
         {
-            if (deadline.IsCancellationRequested) { AbortConnection(); }
+            if (deadline?.IsCancellationRequested == true) { AbortConnection(); }
             // Join cancellation callbacks before releasing the transport they can abort.
             await abort.DisposeAsync().ConfigureAwait(false);
+            deadline?.Dispose();
             try { await connection.DisposeAsync().ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
             finally
@@ -303,6 +312,12 @@ public sealed class GraphDatabaseServer : DatabaseServer
                 _rejections.TryRemove(id, out _);
             }
         }
+    }
+
+    private static void ValidateDrainTimeout(TimeSpan value, string name)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
     }
 
     internal void OnSessionCompleted(GraphDatabaseServerSession session)

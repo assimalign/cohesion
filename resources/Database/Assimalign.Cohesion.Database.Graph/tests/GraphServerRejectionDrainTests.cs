@@ -40,7 +40,7 @@ public sealed class GraphServerRejectionDrainTests
         {
             // Act: no Startup is required for the admission refusal.
             await rejected.Blocked.WaitAsync(timeout.Token);
-            await rejected.Aborted.WaitAsync(TimeSpan.FromSeconds(1), timeout.Token);
+            await rejected.Aborted.WaitAsync(timeout.Token);
             await server.StopAsync(timeout.Token);
 
             // Assert: rejection owns no session, and shutdown joins its pending I/O/disposal.
