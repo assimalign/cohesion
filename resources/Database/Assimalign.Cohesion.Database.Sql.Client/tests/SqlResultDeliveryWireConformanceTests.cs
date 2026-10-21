@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,6 +63,40 @@ public sealed class SqlResultDeliveryWireConformanceTests
             await using var observer = await harness.Client.ConnectAsync(timeout.Token);
             (await observer.QueryAsync("SELECT id FROM users ORDER BY id", cancellationToken: timeout.Token)).Count.ShouldBe(3);
         }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Result delivery: SELECT and RETURNING exceed 64 MiB without an aggregate cap")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_ResultAbove64MiB_ShouldSucceed(bool returning)
+    {
+        // Arrange: sixty-five 1 MiB strings exceed the former cap; every row fits one frame.
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(CancellationToken.None);
+        await connection.ExecuteAsync("CREATE TABLE large_results(id INT)", cancellationToken: CancellationToken.None);
+        const string source = "WITH c AS (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 " +
+            "UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) ";
+        string statement = returning
+            ? source + "INSERT INTO large_results SELECT (a.n - 1) * 9 + b.n FROM c a CROSS JOIN c b LIMIT 65 RETURNING @payload AS payload"
+            : source + "SELECT @payload AS payload FROM c a CROSS JOIN c b LIMIT 65";
+
+        // Act
+        var rows = await connection.QueryAsync(statement, new Dictionary<string, object?> { ["payload"] = new string('x', 1048576) }, cancellationToken: CancellationToken.None);
+
+        // Assert: the deterministic row count and payload lengths exceed 64 MiB without timing checks.
+        rows.Count.ShouldBe(65);
+        long payloadBytes = 0;
+        foreach (var row in rows)
+        {
+            string payload = row.GetString(0);
+            payload.Length.ShouldBe(1048576);
+            payload[0].ShouldBe('x');
+            payload[^1].ShouldBe('x');
+            payloadBytes += payload.Length;
+        }
+        payloadBytes.ShouldBeGreaterThan(64L * 1024 * 1024);
+        (await connection.QueryAsync("SELECT id FROM large_results", cancellationToken: CancellationToken.None)).Count.ShouldBe(returning ? 65 : 0);
+        (await connection.QueryAsync("SELECT 42", cancellationToken: CancellationToken.None))[0].GetInt32(0).ShouldBe(42);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Result header: a repeated MiB CTE alias is a reusable statement error")]
