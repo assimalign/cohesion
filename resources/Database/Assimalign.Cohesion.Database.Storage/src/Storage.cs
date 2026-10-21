@@ -1772,6 +1772,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             currentWritePage = _currentWritePages.TryGetValue(ownerId, out var current) ? current : null;
         }
 
+        OwnerPageIdsReadForWrite?.Invoke();
+
         // The current write page may have been freed since the last insert.
         if (currentWritePage is null || !TryTouchPage(owner, currentWritePage.Value, out var currentHandle))
         {
@@ -2194,6 +2196,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             }
             pages = batch.ToArray();
         }
+
+        OwnerPageIdsReadForWrite?.Invoke();
 
         foreach (long pageId in pages)
         {
@@ -3008,6 +3012,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         return handle;
     }
+
+    // Test rendezvous after an owner-directory read, with _ownerLock released.
+    internal Action? OwnerPageIdsReadForWrite;
 
     // Test rendezvous after the pin, before the allocation is revalidated and locked.
     // No map or pool monitor is held; a handler may complete a different bracket.
