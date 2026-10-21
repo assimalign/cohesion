@@ -114,6 +114,17 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
 
     internal bool HasStorageFailure => _storageFailure is not null;
 
+    internal async ValueTask AbortResultDeliveryAsync(Exception cause)
+    {
+        try { await AbortAsync(cause).ConfigureAwait(false); }
+        catch (Exception abortFailure) when (abortFailure is not OutOfMemoryException)
+        {
+            // Preserve the result failure while recording a secondary rollback failure, just as
+            // storage-failure abort does. AbortAsync records the cause before attempting rollback.
+            SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, abortFailure);
+        }
+    }
+
     internal Exception RecordStorageFailure(Exception cause)
     {
         _storageFailure ??= cause;

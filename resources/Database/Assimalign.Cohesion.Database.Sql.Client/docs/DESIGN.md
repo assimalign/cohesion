@@ -300,6 +300,13 @@ and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures
 keep the connection reusable.
 
+An ExecutionFailure after ResultHeader or ResultRow also completes the statement (#1651).
+The exchange discards buffered columns and rows, retains diagnostics and the original error,
+and marks the response complete so the same connection remains usable. Uncoded result-delivery
+failures and oversized wire rows use COHSQLE045. An explicit transaction is aborted and requires
+ROLLBACK; an autocommit RETURNING write remains committed even when delivery fails. ParseFailure
+after result frames and terminal errors still invalidate the rental.
+
 Application function cancellation follows the statement token (#1419): an
 `OperationCanceledException` from a scalar, any aggregate phase or a domain CHECK is
 `COHSQLE007`, naming the function, unless the server statement's own token is canceled.

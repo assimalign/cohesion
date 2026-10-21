@@ -24,6 +24,14 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
+ExecutionFailure may follow ResultHeader and any number of ResultRow frames when
+enumeration, encoding or result disposal fails. It ends the statement: the client
+discards all partial columns and rows and can reuse the connection. Uncoded delivery
+failures, including an encoded row over the 16 MiB payload limit, carry COHSQLE045;
+already-coded enumeration failures retain their diagnostics. Diagnostics, when
+negotiated, still immediately precede Error. An open explicit transaction is aborted
+and must be rolled back before further statements. An autocommit write whose RETURNING
+delivery fails has already committed: the failure does not undo those writes (#1651).
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
 sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
 `COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more

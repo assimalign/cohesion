@@ -32,8 +32,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>A statement is statement-atomic.</b> Inside an explicit transaction, a statement that fails
-/// writes nothing and leaves the transaction active; the session never aborts its transaction for
-/// a failed statement (the owner's 2026-10-04 per-statement decision). A statement is admitted
+/// writes nothing and leaves the transaction active (the owner's 2026-10-04 per-statement decision).
+/// A later wire result-delivery failure aborts the explicit transaction (#1651). A statement is admitted
 /// into the transaction through the base's operation admission, so a commit cannot start while it
 /// runs, and a transaction that refuses work (its commit or rollback is running, or the kernel
 /// ended it under its caller) refuses the statement. Statements do not hold the session (the
@@ -157,6 +157,25 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     }
 
     internal Action<long, long?>? ProvisioningProgress { get; set; }
+
+    // Result delivery runs after execution released statement admission. Take the session operation
+    // gate before reading its transaction, then take the transaction's end gate during abort. The
+    // root session latch is released before transaction/kernel work; no latch spans an await.
+    internal async ValueTask AbortResultDeliveryAsync(Exception cause)
+    {
+        bool held;
+        try { held = TryEnterOperation(); }
+        catch (DatabaseException) when (State == SessionState.Closed) { return; }
+        if (!held) { return; }
+        try
+        {
+            if (CurrentTransaction is { } transaction)
+            {
+                await transaction.AbortResultDeliveryAsync(cause).ConfigureAwait(false);
+            }
+        }
+        finally { ExitOperation(); }
+    }
 
     // Test-only observation of the real timer token, so commit-boundary proofs await its expiry.
     internal Action<CancellationToken>? StatementTimerArmed { get; set; }

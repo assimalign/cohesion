@@ -27,6 +27,15 @@ successful-statement allocation behavior is unchanged.
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
+Result delivery belongs to the statement error boundary (#1651), including enumeration,
+header/row encoding and result disposal before completion. Uncoded failures and rows exceeding
+the 16 MiB wire payload limit use COHSQLE045; coded enumeration failures retain their diagnostics.
+ExecutionFailure can follow partial result frames and leaves the session ready. The explicit
+transaction is aborted under the session operation gate, then the transaction end gate, without
+holding the root session latch across kernel work; ROLLBACK clears the faulted transaction.
+Autocommit RETURNING has already committed before delivery, so a delivery failure leaves its
+writes committed. Transport failures and malformed incoming parameters retain terminal handling.
+
 
 ## Model component boundaries
 

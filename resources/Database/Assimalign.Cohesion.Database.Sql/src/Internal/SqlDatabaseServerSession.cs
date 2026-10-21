@@ -78,7 +78,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
     /// </summary>
     internal Task Completion => _completion;
 
-    // Owning-assembly test seam for result diagnostics until SQL produces a success warning.
+    // Owning-assembly test seam for result diagnostics and late result failures.
     internal Func<DatabaseResult>? ExecuteResultOverride { get; set; }
 
     /// <summary>
@@ -457,9 +457,35 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             return;
         }
 
+        try
+        {
+            await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException)
+        {
+            // Enumeration and encoding can fail after rows have reached the peer. ExecutionFailure
+            // ends that statement; transport/framing failures still belong to the terminal pump.
+            var failure = exception is DatabaseException databaseFailure &&
+                databaseFailure.Diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code))
+                ? databaseFailure : ResultDeliveryFailure(ErrorMessages.ResultDeliveryFailed, exception);
+            await _databaseSession!.AbortResultDeliveryAsync(failure).ConfigureAwait(false);
+            var diagnostic = failure.Diagnostics.First(item => item.Severity == DiagnosticSeverity.Error && !string.IsNullOrEmpty(item.Code));
+            string errorText = failure.Message.StartsWith(diagnostic.Code + ":", StringComparison.Ordinal)
+                ? failure.Message : $"{diagnostic.Code}: {failure.Message}";
+            await WriteDiagnosticsAsync(PrepareDiagnostics(failure.Diagnostics), cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static DatabaseException ResultDeliveryFailure(string message, Exception? cause = null)
+        => new(message, [new Diagnostic { Code = "COHSQLE045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
+
+    private async Task WriteResultAsync(DatabaseResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
+    {
         byte[]? diagnosticPayload = PrepareDiagnostics(result.Diagnostics);
         if (result is DatabaseResultSet resultSet)
         {
+            long affectedCount;
             await using (resultSet.ConfigureAwait(false))
             {
                 var columns = new List<(string Name, byte Type, int? MaxLength)>(resultSet.Columns.Count);
@@ -478,18 +504,23 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                     for (int ordinal = 0; ordinal < row.FieldCount; ordinal++)
                     {
                         DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
+                        if (rowWriter.Length > ProtocolFrameHeader.MaxPayloadLength)
+                        {
+                            // Refuse before the frame writer: its ProtocolException means a real
+                            // wire violation and would terminate this otherwise usable session.
+                            throw ResultDeliveryFailure(ErrorMessages.ResultRowTooLarge);
+                        }
                     }
 
                     await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
-
-                // Evidence-driven fix kept from the (since-reversed) shared-core
-                // extraction: ResultComplete carries the set's real AffectedCount
-                // (SELECT sets report -1; RETURNING sets report their write count).
-                await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
-                await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+                affectedCount = resultSet.AffectedCount;
             }
 
+            // Dispose before publishing completion: a failed release must still end with Error.
+            // SELECT reports -1; RETURNING preserves the write's actual affected count.
+            await WriteDiagnosticsAsync(diagnosticPayload, cancellationToken).ConfigureAwait(false);
+            await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(affectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             return;
         }
 

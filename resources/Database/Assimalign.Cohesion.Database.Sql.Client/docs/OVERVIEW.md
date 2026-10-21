@@ -31,6 +31,9 @@ The model reference supplies wire codecs; the client never calls its parser.
   with widening numeric getters.
 - `SqlClientException` + `SqlClientErrorKind`: a SQL-scoped failure taxonomy mapped
   from the core's wire codes, with a `ConnectionUsable` flag.
+  ExecutionFailure can end a partial result: QueryAsync throws and discards all partial
+  rows while keeping the connection usable. An explicit transaction then requires ROLLBACK;
+  an autocommit RETURNING write remains committed (#1651).
 - `SqlClientObserver`: an abstract, allocation-free telemetry hook fired around every
   command; an observer overrides only the hooks it needs.
 

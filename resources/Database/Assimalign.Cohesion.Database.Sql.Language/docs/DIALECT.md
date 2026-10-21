@@ -3112,6 +3112,7 @@ pin in the same change.
 | `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
 | `COHSQLE043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
 | `COHSQLE044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as COHSQLE043 (#1231) |
+| `COHSQLE045` | Error | Result delivery failed, including an encoded row exceeding the 16 MiB wire payload limit; ExecutionFailure ends the statement after any partial rows, which the client discards. The connection remains usable; an explicit transaction is aborted and requires ROLLBACK. An autocommit RETURNING write remains committed (#1651). |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
