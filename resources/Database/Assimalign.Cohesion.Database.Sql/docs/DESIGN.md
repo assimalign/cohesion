@@ -3577,6 +3577,22 @@ description + exported registrations), the engine binds them.
 
 ## Engine-owned background workers
 
+The worker resilience tests observe Storage event 8 (PendingCommitsFlushed) for each create
+and reopen and require no event 9 (GroupCommitWindowMissed). This proves the worker served
+construction without a wall-clock latency assertion. Reopen receives an unproven writer so its
+recovery scrub must commit; an unchanged clean open may require no grouped flush.
+The listener filters process-wide events by names reserved to the SQL worker resilience
+suite, including its failing, healthy and provisional databases, to prevent cross-test matches.
+
+The group-commit flusher serves both published databases and provisional file sets (#1275).
+It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
+without taking the engine lock: create/open holds that lock while its construction commits wait
+on the durability gate. Published instances retain per-database failure/backoff handling.
+Provisional offline storages are skipped, disposed storages from failed construction are tolerated,
+and other provisional flush errors reach the constructing commit without a worker failure record.
+Only SQL and Key-Value use this provisional pass; Documents, Blob and Graph retain self-help
+while opening.
+
 The engine is a **data machine**: `Create(name, options)` returns it operational, with
 the six-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
@@ -3587,9 +3603,9 @@ the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its c
 attaches the six built-in workers through the base's `AttachWorker`, which starts each pump on a
 thread named for the worker, and the base stops the pumps and releases the workers on disposal
 (the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
-Each worker iterates a lock-free snapshot of every open storage file set (data +
-catalog per database, rebuilt when databases open/close; passes tolerate racing
-a drop):
+Workers iterate lock-free snapshots of published databases, rebuilt when databases
+open or close; passes tolerate racing a drop. The group-commit flusher also serves
+the provisional storage snapshot described above:
 
 - **`SqlWriteAheadFlushWorker`** — signal-driven group-commit flusher. Every open
   storage's `OnCommitPending` hook sets one engine-level event; a pass resets the
@@ -4855,6 +4871,24 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 `DatabaseException` (area root) for everything user-facing: plan-time
 validation and execution errors. Named integrity violations use
 `SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
@@ -4981,9 +5015,11 @@ from the row fetch as "the row was reclaimed beneath its entry" and dropped the
 row. Only a reclaimed row is skipped now, through the positive check
 `Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
 PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
-`ERRCODE_DATA_CORRUPTED` for an invalid page. The engine does not wrap these
-storage errors in a `DatabaseException` yet, so over the wire one reaches the
-client as `Internal` and closes the session ("Session state machine", above).
+`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
+database and page, and reaches the wire as `ExecutionFailure` without closing the session.
+Other I/O failures retain their existing handling.
+The read-only creation emptiness probe uses the same wrapped-corruption search before its
+I/O catch, so direct, coded and aggregate corruption all refuse adoption of incomplete files.
 The scan had the opposite defect: the version purge deleting a slot, or freeing
 a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
 a `SELECT` without a seek) failed the statement with "Cannot read a deleted

@@ -106,7 +106,7 @@ public sealed class StoragePageManager
     /// <param name="pageId">The identifier of the page to free.</param>
     /// <exception cref="StorageIOException">The page is page 0, the file header, which is never allocated or freed.</exception>
     /// <remarks>
-    /// The free is not journaled: the page is rewritten as <see cref="PageType.Free"/> and written
+    /// The free is not journaled: the page is rewritten as <see cref="PageType.Reclaimed"/> and written
     /// back at once, outside any storage transaction. A crash before the next checkpoint therefore
     /// rebuilds the page from its journal records, as it stood before the free. Storage
     /// transactions free pages through the storage's record operations, which are journaled.
@@ -123,7 +123,7 @@ public sealed class StoragePageManager
             var page = handle.Page;
             new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = (long)pageId;
-            page.Type = PageType.Free;
+            page.Type = PageType.Reclaimed;
             handle.MarkDirty();
         }
 

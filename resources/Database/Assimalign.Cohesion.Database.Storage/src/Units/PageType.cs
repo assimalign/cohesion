@@ -6,13 +6,13 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <remarks>
 /// The page type is persisted in the page header, so values are append-only and never
 /// renumbered. <see cref="Free"/> is deliberately zero: a zero-initialized page reads
-/// as free, and freed pages are re-stamped with this value so the free-space map can
+/// as free, while reclaimed pages use a distinct nonzero type so the free-space map can
 /// be reconstructed by scanning page headers when a storage file is reopened.
 /// </remarks>
 public enum PageType : byte
 {
     /// <summary>
-    /// An unallocated (free) page available for reuse.
+    /// An entirely zero-filled, never-initialized page available for reuse.
     /// </summary>
     Free = 0,
 
@@ -64,4 +64,10 @@ public enum PageType : byte
     /// transaction.
     /// </summary>
     CheckpointAnchor = 9,
+
+    /// <summary>
+    /// A reclaimed page, available for reuse, with checksummed metadata (storage format 4).
+    /// Unlike <see cref="Free"/>, this page may contain nonzero header and body bytes.
+    /// </summary>
+    Reclaimed = 10,
 }

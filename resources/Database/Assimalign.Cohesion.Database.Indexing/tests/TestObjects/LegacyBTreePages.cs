@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
+using System.Numerics;
 
 using Assimalign.Cohesion.Database.Storage;
 
@@ -92,8 +93,8 @@ public static class LegacyBTreePages
 
     /// <summary>
     /// Applies <paramref name="rewrite"/> to every format-2 node page of a closed data
-    /// file and clears each rewritten page's checksum (a zero checksum reads as never
-    /// stamped, so the storage layer loads the page without verifying it).
+    /// file and recomputes its format-4 page checksum, so the test isolates the B-tree
+    /// format refusal from physical page corruption.
     /// </summary>
     /// <returns>The number of pages rewritten.</returns>
     public static int RewriteIndexPages(string dataFilePath, BodyRewriter rewrite)
@@ -110,12 +111,25 @@ public static class LegacyBTreePages
             }
 
             rewrite(page[PageHeaderSize..]);
-            page.Slice(checksumOffset, 4).Clear();
+            StampChecksum(page);
             rewritten++;
         }
 
         File.WriteAllBytes(dataFilePath, file);
         return rewritten;
+    }
+
+    // Test-local encoding through the public BCL CRC primitive: no storage-internals grant.
+    private static void StampChecksum(Span<byte> page)
+    {
+        uint checksum = uint.MaxValue;
+        for (int index = 0; index < page.Length; index++)
+        {
+            byte value = index >= checksumOffset && index < checksumOffset + sizeof(uint) ? (byte)0 : page[index];
+            checksum = BitOperations.Crc32C(checksum, value);
+        }
+        checksum = ~checksum;
+        BinaryPrimitives.WriteUInt32LittleEndian(page[checksumOffset..], checksum == 0 ? uint.MaxValue : checksum);
     }
 
     /// <summary>

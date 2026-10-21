@@ -684,8 +684,10 @@ public class TransactionCoordinatorRollbackTests
             await InsertAsync(coordinator, storage, contexts[i]);
         }
 
-        // Act: the checkpoint truncates the journal, then cannot write its record; the process stops.
+        // Act: allow the new anchor's initialization image to drain, then fail the
+        // checkpoint record after truncation; the process stops with only the header anchor.
         storage.Log.Flush();
+        storage.JournalStream.SkipWrites = 1;
         storage.JournalStream.FailWrites = 1;
         Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()).InnerException.ShouldBeOfType<IOException>();
         var images = storage.CaptureClosedImages();
@@ -697,6 +699,9 @@ public class TransactionCoordinatorRollbackTests
 
         // Assert
         reopened.Log.ReadAll().ShouldAllBe(record => record.Type == JournalRecordType.Checkpoint);
+        storage.JournalStream.SkipWrites.ShouldBe(0);
+        storage.JournalStream.FailWrites.ShouldBe(0);
+        images.Journal.ShouldBeEmpty();
         anchored.Count.ShouldBe(writers);
         anchored.ShouldBe(contexts.Select(context => (long)context.Sequence.Value).Order(), ignoreOrder: false);
         contexts.ShouldAllBe(context => plan.Aborted.Contains(context.Sequence));

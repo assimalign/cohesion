@@ -81,6 +81,8 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
   database whose journal or data fsync (#1243), journal drain (#1252) or header slot write
   (#1268) failed, or whose engine gave up on it (owner decision 25), until it is reopened, and
   `DatabaseTransactionCommitUnconfirmedException` for work that may have committed when it did.
+  `DatabaseCorruptionException` (`COHDBS003`) reports storage damage with the database,
+  affected page and original storage cause; corruption never reads as absence.
   `DatabaseEngine.OfflineDatabases` lists the offline databases for health, and
   `DatabaseEngine.GetOfflineError` says what took one offline. Child roots own independent
   exception roots (see [DESIGN.md](DESIGN.md)).

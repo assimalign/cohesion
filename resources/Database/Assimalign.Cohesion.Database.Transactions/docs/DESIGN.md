@@ -74,6 +74,14 @@ complete: SQL marks an interrupted open `RecoveryInterrupted` before closing the
 storage, preventing its normal shutdown checkpoint. The next open reclassifies and finishes
 scrubbing instead of treating the remaining abandoned stamps as committed.
 
+## Version lookup integrity (#1160)
+
+`VersionStore.GetVisibleVersionAsync` returns absence only for a reclaimed location or an
+invisible version. A checksum failure propagates `StorageCorruptionException` with
+`COHDBS003` and the page id; the record-space test corrupts media after eviction and proves
+both failure and a successful lookup after repair. Engines translate the storage failure
+at their own boundary. The short-record rule is tracked separately by #1372.
+
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
 `TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. Readers and writers both keep storage-counter sequences; no virtual identifier is introduced, and the public session surface remains free of MVCC mechanics.
@@ -994,7 +1002,9 @@ prove the overlap occurred. JournalEnrollmentTests covers standalone read-only e
 cancellation and refused enrollment. Every model's read-only transaction tests count durable
 flush attempts, journal bytes and LSN changes across read loops and every read-only end, including
 read-committed pins. TransactionCoordinatorRollbackTests anchors 1,000 writers through a lost
-checkpoint record; TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
+checkpoint record. Its fault allows the anchor initialization image to drain before failing the
+post-truncation checkpoint-record write, and asserts the journal is empty while all 1,000 writers
+remain anchored. TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
 write of a checkpoint with 40 writers and a reader. Writer durability and crash classification
 keep the same guarantees.
 

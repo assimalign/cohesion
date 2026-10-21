@@ -663,7 +663,9 @@ public sealed class SqlTableReclamationTests
         {
             storage.Data.ReadPage((PageId)id, bytes);
             // Storage's fixed page header: type at byte 21, UInt64 owner at byte 64.
-            bool isFree = (PageType)bytes[21] == PageType.Free;
+            var type = (PageType)bytes[21];
+            bool isFree = type is PageType.Free or PageType.Reclaimed;
+            if (type == PageType.Free) { bytes.ShouldAllBe(value => value == 0); }
             storage.FreeSpaceMap.IsAllocated((PageId)id).ShouldBe(!isFree);
             if (isFree) { free++; }
             if (retired is { } owner) { BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(64)).ShouldNotBe(owner); }

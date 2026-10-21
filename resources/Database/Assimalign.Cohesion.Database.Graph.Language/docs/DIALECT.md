@@ -4,6 +4,14 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+## Storage integrity errors (#1160)
+
+A read that detects storage corruption fails with `COHDBS003`, naming the database and
+page and recommending a verified backup. It never succeeds with the damaged data omitted.
+The error is an execution failure over the wire; the connection remains usable. A
+legitimately reclaimed location retains its existing absence semantics. The engine's
+storage-integrity conformance tests cover corrupted media through the executing language.
+
 ## MATCH and OPTIONAL MATCH
 
 MATCH and OPTIONAL MATCH clauses execute in source order. Each WHERE belongs to its own

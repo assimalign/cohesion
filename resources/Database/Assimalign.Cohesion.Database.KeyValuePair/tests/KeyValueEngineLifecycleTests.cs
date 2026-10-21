@@ -445,7 +445,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         failure.Message.ShouldStartWith(
             $"Database 'kv' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
             Case.Sensitive);
-        failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+        failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 4", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
         reopened.TryGetDatabase("kv", out _).ShouldBeFalse();
         Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).Length.ShouldBe(before.Count);

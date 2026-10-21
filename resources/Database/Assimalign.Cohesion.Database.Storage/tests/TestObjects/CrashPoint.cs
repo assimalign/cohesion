@@ -32,6 +32,9 @@ public sealed class CrashPoint
     /// </summary>
     public int DurableSectors { get; set; }
 
+    /// <summary>Gets or sets the first sector that lands, to model out-of-order writes.</summary>
+    public int DurableSectorOffset { get; set; }
+
     /// <summary>
     /// Gets the number of writes and length changes observed so far.
     /// </summary>

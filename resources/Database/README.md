@@ -2,6 +2,16 @@
 
 The multi-model OLTP database engine family for Cohesion: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — sharing one durable kernel (storage, write-ahead logging, transactions, indexing). A hosted database is an ordinary customer-owned `Sdk.Database` executable whose `Program.cs` composes its engines, code-first schema, servers, and provisioning. See [DESIGN.md](../../docs/resources/Database/DESIGN.md) for the architecture, requirements, and decision log; sequencing lives in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../docs/programs/DATABASE_PROGRAM_PLAN.md).
 
+## Storage corruption diagnostics (#1160)
+
+`DatabaseCorruptionException` with `COHDBS003` is the area-wide signal for damaged storage,
+including corruption wrapped in coded engine exceptions or an `AggregateException`. It names
+the database and affected page and retains the storage cause. When open is refused, an engine
+also includes its previous model diagnostic as an additional entry: Graph `COHDBG018`,
+Documents `COHDBD003`, and Blob `COHDBB004` retain their unrecoverable-files diagnosis. Existing
+coded diagnostics are preserved too. Wire consumers can recognize either the common corruption
+signal or the model code; a damaged read never becomes a successful result with data omitted.
+
 ## Area root, child roots, and model families
 
 `Assimalign.Cohesion.Database` is the **area root**. It holds only what is true of
