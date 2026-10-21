@@ -97,6 +97,11 @@ ExecutionFailure fallback when the engine supplies no structured error code.
 | `COHKV018` | Command arity mismatch |
 | `COHKV019` | Execution failure without an engine diagnostic |
 
+Storage reads fail with structured COHDBK005 for StorageIOException/IOException (SQLSTATE
+58030), or COHDBS003 for corruption (XX001). The wire sends ExecutionFailure and keeps the
+session. Such a failure aborts an explicit transaction; rollback is required before another
+command. Other command errors retain their existing statement-atomic behavior (#1364).
+
 ## Semantics and result shapes
 
 | Command | Result | Notes |

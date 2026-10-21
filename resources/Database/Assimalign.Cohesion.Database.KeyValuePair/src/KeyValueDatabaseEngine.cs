@@ -489,6 +489,19 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <inheritdoc />
     protected override ValueTask<DatabaseInstance> OpenDatabaseCoreAsync(DatabaseName name, CancellationToken cancellationToken)
     {
+        try { return OpenDatabase(name, cancellationToken); }
+        catch (Exception exception) when (exception is StorageIOException or IOException
+            || exception is DatabaseException { Diagnostics.Count: 0, InnerException: StorageIOException or IOException })
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.DatabaseOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+        }
+    }
+
+    private ValueTask<DatabaseInstance> OpenDatabase(DatabaseName name, CancellationToken cancellationToken)
+    {
         ValidateName(name);
         lock (_syncRoot)
         {

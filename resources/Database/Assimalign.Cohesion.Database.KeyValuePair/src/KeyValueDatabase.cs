@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -449,6 +450,20 @@ public sealed class KeyValueDatabase : DatabaseInstance
         return offline.CommitRecordWritten
             ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
+    }
+
+    // Offline/unconfirmed and area-wide corruption classifications take precedence over I/O.
+    internal Exception TranslateFailure(Exception error)
+    {
+        // A transaction refusal owns its diagnostic even when its cause is storage corruption.
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK001" }, ..] }) { return error; }
+        var translated = TranslateOffline(error);
+        return !ReferenceEquals(translated, error) ? translated : error switch
+        {
+            StorageIOException or IOException => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            _ => error,
+        };
     }
 
     /// <summary>

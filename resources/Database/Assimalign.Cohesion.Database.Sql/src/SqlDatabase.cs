@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -490,6 +491,25 @@ public sealed class SqlDatabase : DatabaseInstance
         return offline.CommitRecordWritten || selfCommitted
             ? DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, offline)
             : DatabaseOfflineException.Create(OfflineCode, Name, OfflineError ?? offline);
+    }
+
+    internal static bool IsStorageFailure(Exception error)
+        => StorageOfflineException.Find(error) is null
+            && (error is StorageIOException or System.IO.IOException or DatabaseCorruptionException
+                || StorageCorruptionException.Find(error) is not null);
+
+    // Offline/unconfirmed and area-wide corruption classifications take precedence over I/O.
+    internal Exception TranslateFailure(Exception error, bool selfCommitted = false)
+    {
+        // A transaction refusal owns its diagnostic even when its cause is storage corruption.
+        if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLT005" }, ..] }) { return error; }
+        var translated = TranslateOffline(error, selfCommitted);
+        return !ReferenceEquals(translated, error) ? translated : error switch
+        {
+            StorageIOException or IOException => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHSQLE041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            _ => error,
+        };
     }
 
     /// <summary>

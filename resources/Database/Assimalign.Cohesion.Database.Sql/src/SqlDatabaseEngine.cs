@@ -642,6 +642,20 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private ValueTask<DatabaseInstance> OpenDatabaseInternal(DatabaseName name, CancellationToken cancellationToken,
         bool creating = false, Collation? defaultCollation = null)
     {
+        try { return OpenDatabaseFiles(name, cancellationToken, creating, defaultCollation); }
+        catch (Exception exception) when (exception is StorageIOException or IOException
+            || exception is DatabaseException { Diagnostics.Count: 0, InnerException: StorageIOException or IOException })
+        {
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.DatabaseOpenFailed, name, exception.Message);
+            throw new DatabaseException(message, [new Diagnostic
+            { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+        }
+    }
+
+    private ValueTask<DatabaseInstance> OpenDatabaseFiles(DatabaseName name, CancellationToken cancellationToken,
+        bool creating, Collation? defaultCollation)
+    {
         ValidateName(name);
         lock (_syncRoot)
         {

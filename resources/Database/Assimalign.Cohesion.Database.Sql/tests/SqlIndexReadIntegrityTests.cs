@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
-
-namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
@@ -15,7 +15,10 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
+
+namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// The rows an index seek fetches (#1342). An entry whose row was reclaimed beneath it (its slot
@@ -29,8 +32,17 @@ public sealed class SqlIndexReadIntegrityTests
 {
     private const string Seek = "SELECT id FROM t WHERE val = 20";
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corruption crosses the wire as a coded execution failure (#1160)")]
-    public async Task Execute_CorruptScanOverWire_ShouldReportExecutionFailureAndKeepSessionUsable()
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: storage read failures abort transactions and keep the wire session (#1364)")]
+    [InlineData(0, false, false)]
+    [InlineData(1, false, false)]
+    [InlineData(2, false, false)]
+    [InlineData(0, true, false)]
+    [InlineData(1, true, false)]
+    [InlineData(2, true, false)]
+    [InlineData(0, true, true)]
+    [InlineData(1, true, true)]
+    [InlineData(2, true, true)]
+    public async Task Execute_CorruptScanOverWire_ShouldReportExecutionFailureAndKeepSessionUsable(int failureKind, bool explicitTransaction, bool readCommitted)
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
@@ -42,6 +54,15 @@ public sealed class SqlIndexReadIntegrityTests
         Evict(database, pageId);
         var faults = strategy.Faults(ServerTestHarness.DatabaseName);
         faults.RottenPage = pageId;
+        if (failureKind != 0)
+        {
+            faults.WrapCorruption = _ => failureKind == 1
+                ? new StorageIOException("Injected storage read failure.")
+                : new IOException("Injected device read failure.");
+        }
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        var engineSession = serverSession.DatabaseSession.ShouldBeOfType<SqlDatabaseSession>();
+        var transaction = explicitTransaction ? await engineSession.BeginTransactionAsync(readCommitted ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, CancellationToken.None) : null;
 
         try
         {
@@ -52,12 +73,37 @@ public sealed class SqlIndexReadIntegrityTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith("COHDBS003: ", Case.Sensitive);
+            error.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHSQLE041: ", Case.Sensitive);
             error.Message.ShouldNotContain("COHDBS003: COHDBS003:", Case.Sensitive);
-            error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
-            error.Message.ShouldContain(ServerTestHarness.DatabaseName, Case.Sensitive);
+            if (failureKind == 0)
+            {
+                error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
+                error.Message.ShouldContain(ServerTestHarness.DatabaseName, Case.Sensitive);
+            }
+            if (transaction is not null)
+            {
+                transaction.State.ShouldBe(TransactionState.Faulted);
+                var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await engineSession.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT005");
+                refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
+                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHSQLE041");
+            }
         }
         finally { faults.Clear(); }
+        if (transaction is not null)
+        {
+            if (readCommitted)
+            {
+                await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("COMMIT").Encode());
+                var commit = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+                commit.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+                commit.Message.ShouldStartWith("COHSQLT005: ", Case.Sensitive);
+                engineSession.CurrentTransaction.ShouldBeNull();
+            }
+            else { await transaction.RollbackAsync(CancellationToken.None); }
+        }
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
 
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT id FROM users").Encode());
         await client.ExpectAsync(ProtocolMessageType.ResultHeader);

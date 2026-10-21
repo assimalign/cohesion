@@ -1,17 +1,23 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
-
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
+using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;
 
@@ -155,6 +161,66 @@ public sealed class KeyValueIndexReadIntegrityTests
         // Assert
         failure.PageId.ShouldBe(damaged.PageId);
         Text(bravo.ShouldNotBeNull().Value).ShouldBe("two");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Wire: storage failures abort transactions and preserve the session (#1364)")]
+    [InlineData(0, false, false)]
+    [InlineData(1, false, false)]
+    [InlineData(2, false, false)]
+    [InlineData(0, true, false)]
+    [InlineData(1, true, false)]
+    [InlineData(2, true, false)]
+    [InlineData(0, true, true)]
+    [InlineData(1, true, true)]
+    [InlineData(2, true, true)]
+    public async Task Execute_ReadFailure_ShouldCodeAbortAndKeepWireSession(int failureKind, bool explicitTransaction, bool readCommitted)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var harness = await KeyValueServerHarness.StartAsync(configureEngine: options => options.StorageStrategy = strategy);
+        harness.Engine.TryGetDatabase(KeyValueServerHarness.DatabaseName, out var database).ShouldBeTrue();
+        await using var embedded = await database!.CreateSessionAsync(CancellationToken.None);
+        await database.PutAsync(embedded, Bytes("alpha"), Bytes("one"), cancellationToken: CancellationToken.None);
+        var pageId = database.DataStorage.GetOwnerPages(KeyValueOperationExecutor.KeySpaceObjectId).ShouldHaveSingleItem();
+        Evict(database, pageId);
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+        var engineSession = serverSession.DatabaseSession.ShouldBeOfType<KeyValueDatabaseSession>();
+        var transaction = explicitTransaction ? await engineSession.BeginTransactionAsync(readCommitted ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, CancellationToken.None) : null;
+        var faults = strategy.Faults(KeyValueServerHarness.DatabaseName);
+        faults.RottenPage = pageId;
+        if (failureKind != 0)
+        {
+            faults.WrapCorruption = _ => failureKind == 1
+                ? new StorageIOException("Injected storage read failure.") : new IOException("Injected device read failure.");
+        }
+        try
+        {
+            // Act
+            await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("GET @key", new Dictionary<string, byte[]> { ["key"] = DatabaseValueCodec.EncodeComponent(Bytes("alpha")) }).Encode());
+            var failure = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
+
+            // Assert
+            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            failure.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHDBK005: ", Case.Sensitive);
+            faults.RottenPageReads.ShouldBeGreaterThan(0);
+            if (transaction is not null)
+            {
+                transaction.State.ShouldBe(TransactionState.Faulted);
+                var refusal = await Should.ThrowAsync<DatabaseException>(() => database.GetAsync(engineSession, Bytes("alpha"), CancellationToken.None).AsTask());
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK001");
+                refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
+                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHDBK005");
+            }
+        }
+        finally { faults.Clear(); }
+        if (transaction is not null) { await transaction.RollbackAsync(CancellationToken.None); }
+        await client.SendAsync(ProtocolMessageType.Execute, new ProtocolExecuteMessage("GET @key", new Dictionary<string, byte[]> { ["key"] = DatabaseValueCodec.EncodeComponent(Bytes("alpha")) }).Encode());
+        await client.ExpectAsync(ProtocolMessageType.ResultHeader);
+        await client.ExpectAsync(ProtocolMessageType.ResultRow);
+        await client.ExpectAsync(ProtocolMessageType.ResultComplete);
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
     }
 
     private static KeyValueDatabaseEngine CreateEngine(FaultInjectingJournalStorageStrategy? strategy)

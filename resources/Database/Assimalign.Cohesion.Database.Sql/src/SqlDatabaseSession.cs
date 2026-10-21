@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -222,7 +223,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 ? _database.DdlInterlock.EnterStatement(_database.Name.ToString()) : null;
             return await ExecuteStatementAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
         }
-        catch (Exception exception) when (_database.TranslateOffline(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
+        catch (Exception exception) when (_database.TranslateFailure(exception, selfCommitted: SelfCommitted(request, previousMetrics)) is var translated
             && !ReferenceEquals(translated, exception))
         {
             // A statement that met the offline storage (#1243) gets the coded refusal, unless its
@@ -428,8 +429,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     _lastStatementMetrics = scope.Metrics;
                     return await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
                 }
-                catch (TransactionDeadlockException exception)
+                catch (Exception exception) when (exception is TransactionDeadlockException || SqlDatabase.IsStorageFailure(exception))
                 {
+                    if (SqlDatabase.IsStorageFailure(exception))
+                    {
+                        throw transaction.RecordStorageFailure(_database.TranslateFailure(exception));
+                    }
                     // The requester-closes-cycle victim: the statement failed and is
                     // retryable by construction — roll the transaction back and
                     // re-attempt. The session stays usable.
@@ -441,7 +446,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 }
                 finally
                 {
-                    await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false);
+                    if (transaction.HasStorageFailure)
+                    {
+                        await ReleaseFailedStatementAsync(snapshotPin, transaction).ConfigureAwait(false);
+                    }
+                    else { await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false); }
                 }
             }
             finally
@@ -569,6 +578,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         => transaction.IsolationLevel == IsolationLevel.ReadCommitted
             ? await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false)
             : null;
+
+    // Error-only async work stays outside the statement's normal state machine. The finally
+    // already has a non-generic ValueTask awaiter, so this adds no field per successful statement.
+    private async ValueTask ReleaseFailedStatementAsync(TransactionContext? snapshotPin, SqlDatabaseTransaction transaction)
+    {
+        try { await ReleaseSnapshotPinAsync(snapshotPin).ConfigureAwait(false); }
+        finally { await transaction.AbortStorageFailureAsync().ConfigureAwait(false); }
+    }
 
     /// <summary>
     /// Ends a statement's snapshot pin, on every path out of the statement. It always ends rolled

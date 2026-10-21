@@ -447,7 +447,7 @@ public sealed class BlobDatabaseNameTests : IDisposable
         refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
         refusal.Message.ShouldNotContain("restore");
         refusal.Message.ShouldNotContain("drop");
-        refusal.Diagnostics.ShouldBeEmpty();
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB005");
         (await ReadAsync(reopened, identity)).ShouldBe("acknowledged");
     }
 

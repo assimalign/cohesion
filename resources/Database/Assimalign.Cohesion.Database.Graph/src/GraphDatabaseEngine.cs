@@ -676,7 +676,8 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 string message = string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenFailed, name, exception.Message);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
-                throw new DatabaseException(message, exception);
+                throw new DatabaseException(message, [new Types.Diagnostic
+                { Code = "COHDBG006", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {

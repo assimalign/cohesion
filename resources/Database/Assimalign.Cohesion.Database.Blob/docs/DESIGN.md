@@ -2,6 +2,11 @@
 
 ## Storage corruption (#1160)
 
+A StorageIOException or IOException while opening storage crosses the engine boundary as
+DatabaseException with structured COHDBB005 diagnostics (#1364). Open releases any acquired
+file set and publishes no database, so callers may resolve the I/O condition and retry.
+
+
 Storage corruption is `COHDBS003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified

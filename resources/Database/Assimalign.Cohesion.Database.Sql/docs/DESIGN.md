@@ -4249,7 +4249,8 @@ operation admission, so a statement refused by a transaction that is ending or e
 
 A statement stays statement-atomic: a failed statement (a constraint violation, an evaluation
 fault, a deadlock victim) writes nothing and leaves the transaction active, the owner's
-2026-10-04 per-statement decision, so SQL never calls the base's abort. A transaction the
+2026-10-04 per-statement decision. Storage corruption and I/O failures abort through the base
+and require rollback before further statements (#1364). A transaction the
 kernel ended under its caller (its database was dropped or closed while the session held it)
 reports `Faulted`, stays the session's transaction, and refuses statements, BEGIN (typed or as
 text) and COMMIT with `COHSQLT005` until the caller rolls it back:
@@ -4871,6 +4872,21 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
+diagnostic COHSQLE041 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
+The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
+member is introduced. These failures abort an explicit transaction, retain the coded cause,
+and require rollback before further statements. In autocommit the next statement can run.
+The wire returns ExecutionFailure and preserves the session. Offline/unconfirmed commit
+classification retains its existing precedence and outcome. Open failures in either the data
+or catalog file set carry the I/O code, release opened resources and permit a later retry.
+
+This follows PostgreSQL's ERROR corruption report in src/backend/storage/buffer/bufmgr.c:8866-8868,
+and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.c:4612,4629.
+The implementation uses static type checks and the existing transaction abort mechanism.
+
+
 Storage corruption is `COHDBS003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
@@ -4913,7 +4929,7 @@ particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. Opening a database absent from the
 storage strategy throws the root's `DatabaseNotFoundException`; opening one the
 data-storage format gate refuses throws the internal `SqlDataStorageFormatException`
-(a `DatabaseException`, format rule above); other open failures
+(a `DatabaseException`, format rule above); storage I/O failures carry COHSQLE041; other open failures
 retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged. Arithmetic faults throw the internal
 `SqlEvaluationException` (a `DatabaseException`) whose message leads with
@@ -5352,7 +5368,7 @@ deleted: the factory lives on the type. The test-only `CrashCaptureSqlStorageStr
   "already active" check; the transaction base owns the whole end state machine; the server
   base owns the lifecycle. The model supplies its vocabulary: `COHSQLT004` and `COHSQLT005`,
   the kernel calls and the translation of the kernel's exceptions. It keeps its per-statement
-  rule: a failed statement never aborts the transaction, and statements do not take the
+  rule for ordinary errors; storage corruption and I/O abort the transaction (#1364). Statements do not take the
   session's operation hold.
 - **What changed for a caller** (plan §6.4, asserted in `SqlTransactionContractTests`,
   `SqlEngineContractTests` and `SqlEngineCompositionTests`): BEGIN on an active session fails

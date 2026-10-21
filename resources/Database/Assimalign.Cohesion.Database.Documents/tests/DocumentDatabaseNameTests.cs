@@ -450,7 +450,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
         refusal.Message.ShouldNotContain("restore");
         refusal.Message.ShouldNotContain("drop");
-        refusal.Diagnostics.ShouldBeEmpty();
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004");
         (await ReadAsync(reopened, identity)).ShouldBe("acknowledged");
     }
 
