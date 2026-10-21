@@ -11,6 +11,12 @@ Simple column-reference spans retain the complete raw token, including delimiter
 quotes. Persisted-view binding edits use those source spans, so canonical expansion replaces
 the entire reference rather than leaving a suffix of the quoted name behind.
 
+Persisted view text written by the base engine can contain adjacent delimited tokens without
+whitespace: `"a""x"` formerly parsed as column `a` with alias `x`, and now names the single
+identifier `a"x`. A base-created view with that stored spelling can therefore rebind differently
+or fail after reopen. The unambiguous old form `"a" "x"` keeps its meaning. There is no stored-text
+migration or alternate lexer; recreate an affected view with explicit whitespace or `AS`.
+
 ## INSERT conflict clauses (#1118)
 
 SqlOnConflictClause retains inference kind, column set or constraint name, action,

@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Persisted quoted view text (#1235)
+
+The shared lexer now treats `"a""x"` as one delimited identifier (`a"x`). The base engine could
+persist that text as column `a` with alias `x` when there was no separating space. Such a base
+view can rebind differently or fail after reopen. There is no stored-text migration or legacy
+lexer: recreate affected views using `"a" "x"` or `"a" AS "x"`. The Sql.Language DIALECT records
+this parsing boundary; the catalog encoding and storage format are unchanged.
+
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped

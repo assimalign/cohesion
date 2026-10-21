@@ -2303,8 +2303,11 @@ binding while retaining their identifier token classification. Schema/table
 qualification uses a dot **outside** the delimiters: `"dbo"."order details"` is
 qualified, while `"order.details"` names one table. This applies to DML target
 columns, expression references, aliases and DDL table/index/constraint names.
-Embedded double quotes inside an identifier are outside the current lexer subset;
-the mapper diagnoses such retained names before emitting SQL.
+Embedded double quotes are doubled: `"a""x"` names one identifier, `a"x`.
+Before #1235, the base lexer read that adjacent spelling as column `a` followed by alias `x`.
+Persisted base view text containing it can rebind differently or fail on reopen; no stored-text
+migration is provided. Recreate an affected view with `"a" "x"` or `"a" AS "x"` to retain the
+column/alias interpretation. Whitespace between delimited identifiers remains significant.
 
 | Form | Examples | AST literal type |
 |---|---|---|
