@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
 public sealed partial class DocumentCatalog
 {
-    private readonly Dictionary<(Guid CollectionId, string Name), List<Reference>> _indexDefinitions = new();
+    private readonly Dictionary<(Guid CollectionId, string Name), Versions> _indexDefinitions = new();
     private readonly Dictionary<ulong, (PageId Page, int Slot, long Root)> _registrations = new();
     private readonly Dictionary<ulong, bool> _uniqueIndexes = new();
     private BTreeIndexManager _indexes = null!;
@@ -298,9 +298,10 @@ public sealed partial class DocumentCatalog
 
     private Found? FindIndex(Guid collectionId, string name, TransactionSnapshot snapshot)
     {
-        return _indexDefinitions.TryGetValue((collectionId, name), out var versions)
-            ? Find(versions, snapshot, record => record.Index is { } index && index.CollectionId == collectionId && index.Name == name)
-            : null;
+        if (!_indexDefinitions.TryGetValue((collectionId, name), out var versions)) { return null; }
+        var found = Find(versions, snapshot, record => record.Index is { } index && index.CollectionId == collectionId && index.Name == name);
+        if (versions.Count == 0) { Retire(versions); }
+        return found;
     }
 
     private List<IndexChange> PrepareIndexChanges(DocumentCatalogEntry? document, Found? previous, TransactionSnapshot snapshot)

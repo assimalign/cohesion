@@ -1836,6 +1836,49 @@ check their reference arguments themselves. Public metadata records are immutabl
 
 #### Catalog: Snapshot directory and ownership
 
+Version references follow logical publication predecessors, including a ReadCommitted writer
+that began before the versions it replaced (#1281). Appending a publication and replacing an
+earlier own save take O(1) expected directory work; the balanced writer set is removed. Earlier
+own saves have identical writer/deleter stamps and can never be visible, so only that writer's
+terminal reference is retained. The previous publication remains available for rollback and
+for a reader that cannot see the newest writer. Selection visits publications newer than the
+snapshot and stops at its first visible version. A current reader with one pending newer
+publication reads its committed predecessor directly, independently of pre-snapshot overwrites.
+
+Open rebuilds publication order from predecessor-deleter/successor-writer matches, using writer
+order only to order disconnected components. It establishes the terminal of an all-tombstoned
+chain before taking a terminal shortcut; a retained reader of v2 still sees v2 after v1, v2,
+delete and Open. A unique untombstoned terminal is placed last even when its writer began first.
+Ambiguous or disconnected recovered links use full highest-visible-writer selection where
+predecessor order cannot be proved. No whole-history discard relies on the first physical record.
+Every cached read still verifies owner, allocation, writer stamp and logical identity.
+
+References retain writer sequences, never TransactionContext or snapshot objects. Selection
+consults the coordinator's existing open-context and pending-aborted-purge views by sequence;
+deferred undo stays invisible. A missing newest publication restores its predecessor. A known
+committed predecessor's physical reclamation proves older publications are below the safe
+purge horizon too, so selection can stop without walking that obsolete suffix. If no live
+prefix remains, the directory value is detached without visiting its obsolete references.
+These rules assume the engine's single-writer handoff and conflict validation.
+
+Each lookup also spends any remainder of its three-read current-reader budget on at most two
+rotating cleanup probes. After every full model worker purge pass, the model-local catalog pass
+takes its monitor outside the coordinator apply gate and checks at most 128 references,
+round-robin across all directory keys. Repeated passes retire idle histories without any lookup
+of their names; the retained cache converges to one reference per surviving writer publication.
+Pinned snapshots necessarily retain their visible history. No approximation of the kernel's
+safe prune bound, new public bridge, or shipped-assembly visibility grant is needed. Lock order
+remains model writer lock, catalog monitor, then storage page latches. Apply and undo never enter
+the catalog monitor. CRC, I/O and live decoding failures propagate during selection and cleanup.
+
+The seeded physical-record oracle covers both isolation levels, saves, deletes, recreation,
+commit, rollback, forced deferred undo, retained/released readers, explicit purge and Open.
+Deterministic work counters cover late ReadCommitted publication in live and rebuilt catalogs;
+idle-name tests assert the 128-read maintenance bound. Visibility and reclamation follow the
+same principles as PostgreSQL's single-visible-version chain rule
+(src/backend/access/heap/README.HOT:171-176, 187-192) and its snapshot horizon
+(src/backend/access/heap/heapam_visibility.c:1102-1110); no PostgreSQL implementation is copied.
+
 Opening scans only owner-zero metadata pages, building directories keyed by ordinal collection
 name, `(collectionId, documentId)`, and `(collectionId, indexName)`. Directories retain physical
 version references. Every lookup rereads record stamps and identity: rollback, purge, and slot

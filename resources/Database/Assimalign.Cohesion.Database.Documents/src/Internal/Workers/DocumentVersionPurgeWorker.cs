@@ -194,7 +194,7 @@ internal sealed class DocumentVersionPurgeWorker : DatabaseEngineWorker
                     if (full)
                     {
                         BeforeFullPass?.Invoke(database);
-                        database.Coordinator.RunVersionPurgePass(cancellationToken);
+                        database.Catalog.RunVersionPurgePass(cancellationToken);
                         _fullPassFailed.Remove(database);
                     }
                     else

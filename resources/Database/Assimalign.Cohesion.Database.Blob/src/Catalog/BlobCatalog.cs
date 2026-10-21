@@ -25,13 +25,21 @@ namespace Assimalign.Cohesion.Database.Blob.Catalog;
 /// triplet of <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
-public sealed class BlobCatalog
+public sealed partial class BlobCatalog
 {
     private readonly BlobStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
-    private readonly Dictionary<string, List<Reference>> _containers = new(StringComparer.Ordinal);
-    private readonly Dictionary<(Guid ContainerId, string Name), List<Reference>> _blobs = new();
+    private long _recordReadCount;
+    private readonly LinkedList<Versions> _maintenance = new();
+    private LinkedListNode<Versions>? _maintenanceCursor;
+
+    private readonly Dictionary<string, Versions> _containers = new(StringComparer.Ordinal);
+    private readonly Dictionary<(Guid ContainerId, string Name), Versions> _blobs = new();
+
+    // Deterministic lookup-work observability for this assembly's tests.
+    internal long RecordReadCount { get { lock (_sync) { return _recordReadCount; } } }
+    internal int CachedReferenceCount { get { lock (_sync) { return _containers.Values.Concat(_blobs.Values).Sum(versions => versions.Count); } } }
 
     private BlobCatalog(BlobStorage storage, TransactionCoordinator coordinator)
     {
@@ -60,9 +68,10 @@ public sealed class BlobCatalog
         {
             var unit = iterator.Current;
             var record = BlobCatalogCodec.Decode(unit.Data.Span);
-            var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
-            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer));
+            var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
+            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
+        foreach (var versions in catalog._maintenance) { versions.RebuildPublicationOrder(); }
         return catalog;
     }
 
@@ -310,14 +319,15 @@ public sealed class BlobCatalog
         _coordinator.VersionStore.RecordTombstoned(writer, reference.PageId, reference.SlotIndex);
     }
 
-    private void Add(CatalogRecord record, Reference reference)
+    private void Add(CatalogRecord record, Reference reference, TransactionSequence? recoveredDeleter = null)
     {
-        List<Reference>? versions;
+        Versions? versions;
         if (record.Container is { } container)
         {
             if (!_containers.TryGetValue(container.Name, out versions))
             {
-                _containers[container.Name] = versions = new List<Reference>();
+                _containers[container.Name] = versions = new Versions();
+                Track(versions, value => value.Container?.Name == container.Name, () => _containers.Remove(container.Name));
             }
         }
         else
@@ -326,11 +336,11 @@ public sealed class BlobCatalog
             var key = (blob.ContainerId, blob.Name);
             if (!_blobs.TryGetValue(key, out versions))
             {
-                _blobs[key] = versions = new List<Reference>();
+                _blobs[key] = versions = new Versions();
+                Track(versions, value => value.Blob is { } blob && blob.ContainerId == key.ContainerId && blob.Name == key.Name, () => _blobs.Remove(key));
             }
         }
-        versions.RemoveAll(item => item.PageId == reference.PageId && item.SlotIndex == reference.SlotIndex);
-        versions.Add(reference);
+        versions.Add(reference, recoveredDeleter);
     }
 
     private Found? FindContainerVersion(string name, TransactionSnapshot snapshot)
@@ -342,7 +352,7 @@ public sealed class BlobCatalog
         var result = Find(versions, snapshot, record => record.Container?.Name == name);
         if (versions.Count == 0)
         {
-            _containers.Remove(name);
+            Retire(versions);
         }
         return result;
     }
@@ -356,48 +366,149 @@ public sealed class BlobCatalog
         var result = Find(versions, snapshot, record => record.Blob is { } blob && blob.ContainerId == containerId && blob.Name == name);
         if (versions.Count == 0)
         {
-            _blobs.Remove((containerId, name));
+            Retire(versions);
         }
         return result;
     }
 
-    private Found? Find(List<Reference> versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
+    private Found? Find(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
     {
-        Found? result = null;
-        for (int i = versions.Count - 1; i >= 0; i--)
+        // Lock order: model writer lock, catalog monitor, storage page latches.
+        // Apply/undo never enter this monitor. Maintenance runs after the purge gate exits.
+        long before = _recordReadCount;
+        var result = Select(versions, snapshot, matches);
+        // Three reads suffice for a current lookup, including cleanup and an undone head.
+        int probes = (int)Math.Min(versions.Count, Math.Max(0L, 3 - (_recordReadCount - before)));
+        for (int i = 0; i < probes; i++)
         {
-            var reference = versions[i];
-            // Only a reclaimed location (a deleted or reverted slot, an owner-zero page the
-            // purge freed or the allocator reused) and a changed identity invalidate a cached
-            // physical reference. CRC and I/O exceptions deliberately propagate (#1342).
-            if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes))
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
-            {
-                throw new BlobCatalogException("Truncated blob catalog record.");
-            }
-            var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
-            if (writer != reference.Writer)
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            var record = BlobCatalogCodec.Decode(bytes.Span);
-            if (!matches(record))
-            {
-                versions.RemoveAt(i);
-                continue;
-            }
-            if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter))
-                && (result is null || writer > result.Value.Reference.Writer))
-            {
-                result = new Found(reference, record);
-            }
+            var candidate = versions.NextSweep()!;
+            if (Read(candidate, matches) is null) { versions.Remove(candidate); }
         }
         return result;
+    }
+
+    private Found? Select(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
+    {
+        Found? best = null;
+        var head = versions.Current;
+        bool known = versions.TerminalKnown;
+        for (var reference = head; reference is not null;)
+        {
+            var previous = reference.Previous;
+            bool predecessorKnown = known && reference.PredecessorKnown;
+            // Query existing coordinator state by sequence; no directory reference owns a
+            // transaction or its snapshot. Deferred undo remains pending to every reader.
+            if (IsAborted(reference.Writer))
+            {
+                versions.Remove(reference);
+                known = predecessorKnown;
+                reference = previous;
+                continue;
+            }
+            var record = Read(reference, matches);
+            if (record is null)
+            {
+                versions.Remove(reference);
+                if (known && !ReferenceEquals(reference, head))
+                {
+                    // This is the committed predecessor, not an aborted newest publication.
+                    // Its reclamation proves every older publication is below the purge
+                    // horizon too. A recreated head may still be pending above this suffix.
+                    if (versions.Current is null || ReferenceEquals(versions.Current, previous))
+                    {
+                        versions.Discard();
+                    }
+                    return null;
+                }
+            }
+            else if (snapshot.IsVisible(reference.Writer))
+            {
+                if (record.Value.Deleter == TransactionSequence.None || !snapshot.IsVisible(record.Value.Deleter))
+                {
+                    var found = new Found(reference, record.Value.Record);
+                    if (known) { return found; }
+                    if (best is null || reference.Writer > best.Value.Reference.Writer) { best = found; }
+                }
+                else if (known) { return null; }
+            }
+            known = predecessorKnown;
+            reference = previous;
+        }
+        return best;
+    }
+
+    private bool IsAborted(TransactionSequence writer)
+    {
+        if (_coordinator.VersionStore.PendingAbortedPurges.Contains(writer.Value)) { return true; }
+        foreach (var context in _coordinator.GetOpenContexts())
+        {
+            if (context.Sequence == writer)
+            {
+                return context.State is TransactionState.RolledBack or TransactionState.Faulted;
+            }
+        }
+        return false;
+    }
+
+    private void Track(Versions versions, Func<CatalogRecord, bool> matches, Action retire)
+    {
+        versions.Matches = matches;
+        versions.Retire = retire;
+        versions.MaintenanceNode = _maintenance.AddLast(versions);
+    }
+
+    private void Retire(Versions versions)
+    {
+        var node = versions.MaintenanceNode!;
+        if (ReferenceEquals(_maintenanceCursor, node)) { _maintenanceCursor = node.Next; }
+        _maintenance.Remove(node);
+        versions.MaintenanceNode = null;
+        versions.Retire();
+    }
+
+    // Model-local pass: the worker and deterministic catalog tests use the same boundary.
+    internal long RunVersionPurgePass(CancellationToken cancellationToken)
+    {
+        try { return _coordinator.RunVersionPurgePass(cancellationToken); }
+        finally { MaintainPurgedReferences(); }
+    }
+
+    internal void MaintainPurgedReferences()
+    {
+        lock (_sync)
+        {
+            // One reference per key per turn, round-robin: at most 128 record reads per
+            // pass, independent of name count and historical peak. An idle name needs
+            // no subsequent lookup to relinquish its purged versions.
+            for (int probe = 0; probe < 128 && _maintenance.Count != 0; probe++)
+            {
+                var node = _maintenanceCursor ?? _maintenance.First!;
+                _maintenanceCursor = node.Next;
+                var versions = node.Value;
+                var reference = versions.NextSweep();
+                if (reference is not null && Read(reference, versions.Matches) is null)
+                {
+                    versions.Remove(reference);
+                }
+                if (versions.Count == 0) { Retire(versions); }
+            }
+        }
+    }
+
+    private (CatalogRecord Record, TransactionSequence Deleter)? Read(Reference reference, Func<CatalogRecord, bool> matches)
+    {
+        // Reclaimed slots/pages and changed identities are absence. CRC, I/O and live
+        // decoding failures propagate, including during the bounded cleanup probes.
+        _recordReadCount++;
+        if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
+        if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
+        {
+            throw new BlobCatalogException("Truncated blob catalog record.");
+        }
+        var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+        if (writer != reference.Writer) { return null; }
+        var record = BlobCatalogCodec.Decode(bytes.Span);
+        return matches(record) ? (record, deleter) : null;
     }
 
     private static void EnsureActive(TransactionContext context)
@@ -408,6 +519,5 @@ public sealed class BlobCatalog
         }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer);
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
 }
