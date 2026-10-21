@@ -414,6 +414,17 @@ unchanged user storage, and client discovery/refusal are covered by
 
 ## The key-value server runtime (`KeyValueDatabaseServer`)
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
 The model ships its own wire-protocol server — the **second model server**, the
 one whose construction fired the area's recorded server-core extraction trigger
 (2026-07-14) and thereby produced the evidence behind the settled placement.

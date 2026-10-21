@@ -1378,6 +1378,17 @@ engine-owned implementation of the shared storage flush duty.
 
 ## Document wire family
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
 `DocumentDatabaseServer.Create(engine, options)` binds its listener on Start and owns it through
 Stop. An `AddServer(options => ...)` builder registration creates the same server; the factory
 verb remains available. Options are snapshotted: listener, authenticator (AllowAll by default),
@@ -1767,7 +1778,8 @@ Before writing a terminal shared Error, the server starts one ShutdownDrainTimeo
 That same deadline covers the error write, its flush, transport output completion and the wait
 for connection closure. Expiry aborts the connection to release blocked transport I/O; the pump
 joins that I/O before releasing the session and its counter. The hard-abort registration stays
-attached through the drain, and shutdown can interrupt output completion and the closure wait.
+attached through the drain; hard abort can interrupt output completion and the closure wait.
+Soft stop alone leaves the terminal notice its bounded delivery opportunity.
 A flush only queues pipe bytes; immediate TCP disposal can discard a queued fatal frame. This
 local drain uses the existing connection contract and adds no public transport member. A deferred
 send fixture deterministically verifies error delivery before disposal; TCP unknown-database

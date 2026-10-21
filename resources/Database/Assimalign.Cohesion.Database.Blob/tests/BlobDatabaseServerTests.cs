@@ -91,6 +91,7 @@ public sealed class BlobDatabaseServerTests
         authenticator.Database.ShouldBe("objects");
         authenticator.Principal.ShouldBe("alice");
         authenticator.Evidence.ShouldBe("proof"u8.ToArray());
+        await connection.DisposeAsync(); // A peer closes after consuming the terminal error.
         await server.StopAsync(token);
         server.Sessions.ShouldBeEmpty();
     }
@@ -117,6 +118,9 @@ public sealed class BlobDatabaseServerTests
         ProtocolErrorMessage idle = ProtocolErrorMessage.Decode((await ReadAsync(channel, token)).Payload.Span);
         idle.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         idle.Message.ShouldContain("idle timeout");
+        // Both terminal frames arrived; let their server drains observe peer closure.
+        await first.DisposeAsync();
+        await second.DisposeAsync();
         await server.StopAsync(token);
         server.Sessions.ShouldBeEmpty();
         engine.State.ShouldBe(EngineState.Running);

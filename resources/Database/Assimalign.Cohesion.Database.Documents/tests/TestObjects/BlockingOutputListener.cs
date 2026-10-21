@@ -25,6 +25,10 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
         _holdOutputAfterAbort = holdOutputAfterAbort;
     }
 
+    private readonly TaskCompletionSource<BlockingConnection> _secondAccepted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _accepts;
+    internal Task<BlockingConnection> SecondAccepted => _secondAccepted.Task;
+
     internal Task<BlockingConnection> Accepted => _accepted.Task;
     internal IDuplexConnectionFactory Factory => _inner.CreateFactory();
     public override ListenerId Id => _inner.Id;
@@ -36,7 +40,8 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
     protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         var connection = new BlockingConnection(await _inner.AcceptAsync(cancellationToken), _blockedFlush, _holdOutputAfterAbort);
-        _accepted.TrySetResult(connection);
+        if (Interlocked.Increment(ref _accepts) == 1) { _accepted.TrySetResult(connection); }
+        else { _secondAccepted.TrySetResult(connection); }
         return connection;
     }
 

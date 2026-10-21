@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentServerDrainTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Terminal errors abort blocked writes, flushes and output completion within one drain budget")]
-    [InlineData(1)] // The frame header write flushes the pipe.
-    [InlineData(3)] // The explicit flush after the header and payload writes.
+    [InlineData(1)] // The complete frame write flushes the pipe.
+    [InlineData(2)] // The explicit flush after the complete frame write.
     [InlineData(0)] // Output completion has no cancellation parameter.
     [InlineData(-1)] // A cooperative write can unwind inline inside token cancellation.
     public async Task RunAsync_BlockedTerminalOutput_ShouldAbortAndReleaseSession(int blockedFlush)
@@ -59,7 +59,7 @@ public sealed class DocumentServerDrainTests
             connection.Aborts.ShouldBe(1);
             connection.Disposals.ShouldBe(1);
             connection.PendingOperations.ShouldBe(0);
-            connection.Flushes.ShouldBe(blockedFlush == 0 ? 3 : Math.Abs(blockedFlush));
+            connection.Flushes.ShouldBe(blockedFlush == 0 ? 2 : Math.Abs(blockedFlush));
             connection.Completions.ShouldBe(blockedFlush == 0 ? 1 : 0);
             connection.FlushTokenCanBeCanceled.ShouldBeTrue();
             connection.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();

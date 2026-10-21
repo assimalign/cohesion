@@ -183,7 +183,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         }
         finally
         {
-            await DrainTerminalResponseAsync(softStop).ConfigureAwait(false);
+            await DrainTerminalResponseAsync().ConfigureAwait(false);
             // A token-aware write can resume the pump inline while cancellation callbacks are
             // still running. Abort here too, before detaching a callback that has not run yet.
             if (_terminalDrainSource?.IsCancellationRequested == true) { Abort(); }
@@ -722,7 +722,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
         _ => null,
     };
 
-    private async ValueTask DrainTerminalResponseAsync(CancellationToken softStop)
+    private async ValueTask DrainTerminalResponseAsync()
     {
         if (!_terminalResponseWritten) { return; }
         try
@@ -732,11 +732,22 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             // bounded by the deadline already running since before the terminal write. Keep
             // the abort registrations while joining completion: cancellation must abort the
             // transport, not abandon a pending operation that still owns its output.
-            using var stopRegistration = softStop.Register(static state => ((CancellationTokenSource)state!).Cancel(), _terminalDrainSource!);
             await _connection.Output.CompleteAsync().ConfigureAwait(false);
-            await Task.Delay(Timeout.InfiniteTimeSpan, _terminalDrainSource!.Token).ConfigureAwait(false);
+            // The frame reader has exited. Consume pending peer input so receive
+            // back-pressure cannot hide the peer's close. Soft stop triggers the notice;
+            // only hard abort or the terminal deadline cuts its delivery short.
+            while (true)
+            {
+                var result = await _connection.Input.ReadAsync(_terminalDrainSource!.Token).ConfigureAwait(false);
+                _connection.Input.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted || result.IsCanceled) { break; }
+            }
         }
         catch (OperationCanceledException) { }
+        catch (Exception exception) when (TransportCloseReason(exception) is not null)
+        {
+            // A terminal peer can reset or abort after consuming its error frame.
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             DocumentDatabaseEventSource.Log.SessionCleanupFailed(this, exception);

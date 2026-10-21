@@ -44,12 +44,15 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private ProtocolFrameWriter? _writer;
     private GraphDatabaseSession? _databaseSession;
     private Location? _statementLocation;
+    private bool _terminalResponseWritten;
+    private CancellationTokenSource? _terminalDrainSource;
+    private CancellationTokenRegistration _terminalDrainRegistration;
     private Task _completion = Task.CompletedTask;
     private string _closeReason = GraphDatabaseEventSource.CloseReason.Unknown;
 
     // Set by Abort before it cancels the lifetime, so the pump can tell the server's own teardown
     // from a transport that closed under it.
-    private bool _abortRequested;
+    private int _abortRequested;
     private bool _transportDisposed;
 
     // Per-session fault seams distinguish result materialization from transport I/O.
@@ -104,9 +107,11 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     /// </summary>
     internal void Abort()
     {
+        // Claim abort before cancelling the lifetime: the terminal deadline links back here.
+        // No lock is held across cancellation callbacks or transport I/O.
+        if (Interlocked.Exchange(ref _abortRequested, 1) != 0) { return; }
         try
         {
-            Volatile.Write(ref _abortRequested, true);
             _lifetimeSource.Cancel();
             _connection.Abort(new ConnectionAbortedException("The server is shutting down."));
         }
@@ -186,9 +191,14 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         }
         finally
         {
+            await DrainTerminalResponseAsync().ConfigureAwait(false);
+            // A write can resume inline before the deadline's abort callback runs.
+            if (_terminalDrainSource?.IsCancellationRequested == true) { Abort(); }
             // Detach from the abort signal before the lifetime source is disposed
             // so a late hard abort cannot race a disposed token source.
             await abortRegistration.DisposeAsync().ConfigureAwait(false);
+            await _terminalDrainRegistration.DisposeAsync().ConfigureAwait(false);
+            _terminalDrainSource?.Dispose();
             await CleanupAsync().ConfigureAwait(false);
         }
     }
@@ -709,7 +719,16 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     {
         try
         {
-            await WriteErrorAsync(code, message, CancellationToken.None).ConfigureAwait(false);
+            // Start one budget before any terminal I/O. Aborting on cancellation also releases
+            // transports whose write/flush ignores tokens or whose completion has no token.
+            if (_terminalDrainSource is null)
+            {
+                _terminalDrainSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeSource.Token);
+                _terminalDrainRegistration = _terminalDrainSource.Token.Register(static state => ((GraphDatabaseServerSession)state!).Abort(), this);
+                _terminalDrainSource.CancelAfter(_options.ShutdownDrainTimeout);
+            }
+            await WriteErrorAsync(code, message, _terminalDrainSource.Token).ConfigureAwait(false);
+            _terminalResponseWritten = true;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -763,7 +782,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private bool ClosedUnderPump(CancellationToken softStop, CancellationToken hardAbort)
         => !softStop.IsCancellationRequested
             && !hardAbort.IsCancellationRequested
-            && !Volatile.Read(ref _abortRequested)
+            && Volatile.Read(ref _abortRequested) == 0
             && _connection.ConnectionClosed.IsCancellationRequested;
 
     private static string? TransportCloseReason(Exception exception) => exception switch
@@ -774,6 +793,38 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         IOException { InnerException: SocketException or ConnectionException } => GraphDatabaseEventSource.CloseReason.TransportFailed,
         _ => null,
     };
+
+    private async ValueTask DrainTerminalResponseAsync()
+    {
+        if (!_terminalResponseWritten) { return; }
+        try
+        {
+            // Flush queues bytes in a transport pipe. Completing output lets its send pump
+            // drain them before disposal can abort it. A peer that keeps its half open is
+            // bounded by the deadline already running since before the terminal write. Keep
+            // the abort registrations while joining completion: cancellation must abort the
+            // transport, not abandon a pending operation that still owns its output.
+            await _connection.Output.CompleteAsync().ConfigureAwait(false);
+            // The frame reader has exited. Consume pending peer input so receive
+            // back-pressure cannot hide the peer's close. Soft stop triggers the notice;
+            // only hard abort or the terminal deadline cuts its delivery short.
+            while (true)
+            {
+                var result = await _connection.Input.ReadAsync(_terminalDrainSource!.Token).ConfigureAwait(false);
+                _connection.Input.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted || result.IsCanceled) { break; }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (TransportCloseReason(exception) is not null)
+        {
+            // A terminal peer can reset or abort after consuming its error frame.
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            GraphDatabaseEventSource.Log.SessionCleanupFailed(this, exception);
+        }
+    }
 
     private async ValueTask CleanupAsync()
     {

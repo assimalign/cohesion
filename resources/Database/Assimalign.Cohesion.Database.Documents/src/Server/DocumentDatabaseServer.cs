@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -217,7 +218,7 @@ public sealed class DocumentDatabaseServer : DatabaseServer
                 Guid rejectionId = Guid.NewGuid();
                 var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 _rejections.TryAdd(rejectionId, completion);
-                _ = RejectAsync(connection, rejectionId, completion, softStop);
+                _ = RejectAsync(connection, rejectionId, completion, hardAbort);
                 continue;
             }
 
@@ -238,29 +239,49 @@ public sealed class DocumentDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken softStop)
+    private async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken hardAbort)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(hardAbort, connection.ConnectionClosed);
+        int abortRequested = 0;
+        void AbortConnection()
+        {
+            // Cancellation can resume cooperative I/O inline before this callback runs.
+            // Claim once before entering the transport; cleanup also calls this on expiry.
+            if (Interlocked.Exchange(ref abortRequested, 1) != 0) { return; }
+            try { connection.Abort(); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+        using CancellationTokenRegistration abort = deadline.Token.Register(AbortConnection);
+        deadline.CancelAfter(_options.ShutdownDrainTimeout);
         try
         {
             var stream = connection.AsStream();
             await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, ErrorMessages.SessionLimitReached);
 
-            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), softStop).ConfigureAwait(false);
-            await writer.FlushAsync(softStop).ConfigureAwait(false);
+            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), deadline.Token).ConfigureAwait(false);
+            await writer.FlushAsync(deadline.Token).ConfigureAwait(false);
+            // Complete output before disposal can abort the send pump. One deadline covers
+            // write, flush, completion and peer drain; its callback releases tokenless I/O.
+            await connection.Output.CompleteAsync().ConfigureAwait(false);
+            while (true)
+            {
+                ReadResult result = await connection.Input.ReadAsync(deadline.Token).ConfigureAwait(false);
+                connection.Input.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted || result.IsCanceled) { break; }
+            }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // Best effort: the peer may already be gone; rejection must never
-            // take the accept loop down.
+            // Best effort: the peer may already be gone; rejection never faults the accept loop.
         }
         finally
         {
+            if (deadline.IsCancellationRequested) { AbortConnection(); }
+            // Join cancellation callbacks before releasing the transport they can abort.
+            await abort.DisposeAsync().ConfigureAwait(false);
             try { await connection.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // Rejected peers have no session; teardown must still finish the tracked work.
-            }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
             finally
             {
                 completion.TrySetResult();

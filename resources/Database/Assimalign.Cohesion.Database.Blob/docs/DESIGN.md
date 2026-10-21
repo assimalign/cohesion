@@ -670,6 +670,17 @@ The wire family widened no engine type, and the builder verb references only the
 
 ## Server lifecycle and failure semantics
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
 `BlobDatabaseServer` owns one generic `IDuplexConnectionListener` and a concurrent session table.
 It follows the SQL/Graph per-model server placement rather than depending on a shared server
 implementation, and since phase 4 of the concrete-types plan its lifecycle is the root

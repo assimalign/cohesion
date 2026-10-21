@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -52,6 +53,7 @@ public sealed class SqlDatabaseServer : DatabaseServer
     private readonly SqlDatabaseServerOptions _options;
     private readonly IDuplexConnectionListener _listener;
     private readonly DatabaseAuthenticator _authenticator;
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _rejections = new();
     private readonly ConcurrentDictionary<Guid, SqlDatabaseServerSession> _sessions = new();
 
     // Soft stop ends the accept loop and cancels idle/handshake reads so sessions
@@ -173,7 +175,7 @@ public sealed class SqlDatabaseServer : DatabaseServer
 
                 // Graceful drain: session pumps never fault (they own their
                 // errors), so awaiting their completions cannot throw.
-                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).ToArray());
+                Task drain = Task.WhenAll(_sessions.Values.Select(session => session.Completion).Concat(_rejections.Values.Select(completion => completion.Task)).ToArray());
                 Task lapsed = Task.Delay(_options.ShutdownDrainTimeout, cancellationToken);
 
                 if (await Task.WhenAny(drain, lapsed).ConfigureAwait(false) != drain)
@@ -236,7 +238,11 @@ public sealed class SqlDatabaseServer : DatabaseServer
             if (activeSessions >= _options.MaxSessions)
             {
                 SqlDatabaseEventSource.Log.SessionRejected(_engine, SqlDatabaseEventSource.RejectReason.SessionLimit, activeSessions, _options.MaxSessions);
-                _ = RejectAsync(connection, hardAbort);
+                Guid rejectionId = Guid.NewGuid();
+                var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                // Register before starting I/O; stop joins these after the accept loop exits.
+                _rejections.TryAdd(rejectionId, completion);
+                _ = RejectAsync(connection, rejectionId, completion, hardAbort);
                 continue;
             }
 
@@ -257,25 +263,54 @@ public sealed class SqlDatabaseServer : DatabaseServer
     /// Rejects an over-limit connection with an <see cref="ProtocolErrorCode.Unavailable"/>
     /// error frame; the connection never becomes a session.
     /// </summary>
-    private static async Task RejectAsync(IDuplexConnection connection, CancellationToken hardAbort)
+    private async Task RejectAsync(IDuplexConnection connection, Guid id, TaskCompletionSource completion, CancellationToken hardAbort)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(hardAbort, connection.ConnectionClosed);
+        int abortRequested = 0;
+        void AbortConnection()
+        {
+            // Cancellation can resume cooperative I/O inline before this callback runs.
+            // Claim once before entering the transport; cleanup also calls this on expiry.
+            if (Interlocked.Exchange(ref abortRequested, 1) != 0) { return; }
+            try { connection.Abort(); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+        using CancellationTokenRegistration abort = deadline.Token.Register(AbortConnection);
+        deadline.CancelAfter(_options.ShutdownDrainTimeout);
         try
         {
             var stream = connection.AsStream();
             await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
             var error = new ProtocolErrorMessage(ProtocolErrorCode.Unavailable, "The server is at its session limit.");
 
-            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), hardAbort).ConfigureAwait(false);
-            await writer.FlushAsync(hardAbort).ConfigureAwait(false);
+            await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Error, error.Encode()), deadline.Token).ConfigureAwait(false);
+            await writer.FlushAsync(deadline.Token).ConfigureAwait(false);
+            // Complete output before disposal can abort the send pump. One deadline covers
+            // write, flush, completion and peer drain; its callback releases tokenless I/O.
+            await connection.Output.CompleteAsync().ConfigureAwait(false);
+            while (true)
+            {
+                ReadResult result = await connection.Input.ReadAsync(deadline.Token).ConfigureAwait(false);
+                connection.Input.AdvanceTo(result.Buffer.End);
+                if (result.IsCompleted || result.IsCanceled) { break; }
+            }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            // Best effort: the peer may already be gone; rejection must never
-            // take the accept loop down.
+            // Best effort: the peer may already be gone; rejection never faults the accept loop.
         }
         finally
         {
-            await connection.DisposeAsync().ConfigureAwait(false);
+            if (deadline.IsCancellationRequested) { AbortConnection(); }
+            // Join cancellation callbacks before releasing the transport they can abort.
+            await abort.DisposeAsync().ConfigureAwait(false);
+            try { await connection.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+            finally
+            {
+                completion.TrySetResult();
+                _rejections.TryRemove(id, out _);
+            }
         }
     }
 
