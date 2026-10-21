@@ -102,7 +102,9 @@ internal sealed class SqlTableReclamation
                     Interlocked.Add(ref _reclaimedPages, reclaimed);
                     AfterBatch?.Invoke(pending.ObjectId, reclaimed);
 
-                    if (reclaimed < BatchSize)
+                    // A short batch alone does not prove the directory is empty: FreeOwnerPages
+                    // skips stale snapshot entries (#1273), so completion checks the directory.
+                    if (reclaimed < BatchSize && !_database.DataStorage.HasOwnerPages(pending.ObjectId))
                     {
                         // Data durability precedes intent removal. A crash in between just
                         // visits the remaining owner directory again; freed pages have no owner.

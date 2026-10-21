@@ -31,6 +31,7 @@ internal sealed class TestEngine : DatabaseEngine
     private int _forgets;
     private int _reopens;
     private int _takeOfflineCalls;
+    private readonly TaskCompletionSource _takeOfflineEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public TestEngine(
         string name = "test-engine",
@@ -84,6 +85,9 @@ internal sealed class TestEngine : DatabaseEngine
 
     /// <summary>Gets how many calls entered the take-offline core.</summary>
     public int TakeOfflineCalls => Volatile.Read(ref _takeOfflineCalls);
+
+    /// <summary>Gets a signal that the first take-offline core entered.</summary>
+    public Task TakeOfflineEntered => _takeOfflineEntered.Task;
 
     /// <summary>Gets the threads the take-offline core ran on.</summary>
     public List<int> TakeOfflineThreads { get; } = [];
@@ -296,6 +300,7 @@ internal sealed class TestEngine : DatabaseEngine
             TakeOfflineThreads.Add(Environment.CurrentManagedThreadId);
         }
 
+        _takeOfflineEntered.TrySetResult();
         TakeOfflineGate?.Wait();
         if (TakeOfflineFailure is { } thrown)
         {

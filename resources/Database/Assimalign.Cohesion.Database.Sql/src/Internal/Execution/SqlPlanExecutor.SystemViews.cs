@@ -17,38 +17,19 @@ internal sealed partial class SqlPlanExecutor
     private DatabaseResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
+        return MaterializeSelect(Matches(), plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
 
-        var rows = ReadSystemRelation(plan.View, statement, cancellationToken);
-        foreach (var values in rows)
+        IEnumerable<object?[]> Matches()
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            statement.Metrics.RecordsExamined++;
-            if (evaluator.Matches(plan.Where, values))
+            foreach (var values in ReadSystemRelation(plan.View, statement, cancellationToken))
             {
-                matches.Add(values);
+                cancellationToken.ThrowIfCancellationRequested();
+                statement.Metrics.RecordsExamined++;
+                if (evaluator.Matches(plan.Where, values)) { yield return values; }
             }
         }
-
-        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections, cancellationToken);
-
-        if (plan.IsDistinct)
-        {
-            projected = Deduplicate(projected, plan.Projections, evaluator);
-        }
-
-        var columns = new DatabaseColumn[plan.Projections.Count];
-        for (int i = 0; i < plan.Projections.Count; i++)
-        {
-            columns[i] = new DatabaseColumn
-            {
-                Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
-                MaxLength = plan.Projections[i].MaxLength,
-                IsNullable = plan.Projections[i].IsNullable,
-            };
-        }
-        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, plan.Limit, plan.Offset));
     }
 
     private IEnumerable<object?[]> ReadSystemRelation(
