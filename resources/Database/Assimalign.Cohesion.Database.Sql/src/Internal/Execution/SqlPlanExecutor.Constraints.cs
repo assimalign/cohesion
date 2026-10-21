@@ -975,10 +975,16 @@ internal sealed partial class SqlPlanExecutor
             names.Add(index.Name);
         }
 
+        bool hasPrimaryKeyDeclaration = false;
         for (int i = 0; i < definitions.Count; i++)
         {
             var definition = definitions[i];
             string name = ConstraintName(table, definition, i);
+            if (definition.Kind == SqlConstraintKind.PrimaryKey)
+            {
+                if (hasPrimaryKeyDeclaration) { throw SqlConstraintDeclaration.MultiplePrimaryKeys(table.Name, name); }
+                hasPrimaryKeyDeclaration = true;
+            }
             SqlConstraintDeclaration.ValidateColumns(definition, name);
             if (!names.Add(name))
             {

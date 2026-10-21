@@ -71,7 +71,8 @@ columns in PRIMARY KEY, UNIQUE and FOREIGN KEY child lists before key deduplicat
 publication or index construction, for CREATE and ALTER ADD CONSTRAINT. It uses the same
 case-insensitive identity as column binding and names the column and constraint. A second
 PRIMARY KEY declaration is refused with COHSQLE019, including mixed inline/table declarations
-and ALTER on an existing primary key (PostgreSQL parse_utilcmd.c:2378,2773-2779 uses 42P16
+and ALTER ADD CONSTRAINT or ADD COLUMN on an existing primary key, or repeated PRIMARY KEY
+clauses on one added column (PostgreSQL parse_utilcmd.c:2378,2773-2779 uses 42P16
 for multiple primary keys). The live invalid-statement conformance corpus checks both execution
 boundaries, statement atomicity, connection usability, existing SQL0005 type limits and
 COHSQLE017 aggregate placement. No public API or persisted representation changes.

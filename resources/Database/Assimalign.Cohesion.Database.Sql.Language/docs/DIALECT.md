@@ -1504,8 +1504,9 @@ Repeated UPDATE SET targets fail planning with COHSQLE019, even when no row matc
 DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child column lists
 must not repeat a column (case-insensitive); CREATE TABLE and ALTER TABLE ADD CONSTRAINT
 report COHSQLE019 naming the column and constraint. A table may declare one PRIMARY KEY:
-a second inline or table declaration, or ALTER ADD PRIMARY KEY over an existing key, reports
-COHSQLE019 naming the constraint and table. Composite keys remain supported. The live
+a second inline or table declaration, or ALTER ADD CONSTRAINT / ADD COLUMN PRIMARY KEY over an existing key, reports
+COHSQLE019 naming the constraint and table. Repeated PRIMARY KEY clauses on one column
+also fail, including ADD COLUMN. Composite keys remain supported. The live
 SqlInvalidStatementConformanceTests corpus exercises these refusals in process and over the wire.
 
 ## Grouping and aggregate functions (#1020)

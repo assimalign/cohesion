@@ -29,6 +29,9 @@ public sealed class SqlInvalidStatementConformanceTests
         yield return ["CREATE TABLE d (a INT PRIMARY KEY, b INT, CONSTRAINT pk_d PRIMARY KEY(b))", "COHSQLE019", "pk_d"];
         yield return ["CREATE TABLE d (a INT, b INT, PRIMARY KEY(a), CONSTRAINT pk_d PRIMARY KEY(b))", "COHSQLE019", "pk_d"];
         yield return ["ALTER TABLE p ADD CONSTRAINT pk_p PRIMARY KEY(a)", "COHSQLE019", "pk_p"];
+        yield return ["ALTER TABLE p ADD COLUMN c INT PRIMARY KEY", "COHSQLE019", "PRIMARY KEY"];
+        yield return ["ALTER TABLE t ADD COLUMN c INT PRIMARY KEY PRIMARY KEY", "COHSQLE019", "PRIMARY KEY"];
+        yield return ["CREATE TABLE d (a INT PRIMARY KEY PRIMARY KEY)", "COHSQLE019", "PRIMARY KEY"];
         yield return ["CREATE TABLE d (a VARCHAR(0))", "SQL0005", "a"];
         yield return ["CREATE TABLE d (a DECIMAL(99, 50))", "SQL0005", "a"];
         yield return ["CREATE TABLE d (a DECIMAL(5, 9))", "SQL0005", "a"];
