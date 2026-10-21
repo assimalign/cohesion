@@ -17,8 +17,63 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 /// <summary>Malformed peers must never turn a failed graph exchange into a successful response or reusable lease.</summary>
+[Collection(nameof(GraphClientEventSourceCollection))]
 public sealed class GraphClientFailureTests
 {
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - A queued path is delivered before its following terminal error")]
+    public async Task ReadPathAsync_QueuedPathBeforeTerminalError_ShouldPreserveWireOrder()
+    {
+        // Arrange: the peer sends both frames while the consumer has not read the queued path.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = DatabaseClient.Create(new()
+        {
+            Family = GraphProtocol.Family,
+            Settings = new DatabaseConnectionSettings { Database = "graph", EndPoint = listener.EndPoint, MaxPoolSize = 1 },
+            ConnectionFactory = listener.CreateFactory(),
+        });
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task server = ServeAsync(listener, async channel =>
+        {
+            (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Path,
+                new GraphProtocolPathMessage([new GraphNode(new GraphNodeId(71), ["Person"],
+                    new Dictionary<string, object?> { ["name"] = "Alice" })], []).Encode(), timeout.Token);
+            await WriteAsync(channel, ProtocolMessageType.Error,
+                new ProtocolErrorMessage(ProtocolErrorCode.ExecutionFailure, "Failure following a queued path.").Encode(), timeout.Token);
+            sent.TrySetResult();
+            await finished.Task.WaitAsync(timeout.Token);
+        }, timeout.Token);
+        await using var connection = await client.RentAsync(timeout.Token);
+        long waits = GraphClientEventSource.Log.PathBackpressureWaits;
+        var exchange = new GraphPathsExchange("MATCH (n) RETURN n", null);
+        Task completion = exchange.RunAsync(connection, timeout.Token);
+
+        try
+        {
+            // Act
+            await sent.Task.WaitAsync(timeout.Token);
+            while (GraphClientEventSource.Log.PathBackpressureWaits == waits) { await Task.Delay(1, timeout.Token); }
+            completion.IsCompleted.ShouldBeFalse();
+            var path = (await exchange.ReadPathAsync(completion, timeout.Token)).ShouldNotBeNull();
+            await completion.WaitAsync(timeout.Token);
+            var failure = await Should.ThrowAsync<GraphClientException>(async () =>
+                await exchange.ReadPathAsync(completion, timeout.Token));
+
+            // Assert
+            path.Nodes.ShouldHaveSingleItem().Id.Value.ShouldBe(71UL);
+            path.Nodes[0].Properties["name"].ShouldBe("Alice");
+            failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+            GraphClientEventSource.Log.PathBackpressureWaits.ShouldBeGreaterThan(waits);
+        }
+        finally
+        {
+            finished.TrySetResult();
+            await server.WaitAsync(timeout.Token);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - A terminal diagnostic received before cancellation retains its original failure")]
     public async Task ReadPathAsync_TerminalFailureBeforeCancellation_ShouldPreserveDiagnostic()
     {

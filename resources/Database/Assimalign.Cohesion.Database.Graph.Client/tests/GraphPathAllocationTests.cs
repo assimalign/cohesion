@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
@@ -114,6 +115,44 @@ public sealed class GraphPathAllocationTests
         races.ShouldBeGreaterThanOrEqualTo(8);
         await using var final = await harness.Client.ConnectAsync(harness.Token);
         (await final.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token)).Count.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Backpressured and idle pooled connections retain no borrowed payload rental")]
+    public async Task QueryPathsAsync_BackpressuredAndIdle_ShouldReleaseDecodedPayloads()
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp: true);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:Person {name: 'Alice'}), (:Person {name: 'Bob'}), (:Person {name: 'Carol'})",
+            cancellationToken: harness.Token);
+        var protocolSource = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Protocol");
+        using var recorder = new Assimalign.Cohesion.Testing.EventSourceRecorder(protocolSource,
+            EventLevel.Verbose, TimeSpan.FromMilliseconds(100));
+        var baseline = await recorder.WaitForCounterAsync("pooled-buffers-in-use", 0, harness.Token);
+        long waits = GraphClientEventSource.Log.PathBackpressureWaits;
+        long decodes = GraphClientEventSource.Log.PathDecodeCalls;
+        await using var paths = connection.QueryPathsAsync("MATCH (n:Person) RETURN n ORDER BY n.name",
+            cancellationToken: harness.Token).GetAsyncEnumerator();
+
+        // Act: retain the first path while the next occupies the sole handoff slot.
+        (await paths.MoveNextAsync()).ShouldBeTrue();
+        var retained = paths.Current;
+        while (GraphClientEventSource.Log.PathDecodeCalls - decodes < 2
+            || GraphClientEventSource.Log.PathBackpressureWaits == waits)
+        {
+            await Task.Delay(1, harness.Token);
+        }
+        var backpressured = await recorder.WaitForCounterAsync("pooled-buffers-in-use", recorder.CounterSequence, harness.Token);
+        while (await paths.MoveNextAsync()) { }
+        await connection.DisposeAsync();
+        var idle = await recorder.WaitForCounterAsync("pooled-buffers-in-use", recorder.CounterSequence, harness.Token);
+
+        // Assert: the baseline includes the server's session batch, but no client payload rental.
+        backpressured.Value.ShouldBe(baseline.Value);
+        idle.Value.ShouldBe(baseline.Value);
+        (GraphClientEventSource.Log.PathDecodeCalls - decodes).ShouldBe(3);
+        GraphClientEventSource.Log.PathBackpressureWaits.ShouldBeGreaterThan(waits);
+        retained.Nodes[0].Properties["name"].ShouldBe("Alice");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Path decode and backpressure counters publish")]

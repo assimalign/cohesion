@@ -38,8 +38,20 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
     protected override ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
         => ReadAsync(borrow: false, cancellationToken);
 
-    protected override ValueTask<ProtocolFrame?> ReadBorrowedFrameCoreAsync(CancellationToken cancellationToken)
-        => ReadAsync(borrow: true, cancellationToken);
+    protected override async ValueTask<bool> ReadBorrowedFrameCoreAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken)
+    {
+        try
+        {
+            ProtocolFrame? frame = await ReadAsync(borrow: true, cancellationToken).ConfigureAwait(false);
+            if (frame is not { } value) { return false; }
+            consume(value);
+            return true;
+        }
+        finally
+        {
+            ReturnPayload();
+        }
+    }
 
     private async ValueTask<ProtocolFrame?> ReadAsync(bool borrow, CancellationToken cancellationToken)
     {

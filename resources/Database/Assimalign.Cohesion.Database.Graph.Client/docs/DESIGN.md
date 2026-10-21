@@ -183,8 +183,11 @@ abort another caller's rental.
 
 GraphPathsExchange derives from DatabaseProtocolExchange<bool> and runs one worker under the
 shared rental's exchange admission. The worker reads borrowed pooled payloads when supported,
-decodes each Path exactly once, and hands independently owned GraphPath values to a single-slot
-bounded channel. It waits for room before reading another frame. The byte stream, private length
+decodes each Path exactly once inside the borrowed read's synchronous callback, and hands
+independently owned GraphPath values to a single-slot bounded channel. The reader returns the
+payload rental immediately after decoding every frame, including terminal and diagnostic frames,
+before queue waits or a healthy connection can become idle. Capacity one plus waiting for room
+before each read keeps a terminal error from overtaking a queued path. The byte stream, private length
 prefix, per-chunk copies and second decode are removed (#1539); no wire bytes change.
 
 EOF joins the worker after it verifies PathsComplete's count and releases exchange admission.

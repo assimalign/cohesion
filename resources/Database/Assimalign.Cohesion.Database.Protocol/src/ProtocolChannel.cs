@@ -118,6 +118,8 @@ public sealed class ProtocolChannel : IAsyncDisposable
     {
         private readonly ProtocolFrameReader _reader;
         private readonly ProtocolChannel _channel;
+        private readonly Action<ProtocolFrame> _consumeBorrowedFrame;
+        private Action<ProtocolFrame>? _consumer;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FamilyReader"/> class.
@@ -129,6 +131,7 @@ public sealed class ProtocolChannel : IAsyncDisposable
         {
             _reader = reader;
             _channel = channel;
+            _consumeBorrowedFrame = ConsumeBorrowedFrame;
         }
 
         protected override async ValueTask<ProtocolFrame?> ReadFrameCoreAsync(CancellationToken cancellationToken)
@@ -142,15 +145,21 @@ public sealed class ProtocolChannel : IAsyncDisposable
             return frame;
         }
 
-        protected override async ValueTask<ProtocolFrame?> ReadBorrowedFrameCoreAsync(CancellationToken cancellationToken)
+        protected override async ValueTask<bool> ReadBorrowedFrameCoreAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken)
         {
-            ProtocolFrame? frame = await _reader.ReadBorrowedFrameAsync(cancellationToken).ConfigureAwait(false);
-            if (frame is { } value)
+            _consumer = consume;
+            try
             {
-                _channel.Validate(value.Type);
-                _channel.ValidateCapability(value.Type);
+                return await _reader.ReadBorrowedFrameAsync(_consumeBorrowedFrame, cancellationToken).ConfigureAwait(false);
             }
-            return frame;
+            finally { _consumer = null; }
+        }
+
+        private void ConsumeBorrowedFrame(ProtocolFrame frame)
+        {
+            _channel.Validate(frame.Type);
+            _channel.ValidateCapability(frame.Type);
+            _consumer!(frame);
         }
 
         protected override ValueTask DisposeAsyncCore() => _reader.DisposeAsync();

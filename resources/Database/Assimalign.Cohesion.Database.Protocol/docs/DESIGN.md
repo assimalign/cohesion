@@ -193,11 +193,13 @@ IOException, since the accepted frames may have been sent partially or not at al
 still returns its cleared batch without retrying or sending any subsequent frames.
 
 `ReadFrameAsync` still returns owned memory. The optional `SupportsBorrowedPayloads` capability
-and `ReadBorrowedFrameAsync` offer reader-owned pooled memory valid only until the next read
-of either kind or disposal. A consumer decodes or copies retained values before then. The
-stream reader and channel family reader support it; unsupported decorators explicitly refuse
-it. The reader validates lengths before renting, exposes only the declared slice, and clears
-and returns the rental on the next read, partial payload, cancellation, failure or disposal.
+and `ReadBorrowedFrameAsync` scope reader-owned pooled memory to a synchronous consume callback.
+The existing optional operation now accepts that callback and returns whether a frame was read;
+no separate public release seam or shipped friend grant is needed. A consumer decodes or copies
+retained values within the callback. The reader clears and returns the rental in finally before
+the read completes, including callback failures, so backpressure and idle connections retain no
+payload rental. The stream reader and channel family reader support it; unsupported decorators
+explicitly refuse it. Lengths are validated before renting, and only the declared slice is exposed.
 The single read flow must be joined before disposal; no lock is held across transport I/O.
 
 The source lazily publishes `transport-write-calls`, `transport-flush-calls` and

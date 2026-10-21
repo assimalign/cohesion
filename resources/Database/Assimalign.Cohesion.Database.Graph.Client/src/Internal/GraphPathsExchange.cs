@@ -16,6 +16,10 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
 {
     private readonly GraphProtocolExecuteMessage _request;
+    private readonly Action<ProtocolFrame> _consumeFrame;
+    private GraphPath? _decodedPath;
+    private long _count;
+    private bool _pathsComplete;
     // The producer owns all wire I/O under DatabaseConnection's exchange admission. No lock is
     // held across this bounded queue. Cancellation joins the producer before returning its lease;
     // decoded values own their strings/collections and never reference a borrowed frame buffer.
@@ -35,6 +39,7 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         : base(GraphProtocol.Family)
     {
         _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);
+        _consumeFrame = ConsumeFrame;
     }
 
     internal async Task RunAsync(DatabaseConnection connection, CancellationToken cancellationToken)
@@ -103,72 +108,84 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths, _request.Encode()),
             cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
-        long count = 0;
         while (true)
         {
-            // Wait before decoding another path. Slow callers retain at most one queued path
-            // plus their current path. The frame buffer remains producer-owned.
+            // Capacity 1 plus waiting before every read prevents a terminal error from
+            // overtaking a queued path: it cannot be read until that path is taken.
+            // The decode callback returns the payload rental before queue backpressure.
             ValueTask<bool> ready = _paths.Writer.WaitToWriteAsync(cancellationToken);
             if (!ready.IsCompleted) { GraphClientEventSource.Log.PathBackpressureWaited(); }
             if (!await ready.ConfigureAwait(false)) { return false; }
-            ProtocolFrame frame = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
-            if (frame.Type == ProtocolMessageType.Error)
+            await ReadFrameAsync(reader, cancellationToken).ConfigureAwait(false);
+            if (_pathsComplete) { return true; }
+            if (_decodedPath is { } path)
             {
-                var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-                if (count == 0 && error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
-                {
-                    _responseComplete = true;
-                    MarkResponseComplete();
-                }
-                throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
+                _decodedPath = null;
+                await _paths.Writer.WriteAsync(path, cancellationToken).ConfigureAwait(false);
             }
-            if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.PathsComplete)
-            {
-                if (GraphProtocolPathsCompleteMessage.Decode(frame.Payload.Span).PathCount != count)
-                {
-                    throw new ProtocolException("The graph path completion count does not match the received paths.");
-                }
-                return true;
-            }
-            if (frame.Type != (ProtocolMessageType)GraphProtocolMessageType.Path)
-            {
-                throw new ProtocolException("Expected a graph path or path completion.");
-            }
-            long started = Stopwatch.GetTimestamp();
-            GraphProtocolPathMessage decoded;
-            try { decoded = GraphProtocolPathMessage.Decode(frame.Payload.Span); }
-            finally { GraphClientEventSource.Log.PathDecoded(started); }
-            await _paths.Writer.WriteAsync(new GraphPath(decoded.Nodes, decoded.Relationships), cancellationToken).ConfigureAwait(false);
-            count = checked(count + 1);
         }
     }
 
-    private async ValueTask<ProtocolFrame> ReadAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
+    private void ConsumeFrame(ProtocolFrame frame)
     {
-        ProtocolFrame frame = await ReadFrameAsync(reader, cancellationToken).ConfigureAwait(false);
         if (frame.Type == ProtocolMessageType.Diagnostics)
         {
             if (_hasDiagnostics) { throw new ProtocolException(ErrorMessages.GraphDiagnosticsDuplicate); }
             _hasDiagnostics = true;
             _diagnostics = ProtocolDiagnosticsMessage.Decode(frame.Payload.Span).Entries;
-            frame = await ReadFrameAsync(reader, cancellationToken, afterDiagnostics: true).ConfigureAwait(false);
-            if (frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.PathsComplete)
-            {
-                throw new ProtocolException(ErrorMessages.GraphDiagnosticsOrderInvalid);
-            }
+            return;
         }
-        return frame;
+        if (_hasDiagnostics && frame.Type != ProtocolMessageType.Error
+            && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.PathsComplete)
+        {
+            throw new ProtocolException(ErrorMessages.GraphDiagnosticsOrderInvalid);
+        }
+        if (frame.Type == ProtocolMessageType.Error)
+        {
+            var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+            if (_count == 0 && error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+            {
+                _responseComplete = true;
+                MarkResponseComplete();
+            }
+            throw new DatabaseClientException(error.Code, error.Message, _diagnostics, null);
+        }
+        if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.PathsComplete)
+        {
+            if (GraphProtocolPathsCompleteMessage.Decode(frame.Payload.Span).PathCount != _count)
+            {
+                throw new ProtocolException("The graph path completion count does not match the received paths.");
+            }
+            _pathsComplete = true;
+            return;
+        }
+        if (frame.Type != (ProtocolMessageType)GraphProtocolMessageType.Path)
+        {
+            throw new ProtocolException("Expected a graph path or path completion.");
+        }
+        long started = Stopwatch.GetTimestamp();
+        GraphProtocolPathMessage decoded;
+        try { decoded = GraphProtocolPathMessage.Decode(frame.Payload.Span); }
+        finally { GraphClientEventSource.Log.PathDecoded(started); }
+        _decodedPath = new GraphPath(decoded.Nodes, decoded.Relationships);
+        _count = checked(_count + 1);
     }
 
-    private static async ValueTask<ProtocolFrame> ReadFrameAsync(ProtocolFrameReader reader, CancellationToken cancellationToken,
-        bool afterDiagnostics = false)
+    private async ValueTask ReadFrameAsync(ProtocolFrameReader reader, CancellationToken cancellationToken)
     {
         try
         {
-            return await (reader.SupportsBorrowedPayloads ? reader.ReadBorrowedFrameAsync(cancellationToken)
-                : reader.ReadFrameAsync(cancellationToken)).ConfigureAwait(false)
-                ?? throw new ProtocolException(afterDiagnostics ? ErrorMessages.GraphDiagnosticsCompletionMissing
-                    : ErrorMessages.PathCompletionMissing);
+            if (reader.SupportsBorrowedPayloads)
+            {
+                if (await reader.ReadBorrowedFrameAsync(_consumeFrame, cancellationToken).ConfigureAwait(false)) { return; }
+            }
+            else if (await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false) is { } frame)
+            {
+                ConsumeFrame(frame);
+                return;
+            }
+            throw new ProtocolException(_hasDiagnostics ? ErrorMessages.GraphDiagnosticsCompletionMissing
+                : ErrorMessages.PathCompletionMissing);
         }
         catch (InvalidOperationException exception)
         {

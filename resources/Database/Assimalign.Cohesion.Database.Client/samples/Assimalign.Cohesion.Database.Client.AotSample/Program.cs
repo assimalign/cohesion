@@ -101,16 +101,21 @@ internal static class Program
     {
         await using var transport = await listener.AcceptAsync(cancellationToken);
         await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, batchWrites: true);
-        var startupFrame = await channel.Reader.ReadBorrowedFrameAsync(cancellationToken);
-        Check(startupFrame?.Type == ProtocolMessageType.Startup);
-        var startup = ProtocolStartupMessage.Decode(startupFrame!.Value.Payload.Span);
+        ProtocolStartupMessage? startup = null;
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == ProtocolMessageType.Startup);
+            startup = ProtocolStartupMessage.Decode(frame.Payload.Span);
+        }, cancellationToken));
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
-        Check((await channel.Reader.ReadBorrowedFrameAsync(cancellationToken))?.Type == ProtocolMessageType.AuthenticateResponse);
-        var ready = channel.Negotiate(ProtocolVersion.Current, startup.Capabilities);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(
+            frame => Check(frame.Type == ProtocolMessageType.AuthenticateResponse), cancellationToken));
+        var ready = channel.Negotiate(ProtocolVersion.Current, startup!.Capabilities);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
-        Check((await channel.Reader.ReadBorrowedFrameAsync(cancellationToken))?.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(
+            frame => Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths), cancellationToken));
         var node = new GraphNode(new(1), ["Canary"], new Dictionary<string, object?> { ["name"] = "canary" });
         var message = new GraphProtocolPathMessage([node], []);
         byte[] payload = new byte[message.GetEncodedLength()];

@@ -38,28 +38,34 @@ public abstract class ProtocolFrameReader : IAsyncDisposable
         SupportsBorrowedPayloads = supportsBorrowedPayloads;
     }
 
-    /// <summary>Gets whether this reader supports payloads borrowed until the next read or disposal.</summary>
+    /// <summary>Gets whether this reader supports pooled payloads borrowed within a synchronous callback.</summary>
     public bool SupportsBorrowedPayloads { get; }
 
-    /// <summary>Reads a complete frame using reader-owned, reusable payload storage.</summary>
+    /// <summary>Reads a complete frame and synchronously consumes its reader-owned payload.</summary>
+    /// <param name="consume">Consumes or decodes the frame before its pooled storage is returned.</param>
     /// <param name="cancellationToken">Cancellation token for the read.</param>
-    /// <returns>The next frame, or null at a clean end of stream.</returns>
+    /// <returns>True when a frame was consumed, or false at a clean end of stream.</returns>
+    /// <exception cref="ArgumentNullException">The callback is null.</exception>
     /// <exception cref="NotSupportedException">The reader does not support borrowed payloads.</exception>
     /// <exception cref="ProtocolException">The frame is malformed or incomplete.</exception>
-    /// <remarks>The payload is valid only until the next read (of either kind) or reader disposal.
-    /// Decode or copy everything that must survive before that boundary. Reads and disposal must
-    /// be serialized by the caller. <see cref="ReadFrameAsync"/> continues to return owned payloads.</remarks>
-    public ValueTask<ProtocolFrame?> ReadBorrowedFrameAsync(CancellationToken cancellationToken = default)
+    /// <remarks>The payload is valid only during <paramref name="consume"/>. Decode or copy everything
+    /// that must survive before the callback returns. Storage is returned even if the callback throws,
+    /// before the read completes. Reads and disposal must be serialized by the caller.
+    /// <see cref="ReadFrameAsync"/> continues to return owned payloads.</remarks>
+    public ValueTask<bool> ReadBorrowedFrameAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(consume);
         if (!SupportsBorrowedPayloads) { throw new NotSupportedException(ErrorMessages.BorrowedPayloadsUnsupported); }
-        return ReadBorrowedFrameCoreAsync(cancellationToken);
+        return ReadBorrowedFrameCoreAsync(consume, cancellationToken);
     }
 
-    /// <summary>Reads a frame whose payload remains valid until the next read or disposal.</summary>
+    /// <summary>Reads a frame and consumes it while its pooled payload is borrowed.</summary>
+    /// <param name="consume">Consumes the frame synchronously, without retaining its payload.</param>
     /// <param name="cancellationToken">Cancellation token for the read.</param>
-    /// <returns>The next frame, or null at a clean end of stream.</returns>
+    /// <returns>True when a frame was consumed, or false at a clean end of stream.</returns>
     /// <exception cref="NotSupportedException">The optional capability is unsupported.</exception>
-    protected virtual ValueTask<ProtocolFrame?> ReadBorrowedFrameCoreAsync(CancellationToken cancellationToken)
+    /// <remarks>A supporting leaf must release the payload after the callback, including when it throws.</remarks>
+    protected virtual ValueTask<bool> ReadBorrowedFrameCoreAsync(Action<ProtocolFrame> consume, CancellationToken cancellationToken)
         => throw new NotSupportedException(ErrorMessages.BorrowedPayloadsUnsupported);
 
     /// <summary>

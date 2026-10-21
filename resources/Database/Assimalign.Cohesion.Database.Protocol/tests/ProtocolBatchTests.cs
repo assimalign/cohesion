@@ -69,10 +69,11 @@ public sealed class ProtocolBatchTests
         await using var reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
         for (int i = 0; i < 20; i++)
         {
-            var frame = (await reader.ReadBorrowedFrameAsync(CancellationToken.None)).ShouldNotBeNull();
-            frame.Payload.ToArray().ShouldBe([1, 2, 3]);
+            (await reader.ReadBorrowedFrameAsync(frame => frame.Payload.ToArray().ShouldBe([1, 2, 3]),
+                CancellationToken.None)).ShouldBeTrue();
         }
-        (await reader.ReadBorrowedFrameAsync(CancellationToken.None)).ShouldBeNull();
+        (await reader.ReadBorrowedFrameAsync(_ => throw new InvalidOperationException("EOF has no frame."),
+            CancellationToken.None)).ShouldBeFalse();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Count and byte bounds preserve frame order")]
@@ -100,11 +101,12 @@ public sealed class ProtocolBatchTests
         await using var reader = ProtocolFrameReader.Create(stream, true);
         for (int i = 0; i < count; i++)
         {
-            (await reader.ReadBorrowedFrameAsync(CancellationToken.None))!.Value.Payload.Span[0].ShouldBe((byte)i);
+            (await reader.ReadBorrowedFrameAsync(frame => frame.Payload.Span[0].ShouldBe((byte)i),
+                CancellationToken.None)).ShouldBeTrue();
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Owned payloads survive pooled reads and pooled bytes are cleared on return")]
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Owned payloads survive pooled reads and borrowed bytes are cleared immediately after decoding")]
     public async Task ReadBorrowedFrameAsync_OwnedAndBorrowedFrames_ShouldHonorTheirLifetimes()
     {
         // Arrange
@@ -120,7 +122,15 @@ public sealed class ProtocolBatchTests
 
         // Act
         var owned = (await reader.ReadFrameAsync(CancellationToken.None))!.Value;
-        var borrowed = (await reader.ReadBorrowedFrameAsync(CancellationToken.None))!.Value;
+        ProtocolFrame borrowed = default;
+        (await reader.ReadBorrowedFrameAsync(frame =>
+        {
+            borrowed = frame;
+            frame.Payload.ToArray().ShouldBe([7, 8, 9]);
+        }, CancellationToken.None)).ShouldBeTrue();
+        // No further read or disposal is needed to release the borrowed rental.
+        borrowed.Payload.ToArray().ShouldBe([0, 0, 0]);
+        (ProtocolEventSource.Log.ReturnedBuffers - returned).ShouldBe(1);
         (await reader.ReadFrameAsync(CancellationToken.None)).ShouldNotBeNull();
         await reader.DisposeAsync();
         await reader.DisposeAsync();
@@ -130,6 +140,69 @@ public sealed class ProtocolBatchTests
         borrowed.Payload.ToArray().ShouldBe([0, 0, 0]);
         (ProtocolEventSource.Log.RentedBuffers - rented).ShouldBe(1);
         (ProtocolEventSource.Log.ReturnedBuffers - returned).ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Borrowed reads release large payloads before a callback failure escapes")]
+    [InlineData(false, 3)]
+    [InlineData(true, 3)]
+    [InlineData(true, 16_777_216)]
+    public async Task ReadBorrowedFrameAsync_ConsumerFailure_ShouldReturnRentalBeforeCompleting(bool channelView, int payloadLength)
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        byte[] payload = new byte[payloadLength];
+        Array.Fill(payload, (byte)42);
+        await using (var writer = ProtocolFrameWriter.Create(stream, true))
+        {
+            await writer.WriteFrameAsync(new(ProtocolMessageType.Error, payload), CancellationToken.None);
+        }
+        stream.Position = 0;
+        await using var channel = channelView ? new ProtocolChannel(stream, new ProtocolMessageFamily("test"), true) : null;
+        await using var reader = channel?.Reader ?? ProtocolFrameReader.Create(stream, true);
+        long balance = ProtocolEventSource.Log.PooledBuffersInUse;
+        ReadOnlyMemory<byte> borrowed = default;
+        var failure = new InvalidDataException("Injected decode failure.");
+
+        // Act
+        var caught = await Should.ThrowAsync<InvalidDataException>(async () =>
+            await reader.ReadBorrowedFrameAsync(frame =>
+            {
+                borrowed = frame.Payload;
+                borrowed.Span[0].ShouldBe((byte)42);
+                throw failure;
+            }, CancellationToken.None));
+
+        // Assert: leave the reader open and idle, with no next read to trigger cleanup.
+        caught.ShouldBeSameAs(failure);
+        borrowed.Length.ShouldBe(payloadLength);
+        borrowed.Span[0].ShouldBe((byte)0);
+        borrowed.Span[^1].ShouldBe((byte)0);
+        ProtocolEventSource.Log.PooledBuffersInUse.ShouldBe(balance);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Family and capability rejections release borrowed payloads")]
+    [InlineData((ProtocolMessageType)64)]
+    [InlineData(ProtocolMessageType.Diagnostics)]
+    public async Task ReadBorrowedFrameAsync_ChannelRejection_ShouldReturnRentalWithoutCallingConsumer(ProtocolMessageType type)
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        await using (var writer = ProtocolFrameWriter.Create(stream, true))
+        {
+            await writer.WriteFrameAsync(new(type, new byte[] { 42 }), CancellationToken.None);
+        }
+        stream.Position = 0;
+        await using var channel = new ProtocolChannel(stream, new ProtocolMessageFamily("test"), true);
+        long balance = ProtocolEventSource.Log.PooledBuffersInUse;
+        bool consumed = false;
+
+        // Act
+        await Should.ThrowAsync<ProtocolException>(async () =>
+            await channel.Reader.ReadBorrowedFrameAsync(_ => consumed = true, CancellationToken.None));
+
+        // Assert
+        consumed.ShouldBeFalse();
+        ProtocolEventSource.Log.PooledBuffersInUse.ShouldBe(balance);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Partial borrowed frames release their rental")]
@@ -146,8 +219,8 @@ public sealed class ProtocolBatchTests
         await using var reader = ProtocolFrameReader.Create(stream, true);
 
         // Act / Assert
-        if (length == 0) { (await reader.ReadBorrowedFrameAsync(CancellationToken.None)).ShouldBeNull(); }
-        else { await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadBorrowedFrameAsync(CancellationToken.None)); }
+        if (length == 0) { (await reader.ReadBorrowedFrameAsync(_ => { }, CancellationToken.None)).ShouldBeFalse(); }
+        else { await Should.ThrowAsync<ProtocolException>(async () => await reader.ReadBorrowedFrameAsync(_ => { }, CancellationToken.None)); }
         (ProtocolEventSource.Log.RentedBuffers - ProtocolEventSource.Log.ReturnedBuffers).ShouldBe(balance);
     }
 
@@ -164,7 +237,7 @@ public sealed class ProtocolBatchTests
         long balance = ProtocolEventSource.Log.RentedBuffers - ProtocolEventSource.Log.ReturnedBuffers;
 
         // Act / Assert
-        Task<ProtocolFrame?> read = reader.ReadBorrowedFrameAsync(cancel.Token).AsTask();
+        Task<bool> read = reader.ReadBorrowedFrameAsync(_ => { }, cancel.Token).AsTask();
         await stream.PayloadEntered.Task.WaitAsync(timeout.Token);
         if (fail) { await Should.ThrowAsync<IOException>(async () => await read); }
         else
