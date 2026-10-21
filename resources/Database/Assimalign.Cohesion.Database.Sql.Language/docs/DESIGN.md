@@ -69,6 +69,10 @@ ordering syntax through rendering and remain distinguishable for catalog-aware a
 Special-form names render as quoted ordinary calls when a quantifier or ordering is present;
 the standard EXTRACT/POSITION and niladic arms apply only without those modifiers.
 
+FROM-less SELECT (#1373) retains the existing AST and grammar. The engine now uses
+one implicit row for every such query, including views and nested queries; DIALECT.md
+specifies filtering, aggregation and wildcard refusal. No profile count changes.
+
 ## Executable functions and vocabulary (#1103)
 
 Column DEFAULT uses the restricted comparison/distinct expression grammar, leaving following column constraints

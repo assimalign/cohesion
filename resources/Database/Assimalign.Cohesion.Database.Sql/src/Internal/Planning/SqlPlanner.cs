@@ -156,8 +156,7 @@ internal sealed partial class SqlPlanner
         }
         if (select.From.Count == 0)
         {
-            if (IsCommonTableOperand(select)) { return PlanConstantCommonTable(select); }
-            throw new SqlPlanningException("COHSQLE013", "SELECT requires a FROM table.", select.Location);
+            return PlanConstantSelect(select);
         }
 
         var source = ResolveRelation(select.From[0].Table, select);

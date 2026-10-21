@@ -554,8 +554,14 @@ public sealed class SqlLanguageConformanceTests
                 var rows = await ReadRowsAsync(result);
                 rows.ShouldContain(row => Equals(row[2], "IndexSeek") && Equals(row[4], "by_age") && Equals(row[5], "age = 36"));
             }),
-        [SqlClauses.Select] = Query("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", expression => expression is SqlSelectExpression,
-            [[1, 37L], [2, 46L], [3, 42L]]),
+        [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
+            expression => expression is SqlSelectExpression,
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[1, 37L], [2, 46L], [3, 42L]]);
+                await ExpectRowsAsync(session, "SELECT (SELECT 42) AS answer WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL);", [[42]]);
+                await ExpectRowsAsync(session, "SELECT COUNT(*) WHERE FALSE;", [[0L]]);
+            }),
         [SqlClauses.From] = Query("SELECT u.name FROM dbo.t AS u WHERE id = 1;", expression => expression is SqlSelectExpression { From.Count: 1 },
             [["Ada"]]),
         [SqlClauses.SetOperation] = Query("SELECT id FROM t WHERE id = 1 UNION SELECT id FROM t WHERE id = 2 ORDER BY id;",

@@ -123,7 +123,7 @@
   <data name="ScriptNamespaceTypedObjects" xml:space="preserve"><value>COHSQLS005: Declared script '{0}' cannot DROP SCHEMA '{1}' CASCADE over typed schema objects; declare the change in the typed schema. Nothing was opened or written.</value></data>
   <data name="CteDuplicateName" xml:space="preserve"><value>Common table expression name '{0}' is declared more than once.</value></data>
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
-  <data name="CteConstantQuery" xml:space="preserve"><value>A common table expression without FROM cannot project a wildcard.</value></data>
+  <data name="ConstantQueryWildcard" xml:space="preserve"><value>A SELECT without FROM cannot project a wildcard.</value></data>
   <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
   <data name="CorrelatedUngroupedColumn" xml:space="preserve"><value>Outer column '{0}' must appear in GROUP BY before it can be referenced by a grouped query's subquery.</value></data>
   <data name="OuterOnlyAggregate" xml:space="preserve"><value>An aggregate whose column references all belong to outer query scopes is not supported.</value></data>

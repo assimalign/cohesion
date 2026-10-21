@@ -1646,8 +1646,7 @@ collation without borrowing a physical source ordinal or expression.
 Set bodies execute at the top level, in IN/NOT IN, EXISTS/NOT EXISTS, scalar subqueries,
 derived tables, CTE definitions and INSERT query sources, including correlated operands.
 `IN ((SELECT id FROM t))` is now membership, with redundant query parentheses removed
-by canonical rendering. Top-level SELECT operands still require FROM; the top-level operands
-of a CTE definition may use its implicit row. Each subquery counts once toward the existing
+by canonical rendering. SELECT operands may omit FROM in both top-level and nested queries (#1373). Each subquery counts once toward the existing
 32-level subquery limit; set nodes count individually toward the expression depth limit.
 Parenthesized scalar queries followed by arithmetic, comparison or a list comma remain values
 (PostgreSQL gram.y:15645,15899,15916). Parenthesized WITH retains the existing single subquery
@@ -1681,7 +1680,10 @@ each outer row. Supported forms are correlated and uncorrelated
 `NOT EXISTS (SELECT ...)`, and scalar `(SELECT ...)` expressions. They compose
 with the supported SELECT projection, WHERE, INNER JOIN/ON, GROUP BY/HAVING,
 ORDER BY, LIMIT, and OFFSET surface, including nested queries and wire execution.
-Each SELECT still requires a FROM relation. Scalar and IN queries must return
+A SELECT without FROM reads one implicit row (#1373), so SELECT 1 and SELECT f(1)
+return one row. WHERE FALSE or NULL and LIMIT 0/OFFSET 1 can remove it; aggregates,
+ordering, DISTINCT, set operands, derived tables and views use ordinary query semantics.
+A wildcard without FROM fails with COHSQLE013. Scalar and IN queries must return
 exactly one column; EXISTS accepts any valid select list.
 
 | Form | Result semantics |
@@ -1772,11 +1774,10 @@ entry). A CTE and a stored relation with the same unaliased name conflict
 `WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
 only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
 FROM and operate on one implicit row; a wildcard still requires a relation.
-This implicit row applies to the definition's SELECT root and the top-level SELECT operands of a set-operation body. Subqueries and
-derived tables nested in that body retain the ordinary FROM requirement and
-ordinary diagnostics. Constant bodies run the same planning checks, including
+This implicit row applies to every FROM-less SELECT, including set-operation operands,
+subqueries and derived tables nested in that body (#1373). Constant bodies run the same planning checks, including
 COHSQLE017 for aggregates in WHERE even when the definition is unused.
-The ordinary top-level SELECT-without-FROM exclusion remains.
+FROM-less top-level and nested queries use the same implicit row (#1373).
 
 Every definition is bound before execution, including unused definitions. Duplicate
 names and unresolved references to later siblings use `COHSQLE026` before any row

@@ -90,6 +90,12 @@ internal sealed partial class SqlPlanExecutor
             case SqlSetOperationPlan set:
                 return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
+                if (_subqueryValues is { HasCorrelatedQueries: true })
+                {
+                    return await ExecuteCorrelatedSelectAsync([Array.Empty<object?>()], constant.Projections,
+                        constant.Where, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
+                        statement, cancellationToken).ConfigureAwait(false);
+                }
                 var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
                 return MaterializeSelect(evaluator.Matches(constant.Where, []) ? [Array.Empty<object?>()] : [],
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,

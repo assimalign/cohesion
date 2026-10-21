@@ -105,7 +105,7 @@ public abstract class SqlAggregateAccumulator
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), the database exception it threw, or the argument does not fit its parameter.</exception>
     internal void AddResolved(object? value, DatabaseType target, DatabaseName database, Collation collation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, DateTimeOffset? transactionTimestamp = null)
     {
         var argument = SqlValue.FromObject(value);
         if (target != DatabaseType.Null && (target != argument.Type || target == DatabaseType.Character))
@@ -113,7 +113,7 @@ public abstract class SqlAggregateAccumulator
             argument = CoerceArgument(argument, target);
         }
 
-        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken);
+        var arguments = new SqlArguments(new ReadOnlySpan<SqlValue>(in argument), database, collation, cancellationToken, transactionTimestamp);
         try
         {
             AddCore(in arguments);
@@ -133,9 +133,9 @@ public abstract class SqlAggregateAccumulator
     /// <param name="collation">The collation the call's input compares under.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
     /// <exception cref="DatabaseException">The function failed (<c>COHSQLE007</c>), or the database exception it threw.</exception>
-    internal void AddResolved(DatabaseName database, Collation collation, CancellationToken cancellationToken)
+    internal void AddResolved(DatabaseName database, Collation collation, CancellationToken cancellationToken, DateTimeOffset? transactionTimestamp = null)
     {
-        var arguments = new SqlArguments([], database, collation, cancellationToken);
+        var arguments = new SqlArguments([], database, collation, cancellationToken, transactionTimestamp);
         try
         {
             AddCore(in arguments);
