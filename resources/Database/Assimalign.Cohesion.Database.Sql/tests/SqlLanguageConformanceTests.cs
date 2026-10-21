@@ -21,6 +21,29 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Conformance: embedded identifier quotes survive tables, columns and persisted views (#1235)")]
+    public async Task ExecuteAsync_DoubledIdentifierQuotes_ShouldPreserveCatalogAndViewNames()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("quoted-identifiers", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE \"t\"\"x\" (\"a\"\"b\" INT)");
+        await ExecuteAsync(session, "INSERT INTO \"t\"\"x\" (\"a\"\"b\") VALUES (7)");
+
+        // Act
+        await ExecuteAsync(session, "CREATE VIEW \"v\"\"x\" AS SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\"");
+        await using var result = (await ExecuteAsync(session, "SELECT \"c\"\"d\" FROM \"v\"\"x\""))
+            .ShouldBeAssignableTo<DatabaseResultSet>();
+
+        // Assert
+        result.Columns.ShouldHaveSingleItem().Name.ShouldBe("c\"d");
+        var values = new List<int>();
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { values.Add(row.GetInt32(0)); }
+        values.ShouldBe([7]);
+        (await RowsAsync(session, "SELECT \"a\"\"b\" FROM \"t\"\"x\"")).ShouldHaveSingleItem().ShouldBe([7]);
+    }
+
     /// <summary>Measures constraint diagnostics and statement rollback through the live SQL session.</summary>
     /// <param name="sql">The statement that violates a constraint.</param>
     /// <param name="code">The required engine diagnostic code.</param>

@@ -166,7 +166,7 @@ public sealed class GraphOrderKeyTests
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refused = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("RETURN 1", cancellationToken: CancellationToken.None));
-            refused.Message.ShouldStartWith("COHDBG007: ", Case.Sensitive);
+            refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await using var reused = (await session.ExecuteAsync("RETURN 1", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();

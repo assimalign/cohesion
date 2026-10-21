@@ -4,6 +4,16 @@ The shared query-language substrate for database models. It owns model-neutral l
 syntax-tree primitives, diagnostic production, and parser orchestration; SQL, OQL, GQL, and future model
 languages own their vocabulary and grammar.
 
+## Delimited identifiers (#1235)
+
+The shared lexer consumes `"a""b"` as one QuotedIdentifier token, retaining the raw text and
+source offsets. A doubled double quote is part of the identifier, and a lone quote closes it;
+each model parser rejects an unterminated token, including one ending in an escaped quote.
+SQL, OQL and GQL unescape the token to `a"b` at their identifier boundary. Their single-quoted
+string handling remains separate. PostgreSQL behavior was consulted without copying code:
+`C:/Source/repos/postgres/postgres/src/backend/parser/scan.l:794-799` consumes `xddouble`
+inside a delimited identifier and appends one double quote.
+
 `Diagnostic`, `DiagnosticSeverity` and `DiagnosticLocation` live in `Database.Types`
 (owner, 2026-10-16; #1577), with their names and members unchanged. Language references
 Types; model-neutral execution results can expose diagnostics without depending on Language.

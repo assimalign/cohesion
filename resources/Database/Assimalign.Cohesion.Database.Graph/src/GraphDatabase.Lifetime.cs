@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -13,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 public sealed partial class GraphDatabase
 {
+    private static readonly string _catalogSnapshotChangedMessage = ErrorMessages.CatalogSnapshotChanged;
+
     /// <summary>
     /// Starts one statement on a session: holds the session, admits the statement into the
     /// session's explicit transaction or begins an autocommit context, and pins a read-committed
@@ -84,7 +87,8 @@ public sealed partial class GraphDatabase
     private Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
     {
         var translated when !ReferenceEquals(translated, error) => translated,
-        _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
+        _ when error is InvalidOperationException => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBG003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         // A label expression or predicate nested deeper than this thread's stack: the walks
         // check the stack before they descend, so the statement fails, not the process.
         _ when error is InsufficientExecutionStackException stack => GraphStatementTooComplex.Create(stack),
@@ -110,11 +114,22 @@ public sealed partial class GraphDatabase
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
-        GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
+        GraphElementTooLargeException => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBG009", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null
             || DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null
+            || DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: false, IsCallerError: false }
             => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<ObjectDisposedException>(error) is not null
+            => new DatabaseException(ErrorMessages.GraphDisposed, [new Types.Diagnostic
+            { Code = "COHDBG019", Message = ErrorMessages.GraphDisposed, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
+            => new DatabaseTransactionAbortedException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBG007", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true }
+            => new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = "COHDBG003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         _ => error,
     };
 
@@ -166,7 +181,8 @@ public sealed partial class GraphDatabase
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The graph catalog changed since this transaction's snapshot. Retry the transaction.");
+    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(_catalogSnapshotChangedMessage,
+        [new Types.Diagnostic { Code = "COHDBG007", Message = _catalogSnapshotChangedMessage, Severity = Types.DiagnosticSeverity.Error }]);
 
     /// <inheritdoc />
     /// <remarks>

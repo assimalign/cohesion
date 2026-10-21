@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,6 +33,12 @@ public sealed class GraphCatalog
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
     private readonly Dictionary<(byte Kind, Guid Parent, string Name), List<Reference>> _versions = new();
+    private readonly Dictionary<Guid, HashSet<(byte Kind, string Name)>> _definitions = new();
+    private readonly Dictionary<(byte Kind, Guid Parent), SortedSet<string>> _children = new();
+
+    // Per-instance fault/record-visit seam, reached only by this model's tests.
+    internal Action? BeforeRecordRead { get; set; }
+    internal Action? BeforeDirectoryKeyVisit { get; set; }
 
     private GraphCatalog(GraphStorage storage, TransactionCoordinator coordinator)
         => (_storage, _coordinator) = (storage, coordinator);
@@ -53,7 +60,7 @@ public sealed class GraphCatalog
             var unit = iterator.Current;
             var record = GraphCatalogCodec.Decode(unit.Data.Span);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
-            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer));
+            catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
         return catalog;
     }
@@ -65,6 +72,15 @@ public sealed class GraphCatalog
     /// <exception cref="ArgumentNullException"><paramref name="name"/> or <paramref name="snapshot"/> is null.</exception>
     public GraphLabelMetadata? FindLabel(string name, TransactionSnapshot snapshot)
         => Find(1, Guid.Empty, name, snapshot)?.Record.Label;
+
+    /// <summary>Finds a visible label by its stable identity.</summary>
+    /// <param name="id">The definition identity.</param>
+    /// <param name="snapshot">The reader's snapshot.</param>
+    /// <returns>The visible definition, or null if absent or of another kind.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="GraphCatalogException">Persisted metadata is malformed.</exception>
+    public GraphLabelMetadata? FindLabel(Guid id, TransactionSnapshot snapshot)
+        => FindDefinition(id, snapshot, 1)?.Record.Label;
 
     /// <summary>Lists visible label definitions in ordinal name order.</summary>
     /// <param name="snapshot">The reader's snapshot.</param>
@@ -81,6 +97,15 @@ public sealed class GraphCatalog
     public GraphRelationshipTypeMetadata? FindRelationshipType(string name, TransactionSnapshot snapshot)
         => Find(2, Guid.Empty, name, snapshot)?.Record.RelationshipType;
 
+    /// <summary>Finds a visible relationship type by its stable identity.</summary>
+    /// <param name="id">The definition identity.</param>
+    /// <param name="snapshot">The reader's snapshot.</param>
+    /// <returns>The visible definition, or null if absent or of another kind.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="GraphCatalogException">Persisted metadata is malformed.</exception>
+    public GraphRelationshipTypeMetadata? FindRelationshipType(Guid id, TransactionSnapshot snapshot)
+        => FindDefinition(id, snapshot, 2)?.Record.RelationshipType;
+
     /// <summary>Lists visible relationship type definitions in ordinal name order.</summary>
     /// <param name="snapshot">The reader's snapshot.</param>
     /// <returns>The visible definitions.</returns>
@@ -95,6 +120,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveLabelAsync(GraphLabelMetadata label, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(Label: label), context, cancellationToken);
@@ -106,6 +132,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(RelationshipType: relationshipType), context, cancellationToken);
@@ -143,6 +170,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -185,6 +213,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The index metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The label is absent or the name identifies another property.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The label is schema-owned.</exception>
     public ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -196,7 +225,8 @@ public sealed class GraphCatalog
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
         if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
         {
-            throw new GraphCatalogException($"Index '{index.Name}' already identifies property '{previous.PropertyKey}'.");
+            throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
+                index.Name, previous.PropertyKey)) { IsCallerError = true };
         }
         return SaveAsync(record, prior, context, cancellationToken);
     }
@@ -232,15 +262,20 @@ public sealed class GraphCatalog
             RefuseSchemaOwner(found.Record, "ALTER");
             if (found.Record.Id != record.Id)
             {
-                throw new GraphCatalogException($"Definition '{record.Name}' already has a different identity.");
+                throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
+                    record.Name)) { IsCallerError = true };
             }
         }
         var latestSnapshot = Latest(context);
-        var sameIdentity = List(1, null, latestSnapshot).Concat(List(2, null, latestSnapshot))
-            .FirstOrDefault(item => item.Record.Id == record.Id);
-        if (sameIdentity.Record is { } same && (same.Kind != record.Kind || same.Name != record.Name))
+        // Confirm/prune the candidate before enforcing immutable identity routing. An invisible
+        // tombstoned version may still be needed by an older snapshot, so its id cannot rename.
+        FindDefinition(record.Id, latestSnapshot);
+        lock (_sync)
         {
-            throw new GraphCatalogException("A definition identity cannot be reused or renamed.");
+            if (_definitions.TryGetValue(record.Id, out var keys) && keys.Any(key => key != (record.Kind, record.Name)))
+            {
+                throw new GraphCatalogException(ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
+            }
         }
         return SaveAsync(record, previous, context, cancellationToken);
     }
@@ -248,9 +283,9 @@ public sealed class GraphCatalog
     private ValueTask DeleteDefinitionAsync(byte kind, Guid id, TransactionContext context, CancellationToken cancellationToken)
     {
         EnsureActive(context);
-        var previous = List(kind, null, context.Snapshot).FirstOrDefault(item => item.Record.Id == id);
+        var previous = FindDefinition(id, context.Snapshot, kind) ?? default;
         var latestSnapshot = Latest(context);
-        var latest = List(kind, null, latestSnapshot).FirstOrDefault(item => item.Record.Id == id);
+        var latest = FindDefinition(id, latestSnapshot, kind) ?? default;
         if (latest.Record is not null)
         {
             RefuseSchemaOwner(latest.Record, "DROP");
@@ -297,10 +332,8 @@ public sealed class GraphCatalog
     private void EnsureParentUnchanged(Guid id, TransactionContext context)
     {
         var latestSnapshot = Latest(context);
-        var previous = List(1, null, context.Snapshot).Concat(List(2, null, context.Snapshot))
-            .FirstOrDefault(item => item.Record.Id == id);
-        var latest = List(1, null, latestSnapshot).Concat(List(2, null, latestSnapshot))
-            .FirstOrDefault(item => item.Record.Id == id);
+        var previous = FindDefinition(id, context.Snapshot) ?? default;
+        var latest = FindDefinition(id, latestSnapshot) ?? default;
         if (latest.Record is not null)
         {
             RefuseSchemaOwner(latest.Record, "ALTER");
@@ -311,20 +344,15 @@ public sealed class GraphCatalog
         }
     }
 
-    private static GraphCatalogException Conflict()
-        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.");
+    internal static GraphCatalogException Conflict()
+        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.") { IsConflict = true };
 
     private void RequireMutableDefinition(Guid id, TransactionSnapshot snapshot, string operation, bool labelOnly = false)
     {
-        var definitions = List(1, null, snapshot);
-        var found = definitions.FirstOrDefault(item => item.Record.Id == id);
-        if (found.Record is null && !labelOnly)
-        {
-            found = List(2, null, snapshot).FirstOrDefault(item => item.Record.Id == id);
-        }
+        var found = FindDefinition(id, snapshot, labelOnly ? (byte)1 : null) ?? default;
         if (found.Record is null)
         {
-            throw new GraphCatalogException("The owning graph definition does not exist.");
+            throw new GraphCatalogException(ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
         }
         RefuseSchemaOwner(found.Record, operation);
     }
@@ -353,7 +381,7 @@ public sealed class GraphCatalog
         }, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
         lock (_sync)
         {
-            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence));
+            Add(record, new Reference(location.PageId, location.SlotIndex, context.Sequence, record.Id));
         }
     }
 
@@ -387,8 +415,79 @@ public sealed class GraphCatalog
         {
             _versions[key] = versions = [];
         }
-        versions.RemoveAll(item => item.PageId == reference.PageId && item.SlotIndex == reference.SlotIndex);
+        for (int index = versions.Count - 1; index >= 0; index--)
+        {
+            if (versions[index].PageId == reference.PageId && versions[index].SlotIndex == reference.SlotIndex)
+            {
+                RemoveStaleReference(key, versions, index);
+            }
+        }
+        _versions[key] = versions;
         versions.Add(reference);
+        if (record.Kind <= 2)
+        {
+            if (!_definitions.TryGetValue(record.Id, out var keys))
+            {
+                _definitions[record.Id] = keys = [];
+            }
+            keys.Add((record.Kind, record.Name));
+        }
+        else
+        {
+            var parent = (record.Kind, record.Parent);
+            if (!_children.TryGetValue(parent, out var names))
+            {
+                _children[parent] = names = new SortedSet<string>(StringComparer.Ordinal);
+            }
+            names.Add(record.Name);
+        }
+    }
+
+    private Found? FindDefinition(Guid id, TransactionSnapshot snapshot, byte? kind = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        lock (_sync)
+        {
+            if (!_definitions.TryGetValue(id, out var keys))
+            {
+                return null;
+            }
+            // A dropped name may be recreated with another identity. The directory is only a
+            // candidate selector: the visible record must still have the requested identity.
+            Found? result = null;
+            foreach (var key in keys.ToArray())
+            {
+                if (kind is { } expected && key.Kind != expected) { continue; }
+                var found = Find(key.Kind, Guid.Empty, key.Name, snapshot);
+                if (found?.Record.Id == id && (result is null || found.Value.Reference.Writer > result.Value.Reference.Writer))
+                {
+                    result = found;
+                }
+            }
+            return result;
+        }
+    }
+
+    private void RemoveStaleReference((byte Kind, Guid Parent, string Name) key, List<Reference> versions, int index)
+    {
+        var removed = versions[index];
+        versions.RemoveAt(index);
+        if (key.Kind <= 2 && !versions.Any(item => item.Id == removed.Id) &&
+            _definitions.TryGetValue(removed.Id, out var keys))
+        {
+            keys.Remove((key.Kind, key.Name));
+            if (keys.Count == 0) { _definitions.Remove(removed.Id); }
+        }
+        if (versions.Count == 0)
+        {
+            _versions.Remove(key);
+            var parent = (key.Kind, key.Parent);
+            if (_children.TryGetValue(parent, out var names))
+            {
+                names.Remove(key.Name);
+                if (names.Count == 0) { _children.Remove(parent); }
+            }
+        }
     }
 
     private Found? Find(byte kind, Guid parent, string name, TransactionSnapshot snapshot)
@@ -406,12 +505,13 @@ public sealed class GraphCatalog
             for (int index = versions.Count - 1; index >= 0; index--)
             {
                 var reference = versions[index];
+                BeforeRecordRead?.Invoke();
                 // A reclaimed location (a deleted or reverted slot, a freed page, a page
                 // reused by another owner or as a non-data page) is a stale reference;
                 // CRC and I/O errors propagate (#1342).
                 if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes))
                 {
-                    versions.RemoveAt(index);
+                    RemoveStaleReference(key, versions, index);
                     continue;
                 }
                 if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
@@ -421,13 +521,13 @@ public sealed class GraphCatalog
                 var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                 if (writer != reference.Writer)
                 {
-                    versions.RemoveAt(index);
+                    RemoveStaleReference(key, versions, index);
                     continue;
                 }
                 var record = GraphCatalogCodec.Decode(bytes.Span);
-                if ((record.Kind, record.Parent, record.Name) != key)
+                if ((record.Kind, record.Parent, record.Name) != key || record.Id != reference.Id)
                 {
-                    versions.RemoveAt(index);
+                    RemoveStaleReference(key, versions, index);
                     continue;
                 }
                 if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter))
@@ -446,9 +546,13 @@ public sealed class GraphCatalog
         lock (_sync)
         {
             var result = new List<Found>();
-            foreach (var key in _versions.Keys.Where(key => key.Kind == kind && (parent is null || key.Parent == parent))
-                .OrderBy(key => key.Name, StringComparer.Ordinal).ToArray())
+            var keys = parent is { } owner
+                ? _children.TryGetValue((kind, owner), out var names)
+                    ? names.Select(name => (Kind: kind, Parent: owner, Name: name)).ToArray() : []
+                : _versions.Keys.Where(key => key.Kind == kind).OrderBy(key => key.Name, StringComparer.Ordinal).ToArray();
+            foreach (var key in keys)
             {
+                BeforeDirectoryKeyVisit?.Invoke();
                 if (Find(key.Kind, key.Parent, key.Name, snapshot) is { } found)
                 {
                     result.Add(found);
@@ -467,7 +571,7 @@ public sealed class GraphCatalog
         }
     }
 
-    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer);
+    private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
 }

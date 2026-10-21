@@ -275,7 +275,7 @@ public sealed class GqlLabelChainExecutionTests
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>().Message.ShouldContain("GQL0009", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(CancellationToken.None)))
-            .Message.ShouldStartWith("COHDBG007: ", Case.Sensitive);
+            .Diagnostics[0].Code.ShouldBe("COHDBG007");
         // The abort also rolled back the definition of Kept, so match the node by its property.
         (await ColumnAsync(session, "MATCH (n {name: 'kept'}) RETURN n.name")).ShouldBeEmpty();
         (await ColumnAsync(session, "MATCH (n {name: 'deep'}) RETURN n.name")).ShouldBeEmpty();
@@ -385,12 +385,12 @@ public sealed class GqlLabelChainExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
         error.Message.ShouldContain("8092 bytes one graph record can hold", Case.Sensitive);
         error.InnerException.ShouldBeOfType<GraphElementTooLargeException>();
         transaction.State.ShouldBe(TransactionState.Faulted);
         (await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(CancellationToken.None)))
-            .Message.ShouldStartWith("COHDBG007: ", Case.Sensitive);
+            .Diagnostics[0].Code.ShouldBe("COHDBG007");
         await transaction.DisposeAsync();
         (await RowsAsync(session, "SHOW LABELS")).Count.ShouldBe(labelCount);
         await using (var next = await session.BeginTransactionAsync(CancellationToken.None))
@@ -437,9 +437,10 @@ public sealed class GqlLabelChainExecutionTests
         var equality = await ColumnAsync(session, "MATCH (n:X) WHERE n.name = '" + longName + "' RETURN n.name");
 
         // Assert
-        insert.Message.ShouldStartWith("COHDBG009: An indexed property value encodes to ", Case.Sensitive);
+        insert.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
+        insert.Message.ShouldStartWith("An indexed property value encodes to ", Case.Sensitive);
         insert.Message.ShouldContain("1016-byte index key", Case.Sensitive);
-        build.Message.ShouldStartWith("COHDBG009: ", Case.Sensitive);
+        build.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG009");
         inline.ShouldBeEmpty();
         equality.ShouldBeEmpty();
         (await ColumnAsync(session, "MATCH (n:X {name: 'x'}) RETURN n.name")).ShouldBe(["x"]);

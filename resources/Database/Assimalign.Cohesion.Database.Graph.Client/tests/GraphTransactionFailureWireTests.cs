@@ -159,7 +159,7 @@ public sealed class GraphTransactionFailureWireTests
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldContain("depth 64", Case.Sensitive);
         faultedState.ShouldBe(TransactionState.Faulted);
-        commitError.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        commitError.Diagnostics[0].Code.ShouldBe("COHDBG007");
         commitError.Message.ShouldContain("depth 64", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         connection.IsOpen.ShouldBeTrue();
@@ -192,7 +192,7 @@ public sealed class GraphTransactionFailureWireTests
         (await connection.ExecuteAsync("CREATE (:After)", cancellationToken: harness.Token)).ShouldBe(1);
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+        error.Diagnostics[0].Code.ShouldBe("COHDBG007");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token)).Select(row => (string?)row[2]).ShouldBe(["After"]);
     }

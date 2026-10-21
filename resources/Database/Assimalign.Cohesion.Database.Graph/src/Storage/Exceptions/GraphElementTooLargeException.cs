@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 /// <summary>
 /// A graph element cannot be stored because its encoding exceeds a storage limit: a node's labels
-/// and properties, a relationship's type and properties, or an index definition's names encode past
+/// and properties, a relationship's type and properties, catalog metadata, or an index definition's names encode past
 /// one slotted-page record (<see cref="SlottedPage.MaxRecordSize"/> bytes), or an indexed property
 /// value encodes past the index key prefix (1,016 bytes). The store throws it before it writes
 /// anything for the element.

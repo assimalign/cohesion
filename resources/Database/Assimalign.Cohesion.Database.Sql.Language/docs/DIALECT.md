@@ -1,5 +1,9 @@
 # The Declared SQL Dialect
 
+Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
+`a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
+An escaped final quote without a closing delimiter is SQL0003 (#1235).
+
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
@@ -1088,6 +1092,11 @@ JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
 and ambiguous columns report located COHSQLE015 before rows are read; duplicate aliases
 report COHSQLE019. An explicit alias hides the base name in every join form and in DML.
+New CHECK declarations likewise reject a qualifier that does not name the constrained table
+or its schema with located COHSQLE015, for CREATE TABLE, ADD CONSTRAINT and ADD COLUMN.
+Bare column names, table.column and schema.table.column are valid. Previously persisted
+CHECKs keep their original binding behavior when reopened. SqlQualifierConformanceTests
+covers stored-table query clauses and the CHECK declaration/reopen contract (#1191).
 PostgreSQL anchors: doc/src/sgml/queries.sgml:217-227 and
 src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join inputs).
 
@@ -1494,6 +1503,18 @@ column-list requirement. These DEFAULT forms add no named clause (+0); see the [
 parse as niladic function nodes and execute using the transaction-start clock (#1120).
 `NOW()` executes with the same clock. Quoted datetime names and qualified references
 remain column references and receive `COHSQLE005` in these clauses.
+
+Repeated UPDATE SET targets fail planning with COHSQLE019, even when no row matches;
+DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child and referenced column lists
+must not repeat a column (case-insensitive); CREATE TABLE and ALTER TABLE ADD CONSTRAINT
+report COHSQLE019 naming the column and constraint. A table may declare one PRIMARY KEY:
+a second inline or table declaration, or ALTER ADD CONSTRAINT / ADD COLUMN PRIMARY KEY over an existing key, reports
+COHSQLE019 naming the constraint and table. Repeated PRIMARY KEY clauses on one column
+also fail, including ADD COLUMN. Composite keys remain supported. The live
+SqlInvalidStatementConformanceTests corpus exercises these refusals in process and over the wire.
+CREATE TABLE IF NOT EXISTS succeeds without validating key declarations when the table already
+exists and leaves it unchanged, matching PostgreSQL parse_utilcmd.c:202 (without its NOTICE).
+Refusing repeated FOREIGN KEY child columns is stricter than PostgreSQL.
 
 ## Grouping and aggregate functions (#1020)
 
@@ -2299,8 +2320,11 @@ binding while retaining their identifier token classification. Schema/table
 qualification uses a dot **outside** the delimiters: `"dbo"."order details"` is
 qualified, while `"order.details"` names one table. This applies to DML target
 columns, expression references, aliases and DDL table/index/constraint names.
-Embedded double quotes inside an identifier are outside the current lexer subset;
-the mapper diagnoses such retained names before emitting SQL.
+Embedded double quotes are doubled: `"a""x"` names one identifier, `a"x`.
+Before #1235, the base lexer read that adjacent spelling as column `a` followed by alias `x`.
+Persisted base view text containing it can rebind differently or fail on reopen; no stored-text
+migration is provided. Recreate an affected view with `"a" "x"` or `"a" AS "x"` to retain the
+column/alias interpretation. Whitespace between delimited identifiers remains significant.
 
 | Form | Examples | AST literal type |
 |---|---|---|
@@ -3073,7 +3097,7 @@ pin in the same change.
 | `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary |
 | `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
 | `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
-| `COHSQLE019` | Error | Duplicate target column, table binding or ambiguous output alias |
+| `COHSQLE019` | Error | Duplicate target column, key constraint column, PRIMARY KEY declaration, table binding or ambiguous output alias |
 | `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
 | `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
 | `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |

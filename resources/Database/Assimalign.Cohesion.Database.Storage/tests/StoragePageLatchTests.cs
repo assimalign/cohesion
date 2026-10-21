@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,6 +23,54 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class StoragePageLatchTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: canceled queued readers leave before the writer releases (#1542)")]
+    public async Task EnterRead_CanceledBehindWriter_ShouldReleaseEveryQueuedAcquisition()
+    {
+        // Arrange
+        var latch = StoragePageLatch.Create();
+        int queued = 0;
+        int canceled = 0;
+        var elapsed = Stopwatch.StartNew();
+
+        // Act: every iteration proves a real wait, then cancels while the writer is still held.
+        do
+        {
+            var (reader, waited, completedWhileHeld) = CancelReaderWhileWriting(latch);
+            await reader.WaitAsync(Wait);
+            waited.ShouldBeTrue();
+            queued++;
+            completedWhileHeld.ShouldBeTrue("cancellation must finish while the writer still owns the latch");
+            canceled++;
+        }
+        while (elapsed.Elapsed < TimeSpan.FromSeconds(2) ||
+            ((queued < 20 || canceled < 20) && elapsed.Elapsed < TimeSpan.FromSeconds(60)));
+
+        // Assert
+        queued.ShouldBeGreaterThanOrEqualTo(20);
+        canceled.ShouldBe(queued);
+        latch.WaitingReaders.ShouldBe(0);
+        latch.EnterWrite(); // No canceled acquisition retained a shared hold.
+        latch.ExitWrite();
+        latch.EnterRead(CancellationToken.None);
+        latch.ExitRead();
+    }
+
+    // The write hold must enter and leave on the same thread; await the returned reader afterward.
+    private static (Task Reader, bool Waited, bool CompletedWhileHeld) CancelReaderWhileWriting(StoragePageLatch latch)
+    {
+        using var stop = new CancellationTokenSource();
+        latch.EnterWrite();
+        try
+        {
+            var reader = RunOnThread(() => Should.Throw<OperationCanceledException>(() => latch.EnterRead(stop.Token)));
+            bool waited = SpinWait.SpinUntil(() => latch.WaitingReaders == 1 || reader.IsCompleted, Wait) && !reader.IsCompleted;
+            stop.Cancel();
+            bool completed = SpinWait.SpinUntil(() => reader.IsCompleted, Wait);
+            return (reader, waited, completed);
+        }
+        finally { stop.Cancel(); latch.ExitWrite(); }
+    }
+
     private const ulong RecordOwner = 7;
 
     /// <summary>

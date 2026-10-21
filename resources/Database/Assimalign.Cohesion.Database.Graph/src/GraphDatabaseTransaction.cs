@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
@@ -34,6 +35,11 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// </remarks>
 public sealed class GraphDatabaseTransaction : DatabaseTransaction
 {
+    // Aborted refusals are created on a normal path, so their messages are read once.
+    private static readonly string _commitAborted = ErrorMessages.TransactionCommitAborted;
+    private static readonly string _operationsAborted = ErrorMessages.TransactionOperationsAborted;
+    private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
+
     private readonly TransactionCoordinator _coordinator;
     private readonly TransactionContext _context;
 
@@ -95,7 +101,8 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// <inheritdoc />
     /// <remarks>
     /// While the database closes, the kernel refuses every end before it starts: a commit then
-    /// fails with <see cref="ObjectDisposedException"/>, and the base reports the transaction ended
+    /// fails with a <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// <see cref="ObjectDisposedException"/> cause, and the base reports the transaction ended
     /// with nothing committed. A commit whose record was written but could not be made durable
     /// throws <see cref="DatabaseTransactionCommitUnconfirmedException"/> and leaves the transaction
     /// <c>Committed</c>.
@@ -104,6 +111,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     {
         try
         {
+            if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
             // Like a rollback, a commit that started runs to completion: a cancellation here would
             // only turn into a kernel abort of work the caller asked to keep.
             await _coordinator.CommitAsync(_context).ConfigureAwait(false);
@@ -126,12 +134,15 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// The caller's token is not passed on (PostgreSQL holds interrupts through
     /// <c>AbortTransaction</c> for the same reason), and the kernel ends the context whatever
     /// fails once it starts (#1226). Only a closing database refuses the rollback before it starts,
-    /// and its disposal then aborts the context itself.
+    /// and its disposal then aborts the context itself. The refusal is a
+    /// <see cref="DatabaseException"/> carrying <c>COHDBG019</c> and the kernel's
+    /// <see cref="ObjectDisposedException"/> cause.
     /// </remarks>
     protected override async ValueTask RollbackCoreAsync()
     {
         try
         {
+            if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
             await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
         }
         catch (Exception error)
@@ -156,11 +167,12 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
         var diagnostic = cause is DatabaseException failure && failure.Diagnostics.Count > 0 ? failure.Diagnostics[0] : null;
         string causeText = diagnostic?.Code is { } code && !cause!.Message.StartsWith(code + ":", StringComparison.Ordinal)
             ? $"{code}: {cause.Message}" : cause?.Message ?? string.Empty;
-        string reason = cause is null ? string.Empty : " Cause: " + causeText;
-        string message = commit
-            ? "COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed." + reason
-            : "COHDBG007: The session's transaction is aborted; statements are refused until it is rolled back." + reason;
-        return new DatabaseException(message, cause);
+        // The transaction's own code lives in Diagnostics only; the wire writer adds the prefix
+        // (Database DESIGN.md). The cause's code stays in the cause text, which is all the wire keeps of it.
+        string reason = cause is null ? string.Empty : string.Format(CultureInfo.CurrentCulture, _failureCause, causeText);
+        string message = (commit ? _commitAborted : _operationsAborted) + reason;
+        return new DatabaseException(message, [new Types.Diagnostic
+        { Code = "COHDBG007", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // A failure the offline storage caused is the database's coded refusal (#1243), checked first:

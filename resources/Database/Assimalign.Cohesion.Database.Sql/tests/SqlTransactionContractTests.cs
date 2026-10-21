@@ -165,7 +165,8 @@ public sealed class SqlTransactionContractTests
         current.ShouldBeSameAs(transaction);
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         canceledTyped.CancellationToken.ShouldBe(canceled.Token);
-        canceledBegin.Message.ShouldBe("COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled back.");
+        canceledBegin.Message.ShouldBe("The session's transaction is aborted; statements are refused until it is rolled back.");
+        canceledBegin.Diagnostics[0].Code.ShouldBe("COHSQLT005");
         text.Message.ShouldBe(canceledBegin.Message);
         ddl.Message.ShouldBe(canceledBegin.Message);
         textBegin.Message.ShouldBe(canceledBegin.Message);
@@ -212,7 +213,8 @@ public sealed class SqlTransactionContractTests
         var again = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
 
         // Assert
-        commit.Message.ShouldBe("COHSQLT005: The session's transaction is aborted and cannot commit; nothing was committed.");
+        commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed.");
+        commit.Diagnostics[0].Code.ShouldBe("COHSQLT005");
         again.Message.ShouldStartWith("The transaction is ", Case.Sensitive);
         transaction.State.ShouldNotBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
@@ -272,7 +274,8 @@ public sealed class SqlTransactionContractTests
 
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
-        commit.Message.ShouldBe("COHSQLT005: The session's transaction is aborted and cannot commit; nothing was committed. Cause: The session closed before the transaction ended.");
+        commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed. Cause: The session closed before the transaction ended.");
+        commit.Diagnostics[0].Code.ShouldBe("COHSQLT005");
         commit.InnerException.ShouldNotBeNull().Message.ShouldBe("The session closed before the transaction ended.");
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync(TestTimeout.Token());

@@ -5,6 +5,12 @@ and conformance corpus. `OqlQueryParser` derives from the shared `QueryParser` a
 `OqlLanguageProfile.Instance` as its profile. The shared `TokenLexer` provides tokenization;
 there is no alternate lexer or duplicated keyword configuration.
 
+Double-quoted identifiers decode doubled `""` to one embedded quote (#1235), in collection,
+field and alias names. The shared lexer keeps the whole identifier in one token; OQL verifies
+its closing quote before unescaping it. A final escaped quote without a closing delimiter is
+OQL0003. The parser conformance corpus and identifier-value test pin this extension to the
+existing double-quoted name syntax. See Database.Language DESIGN for the scanner reference.
+
 The OQL name is retained, but the language basis is SQL++ for JSON, following Couchbase
 SQL++ for Query. The executable subset below is the dialect contract; it does not claim
 complete SQL++ support. MISSING and NULL are separate values (#1126, owner D2/D2a).

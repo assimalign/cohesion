@@ -215,7 +215,7 @@ public abstract record GqlLabelExpression
             return;
         }
 
-        builder.Append('"').Append(name).Append('"');
+        builder.Append('"').Append(name.Replace("\"", "\"\"", StringComparison.Ordinal)).Append('"');
     }
 
     /// <summary>One step of the renderer: an expression to write, optionally grouped, or literal text.</summary>

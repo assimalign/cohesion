@@ -126,7 +126,7 @@ public sealed partial class GraphStore
             foreach (Guid label in tokens)
             {
                 token.ThrowIfCancellationRequested();
-                var cursor = index.OpenCursor(snapshot, new IndexKeyRange(LabelKey(label, 0), LabelKey(label, ulong.MaxValue), true, true));
+                var cursor = index.OpenCursor(snapshot, new IndexKeyRange(LabelKey(label, 0), LabelKey(label, ulong.MaxValue), true, true), cancellationToken: token);
                 cursors.Add(cursor);
                 Advance(cursor, label);
             }
@@ -154,8 +154,8 @@ public sealed partial class GraphStore
 
         void Advance(BTreeCursor cursor, Guid label)
         {
-            // BTreeCursor is an in-memory, synchronously completed cursor. OpenCursor owns
-            // range materialization (#1542); keep disposal even though it holds no latch today.
+            // BTreeCursor moves complete synchronously and copy bounded batches. No page or latch
+            // survives a move; disposal releases the owned keys on every exit.
             if (!cursor.MoveNextAsync(token).GetAwaiter().GetResult()) { return; }
             var key = cursor.CurrentKey.Encoded.Span;
             if (key.Length != 24 || new Guid(key.Slice(0, 16), bigEndian: true) != label)

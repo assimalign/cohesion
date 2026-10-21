@@ -896,9 +896,16 @@ internal sealed partial class SqlPlanner
             outerScope: OuterScope, outerDependencies: OuterDependencies, relation: update.Table);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
+        var assigned = new HashSet<int>();
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            // PostgreSQL rewriteHandler.c:1168 rejects repeated whole-column assignments.
+            if (!assigned.Add(ordinal))
+            {
+                throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location);
+            }
             if (table.Columns[ordinal].Identity is { IsAlways: true })
             {
                 throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden);
@@ -973,7 +980,6 @@ internal sealed partial class SqlPlanner
         var columns = new List<SqlCatalogColumn>(create.Columns.Count);
         var primaryKey = new List<string>();
         bool hasIdentity = false;
-
         foreach (var definition in create.Columns)
         {
             var type = ResolveColumnType(definition);

@@ -60,6 +60,7 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
+                new("MATCH (a:Person)-[:KNOWS|SERVES]-(b) RETURN a.name, b.name", [["Alice", "Bob"], ["Bob", "Alice"]]),
                 new("MATCH (a)-[r:KNOWS]->(b) MATCH (a)-[s:KNOWS]->(b) RETURN r.weight, s.weight", [[2L, 2L]]),
                 new("MATCH (a:Person)-[:KNOWS]->(b) WHERE b.age > 50 RETURN a.name", []),
                 new("MATCH (a:Person {name: $name}) RETURN a.name", [["Alice"]],
@@ -202,6 +203,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                Mutation("INSERT (: \"L\"\"X\" {\"p\"\"q\": 7})-[:\"T\"\"Y\"]->()", 3,
+                    new ExecutionCase("MATCH (\"a\"\"b\":\"L\"\"X\")-[:\"T\"\"Y\"]->() RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"", [[7L]])),
                 new("INSERT (:Person {name: $name})", [], 1,
                     [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
                     new Dictionary<string, object?> { ["name"] = "Cara" }),

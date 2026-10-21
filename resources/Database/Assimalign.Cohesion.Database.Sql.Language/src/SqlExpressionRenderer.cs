@@ -65,7 +65,7 @@ public static class SqlExpressionRenderer
     /// <exception cref="ArgumentNullException"><paramref name="expression"/> is null.</exception>
     /// <exception cref="NotSupportedException">
     /// The tree contains a node the dialect cannot spell: a node type the parser does not
-    /// produce, or a name containing a double quote, which the dialect cannot delimit. Or the tree
+    /// produce. Or the tree
     /// nests deeper than <see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/>, the
     /// highest limit a parser can be configured with, so no parser would read its text.
     /// </exception>
@@ -556,8 +556,7 @@ public static class SqlExpressionRenderer
     /// </summary>
     private static string Identifier(string name)
     {
-        ThrowIfUndelimitable(name);
-        return IsRegularIdentifier(name) && !IsReservedWord(name) ? name : "\"" + name + "\"";
+        return IsRegularIdentifier(name) && !IsReservedWord(name) ? name : "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
     /// <summary>
@@ -568,11 +567,10 @@ public static class SqlExpressionRenderer
     /// </summary>
     private static string FunctionName(string name)
     {
-        ThrowIfUndelimitable(name);
         bool bare = IsRegularIdentifier(name) && !name.Equals("CAST", StringComparison.OrdinalIgnoreCase) &&
             !Contains(_windowFunctions, name) &&
             (Contains(SqlLanguageProfile.Instance.Functions, name) || !IsReservedWord(name));
-        return bare ? name : "\"" + name + "\"";
+        return bare ? name : "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
     /// <summary>
@@ -597,14 +595,6 @@ public static class SqlExpressionRenderer
             builder.Append(text);
         }
         return builder.ToString();
-    }
-
-    private static void ThrowIfUndelimitable(string name)
-    {
-        if (name.Contains('"', StringComparison.Ordinal))
-        {
-            throw new NotSupportedException($"The name '{name}' contains a double quote, which the SQL dialect cannot delimit.");
-        }
     }
 
     /// <summary>Mirrors the lexer's identifier scan: a letter or <c>_</c>, then letters, digits and <c>_</c>.</summary>

@@ -4,6 +4,18 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+Double-quoted identifiers double an embedded `"`: `"a""b"` names `a"b` in variables,
+labels, relationship types, property keys and aliases. Rendered label expressions and
+source-free projection names use the same escape. A missing closing quote is GQL0003.
+Catalog metadata must fit one 8,092-byte encoded record; an oversized name or schema name
+fails with COHDBG009 and preserves the session (#1235).
+
+Unsigned property parameters retain their CLR types at storage. Type checking classifies
+byte as Int16, UInt16 as Int32, UInt32 as Int64 and UInt64 as Decimal without loss; it does
+not rewrite persisted values. Negotiated graph.composite-values preserves those unsigned
+runtime types on the wire, while unnegotiated projections fail with COHDBG016. This is the
+documented owner default for #1235, preserving #1146's value contract.
+
 ## Storage integrity errors (#1160)
 
 A read that detects storage corruption fails with `COHDBS003`, naming the database and
@@ -11,6 +23,12 @@ page and recommending a verified backup. It never succeeds with the damaged data
 The error is an execution failure over the wire; the connection remains usable. A
 legitimately reclaimed location retains its existing absence semantics. The engine's
 storage-integrity conformance tests cover corrupted media through the executing language.
+
+Malformed catalog records and ordinary index/storage failures report `COHDBG006`.
+Catalog write conflicts abort with `COHDBG007`; disposal during execution or at the wire
+statement's lifetime guard reports `COHDBG019`. These are ExecutionFailure responses and
+leave the wire session ready. An aborted explicit transaction requires rollback before
+further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
 
 ## MATCH and OPTIONAL MATCH
 
@@ -74,6 +92,9 @@ viable descent; deferred predicates retain their final checks. Physical work cou
 candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
 dead ends. COHDBG004 includes actual physical and viable totals when that cap is exceeded;
 100,000-binding and 64-hop limits remain. The separate #1533 budget redesign is deferred.
+Incident ranges are read incrementally with cancellation, merging type/direction streams in
+relationship identity order. Reaching the expansion cap closes every active parent cursor;
+only bounded index batches and one decoded head per selected range are prefetched (#1542).
 
 EXPLAIN Expand details include adjacency=(node,direction,type_id,relationship), effective
 seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops and

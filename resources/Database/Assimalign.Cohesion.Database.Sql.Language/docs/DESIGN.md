@@ -1,5 +1,29 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Key declaration semantics (#1192)
+
+The engine rejects repeated child or referenced key columns with COHSQLE019; rejecting
+repeated FOREIGN KEY child columns is stricter than PostgreSQL. Existing-table CREATE TABLE
+IF NOT EXISTS skips key declaration validation and preserves the table. DIALECT.md records
+these execution rules; parser shapes and advertised clauses are unchanged.
+
+## Delimited identifiers (#1235)
+
+The shared lexer keeps `"a""b"` as one identifier token; CurrentIdentifierText decodes it to
+`a"b` for every name position. Expression rendering doubles embedded quotes in ordinary and
+function identifiers. Lexical completeness checks distinguish a closing quote from a final
+escaped quote, so `"a""` is SQL0003. Parser conformance, identifier-value and renderer round-trip
+tests pin the behavior. See Database.Language DESIGN for the PostgreSQL scanner reference.
+Simple column-reference spans retain the complete raw token, including delimiters and doubled
+quotes. Persisted-view binding edits use those source spans, so canonical expansion replaces
+the entire reference rather than leaving a suffix of the quoted name behind.
+
+Persisted view text written by the base engine can contain adjacent delimited tokens without
+whitespace: `"a""x"` formerly parsed as column `a` with alias `x`, and now names the single
+identifier `a"x`. A base-created view with that stored spelling can therefore rebind differently
+or fail after reopen. The unambiguous old form `"a" "x"` keeps its meaning. There is no stored-text
+migration or alternate lexer; recreate an affected view with explicit whitespace or `AS`.
+
 ## INSERT conflict clauses (#1118)
 
 SqlOnConflictClause retains inference kind, column set or constraint name, action,
@@ -316,8 +340,8 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   strips the surrounding double quotes for tables, schemas, aliases, columns,
   indexes and constraints. Tokens retain their quoted-identifier classification,
   so a quoted reserved word cannot become a keyword or literal. Keyword dispatch,
-  literal parsing and diagnostics continue to consume raw token text. Embedded
-  double-quote escapes are outside the current lexer subset.
+  literal parsing and diagnostics continue to consume raw token text. Doubled
+  double quotes decode to one embedded quote; rendering escapes them the same way (#1235).
 - **Type names resolve through one table.** `SqlTypeNames` is the single
   SQL-name → `DatabaseType` mapping (with the `DECIMAL(p[,s])`
   argument-is-precision rule); catalogs and the schema compiler must not grow
@@ -438,7 +462,8 @@ same shape: optional name, ordered key columns, foreign-key target and deletion
 action, or a check predicate. `SqlCreateTableExpression.Constraints` contains all
 constraints; column definitions also retain their own constraints so `ALTER TABLE
 ADD COLUMN` carries the same information. The executor consumes the normalized
-table list once. `CHECK` retains both its expression tree and the predicate source
+table list once. The engine rejects duplicate key columns and multiple PRIMARY KEY declarations
+with COHSQLE019 before publication; it does not merge separate declarations (#1192). `CHECK` retains both its expression tree and the predicate source
 as written (`CheckExpressionText`, for tooling); the engine never persists that
 source. It persists the canonical text `SqlExpressionRenderer` renders from the
 tree (below), so no spelling — and no leniency an older parser had for a spelling —
@@ -493,9 +518,9 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   because `f(*` is read as the `COUNT(*)` star argument).
 - **Identifiers are delimited only when needed**, mirroring the lexer's identifier
   scan: a keyword, builtin function name, unsupported-vocabulary or positional word,
-  or a name the lexer would not read as one word is quoted; a name containing `"`
-  cannot be delimited and is refused with `NotSupportedException`, as is a node type
-  the parser does not produce. A called function name is bare when it is a builtin
+  or a name the lexer would not read as one word is quoted. Embedded `"` characters
+  are doubled inside those delimiters. A node type the parser does not produce is
+  refused with `NotSupportedException`. A called function name is bare when it is a builtin
   or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
   `RANK`, ...): a bare call to one of those parses as the window function, which the
   dialect rejects, so an error-free tree that calls one named a delimited user

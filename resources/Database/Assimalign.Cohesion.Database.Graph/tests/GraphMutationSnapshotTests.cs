@@ -113,8 +113,8 @@ public sealed class GraphMutationSnapshotTests
             // Assert
             if (mode == 2)
             {
-                if (scenario == "Schema") { await Should.ThrowAsync<GraphCatalogException>(() => pending); }
-                else { await Should.ThrowAsync<DatabaseTransactionAbortedException>(() => pending); }
+                var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(() => pending);
+                if (scenario == "Schema") { conflict.InnerException.ShouldBeOfType<GraphCatalogException>(); }
                 transaction!.State.ShouldBe(TransactionState.Faulted);
                 await transaction.RollbackAsync(token);
                 conflicts++;

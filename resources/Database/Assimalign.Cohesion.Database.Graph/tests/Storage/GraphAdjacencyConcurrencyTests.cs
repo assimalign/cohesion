@@ -75,19 +75,20 @@ public sealed class GraphAdjacencyConcurrencyTests
         await fixture.Coordinator.CommitAsync(seed, timeout.Token);
         var states = new ConcurrentDictionary<int, (TransactionSequence Sequence, ulong ReplacedId)>();
         states[0] = (seed.Sequence, replaced.Id);
-        const int iterations = 64;
+        const int rounds = 64;
         int reading = 0, writing = 0, reads = 0, writes = 0, readOverlaps = 0, writeOverlaps = 0;
 
         // Act: independent loops yield inside operations so seeks and record reads can race
-        // mutation brackets. The barrier starts the first read and write together.
+        // mutation brackets. Two barrier phases per round keep both operation lifetimes open.
         var readerTask = Task.Run(async () =>
         {
-            for (int iteration = 0; iteration < iterations; iteration++)
+            for (int iteration = 0; iteration < rounds; iteration++)
             {
                 Volatile.Write(ref reading, 1);
                 try
                 {
-                    if (iteration == 0) { start.SignalAndWait(timeout.Token); }
+                    start.SignalAndWait(timeout.Token);
+                    if (Volatile.Read(ref writing) != 0) { Interlocked.Increment(ref readOverlaps); }
                     var reader = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
                     try
                     {
@@ -95,7 +96,6 @@ public sealed class GraphAdjacencyConcurrencyTests
                         var observed = new List<StoredGraphRelationship>();
                         await foreach (var edge in fixture.Store.GetIncidentAsync(hub.Id, GraphIncidentDirection.Both, [fixture.Type], reader.Snapshot, timeout.Token))
                         {
-                            if (Volatile.Read(ref writing) != 0) { Interlocked.Increment(ref readOverlaps); }
                             observed.Add(edge);
                             await Task.Yield();
                         }
@@ -107,19 +107,19 @@ public sealed class GraphAdjacencyConcurrencyTests
                     }
                     finally { await fixture.Coordinator.RollbackAsync(reader, timeout.Token); }
                 }
-                finally { Volatile.Write(ref reading, 0); }
+                finally { start.SignalAndWait(timeout.Token); Volatile.Write(ref reading, 0); }
                 await Task.Yield();
             }
         }, timeout.Token);
         var writerTask = Task.Run(async () =>
         {
             ulong prior = replaced.Id;
-            for (int version = 1; version <= iterations; version++)
+            for (int version = 1; version <= rounds; version++)
             {
                 Volatile.Write(ref writing, 1);
                 try
                 {
-                    if (version == 1) { start.SignalAndWait(timeout.Token); }
+                    start.SignalAndWait(timeout.Token);
                     var writer = await fixture.Coordinator.BeginAsync(IsolationLevel.Snapshot, timeout.Token);
                     await fixture.Store.UpdateRelationshipAsync(outgoing.Id, Properties(version), writer, timeout.Token);
                     if (Volatile.Read(ref reading) != 0) { Interlocked.Increment(ref writeOverlaps); }
@@ -133,17 +133,17 @@ public sealed class GraphAdjacencyConcurrencyTests
                     prior = next.Id;
                     Interlocked.Increment(ref writes);
                 }
-                finally { Volatile.Write(ref writing, 0); }
+                finally { start.SignalAndWait(timeout.Token); Volatile.Write(ref writing, 0); }
                 await Task.Yield();
             }
         }, timeout.Token);
         await Task.WhenAll(readerTask, writerTask);
 
         // Assert: both loops completed their bounded work and saw the other inside an operation.
-        reads.ShouldBe(iterations);
-        writes.ShouldBe(iterations);
-        readOverlaps.ShouldBeGreaterThan(0);
-        writeOverlaps.ShouldBeGreaterThan(0);
+        reads.ShouldBe(rounds);
+        writes.ShouldBe(rounds);
+        readOverlaps.ShouldBe(reads);
+        writeOverlaps.ShouldBe(writes);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph.Storage] - Adjacency: cancellation between directions prevents reading incoming records (#1532)")]

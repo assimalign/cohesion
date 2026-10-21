@@ -208,7 +208,9 @@ public class BTreePageFormatTests
 
         // Act
         var reader = await harness.BeginAsync();
-        var failure = Should.Throw<IndexCorruptionException>(() => index.OpenCursor(reader, IndexKeyRange.All));
+        await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+        // Opening is lazy; the same typed corruption must surface on the first page read.
+        var failure = await Should.ThrowAsync<IndexCorruptionException>(async () => await cursor.MoveNextAsync());
         var deleting = await harness.BeginAsync();
         var deleteFailure = await Should.ThrowAsync<IndexCorruptionException>(async () => await index.DeleteAsync(deleting, IndexKey.FromInt64(0), 0));
         await harness.RollbackAsync(deleting);

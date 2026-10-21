@@ -181,7 +181,7 @@ internal sealed class KeyValueOperationExecutor
 
         if (limit > 0)
         {
-            await using var cursor = _primaryIndex.OpenCursor(context.Snapshot, range);
+            await using var cursor = _primaryIndex.OpenCursor(context.Snapshot, range, cancellationToken: cancellationToken);
 
             while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -353,7 +353,7 @@ internal sealed class KeyValueOperationExecutor
         var indexKey = new IndexKey(key);
         var range = new IndexKeyRange(indexKey, indexKey, IsStartInclusive: true, IsEndInclusive: true);
 
-        await using var cursor = _primaryIndex.OpenCursor(context.Snapshot, range);
+        await using var cursor = _primaryIndex.OpenCursor(context.Snapshot, range, cancellationToken: cancellationToken);
 
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {

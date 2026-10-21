@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -49,6 +50,11 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// aborted: the kernel ended it under its caller, or the session's teardown ended it.
     /// </summary>
     internal const string AbortedCode = "COHSQLT005";
+
+    // Aborted refusals are created on a normal path, so their messages are read once.
+    private static readonly string _commitAborted = ErrorMessages.TransactionCommitAborted;
+    private static readonly string _operationsAborted = ErrorMessages.TransactionOperationsAborted;
+    private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
 
     private readonly TransactionCoordinator _coordinator;
     private readonly TransactionContext _context;
@@ -191,12 +197,11 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     protected override DatabaseException CreateAbortedException(Exception? cause, bool commit)
     {
         // The cause travels in the message as well: the wire carries message text, not inner exceptions.
-        string reason = cause is null ? string.Empty : " Cause: " + cause.Message;
-        string message = commit
-            ? AbortedCode + ": The session's transaction is aborted and cannot commit; nothing was committed." + reason
-            : AbortedCode + ": The session's transaction is aborted; statements are refused until it is rolled back." + reason;
+        // The code lives in Diagnostics only; the wire writer adds the prefix (Database DESIGN.md).
+        string reason = cause is null ? string.Empty : string.Format(CultureInfo.CurrentCulture, _failureCause, cause.Message);
+        string message = (commit ? _commitAborted : _operationsAborted) + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHSQLT005", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = AbortedCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // The area error policy: the engine translates the transaction kernel's independent exception

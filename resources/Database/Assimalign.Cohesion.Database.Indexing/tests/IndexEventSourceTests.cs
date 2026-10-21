@@ -154,7 +154,7 @@ public sealed class IndexEventSourceTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - IndexEventSource: Should report a damaged node an operation reaches, once per operation")]
-    public async Task OpenCursor_DamagedLeaf_ShouldReportTheCorruptionOnce()
+    public async Task MoveNextAsync_DamagedLeaf_ShouldReportTheCorruptionOnce()
     {
         // Arrange: a tree with an internal root, one of whose leaves loses its format stamp.
         string name = UniqueName();
@@ -173,7 +173,8 @@ public sealed class IndexEventSourceTests
 
         // Act
         var reader = await harness.BeginAsync();
-        Should.Throw<IndexCorruptionException>(() => index.OpenCursor(reader, IndexKeyRange.All));
+        await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+        await Should.ThrowAsync<IndexCorruptionException>(async () => await cursor.MoveNextAsync());
 
         // Assert
         recorder.ShouldHaveNoInstrumentationError();

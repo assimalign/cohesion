@@ -356,12 +356,15 @@ internal sealed partial class SqlPlanExecutor
     private sealed class GroupKeyComparer : IEqualityComparer<object?[]>
     {
         private readonly IReadOnlyList<Collation> _collations;
+        private readonly SqlStatementMetrics? _constraintMetrics;
 
         /// <summary>Initializes a new instance of the <see cref="GroupKeyComparer"/> class.</summary>
         /// <param name="collations">The collation for each group key position.</param>
-        public GroupKeyComparer(IReadOnlyList<Collation> collations)
+        /// <param name="constraintMetrics">Statement metrics for constraint keys; null for query grouping.</param>
+        public GroupKeyComparer(IReadOnlyList<Collation> collations, SqlStatementMetrics? constraintMetrics = null)
         {
             _collations = collations;
+            _constraintMetrics = constraintMetrics;
         }
 
         public bool Equals(object?[]? left, object?[]? right)
@@ -372,6 +375,7 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < left.Length; i++)
             {
+                if (_constraintMetrics is not null) { _constraintMetrics.ConstraintKeyComparisons++; }
                 if (left[i] is null ? right[i] is not null : right[i] is null
                     || SqlValueComparer.Compare(left[i]!, right[i]!, _collations[i]) != 0)
                 {

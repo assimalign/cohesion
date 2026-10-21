@@ -255,13 +255,14 @@ public ref struct TokenLexer
     private Token ScanQuotedIdentifier(int start)
     {
         _pos++; // skip opening "
-        while (_pos < _source.Length && _source[_pos] != '"')
+        while (_pos < _source.Length)
         {
-            _pos++;
-        }
-        if (_pos < _source.Length)
-        {
-            _pos++; // skip closing "
+            if (_source[_pos] == '"')
+            {
+                if (Peek(1) == '"') { _pos += 2; }
+                else { _pos++; break; }
+            }
+            else { _pos++; }
         }
         return new Token(TokenType.QuotedIdentifier, _source[start.._pos], start);
     }

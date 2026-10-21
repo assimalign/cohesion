@@ -75,6 +75,17 @@ Administrative database lookup remains ordinal-ignore-case. SQL database default
 column collations, and expression `COLLATE` have no effect on this model.
 Configurable document collation is deferred; stored text retains its original form.
 
+## Incremental index reads (#1542)
+
+Catalog index scans and unique probes pass their statement token at cursor open and on every move. Shared B+Tree cursors copy bounded batches and release their read latch before document decoding or validation. Scans and unique checks finish before applying index changes, so transaction-stamped own writes cannot extend an active scan.
+
+The unique probe uses an unpinned latest-state snapshot, so its view can move between batches.
+The existing check-then-act gap between that probe and physical apply predates incremental
+cursors: it is not a statement-wide uniqueness reservation. The database writer protocol remains
+responsible for write serialization; this change adds neither a key reservation nor a pinned
+unique-check horizon. Manager replacement after failed apply shares the physical tree's latch
+with surviving cursors through the Indexing registry keyed by storage and fixed root page.
+
 ## Intent and composition
 
 Documents combines the Blob engine's lifecycle, session transaction, worker, and
@@ -144,6 +155,11 @@ describes.
 Snapshot isolation fixes the read horizon at transaction start. ReadCommitted
 captures one statement snapshot and pins its retention horizon for the statement.
 Serializable is rejected rather than silently weakened.
+Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
+manager registration, fixed snapshot and existing rollback/disposal release paths. Pins remain
+in the current-transactions gauge but move none of the begin, commit or rollback rates and
+emit no Verbose kernel lifecycle events. A real explicit rollback still counts. Read-only pins
+append no lifecycle records (#1280); registered statement snapshots are outside this change.
 
 The shared lock manager serializes writers per logical database. Before changing
 a document, collection, or index, the operation compares its snapshot with the

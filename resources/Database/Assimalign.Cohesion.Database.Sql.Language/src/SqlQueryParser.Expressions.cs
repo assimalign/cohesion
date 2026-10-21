@@ -844,6 +844,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         bool quoted = lexer.Current.Type == TokenType.QuotedIdentifier;
+        int firstEnd = CurrentTokenEnd(ref lexer);
         string first = CurrentIdentifierText(ref lexer);
         Advance(ref lexer);
 
@@ -899,7 +900,7 @@ public sealed partial class SqlQueryParser
 
         // Simple identifier
         return new SqlColumnReferenceExpression(first, null, null,
-            Location.Create(1, 1, pos, pos + first.Length));
+            Location.Create(1, 1, pos, firstEnd));
     }
 
     private SqlStarExpression ParseUnsupportedQualifiedStar(ref TokenLexer lexer, int start)

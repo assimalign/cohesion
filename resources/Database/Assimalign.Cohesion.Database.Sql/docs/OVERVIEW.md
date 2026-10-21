@@ -21,7 +21,10 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   transaction auto-commit. The session and transaction are sealed leaves of the root
   bases, which own the end state machine: a failed statement leaves the transaction
   active, and a transaction the kernel ended under its caller refuses work with
-  `COHSQLT005` until it is rolled back.
+  `COHSQLT005` until it is rolled back. A storage, I/O or index failure (`COHSQLE041`, or
+  `COHDBS003` for corruption) is the exception: it aborts the explicit transaction, which
+  then refuses work with `COHSQLT005` naming that cause until it is rolled back (#1364). In
+  autocommit the next statement can run.
 - **Database scope (A5)** — every session stays bound to the database that
   created it. Qualified table references resolve only within that database's
   catalog; SQL cannot switch databases or manage the server. Conformance tests
@@ -71,9 +74,10 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   `CalledOnNullInput`) is not called over NULL; a CHECK admits only `Immutable` functions; and
   what a function throws, or a result of another type than it declares, fails the statement as
   `COHSQLE007`. One function instance serves every session, so it must be thread-safe. A
-  `SELECT` needs a `FROM` in this dialect, so try a function as `SELECT f(x) FROM t`. A compiled schema's
+  `SELECT` without `FROM` returns one row, so `SELECT f(x)` tries a function directly (#1373). A compiled schema's
   `table.Check(name, sql)` binds to the frozen catalog before the build touches any file
-  (`COHSQLP001` when it does not). A stored CHECK whose function a later build no longer
+  (`COHSQLP001` when it does not); a schema that is new or changed also has every CHECK
+  qualifier validated, while an already-applied schema keeps its recorded binding (#1191). A stored CHECK whose function a later build no longer
   registers, or registers with a result that no longer fits, does not stop its database from
   opening: its reads proceed, each write that would
   evaluate it fails with `COHSQLE009`, and an engine that declares the database fails its build
