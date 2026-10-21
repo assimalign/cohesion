@@ -5,11 +5,15 @@ using System.Text;
 namespace Assimalign.Cohesion.Database.Language;
 
 /// <summary>
-/// This represents a base node for all query expressions in the syntax tree. It serves as a common ancestor for various types of query expressions, such as select statements, insert statements, etc. Each specific query expression will inherit from this base class and provide
+/// Provides the base node for model-specific query expressions, with optional source text and location.
 /// </summary>
 public abstract class QueryExpression
 {
+    /// <summary>Initializes an expression without source text or location.</summary>
     protected QueryExpression() { }
+    /// <summary>Initializes an expression with its source text and location.</summary>
+    /// <param name="text">The original expression text, or null when unavailable.</param>
+    /// <param name="location">The expression's location in the original source.</param>
     protected QueryExpression(string? text, Location location)
     {
         Text = text;
@@ -22,7 +26,7 @@ public abstract class QueryExpression
     public virtual string? Text { get; }
 
     /// <summary>
-    /// 
+    /// Gets the source location, or null when the expression has no source location.
     /// </summary>
     public virtual Location? Location { get; }
 }

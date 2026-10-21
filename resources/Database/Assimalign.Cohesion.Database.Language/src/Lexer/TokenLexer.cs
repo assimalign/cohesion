@@ -27,6 +27,9 @@ public ref struct TokenLexer
     private int _pos;
     private Token _current;
 
+    /// <summary>Initializes a lexer at the beginning of the supplied query source.</summary>
+    /// <param name="statement">The source text, borrowed for the lexer's lifetime.</param>
+    /// <param name="options">The model's vocabulary and case policy, borrowed for the lexer's lifetime.</param>
     public TokenLexer(ReadOnlySpan<char> statement, TokenLexerOptions options)
     {
         _source = statement;
@@ -45,6 +48,7 @@ public ref struct TokenLexer
     /// <summary>
     /// Returns this instance as the enumerator, enabling <c>foreach</c> usage.
     /// </summary>
+    /// <returns>A copy of this lexer at its current position.</returns>
     public TokenLexer GetEnumerator() => this;
 
     /// <summary>

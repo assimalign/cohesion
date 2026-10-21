@@ -4,6 +4,16 @@ The shared query-language substrate for database models. It owns model-neutral l
 syntax-tree primitives, diagnostic production, and parser orchestration; SQL, OQL, GQL, and future model
 languages own their vocabulary and grammar.
 
+## Analyzer completion and statement diagnostics (#1267)
+
+The synchronous parser waits on all analyzer tasks through a cancellation-aware blocking wait,
+so incomplete analysis consumes no busy-spin CPU. The shared timeout cancels the analyzers and
+ends the wait even if an analyzer ignores cancellation. Analyzers must not depend on the caller's
+synchronization context. Faults and cancellation propagate to the parse caller rather than being
+discarded. `QueryStatement.AddDiagnostic` rejects null before adding to its concurrent bag;
+diagnostic enumeration retains severity and source-end ordering. The mutable analyzer list and
+public virtual surface remain for the separate #1264 API audit.
+
 ## Delimited identifiers (#1235)
 
 The shared lexer consumes `"a""b"` as one QuotedIdentifier token, retaining the raw text and
