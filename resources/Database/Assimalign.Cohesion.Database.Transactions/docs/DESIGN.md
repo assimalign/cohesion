@@ -74,6 +74,14 @@ complete: SQL marks an interrupted open `RecoveryInterrupted` before closing the
 storage, preventing its normal shutdown checkpoint. The next open reclassifies and finishes
 scrubbing instead of treating the remaining abandoned stamps as committed.
 
+## Version lookup integrity (#1160)
+
+`VersionStore.GetVisibleVersionAsync` returns absence only for a reclaimed location or an
+invisible version. A checksum failure propagates `StorageCorruptionException` with
+`COHDBS003` and the page id; the record-space test corrupts media after eviction and proves
+both failure and a successful lookup after repair. Engines translate the storage failure
+at their own boundary. The short-record rule is tracked separately by #1372.
+
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
 `TransactionId` is a GUID — a good *external* identity for sessions, diagnostics, and the wire protocol, but unordered. Visibility decisions need a total order, so this project also has `TransactionSequence`, a monotonically increasing `ulong` assigned at begin. Readers and writers both keep storage-counter sequences; no virtual identifier is introduced, and the public session surface remains free of MVCC mechanics.
@@ -605,7 +613,9 @@ row while the writers' shared grants passed it, the longest 11.3 s and 6.3 s; th
 committed one delete in the two. The review's own probe of that shape saw seven consecutive
 waits of the deleter canceled at 12 s. With the queue no wait reached 1 s. The rule also lets a
 DDL statement's exclusive table lock through a stream of writers' intent locks, which could keep
-it waiting the same way.
+it waiting the same way. The #1163 guard refuses 1,000 later intent requests behind queued DDL;
+SQL's concurrent DDL stress keeps all three writers running through catch-up and counts commits
+during each exclusive table wait: only the already-admitted writers may finish.
 
 **The queue does not make a hot row's cascade succeed, and it costs a hot row throughput.** The
 same probe, run for 60 s in Release without tiered compilation, twice on `a60f850c` and twice
@@ -671,6 +681,10 @@ listed after the owner's wait for it was canceled; the release then finds no gra
 of the owner there. PostgreSQL's `LockReleaseAll` likewise walks the backend's own lock table
 and proc-lock lists, never the shared table (`src/backend/storage/lmgr/lock.c:2338`, `:2377`,
 `:2511-2540`).
+
+The #1250 timing guard releases ten owned locks beside 1,000 versus 100,000 foreign locks.
+It alternates sizes in one non-parallel process, compares the minima of five rounds, and allows
+an eightfold ratio; a whole-table scan grows with the hundredfold increase in foreign entries.
 
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
 internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
@@ -988,7 +1002,9 @@ prove the overlap occurred. JournalEnrollmentTests covers standalone read-only e
 cancellation and refused enrollment. Every model's read-only transaction tests count durable
 flush attempts, journal bytes and LSN changes across read loops and every read-only end, including
 read-committed pins. TransactionCoordinatorRollbackTests anchors 1,000 writers through a lost
-checkpoint record; TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
+checkpoint record. Its fault allows the anchor initialization image to drain before failing the
+post-truncation checkpoint-record write, and asserts the journal is empty while all 1,000 writers
+remain anchored. TransactionCoordinatorCheckpointCrashTests cuts power at every whole or torn
 write of a checkpoint with 40 writers and a reader. Writer durability and crash classification
 keep the same guarantees.
 

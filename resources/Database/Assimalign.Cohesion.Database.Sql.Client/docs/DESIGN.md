@@ -184,9 +184,9 @@ Database.Client, which references no model package.
 `DatabaseClientResult` and `DatabaseClientColumn` moved to this package's
 namespace. Typed SQL APIs and protocol 2.0 wire behavior are unchanged.
 
-The model reference supplies codecs without parsing SQL or inspecting plans.
-Its transitive assembly closure is an accepted packaging consequence; a dedicated
-model protocol assembly can be a future refinement. The model's
+`Database.Sql.Protocol` supplies codecs without parsing SQL or inspecting plans.
+Both engine and client consume that contract assembly independently; the client's
+dependency closure contains no SQL engine, catalog or storage implementation. The model's
 [design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md) defines wire ownership.
 
 ## Typed literal wire values (#1110)
@@ -485,4 +485,11 @@ transports. Invalid escape sequences (COHSQLE034) and non-Boolean truth tests
 (COHSQLE003) are ExecutionFailure responses; data and the connection remain usable.
 A volatile application function that raises a stack refusal deterministically pins
 execution-time COHSQLE004 over the wire, including a reusable connection.
-No client API or protocol format changes are needed.
+Invariant LIKE work exhaustion uses the existing located ExecutionFailure diagnostic
+COHSQLE040 and leaves the connection reusable (#1166). The real session lifetime token
+reaches row-time LIKE without an application function; disconnect cancellation closes
+the session on both InMemory and TCP. Its regression holds a hook inside Match,
+asserts entry, waits for the server lifetime token after disconnect, then releases
+matching. Reverting LIKE token routing must produce StatementStop Error instead of
+Cancelled. The test uses AOT-compatible UnsafeAccessor seams without a public API
+or friend-assembly grant. No client API or protocol format changes are needed.

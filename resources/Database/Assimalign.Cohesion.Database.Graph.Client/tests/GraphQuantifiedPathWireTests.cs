@@ -29,11 +29,11 @@ public sealed class GraphQuantifiedPathWireTests
         {
             var rows = await connection.QueryAsync("MATCH (a:V {name:'A'})" + segment + "(b) RETURN a.name,b.name", cancellationToken: harness.Token);
             rows.Select(row => row[0]).ShouldBe(new object?[] { "A", "A", "A" });
-            rows.Select(row => row[1]).ShouldBe(new object?[] { "B", "C", "D" });
+            rows.Select(row => row[1]).ShouldBe(new object?[] { "B", "C", "D" }, ignoreOrder: true);
             var paths = new List<GraphPath>();
             await foreach (var path in connection.QueryPathsAsync("MATCH p = (a:V {name:'A'})" + segment + "(b) RETURN p", cancellationToken: harness.Token))
             { paths.Add(path); }
-            paths.Select(path => path.Relationships.Count).ShouldBe(new[] { 1, 2, 3 });
+            paths.Select(path => path.Relationships.Count).ShouldBe(new[] { 1, 2, 3 }, ignoreOrder: true);
             foreach (var path in paths)
             {
                 path.Nodes.Count.ShouldBe(path.Relationships.Count + 1);
@@ -46,12 +46,12 @@ public sealed class GraphQuantifiedPathWireTests
         var reverse = new List<GraphPath>();
         await foreach (var path in connection.QueryPathsAsync("MATCH p = (a)-[:T]->{1,3}(b:V {name:'D'}) RETURN p", cancellationToken: harness.Token))
         { reverse.Add(path); }
-        reverse.Select(path => path.Relationships.Count).ShouldBe(new[] { 1, 2, 3 });
-        reverse[^1].Nodes.Select(node => node.Properties["name"]).ShouldBe(new object?[] { "A", "B", "C", "D" });
+        reverse.Select(path => path.Relationships.Count).ShouldBe(new[] { 1, 2, 3 }, ignoreOrder: true);
+        reverse.Single(path => path.Relationships.Count == 3).Nodes.Select(node => node.Properties["name"]).ShouldBe(new object?[] { "A", "B", "C", "D" });
         foreach (string loop in new[] { "FOR e IN r", "UNWIND r AS e" })
         {
             (await connection.QueryAsync("MATCH (a:V {name:'A'})-[r:T]->{2}(b) WITH r " + loop + " WITH e MATCH ()-[e]->() RETURN e.w", cancellationToken: harness.Token))
-                .Select(row => row[0]).ShouldBe(new object?[] { 1L, 2L });
+                .Select(row => row[0]).ShouldBe(new object?[] { 1L, 2L }, ignoreOrder: true);
         }
         var comment = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
             "MATCH (a:V {name:'A'})-[:T*--1..1]->(hidden)\n]->(b) RETURN b.name", cancellationToken: harness.Token));

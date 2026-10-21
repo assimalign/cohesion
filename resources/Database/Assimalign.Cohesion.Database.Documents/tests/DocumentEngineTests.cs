@@ -393,7 +393,7 @@ public sealed class DocumentEngineTests
 
             // Assert: the storage's coded refusal, named for the database; nothing written.
             failure.Message.ShouldStartWith("Database 'legacy' cannot be opened. " + StorageFormatException.ErrorCode + ": ", Case.Sensitive);
-            failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 3", Case.Sensitive);
+            failure.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 4", Case.Sensitive);
             failure.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();

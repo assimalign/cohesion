@@ -418,6 +418,22 @@ failed to close."), as it ignored the `DatabaseException` before.
 
 ## Engine-owned background workers
 
+The worker resilience tests observe Storage event 8 (PendingCommitsFlushed) for each create
+and reopen and require no event 9 (GroupCommitWindowMissed). This proves the worker served
+construction without a wall-clock latency assertion. Reopen receives an unproven writer so its
+recovery scrub must commit; an unchanged clean open may require no grouped flush.
+The listener filters process-wide events by names reserved to the Key-Value worker resilience
+suite, including its failing, healthy and provisional databases, to prevent cross-test matches.
+
+The group-commit flusher serves both published databases and provisional file sets (#1275).
+It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
+without taking the engine lock: create/open holds that lock while its construction commits wait
+on the durability gate. Published instances retain per-database failure/backoff handling.
+Provisional offline storages are skipped, disposed storages from failed construction are tolerated,
+and other provisional flush errors reach the constructing commit without a worker failure record.
+Only SQL and Key-Value use this provisional pass; Documents, Blob and Graph retain self-help
+while opening.
+
 The same five-worker inventory as the SQL engine, spawned at creation on
 engine-owned threads, quiesced on dispose (engines are data machines; R10):
 group-commit WAL flusher (signal-driven), paced page write-back, checkpointer
@@ -691,6 +707,24 @@ leak), repaired by re-bootstrapping on the next open.
 
 ## Error model
 
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 `DatabaseException` (area root) for misuse and model errors;
 `DatabaseNotFoundException` for an open request whose storage does not exist;
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
@@ -705,7 +739,7 @@ An entry page the command cannot read fails the command with the storage library
 error: `StorageCorruptionException` (carrying the page id) for a page that fails its
 checksum or whose slot geometry is malformed, `StorageIOException` for a page cut short or
 a pool with every frame pinned, and the device's `IOException`. The engine does not wrap
-them yet. Every command resolves its key by a primary-index seek, and the seek fetches the
+I/O failures yet; corruption is translated to `DatabaseCorruptionException` (`COHDBS003`). Every command resolves its key by a primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
 or reallocated) reads as absence, and anything else that stops the read fails the command.
@@ -1098,9 +1132,9 @@ all files and restore the complete backup, since a lost journal may hold acknowl
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.KeyValuePair.Catalog — Design
+### Catalog: KeyValuePair catalog design
 
 #### Catalog: Design intent
 
@@ -1200,31 +1234,31 @@ Tuple-codec encode/decode only; no reflection, no serialization frameworks.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.KeyValuePair.Storage — Design
+### Storage: KeyValuePair storage design
 
 #### Storage: Design intent
 
-The thinnest possible model-storage satellite: it types a storage file set as
+A thin model-storage component: it types a storage file set as
 `StorageModel.KeyValue` and exposes the kernel's protected record surface under
 entry-flavored names (`InsertEntry`/`ReadEntry`/`UpdateEntry`/`DeleteEntry`). The
 key-value model deliberately brings **no model-specific physical layout** — the
 generality bet of the second model is that the shared substrate (slotted pages,
 per-owner record chains, WAL v2, recovery) serves an ordered key-value store
-as-is, and this project is where that bet is visibly small.
+as-is, and this component is where that bet is visibly small.
 
 #### Storage: Why-this-not-that
 
 - **A `Storage` subclass, not a wrapper.** `SqlStorage` set the family shape: the
-  kernel's record operations are `protected`, and the model satellite is the
+  kernel's record operations are `protected`, and the model component is the
   sanctioned way to expose the subset a model composes. A wrapper would duplicate
   the surface; a public kernel record API would invite models to bypass their
   engines.
 - **No entry codec here.** The record byte layout (16-byte version-stamp header +
   key/value tuple) is engine policy, tied to the engine's MVCC composition — it
   lives with the version store and executor in `Database.KeyValuePair`, exactly
-  where `SqlRowCodec` lives in `Database.Sql`. This satellite stays byte-agnostic.
+  where `SqlRowCodec` lives in `Database.Sql`. This component stays byte-agnostic.
 - **Owner-chain inserts are the primary insert path.** The engine keys every entry
   record by its key-space object id so the key space owns its pages (the #911
   per-object chain design). The shared-space overload exists for the catalog file

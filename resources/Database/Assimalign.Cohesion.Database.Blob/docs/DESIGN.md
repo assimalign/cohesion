@@ -1,5 +1,25 @@
 # Blob engine design
 
+## Storage corruption (#1160)
+
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Blob.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (15 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Blob`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
@@ -36,7 +56,8 @@ the engine server depends only on transport abstractions. These are reference di
 
 ```mermaid
 flowchart LR
-    Client["Database.Blob.Client"] --> Blob["Database.Blob"]
+    Client["Database.Blob.Client"] --> Wire["Database.Blob.Protocol"]
+    Blob["Database.Blob"] --> Wire
     Client --> SharedClient["Database.Client"]
     Blob --> Protocol["Database.Protocol"]
     SharedClient --> Protocol
@@ -48,8 +69,9 @@ flowchart LR
 
 | Component or package | Responsibility |
 | --- | --- |
-| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication, Blob wire family and server |
+| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication and wire server |
 | `Assimalign.Cohesion.Database.Blob.Client` | Typed streaming operations over shared connection exchanges |
+| `Assimalign.Cohesion.Database.Blob.Protocol` | Shared Blob message family, codecs and transferred values |
 | `Assimalign.Cohesion.Connections` | Generic connection and listener contracts; no concrete transport |
 | `Assimalign.Cohesion.Database.Protocol` | Shared framing, handshake, versioning, errors and family-bound channels |
 | `Catalog/` in Database.Blob | Metadata versions, directory and ordered listings |
@@ -1150,7 +1172,7 @@ The endpoint participates in protocol 2.1: Startup may carry capability names an
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Blob.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Blob`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Blob catalog design
 
@@ -1159,20 +1181,21 @@ It shares one Blob.Storage file set and one TransactionCoordinator with the cont
 This gives metadata and content a single commit decision, including after a crash. There is
 no independent catalog transaction and no separate catalog journal.
 
-The family dependencies are shown below; each arrow means a project references another project.
+The catalog and storage components live in `Database.Blob`. Arrows below show their
+internal dependencies and references to shared kernel packages.
 
 ```mermaid
 flowchart LR
-    Catalog["Blob.Catalog"] --> Root["Database root"]
-    Catalog --> BlobStorage["Blob.Storage"]
+    Catalog["Blob Catalog component"] --> Root["Database root"]
+    Catalog --> BlobStorage["Blob Storage component"]
     Catalog --> Transactions["Database.Transactions"]
     Catalog --> Storage["Database.Storage"]
 ```
 
-| Package | Role |
+| Component or package | Role |
 | --- | --- |
-| `Assimalign.Cohesion.Database.Blob.Catalog` | Metadata format, directory, snapshot selection |
-| `Assimalign.Cohesion.Database.Blob.Storage` | Metadata record access and chunk storage |
+| `src/Catalog/` in `Database.Blob` | Metadata format, directory, snapshot selection |
+| `src/Storage/` in `Database.Blob` | Metadata record access and chunk storage |
 | `Assimalign.Cohesion.Database.Transactions` | Shared coordinator, snapshots, undo and purge ledger |
 | `Assimalign.Cohesion.Database.Storage` | Pages, page CRC, storage brackets and journal |
 | `Assimalign.Cohesion.Database` | Shared object ownership vocabulary |
@@ -1199,7 +1222,10 @@ index node. A page that fails its CRC or cannot be read throws instead (#1342). 
 reread caught only the slot exceptions, so a reference into a freed metadata page failed the
 lookup with "Page N is not allocated" (250 versions of one blob's metadata and a purge pass).
 Live malformed records raise a catalog error; a checksum-valid but malformed record is not
-treated as missing.
+treated as missing. The #1287 regression repeats both committed overwrite/purge and explicit
+rollback for 120 rounds, forcing one metadata version per page and asserting each reclamation
+before lookup and listing through the same catalog. Purge is driven directly instead of relying
+on a 100 ms worker schedule.
 
 Writers acquire model locks in the engine before reaching the catalog. A save tombstones the
 snapshot-visible old metadata record and inserts the new version in one coordinator physical
@@ -1270,7 +1296,7 @@ Serialization uses explicit BCL primitives with no reflection or generated runti
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Blob.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Blob. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Blob`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Blob storage design
 
@@ -1283,20 +1309,20 @@ implements the existing `TransactionRecordSpace` seam for the coordinator's
 `RecordSpaceVersionStore`. All catalog records and chunk records begin with the
 same 16-byte writer/deleter prefix.
 
-These references explain the package boundary.
+These dependencies show the components within `Database.Blob` and their shared kernel references.
 
 ```mermaid
 flowchart LR
-    Blob["Database.Blob"] --> BS["Database.Blob.Storage"]
-    Cat["Database.Blob.Catalog"] --> BS
+    Blob["Blob engine component"] --> BS["Blob Storage component"]
+    Cat["Blob Catalog component"] --> BS
     BS --> S["Database.Storage"]
     BS --> T["Database.Transactions"]
     T --> S
 ```
 
-The engine and catalog reference Blob storage. Blob storage references shared
-Storage and Transactions, and Transactions references Storage. The feature has
-no Hosting, ApplicationModel, or wire-client reference.
+The engine and catalog components use Blob storage within the same assembly. Blob storage references shared
+Storage and Transactions, and Transactions references Storage. The Storage component has
+no Hosting, ApplicationModel, or wire-client dependency.
 
 #### Storage: File and record format
 
@@ -1417,7 +1443,7 @@ persistence. The engine's executable fixture additionally round-trips a file-bac
 object larger than a constrained managed heap and reopens its files. The code
 uses static calls and BCL types, with no reflection or `Microsoft.Extensions.*`.
 Container ownership, listing, security, transport, and schema provisioning are
-outside this package.
+outside this component.
 
 
 ## Public assembly identity changes

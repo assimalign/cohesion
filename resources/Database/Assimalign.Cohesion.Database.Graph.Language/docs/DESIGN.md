@@ -174,7 +174,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
 | `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
-| `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139); chains of any length and nesting the stack allows | A node is tested against its label set, a relationship against its one type; a disjunction, negation, wildcard or labeled predicate never supplies the index anchor |
+| `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139); chains of any length and nesting the stack allows | A node is tested against its label set, a relationship against its one type; pattern and positive conjunctive WHERE labels can anchor scans or property seeks (#1245) |
 
 Match patterns accept `(a)`, `(a:Label {key: value})`, `(a IS A|B)`, `(a:(A|B)&!C)`, `(a:%)`, and
 every ISO directed edge in full and abbreviated form: `-[r:TYPE]->` or `->`, `<-[r:TYPE]-` or `<-`,
@@ -1003,12 +1003,19 @@ with labeled predicates. A `:` directly after an element variable in a predicate
 predicate; an operand that begins with `:` keeps shared-parameters' coded `:name` rejection, and
 whichever of the two lands second adds the other's case.
 
-**Index anchors.** The planner anchors only on `Labels`, which the parser fills only for a pure
-conjunction: every match must carry each listed label, so anchoring on any one of them drops no
-row. A disjunction, negation or wildcard leaves `Labels` empty, and a labeled predicate is never an
-equality, so neither feeds an anchor: `(n:A|B {k: 1})`, `(n:!A {k: 1})` and
-`MATCH (n) WHERE n:A AND n.k = 1` scan, and the executor tests each candidate. `(n:A&B {k: 1})`
-anchors on an index of `A` or `B`.
+**Index and label-scan anchors (#1245).** Pure pattern conjunctions and non-negated labeled
+predicates in the clause's top-level AND chain supply required node labels. Thus `(n:A&B {k: 1})`
+and `MATCH (n) WHERE n IS LABELED A&B AND n.k = 1` may seek an index of `A` or `B`.
+Pattern labels precede WHERE labels in source order. Bound entities take precedence, then property
+seeks, then a scan of the first required label at any node position. `(a)->(b) WHERE b:A` may
+therefore anchor at `b`, as `(a)->(b:A)` does. The full pattern and predicate remain residual
+checks. EXPLAIN reports the selected label and node ordinal. Requirements are clause-local;
+relationship labeled predicates supply no node labels. OR, XOR, NOT, truth tests, IS NOT LABELED
+and label expressions using `|`, `!` or `%` supply none, so `(n:A|B {k: 1})` and
+`(n:!A {k: 1})` still scan all nodes unless another requirement narrows them.
+Behavior consulted, no code copied: Neo4j's
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`
+reads HasLabels selections for any pattern node (relative to C:/Source/repos/neo4j/neo4j).
 
 **Directions.** Storage holds only directed relationships, so the ISO forms map as follows:
 

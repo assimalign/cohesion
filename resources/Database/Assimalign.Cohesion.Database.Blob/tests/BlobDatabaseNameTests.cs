@@ -373,10 +373,14 @@ public sealed class BlobDatabaseNameTests : IDisposable
         await using var engine = CreateEngine(onDisk: true);
 
         // Act
-        var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
+        var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB004");
+        refusal.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBB004"]);
+        refusal.Database.ShouldBe((DatabaseName)"sales");
+        refusal.PageId.ShouldBe((PageId)1L);
+        refusal.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe((PageId)1L);
+        refusal.Message.ShouldContain("page 1", Case.Sensitive);
         refusal.Message.ShouldNotContain("DropDatabaseAsync", Case.Sensitive);
         File.ReadAllBytes(path).ShouldBe(before);
     }
@@ -477,6 +481,42 @@ public sealed class BlobDatabaseNameTests : IDisposable
         using var copy = new MemoryStream();
         input.CopyTo(copy);
         return copy.ToArray();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Blob] - Names: refused create open and drop preserve a sibling directory and every database file (#1219)")]
+    [InlineData("../victim")]
+    [InlineData("..\\victim")]
+    [InlineData("rooted")]
+    [InlineData("..")]
+    [InlineData("a:b")]
+    [InlineData("CON")]
+    [InlineData("COM1")]
+    [InlineData("LPT9")]
+    public async Task DatabaseOperations_OutsideRootName_ShouldRefuseWithoutTouchingDisk(string input)
+    {
+        // Arrange: the canary is a sibling of the engine's data root, all inside this test's directory.
+        string root = Path.Combine(_rootPath, "data");
+        string victim = Path.Combine(_rootPath, "victim");
+        Directory.CreateDirectory(victim);
+        string canary = Path.Combine(victim, "keep.txt");
+        File.WriteAllText(canary, "keep");
+        string name = input == "rooted" ? victim : input;
+        await using var engine = BlobDatabaseEngine.Create("containment", new BlobDatabaseEngineOptions { RootPath = root });
+        var valid = await engine.CreateDatabaseAsync("valid", TestTimeout.Token());
+        await valid.DisposeAsync();
+        var before = Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
+
+        // Act
+        await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(name, TestTimeout.Token()));
+        await Should.ThrowAsync<ArgumentException>(async () => await engine.OpenDatabaseAsync(name, TestTimeout.Token()));
+        await Should.ThrowAsync<ArgumentException>(async () => await engine.DropDatabaseAsync(name, TestTimeout.Token()));
+
+        // Assert: invalid names reach no filesystem operation, including recursive deletion.
+        File.ReadAllText(canary).ShouldBe("keep");
+        Directory.GetDirectories(root).Select(Path.GetFileName).ShouldBe(["valid"]);
+        Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order().ShouldBe(before.Keys.Order());
+        foreach (var file in before) { File.ReadAllBytes(file.Key).ShouldBe(file.Value); }
+        (await engine.OpenDatabaseAsync("valid", TestTimeout.Token())).Name.ToString().ShouldBe("valid");
     }
 
     private BlobDatabaseEngine CreateEngine(bool onDisk)

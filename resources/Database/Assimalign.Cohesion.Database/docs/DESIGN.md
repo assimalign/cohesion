@@ -1,5 +1,31 @@
 # Assimalign.Cohesion.Database — Design
 
+## Storage corruption (#1160)
+
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+Lifecycle translation removes an existing `COHDBS003` from the carried diagnostics before
+adding the common corruption diagnostic, so coded and aggregate wrappers report it once.
+
+Lifecycle integrity translation preserves synchronous core throws and returns successful
+completed value tasks unchanged. Only a pending or faulted operation uses the async
+translation continuation; the existing zero-allocation creation contract stays intact.
+
 ## Provisioning observations and construction cancellation (49a)
 
 The root base instance exposes a nullable immutable `DatabaseProvisioningProgress` through

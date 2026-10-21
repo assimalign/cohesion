@@ -94,8 +94,8 @@ public readonly unsafe struct Page
     /// <remarks>
     /// The checksum is computed over the full page with the checksum field itself
     /// treated as zero. It is stamped by the buffer pool on every write-back and
-    /// verified on every load from the storage stream. A stored value of zero means
-    /// the page has never been stamped (a freshly allocated page) and is not verified.
+    /// verified on every load from the storage stream. A stored value of zero is accepted only when
+    /// the entire page is zero-filled. Every nonzero pooled page requires a checksum.
     /// </remarks>
     public uint Checksum
     {

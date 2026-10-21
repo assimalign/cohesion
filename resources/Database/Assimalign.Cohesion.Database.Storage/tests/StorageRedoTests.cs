@@ -792,6 +792,11 @@ public sealed class StorageRedoTests
         if (zeroChecksum)
         {
             images.Data.AsSpan(pageStart + Page.ChecksumFieldOffset, sizeof(uint)).Clear();
+            // Format 4 refuses a missing checksum on a nonzero page before trusting its LSN.
+            var corruption = Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images));
+            corruption.PageId.ShouldBe(pageId);
+            corruption.Code.ShouldBe("COHDBS003");
+            return;
         }
 
         // Act

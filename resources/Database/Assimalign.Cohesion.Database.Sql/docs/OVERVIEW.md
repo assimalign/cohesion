@@ -205,9 +205,9 @@ Missing sidecars and ambiguous lost catalogs are preserved and refused.
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.Sql.Catalog — Overview
+### Catalog: Sql catalog overview
 
 The relational catalog of the SQL model: SQL namespaces, tables, columns, and constraints
 (`SqlCatalogTable`/`SqlCatalogColumn`), persisted through the storage kernel so
@@ -252,8 +252,8 @@ physical index registrations exported by `Database.Indexing`.
 
 #### Catalog: Dependencies
 
-`Database` (root), `Database.Storage`, `Database.Sql.Storage` (the record facade
-its records persist through), `Database.Types` (type identities + the record
+`Database` (root), `Database.Storage`, the local `src/Storage/` record facade
+its records persist through, `Database.Types` (type identities + the record
 codec), `Database.Indexing` (registration types). Deliberately language-free:
 translating parsed DDL (`SqlCreateTableExpression`) into catalog calls is the
 planner's job.
@@ -276,9 +276,9 @@ See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.Sql.Storage — Overview
+### Storage: Sql storage overview
 
 The SQL model's storage facade: `SqlStorage` is the concrete `Storage` implementation
 (model `StorageModel.Sql`) the SQL engine composes per database file set. It exposes
@@ -286,9 +286,8 @@ row-grain operations — insert/read/update/delete by `(PageId, SlotIndex)` — 
 shared page/WAL substrate from `Assimalign.Cohesion.Database.Storage`, plus the
 factory methods (`Create`/`Open`) the engine's storage strategies call.
 
-- **Consumed by:** `Assimalign.Cohesion.Database.Sql` (the engine, per database:
-  one data file set + one catalog file set) and `Assimalign.Cohesion.Database.Sql.Catalog`
-  (metadata records on the catalog file set).
+- **Consumed by:** the engine and Catalog components in `Assimalign.Cohesion.Database.Sql`:
+  one data file set for rows and one catalog file set for metadata records.
 - **Depends on:** `Assimalign.Cohesion.Database.Storage` only.
 - **Docs:** design record in [DESIGN.md](DESIGN.md); the substrate's invariants
   (WAL ordering, recovery, buffer pool, per-owner record chains) are documented in

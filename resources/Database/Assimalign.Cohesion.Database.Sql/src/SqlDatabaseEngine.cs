@@ -867,7 +867,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         {
             throw RefuseStorageFormat(name, "data", name, exception);
         }
-        catch (StorageCorruptionException)
+        catch (Exception exception) when (StorageCorruptionException.Find(exception) is not null)
         {
             return false;
         }
@@ -1123,7 +1123,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <summary>
     /// Publishes a provisional storage snapshot containing the open databases'
     /// storages plus the given not-yet-registered ones — called before instance
-    /// construction so the flush/write-back workers can serve commits the
+    /// construction so the flush worker can serve commits the
     /// construction itself performs.
     /// </summary>
     private void PublishStorageSnapshotLocked(SqlStorage storage, SqlStorage catalogStorage)

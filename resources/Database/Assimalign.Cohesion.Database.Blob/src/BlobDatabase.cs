@@ -207,6 +207,13 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
+        if (error is DatabaseCorruptionException) { return error; }
+
+        if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
+        {
+            return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || Assimalign.Cohesion.Database.Storage.StorageOfflineException.Find(error) is not { } offline)
         {

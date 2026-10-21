@@ -89,6 +89,9 @@ internal sealed class DeviceFaults
     /// <summary>Gets the number of reads that returned the rotten page with its byte flipped.</summary>
     internal long RottenPageReads => Interlocked.Read(ref _rottenPageReads);
 
+    /// <summary>Optionally wraps the rotten page's simulated corruption at the read boundary.</summary>
+    internal Func<StorageCorruptionException, Exception>? WrapCorruption { get; set; }
+
     /// <summary>
     /// Gets or sets whether every write to a data page (page 1 and beyond) of the data file fails:
     /// a page write-back, an eviction, or a checkpoint's flush of the buffer pool.
@@ -210,6 +213,7 @@ internal sealed class DeviceFaults
         FailJournalFlushes = false;
         FailJournalWrites = false;
         RottenPage = null;
+        WrapCorruption = null;
         ReleaseDataFlushes();
         ReleaseJournalWrites();
         ReleaseJournalFlushes();
@@ -300,6 +304,10 @@ internal sealed class DeviceFaults
         {
             read[(int)(target - offset)] ^= 0x5A;
             Interlocked.Increment(ref _rottenPageReads);
+            if (WrapCorruption is { } wrap)
+            {
+                throw wrap(new StorageCorruptionException((PageId)page, $"Page {page} failed checksum verification."));
+            }
         }
     }
 

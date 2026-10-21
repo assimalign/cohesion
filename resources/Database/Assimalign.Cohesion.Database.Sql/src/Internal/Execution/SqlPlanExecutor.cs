@@ -37,6 +37,7 @@ internal sealed partial class SqlPlanExecutor
     /// subquery plan.
     /// </summary>
     private SqlSubqueryValues? _subqueryValues;
+    private bool _containsLike;
 
     /// <summary>Initializes an executor for one statement.</summary>
     /// <param name="storage">The database's data storage.</param>
@@ -61,15 +62,14 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// The evaluator a plan's bound expressions run with: the statement's subquery values, and its
-    /// cancellation token only when the engine registers an application function, the only kind of
-    /// function that reads the token from its context. A statement of an engine with the standard
-    /// library alone therefore shares the evaluator without subquery values or retained join
-    /// columns and allocates none, whatever its token, as before functions carried a context.
+    /// cancellation token when a plan contains LIKE or the engine runs application code.
+    /// Other plans still share the evaluator without subquery values or retained join columns,
+    /// preserving their allocation budget even when their statement token is cancellable.
     /// </summary>
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
-        bool[]? sharedColumns = null)
+        bool[]? sharedColumns = null, bool containsLike = false)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, ViewTransactionStart);
+            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, ViewTransactionStart);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
@@ -83,6 +83,7 @@ internal sealed partial class SqlPlanExecutor
     internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        _containsLike |= plan.ContainsLike;
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {

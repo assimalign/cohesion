@@ -161,6 +161,7 @@ internal sealed partial class SqlPlanner
 
     private void ValidateFunctionCalls(SqlExpression? expression)
     {
+        _containsLike |= expression is SqlLikeExpression;
         // Subqueries recurse through here as well as children (#1151).
         RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)

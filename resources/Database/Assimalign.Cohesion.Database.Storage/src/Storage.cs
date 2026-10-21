@@ -1120,11 +1120,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     protected unsafe void OpenExisting(bool checkpointOnOpen = true, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var header = ReadHeader(out long[] anchor, out List<long> anchorChain);
+        var header = ReadHeader(out long[] anchor, out _);
         NameComponents();
         _checkpointActives = anchor;
-        _anchorChains[_headerSlot].AddRange(anchorChain);
-        var protectedPages = new HashSet<long>(anchorChain);
+        var protectedPages = new HashSet<long>(_anchorChains[0]);
+        protectedPages.UnionWith(_anchorChains[1]);
 
         // Recover before anything reads pages: replay, in order, every page's full image and the
         // committed changes after it, which also overwrites the stolen writes of transactions that
@@ -1190,11 +1190,26 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     pageLsn = ((Page.Header*)headerPtr)->Lsn;
                 }
 
-                // An anchor page off the newest generation's chain is the other slot's (whose
-                // generation the next header write replaces) or a leftover of a crashed header
-                // write: free. Its on-disk bytes are never read again — allocation overwrites
-                // without reading.
-                if (type == PageType.Free || (type == PageType.CheckpointAnchor && !protectedPages.Contains(i)))
+                // Type zero is reserved for wholly zero, never-initialized pages (format 4).
+                // Validate reclaimable pages before trusting their headers: a zeroed first
+                // sector must not turn a live page into reusable space. Reclaimed pages use a
+                // distinct nonzero type and retain a checksum over their metadata and body.
+                bool leftoverAnchor = type == PageType.CheckpointAnchor && !protectedPages.Contains(i);
+                if (!leftoverAnchor && (type is PageType.Free or PageType.Reclaimed
+                    || System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(pageHeader.AsSpan(Page.ChecksumFieldOffset)) == 0))
+                {
+                    pageBuffer ??= new byte[Page.Size];
+                    Data.ReadPage((PageId)i, pageBuffer);
+                    PageChecksum.Verify(pageBuffer, (PageId)i);
+                    if (type == PageType.Free && pageBuffer.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
+                    {
+                        throw new StorageCorruptionException((PageId)i, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FreePageNonzero, i));
+                    }
+                }
+
+                // Only an anchor outside both slots' valid chains can be a torn, unjournaled
+                // leftover. Its bytes are never read again: allocation overwrites without reading.
+                if (type is PageType.Free or PageType.Reclaimed || leftoverAnchor)
                 {
                     _freeSpaceMap.MarkFree((PageId)i);
                 }
@@ -1221,7 +1236,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     // copy does the same. Its LSN is taken only from a page whose stamped checksum
                     // verifies, as every write-back leaves it: a damaged header must not move LSNs (the
                     // page fails its checksum when it is read), and neither may a page whose checksum
-                    // field reads zero, which is never verified.
+                    // field reads zero, which must be entirely zero-filled as checked above.
                     if (pageLsn > redoLsn && pageLsn > strayLsn && !recovery.RebuiltPages.Contains(i))
                     {
                         pageBuffer ??= new byte[Page.Size];
@@ -1977,7 +1992,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var page = handle.Page;
         ulong pageOwner = page.OwnerId;
         ClearBody(page);
-        page.Type = PageType.Free;
+        page.Type = PageType.Reclaimed;
         page.OwnerId = 0;
         slotted.Initialize();
         owner.RegisterPendingFree((long)pageId, pageOwner);
@@ -2112,7 +2127,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Releases a bounded batch of the specified owner's data and index pages inside a
-    /// transaction: each page is retyped <see cref="PageType.Free"/> under the
+    /// transaction: each page is retyped <see cref="PageType.Reclaimed"/> under the
     /// write-ahead log (a rollback restores the chain from the pre-image), and
     /// the pages return to the free-space map when the transaction commits, never
     /// before, so an in-flight release can never be reallocated.
@@ -2162,7 +2177,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             using var handle = TouchPage(owner, (PageId)pageId);
             var page = handle.Page;
             ClearBody(page);
-            page.Type = PageType.Free;
+            page.Type = PageType.Reclaimed;
             page.OwnerId = 0;
 
             var slotted = new SlottedPage(page);
@@ -3230,7 +3245,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             int inline = Math.Min(anchor.Length, StorageHeaderPage.InlineAnchorCapacity);
             var overflow = anchor[inline..];
-            ResizeAnchorChain(target, (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity);
+            var retired = ResizeAnchorChain(target, (overflow.Length + StorageHeaderPage.AnchorPageCapacity - 1) / StorageHeaderPage.AnchorPageCapacity);
 
             // Read after the chain's allocations: every free that returned one of its pages to
             // the allocator appended its commit record before it did.
@@ -3313,32 +3328,74 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             _sequenceFloor = sequenceFloor;
             _identityNeedsRepair &= !repair;
             Volatile.Write(ref _checkpointActives, anchor.ToArray());
+
+            // Until the target slot is durable its old chain still belongs to a valid header.
+            // Flush and non-idle shutdown do not hold the transaction lock: an early free could
+            // be allocated and committed while recovery would still exclude that page as an anchor.
+            // A failed header write deliberately leaves these pages allocated until reopen.
+            if (retired is not null)
+            {
+                foreach (long pageId in retired)
+                {
+                    FreeAnchorPage(pageId);
+                }
+            }
         }
     }
 
     /// <summary>
-    /// Sizes a slot's chain of anchor pages: frees the pages it no longer needs, then grows
-    /// it from the free-space map.
+    /// Sizes a slot's chain of anchor pages, collecting retired pages for release only after
+    /// the replacement header slot is durable, and growing it from the free-space map.
     /// </summary>
-    private void ResizeAnchorChain(int slot, int pagesNeeded)
+    private unsafe List<long>? ResizeAnchorChain(int slot, int pagesNeeded)
     {
         var chain = _anchorChains[slot];
+        List<long>? retired = null;
 
         while (chain.Count > pagesNeeded)
         {
-            FreeAnchorPage(chain[^1]);
+            (retired ??= []).Add(chain[^1]);
             chain.RemoveAt(chain.Count - 1);
         }
 
         while (chain.Count < pagesNeeded)
         {
-            // Recorded on the chain as soon as it is allocated, so a failure before the slot
-            // is written still leaves the page to the chain's next write (or to the next
-            // open's scan, which frees an anchor page no valid generation chains). The allocation
-            // reports the page to the consistency check as written outside the journal.
+            // Keep the page pinned until its repair image is recorded. Only then add it to the
+            // chain: a failed initialization must not leave a retry using an unimaged page.
             using var allocated = _pageManager!.AllocatePage(PageType.CheckpointAnchor);
-            chain.Add((long)allocated.Id);
+
+            // Publish a recovery image while the initialized page is still pinned, before any
+            // write-back can tear its conversion from Free/Reclaimed. In particular, a write
+            // whose second half lands first still has its old non-anchor header. Recovery must
+            // repair it rather than exempt an arbitrary damaged free page from verification.
+            byte[]? scratch = null;
+            try
+            {
+                scratch = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumRunsLength);
+                var page = allocated.Page;
+                int length = PageImageCodec.EncodeImage(new ReadOnlySpan<byte>(page.Pointer, Page.Size), scratch);
+                page.Lsn = _journal!.AppendPageRecord(0, allocated.Id, JournalRecordType.FullPageImage,
+                    scratch.AsSpan(0, length), out _);
+                allocated.MarkDirty();
+                chain.Add((long)allocated.Id);
+            }
+            catch
+            {
+                // The initialized page never joined the chain when its repair image failed.
+                // Leave its anchor bytes intact, as for ordinary retirement, but return the id.
+                FreeAnchorPage((long)allocated.Id);
+                throw;
+            }
+            finally
+            {
+                if (scratch is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(scratch);
+                }
+            }
         }
+
+        return retired;
     }
 
     /// <summary>
@@ -3385,22 +3442,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Returns an anchor page to the allocator: retyped <see cref="PageType.Free"/> in the
-    /// pool (the next flush writes it) and freed in the free-space map. Anchor pages are
-    /// unjournaled, so nothing else needs to know.
+    /// Returns a retired anchor to the in-memory allocator without changing its on-disk type.
+    /// Open reclaims anchors outside both slots' valid chains, including torn leftovers (#1251).
+    /// Retyping here without a journal image could turn a harmless torn write into an ordinary
+    /// damaged Reclaimed page, which open must refuse (#1160).
     /// </summary>
-    private unsafe void FreeAnchorPage(long pageId)
+    private void FreeAnchorPage(long pageId)
     {
         _consistency?.Forget(pageId);
-        using (var handle = _pageManager!.PinForOverwrite((PageId)pageId))
-        {
-            var page = handle.Page;
-            new Span<byte>(page.Pointer, Page.Size).Clear();
-            page.Id = pageId;
-            page.Type = PageType.Free;
-            handle.MarkDirty();
-        }
-
         _freeSpaceMap.Free((PageId)pageId);
     }
 
@@ -3501,6 +3550,24 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             page0.AsSpan(StorageHeaderPage.SlotOffset(newestSlot), StorageHeaderPage.SlotSize),
             anchor.AsSpan(0, newest.AnchorInlineCount));
         anchorChain = ReadAnchorChain(newest, newestSlot, anchor.AsSpan(newest.AnchorInlineCount));
+        _anchorChains[newestSlot].AddRange(anchorChain);
+
+        // The older slot can still have a complete chain. Keep it allocated and exclude it
+        // from replay too. A chain rewritten before a crashed slot update is no longer live;
+        // only the newest slot's chain is required to verify for open to succeed.
+        int olderSlot = 1 - newestSlot;
+        if (StorageHeaderPage.TryReadSlot(page0.AsSpan(StorageHeaderPage.SlotOffset(olderSlot), StorageHeaderPage.SlotSize), out var older))
+        {
+            try
+            {
+                var entries = new long[older!.AnchorCount - older.AnchorInlineCount];
+                _anchorChains[olderSlot].AddRange(ReadAnchorChain(older, olderSlot, entries));
+            }
+            catch (StorageCorruptionException)
+            {
+                // The newest generation remains authoritative; a retired chain may be torn.
+            }
+        }
 
         _headerSlot = newestSlot;
         _headerGeneration = newest.Generation;

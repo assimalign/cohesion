@@ -32,11 +32,98 @@ using static KeyValueTestHarness;
 /// failed header slot write take only their database offline, and every later operation on it is
 /// refused with COHDBK002 while nothing more is written to it.
 /// </summary>
+[CollectionDefinition(nameof(KeyValueWorkerResilienceTests), DisableParallelization = true)]
+[Collection(nameof(KeyValueWorkerResilienceTests))]
 public sealed class KeyValueWorkerResilienceTests
 {
-    private const string Failing = "failing";
-    private const string Healthy = "healthy";
+    private const string Failing = "kv-worker-resilience-failing";
+    private const string Healthy = "kv-worker-resilience-healthy";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: failed provisional flushes reach construction without faulting the worker")]
+    [InlineData(DeviceFault.JournalWrite)]
+    [InlineData(DeviceFault.JournalFlush)]
+    public async Task WriteAheadFlushWorker_ProvisionalFlushFails_ShouldKeepServingAfterFailedConstruction(DeviceFault fault)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(10);
+        using var commits = new GroupCommitRecorder();
+        await using var engine = KeyValueDatabaseEngine.Create("provisional-engine", options);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var faults = strategy.Faults(Failing, catalog: true);
+        faults.SwitchOn(fault);
+
+        // Act: the constructor receives the failed flush and disposes the provisional file sets.
+        try
+        {
+            var failure = await Record.ExceptionAsync(async () => await engine.CreateDatabaseAsync(Failing));
+            StorageOfflineException.Find(failure.ShouldNotBeNull()).ShouldNotBeNull();
+        }
+        finally
+        {
+            faults.Clear();
+        }
+        await engine.CreateDatabaseAsync(Healthy);
+
+        // Assert: the worker survives the stale snapshot and serves the next construction.
+        (await Eventually(() => commits.FlushCount(Healthy) > 0)).ShouldBeTrue();
+        commits.MissedCount(Healthy).ShouldBe(0);
+        worker.FailureCount.ShouldBe(0);
+        worker.Fault.ShouldBeNull();
+        engine.GetStorageSnapshot().Length.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: grouped create and reopen commits are flushed before publication")]
+    public async Task WriteAheadFlushWorker_ProvisionalDatabases_ShouldFlushCreateAndOpenBeforeSelfHelp()
+    {
+        // Arrange: construction holds the engine lock and cannot publish until its commits finish.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(10);
+        using var commits = new GroupCommitRecorder();
+        await using var engine = KeyValueDatabaseEngine.Create("provisional-engine", options);
+        var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var duration = Stopwatch.StartNew();
+        int creates = 0;
+        int opens = 0;
+
+        // Act: repeat until both publication races have run, for at least a quarter second.
+        do
+        {
+            string name = "kv-worker-resilience-provisional-" + creates;
+            var database = await engine.CreateDatabaseAsync(name);
+            (await Eventually(() => commits.FlushCount(name) > 0)).ShouldBeTrue();
+            creates++;
+
+            // Leave an unproven logical writer, so reopen must commit a recovery scrub.
+            // A clean reopen may need no grouped commit and would prove nothing about the worker.
+            var storage = database.DataStorage;
+            storage.WriteAheadJournal.AppendBegin(storage.ReserveTransactionSequence());
+            storage.WriteAheadJournal.Flush(forceDurable: true);
+            storage.TakeOffline(StorageOfflineCause.RecoveryInterrupted,
+                "Simulated power loss before transaction end.", new IOException("Simulated unfinished writer."));
+            await database.DisposeAsync();
+            int beforeOpen = commits.FlushCount(name);
+            var reopened = await engine.OpenDatabaseAsync(name);
+            (await Eventually(() => commits.FlushCount(name) > beforeOpen)).ShouldBeTrue();
+            commits.MissedCount(name).ShouldBe(0);
+            opens++;
+            await reopened.DisposeAsync();
+        }
+        while ((duration.Elapsed < TimeSpan.FromMilliseconds(250) || creates < 3 || opens < 3)
+            && duration.Elapsed < Timeout);
+
+        // Assert
+        creates.ShouldBeGreaterThanOrEqualTo(3);
+        opens.ShouldBe(creates);
+        worker.FailureCount.ShouldBe(0);
+        worker.Fault.ShouldBeNull();
+        engine.GetStorageSnapshot().ShouldBeEmpty();
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: a checkpoint whose page writes fail is retried after a backoff, and recovers when the fault clears")]
     public async Task CheckpointWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesCheckpoint()

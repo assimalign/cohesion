@@ -24,7 +24,7 @@ public sealed class GraphReturnWireTests
         await using var harness = await GraphClientTestHarness.StartAsync(tcp);
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("INSERT (:Person {name: 'Alice', age: 42}), (:Person {name: 'Bob', age: 17})", cancellationToken: harness.Token);
-        const string source = "MATCH (a:Person), (b:Person) RETURN DISTINCT a.age + $d AS next, a.name || '!'";
+        const string source = "MATCH (a:Person), (b:Person) RETURN DISTINCT a.age + $d AS next, a.name || '!' ORDER BY next DESC";
         var parameters = new Dictionary<string, object?> { ["d"] = 1 };
         await using var session = await harness.Database.CreateSessionAsync(harness.Token);
         await using var local = (await session.ExecuteAsync(source, parameters, harness.Token)).ShouldBeAssignableTo<DatabaseResultSet>();

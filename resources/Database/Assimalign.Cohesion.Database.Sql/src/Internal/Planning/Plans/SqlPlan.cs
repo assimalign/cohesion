@@ -7,4 +7,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Every scalar expression a plan evaluates is a <see cref="SqlBoundExpression"/> the
 /// planner compiled once; the executor never resolves a name or a collation per row.
 /// </summary>
-internal abstract record SqlPlan;
+internal abstract record SqlPlan
+{
+    // Set once before publication, including cached view bodies. Child plans inherit the
+    // executing statement's token; no token is retained in a cached plan.
+    internal bool ContainsLike { get; set; }
+}

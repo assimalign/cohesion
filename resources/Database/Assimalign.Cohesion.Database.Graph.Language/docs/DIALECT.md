@@ -4,6 +4,14 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+## Storage integrity errors (#1160)
+
+A read that detects storage corruption fails with `COHDBS003`, naming the database and
+page and recommending a verified backup. It never succeeds with the damaged data omitted.
+The error is an execution failure over the wire; the connection remains usable. A
+legitimately reclaimed location retains its existing absence semantics. The engine's
+storage-integrity conformance tests cover corrupted media through the executing language.
+
 ## MATCH and OPTIONAL MATCH
 
 MATCH and OPTIONAL MATCH clauses execute in source order. Each WHERE belongs to its own
@@ -190,6 +198,9 @@ STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are COHDBL001; WITH uses the sam
 
 ## ORDER BY, OFFSET, SKIP and LIMIT
 
+Queries without ORDER BY have no guaranteed row order. A later-position anchor can change their
+result row order while preserving the order of elements within each matched path.
+
 After RETURN or WITH, `ORDER BY expression [ASC|ASCENDING|DESC|DESCENDING] [NULLS FIRST|LAST]` accepts multiple keys,
 RETURN aliases and projected expressions. ASC is the default. NULL sorts last in ASC and
 first in DESC (Cypher); explicit placement overrides it. This differs from Cohesion SQL's
@@ -341,6 +352,22 @@ otherwise a match wins, then a NULL operand or item yields UNKNOWN, otherwise FA
 Thus `1 IN [1, NULL]` is TRUE and `1 IN [2, NULL]` is UNKNOWN.
 IS truth tests accept Boolean/NULL and return Boolean. Evaluated non-Boolean logical values
 raise COHDBG013.
+
+A non-negated labeled predicate in a MATCH clause's top-level AND chain supplies required node
+labels when its label expression is a pure conjunction: `MATCH (n) WHERE n:Keep RETURN n` and
+`MATCH (n) WHERE n IS LABELED Keep RETURN n` anchor like `(n:Keep)`. Required labels also enable
+property index seeks with inline or conjunctive WHERE equalities. Bound entities take precedence,
+then property seeks; otherwise the first required label by node position anchors a label scan.
+The choice is positional, not cardinality-based; choosing by cardinality waits for label counts.
+Any node position can anchor, including `(a)->(b) WHERE b:Keep`; EXPLAIN shows the chosen label
+and node ordinal. The complete predicate still filters candidates. A label scan still decodes every
+node record and filters by label (`GraphStore.GetNodes(label, snapshot)`); no label index exists yet.
+#1245 reduces the expansion budget charge and the expansion work after the scan. Reducing label-scan
+decoding through a label index belongs to #1534.
+
+OR, XOR, NOT, IS NOT LABELED, truth tests and label expressions using `|`, `!` or `%` supply no
+required labels. Requirements remain local to their MATCH clause. Without any required label or
+a bound entity, `(n:A|B {k:1})` scans every node; `(n:A|B)->(m:C)` anchors at `m`.
 
 Precedence from weakest to strongest; binary runs associate left:
 

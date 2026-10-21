@@ -101,8 +101,9 @@ One abstract base plus one branch-free internal implementation — nothing to tr
 
 ## Non-goals
 
-- No principal/role/permission model here yet — it arrives with the per-model
-  security satellites.
+- No principal/role/permission model here yet — when one arrives, its model-specific
+  parts live in each model's engine project (`Database.{Model}`), not in separate
+  security satellites, which were removed in the model consolidation.
 - No credential storage or key material (see `Security.DataProtection` at the
   platform level for that machinery).
 - No transport security: TLS belongs to `Connections.Security` under the server's

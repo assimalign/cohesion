@@ -1034,17 +1034,18 @@ internal sealed partial class GraphPlanner
     // Earlier paths and clauses supply argument bindings before any scan or seek, as Neo4j's
     // argumentLeafPlanner.scala:33-37 does (community/cypher/cypher-planner/.../steps/leafplanner).
     // A bound relationship supplies its adjacent endpoint when no node is already bound.
-    // Fresh anchors come from Labels only, which holds a node's labels only when every match must carry
-    // them all: a pure conjunction. A disjunction, negation or wildcard leaves Labels empty, and a
-    // labeled predicate is never an equality, so neither can narrow the candidates and drop rows;
-    // such a node scans every node and the executor evaluates the expression on each.
+    // A pattern's pure label conjunction requires every match to carry each label.
+    // Positive label conjunctions in the clause's top-level WHERE
+    // AND chain supply the same required labels. Other label expressions remain residuals.
     //
-    // The choice is the first distinct label, in Labels order, that has an index on a key the node
+    // The choice is the first distinct required label, pattern before WHERE, with an index on a key the node
     // has a value for, and of that label's indexed keys the one whose first non-null value comes
     // first, inline properties before WHERE equalities. Selection costs the node's labels and values
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
+    // Without a seek, scan the first required label at any node position, as Neo4j's labelScanLeafPlanner
+    // reads HasLabels selections for pattern nodes (labelScanLeafPlanner.scala:45-46, :73-78).
     private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables)
     {
         for (int i = 0; i < shape.Nodes.Count; i++)
@@ -1060,18 +1061,21 @@ internal sealed partial class GraphPlanner
             if (shape.Segments[i] is { Quantifier: null, Body.Edge.Variable: { } variable } && boundVariables.Contains(variable))
             { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
         }
+        GraphAnchor? scan = null;
         for (int i = 0; i < shape.Nodes.Count; i++)
         {
             foreach (var node in shape.Nodes[i])
             {
-                if (node.Labels.Count == 0) { continue; }
+                var labels = sources.GetRequiredLabels(node);
+                if (labels.Count == 0) { continue; }
+                scan ??= new GraphAnchor(i, labels[0], null, null);
                 var inline = FirstValues(node.Properties);
                 var equalities = sources.GetEqualities(node.Variable);
                 if (inline.Count == 0 && equalities.Count == 0) { continue; }
                 var indexes = sources.GetIndexedKeys();
-                if (indexes.Count == 0) { break; }
+                if (indexes.Count == 0) { continue; }
                 var tried = new HashSet<string>(StringComparer.Ordinal);
-                foreach (string label in node.Labels)
+                foreach (string label in labels)
                 {
                     if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
                     string? bestKey = null;
@@ -1090,7 +1094,7 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
-        return new GraphAnchor(0, shape.Nodes[0].SelectMany(node => node.Labels).FirstOrDefault(), null, null);
+        return scan ?? new GraphAnchor(0, null, null, null);
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>
@@ -1112,7 +1116,7 @@ internal sealed partial class GraphPlanner
     /// <summary>
     /// What anchor selection reads from outside the pattern, each read at most once per clause: the
     /// visible indexes grouped by label, and every variable's <c>variable.key = literal-or-parameter</c>
-    /// equalities from the <c>WHERE</c> chain.
+    /// equalities and required label conjunctions from the <c>WHERE</c> chain.
     /// </summary>
     private sealed class AnchorSources
     {
@@ -1123,6 +1127,7 @@ internal sealed partial class GraphPlanner
         private readonly GqlExpression? _predicate;
         private Dictionary<string, List<string>>? _indexedKeys;
         private Dictionary<string, Dictionary<string, FirstValue>>? _equalities;
+        private readonly Dictionary<string, List<string>> _labels = new(StringComparer.Ordinal);
 
         /// <summary>Initializes a new instance of the <see cref="AnchorSources"/> class.</summary>
         /// <param name="database">The database whose store lists the visible indexes.</param>
@@ -1161,10 +1166,20 @@ internal sealed partial class GraphPlanner
             return _equalities.TryGetValue(variable, out var values) ? values : _none;
         }
 
+        /// <summary>The pattern's required labels followed by this clause's required WHERE labels.</summary>
+        internal IReadOnlyList<string> GetRequiredLabels(GqlNodePattern node)
+        {
+            var pattern = node.LabelExpression is { } expression ? GraphLabelEvaluator.Conjunction(expression) ?? [] : node.Labels;
+            if (node.Variable is not { } variable) { return pattern; }
+            _equalities ??= Collect(_predicate);
+            if (!_labels.TryGetValue(variable, out var labels)) { return pattern; }
+            return pattern.Count == 0 ? labels : pattern.Concat(labels).ToArray();
+        }
+
         /// <summary>
         /// Walks the predicate's <c>AND</c> chains once, through nested chains of any depth, with an
-        /// explicit stack. Anchors are chosen before the predicate is validated, so a malformed
-        /// hand-built chain or a null name is skipped here and rejected by validation.
+        /// explicit stack. Only positive pure label conjunctions require every match to carry
+        /// their labels. Negation, disjunction and truth tests remain residual predicates.
         /// </summary>
         private Dictionary<string, Dictionary<string, FirstValue>> Collect(GqlExpression? predicate)
         {
@@ -1177,6 +1192,13 @@ internal sealed partial class GraphPlanner
                 if (expression is GqlLogicalExpression { Operator: GqlLogicalOperator.And, Operands: { } operands })
                 {
                     for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
+                    continue;
+                }
+                if (expression is GqlLabeledPredicate { IsNegated: false } labeled &&
+                    GraphLabelEvaluator.Conjunction(labeled.LabelExpression) is { } conjunction)
+                {
+                    if (!_labels.TryGetValue(labeled.Variable, out var labels)) { _labels.Add(labeled.Variable, labels = []); }
+                    labels.AddRange(conjunction);
                     continue;
                 }
                 if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }

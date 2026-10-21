@@ -209,9 +209,8 @@ public class StorageBufferPoolTests
     [InlineData(-1, true)]
     public unsafe void Pin_HeaderOverflowPastTheBuffer_ShouldThrowAndStayOutOfCache(int overflowSize, bool stamped)
     {
-        // Arrange: Page.AsSpan sizes its span from the overflow header. An unstamped page
-        // (checksum zero) is never verified, and a stamped one verifies whatever its header
-        // says, so the header alone must not size a span past the 8 KiB buffer.
+        // Arrange: Page.AsSpan sizes its span from the overflow header. A stamped page must
+        // pass the geometry guard; a nonzero unstamped page fails the checksum guard first.
         var bytes = new byte[Page.Size];
         fixed (byte* pointer = bytes)
         {
@@ -233,7 +232,7 @@ public class StorageBufferPoolTests
         var exception = Should.Throw<StorageCorruptionException>(() => pool.Pin((PageId)0L, stream));
 
         // Assert
-        exception.Message.ShouldContain("overflow");
+        exception.Message.ShouldContain(stamped ? "overflow" : "checksum");
         pool.Count.ShouldBe(0);
         pool.CheckInvariants();
     }

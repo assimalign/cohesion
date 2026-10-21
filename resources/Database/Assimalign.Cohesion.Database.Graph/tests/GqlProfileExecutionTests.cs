@@ -31,6 +31,11 @@ public sealed class GqlProfileExecutionTests
                      [1, 0, "ExpandPath", null, null, null, null, null],
                      [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
                      [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
+                new("EXPLAIN MATCH (a) WHERE a IS LABELED Person RETURN a",
+                    [[0, null, "Match", null, null, "filter=True; matches_nothing=False", null, null],
+                     [1, 0, "ExpandPath", null, null, null, null, null],
+                     [2, 1, "LabelScan", "Person", null, "node=0; property=; value=NULL", null, null],
+                     [3, 0, "Project", "a", null, "kind=Node; expression=a", null, null]]),
                 new("EXPLAIN MATCH (a:Person)-[:KNOWS]->(b) RETURN a",
                     [[0, null, "Match", null, null, "filter=False; matches_nothing=False", null, null],
                      [1, 0, "ExpandPath", null, null, null, null, null],
@@ -281,6 +286,8 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a)-[r:!KNOWS]->(b) RETURN a.name", [["Robo"]]),
                 new("MATCH (n) WHERE n IS LABELED Robot|!% RETURN n.name", [["Robo"], ["Ghost"]]),
                 new("MATCH (n) WHERE n:Person AND n IS NOT LABELED Robot AND n.age > 20 RETURN n.name", [["Alice"], ["Isolated"]]),
+                new("MATCH (n) WHERE n IS LABELED Person&Person AND n.age > 20 RETURN n.name", [["Alice"], ["Isolated"]]),
+                new("MATCH (a)->(b) WHERE b:Person RETURN a.name, b.name", [["Alice", "Bob"]]),
             ],
         };
 

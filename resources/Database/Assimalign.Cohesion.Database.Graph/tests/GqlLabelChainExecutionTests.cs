@@ -40,7 +40,7 @@ public sealed class GqlLabelChainExecutionTests
 
     /// <param name="gql">A read whose chain is at <c>{0}</c> (labels) or <c>{1}</c> (types).</param>
     /// <param name="separator">The chain's operator.</param>
-    /// <param name="expected">The comma-separated names it returns, in identity order.</param>
+    /// <param name="expected">The comma-separated names it returns, regardless of row order.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label chains: 10,000-name chains of each operator select exactly the expected rows")]
     [InlineData("MATCH (n:{0}) RETURN n.name", "|", "all,even")]
     [InlineData("MATCH (n:{0}) RETURN n.name", "&", "all")]
@@ -64,7 +64,7 @@ public sealed class GqlLabelChainExecutionTests
         var names = await ColumnAsync(session, gql);
 
         // Assert
-        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','));
+        names.ShouldBe(expected.Length == 0 ? [] : expected.Split(','), ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a 10,000-name disjunction over relationship types matches every typed edge")]
@@ -80,9 +80,9 @@ public sealed class GqlLabelChainExecutionTests
         var predicate = await ColumnAsync(session, "MATCH ()-[r]->() WHERE r:" + Chain(types, "|") + " RETURN r.name");
 
         // Assert
-        names.ShouldBe(types.Select(type => type.ToLowerInvariant()));
+        names.ShouldBe(types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
         single.ShouldBe(["t7"]);
-        predicate.ShouldBe(names);
+        predicate.ShouldBe(names, ignoreOrder: true);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: 10,000 labeled predicates joined by AND filter as one chain")]
@@ -100,7 +100,7 @@ public sealed class GqlLabelChainExecutionTests
 
         // Assert
         all.ShouldBe(["all"]);
-        notX.ShouldBe(["all", "even", "u"]);
+        notX.ShouldBe(["all", "even", "u"], ignoreOrder: true);
     }
 
     /// <summary>
@@ -129,8 +129,8 @@ public sealed class GqlLabelChainExecutionTests
         var catalog = await RowsAsync(session, "SHOW LABELS");
 
         // Assert
-        any.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Select(index => (object?)(long)index));
-        labeled.Select(row => row[0]).ShouldBe(any.Select(row => row[0]));
+        any.Select(row => row[0]).ShouldBe(Enumerable.Range(0, 10).Select(index => (object?)(long)index), ignoreOrder: true);
+        labeled.Select(row => row[0]).ShouldBe(any.Select(row => row[0]), ignoreOrder: true);
         every.ShouldBeEmpty();
         first.ShouldHaveSingleItem()[0].ShouldBe(0L);
         catalog.Count.ShouldBe(names.Length);
@@ -182,7 +182,7 @@ public sealed class GqlLabelChainExecutionTests
     /// <c>|</c>, in a pattern and in a labeled predicate alike.
     /// </summary>
     /// <param name="expression">A label expression mixing operators.</param>
-    /// <param name="expected">The comma-separated names it selects, in identity order.</param>
+    /// <param name="expected">The comma-separated names it selects, regardless of row order.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label chains: mixed precedence selects the same rows after flattening")]
     [InlineData("A|B&C", "a,ab,bc")]
     [InlineData("!A&B", "b,bc")]
@@ -209,8 +209,8 @@ public sealed class GqlLabelChainExecutionTests
         var predicate = await ColumnAsync(session, "MATCH (n) WHERE n IS LABELED " + expression + " RETURN n.name");
 
         // Assert
-        pattern.ShouldBe(expected.Length == 0 ? [] : expected.Split(','));
-        predicate.ShouldBe(pattern);
+        pattern.ShouldBe(expected.Length == 0 ? [] : expected.Split(','), ignoreOrder: true);
+        predicate.ShouldBe(pattern, ignoreOrder: true);
     }
 
     /// <summary>

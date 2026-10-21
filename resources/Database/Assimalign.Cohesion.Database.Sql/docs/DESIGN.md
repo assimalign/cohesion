@@ -602,6 +602,11 @@ and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Uns
 TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
 assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
 typed literals use its strict readers directly. No session zone or assembly access grant is added.
+The #1648 storage regression launches isolated Unix child test processes with TZ set to
+America/Phoenix (UTC-7) and Asia/Tokyo (UTC+9); zone identity, base offset and a plain .NET parse
+verify each setting before SQL inserts and reads both winter and summer values. Windows
+reports an explicit skip because it has no supported per-process local-zone override; the
+Linux CI leg is authoritative. The parent process and OS zone remain untouched.
 
 No catalog record changes. SqlCatalogColumn.DefaultLiteral still contains canonical SQL;
 previously accepted string and signed numeric defaults resolve identically, including after reopen.
@@ -3572,6 +3577,22 @@ description + exported registrations), the engine binds them.
 
 ## Engine-owned background workers
 
+The worker resilience tests observe Storage event 8 (PendingCommitsFlushed) for each create
+and reopen and require no event 9 (GroupCommitWindowMissed). This proves the worker served
+construction without a wall-clock latency assertion. Reopen receives an unproven writer so its
+recovery scrub must commit; an unchanged clean open may require no grouped flush.
+The listener filters process-wide events by names reserved to the SQL worker resilience
+suite, including its failing, healthy and provisional databases, to prevent cross-test matches.
+
+The group-commit flusher serves both published databases and provisional file sets (#1275).
+It captures the storage snapshot before the instance snapshot, then flushes uncovered storages
+without taking the engine lock: create/open holds that lock while its construction commits wait
+on the durability gate. Published instances retain per-database failure/backoff handling.
+Provisional offline storages are skipped, disposed storages from failed construction are tolerated,
+and other provisional flush errors reach the constructing commit without a worker failure record.
+Only SQL and Key-Value use this provisional pass; Documents, Blob and Graph retain self-help
+while opening.
+
 The engine is a **data machine**: `Create(name, options)` returns it operational, with
 the six-worker inventory already pumping — one dedicated background thread per
 worker, spawned by the constructor and joined on dispose. Nothing outside the
@@ -3582,9 +3603,9 @@ the concrete-types plan the engine is a leaf of the root `DatabaseEngine`: its c
 attaches the six built-in workers through the base's `AttachWorker`, which starts each pump on a
 thread named for the worker, and the base stops the pumps and releases the workers on disposal
 (the checkpointer's lanes end in its release hook, `DisposeAsyncCore`).
-Each worker iterates a lock-free snapshot of every open storage file set (data +
-catalog per database, rebuilt when databases open/close; passes tolerate racing
-a drop):
+Workers iterate lock-free snapshots of published databases, rebuilt when databases
+open or close; passes tolerate racing a drop. The group-commit flusher also serves
+the provisional storage snapshot described above:
 
 - **`SqlWriteAheadFlushWorker`** — signal-driven group-commit flusher. Every open
   storage's `OnCommitPending` hook sets one engine-level event; a pass resets the
@@ -4850,6 +4871,24 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 `DatabaseException` (area root) for everything user-facing: plan-time
 validation and execution errors. Named integrity violations use
 `SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
@@ -4976,9 +5015,11 @@ from the row fetch as "the row was reclaimed beneath its entry" and dropped the
 row. Only a reclaimed row is skipped now, through the positive check
 `Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
 PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
-`ERRCODE_DATA_CORRUPTED` for an invalid page. The engine does not wrap these
-storage errors in a `DatabaseException` yet, so over the wire one reaches the
-client as `Internal` and closes the session ("Session state machine", above).
+`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
+database and page, and reaches the wire as `ExecutionFailure` without closing the session.
+Other I/O failures retain their existing handling.
+The read-only creation emptiness probe uses the same wrapped-corruption search before its
+I/O catch, so direct, coded and aggregate corruption all refuse adoption of incomplete files.
 The scan had the opposite defect: the version purge deleting a slot, or freeing
 a page, while a statement scanned the table (an `UPDATE` or `DELETE` target scan,
 a `SELECT` without a seek) failed the statement with "Cannot read a deleted
@@ -5748,7 +5789,7 @@ COHDBP001 with exact retained/omitted counts; the original Error category/messag
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
-## Predicate execution (#1111)
+## Predicate execution (#1111, #1166)
 
 Dedicated E1 distinct and Boolean-test nodes avoid binary null propagation and seek
 extraction. The distinct predicate uses the existing comparer, collation and CHAR
@@ -5769,21 +5810,65 @@ a scalar-to-normalized-offset map preserves boundaries across expansions and ign
 marks. Binary and simple case-insensitive matching use last-`%` backtracking with
 constant search state; simple folding preserves one scalar per original scalar.
 Accent-insensitive literal probes compare normalized spans and stop once a prefix
-can no longer match. Linguistic probes compare spans at every original scalar
-boundary, including Thai/Lao reordered prefixes (like_match.c:289-311); a prefix
-test cannot safely prune these comparisons. Explicit continuations avoid recursion;
-visited suffixes use at most one bit per token/input boundary, allocated by token
-as reached. Every path observes statement cancellation. Runtime distinct, truth-test
+can no longer match. Invariant literals use CompareInfo.IsSuffix for terminal
+suffixes before analyzing the input boundaries, including combining and ignored
+scalars ahead of an independent terminal literal. IsPrefix supplies candidate ends
+for anchors and IndexOf supplies candidate starts for middle runs. Independent scalar ends without ignorables use constant-state
+last-% backtracking; combining sequences and contextual scripts (including Thai/Lao
+reordering and contractions) retain exhaustive scalar probes (like_match.c:289-311).
+ASCII letter/digit literals prune impossible isolated prefixes and
+skip ignored runs when the complete-input search misses a match at a combining
+boundary. Ignored scalars retain all candidate ends on the general path. Explicit continuations avoid recursion;
+visited suffixes keep one boundary inline per token and expand to at most one bit
+per token/input boundary when another start arrives. Invariant search charges every transition and boundary probe, plus both
+UTF-16 comparison/search lengths, to a per-match budget of
+64 × (input UTF-16 length + 1) × (raw pattern UTF-16 length + 1), with checked
+64-bit arithmetic. Successful prefix/middle searches charge through the match;
+Failed searches before boundary analysis charge the full offered span; known
+independent prefix failures charge the literal extent. Ordinary anchors therefore stay
+linear in input length, leaving the polynomial budget as a backstop. Each zero-initialized
+32-bit visited-state word also costs one unit, charged before allocating its row;
+many literal tokens therefore cannot bypass the budget through state initialization.
+Exhaustion raises located
+COHSQLE040; it never returns a guessed Boolean. This bounds comparison work even when
+a single probe scans a long equal prefix, while preserving reordered and ignorable
+scalar semantics for admitted matches (#1166). Cancellation wins over budget refusal.
+The planner marks LIKE-bearing plans during its existing expression walk, including
+CTEs and subqueries; cached view bodies retain the flag, never a token. The executor
+passes the current statement token to their row evaluator, and persisted CHECKs carry
+the same flag, aggregated once on SqlBoundTable. DEFAULT and SQL-function evaluation already forward the current token.
+Plans without LIKE or application code retain the allocation-free shared evaluator.
+Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
 Format 25 admits the new persisted expression/view syntax and has no upgrade reader.
 
+The #1394 resource regressions use 2,048 `%a` fragments and count search transitions
+and compared UTF-16 units instead of elapsed time. Index-backed search is bounded by
+O(input × pattern); invariant search must refuse within its charged budget. Minimum
+allocation across three rounds pins zero bytes for binary matching and size bounds
+for normalization and visited bits. Literal probes use spans; no suffix string is
+copied during backtracking. The existing small-stack regression covers the iterative
+matcher independently of expression-tree stack guards.
+Accent-insensitive matching maps each normalized end offset to its first original
+scalar boundary and coalesces already reached literal-end continuations. This avoids
+repeatedly scanning an ignored prefix or enumerating an ignored tail for every raw
+start. Wildcards still consume original scalars, and an exhaustive small-input oracle
+pins expansion, decomposition and ignorable-mark behavior.
+The final literal compares the complete remaining span once (PostgreSQL
+`src/backend/utils/adt/like_match.c:272-286`), preserving long exact linguistic
+matches within the work budget. Scalar-offset and first-boundary arrays rent from
+ArrayPool and return in a finally block, including on cancellation or refusal.
+The test hook is captured per evaluator and supplied to Match, leaving cached
+patterns immutable. A single delegate check remains at match entry; there is no
+mutable test-hook field on the shared pattern.
+
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.Sql.Catalog — Design
+### Catalog: Sql catalog design
 
 #### Catalog: Fixed-length characters (#1437)
 
@@ -6344,7 +6429,7 @@ over its own file set. So the three collapsed into the sealed class
 private constructor, and the four statics are instance members with the same
 checks and documentation. The internal test helpers (`CreateTableAsync` with
 ownership and constraints, `AddConstraintAsync`) became internal instance members
-the catalog's tests reach through the existing Sql.Catalog → Sql.Catalog.Tests grant.
+the model's tests reach through the owning `Database.Sql` assembly's test-only visibility grant.
 No behavior changed. The `Abstractions/` folder is gone.
 
 #### Catalog: Error model
@@ -6378,7 +6463,7 @@ it atomically. A recreated table gets a fresh ObjectId and starts from START.
 #### Catalog: Non-goals
 
 - General sequences and permissions (permissions are
-  `Sql.Security`'s feature, #177). Virtual system views are engine projections
+  a future SQL engine feature, #177). Virtual system views are engine projections
   of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
   layer compensates completed reversible statements on failure; an MVCC bracket
@@ -6511,13 +6596,13 @@ catalog dependency on the language assembly.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Sql.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Sql. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Sql`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.Sql.Storage — Design
+### Storage: Sql storage design
 
-The SQL model's *storage layout* project (area architecture:
+The SQL model's *storage layout* component (area architecture:
 [docs/resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3 — every model brings a layout,
-never its own paging/WAL). This library is deliberately thin: `SqlStorage` derives
+never its own paging/WAL). This component is deliberately thin: `SqlStorage` derives
 from the kernel's `Storage` base and re-exposes the protected record operations as a
 public row-oriented surface. All hard invariants (write-ahead ordering, recovery
 replay, buffer-pool behavior, per-owner record chains) live in — and are documented
@@ -6527,7 +6612,7 @@ by — `Assimalign.Cohesion.Database.Storage`.
 
 - **A facade, not a layout engine.** SQL rows are "variable-length byte sequences
   addressed by (page, slot)" — exactly the substrate's slotted-page unit — so the
-  SQL layout adds no page format of its own. The project still exists (rather than
+  SQL layout adds no page format of its own. The component exposes a model-specific surface (rather than
   the engine using `Storage` directly) because the base class's record operations
   are `protected` by design: models opt into the record surface they actually
   expose, and `SqlStorage` is where the SQL model does that, plus where a
@@ -6575,7 +6660,7 @@ family. The SQL engine translates at its model boundary per the area error polic
 #### Storage: AOT posture
 
 Inherits the substrate's posture (explicit-layout header overlays, span-based
-codecs); this project adds no reflection and no serialization.
+codecs); this component adds no reflection and no serialization.
 
 #### Storage: Non-goals
 

@@ -154,7 +154,8 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     {
         // The cause travels in the message as well: the wire carries message text, not inner exceptions.
         var diagnostic = cause is DatabaseException failure && failure.Diagnostics.Count > 0 ? failure.Diagnostics[0] : null;
-        string causeText = diagnostic?.Code is { } code ? $"{code}: {cause!.Message}" : cause?.Message ?? string.Empty;
+        string causeText = diagnostic?.Code is { } code && !cause!.Message.StartsWith(code + ":", StringComparison.Ordinal)
+            ? $"{code}: {cause.Message}" : cause?.Message ?? string.Empty;
         string reason = cause is null ? string.Empty : " Cause: " + causeText;
         string message = commit
             ? "COHDBG007: The session's transaction is aborted and cannot commit; nothing was committed." + reason

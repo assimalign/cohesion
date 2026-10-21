@@ -459,7 +459,9 @@ public sealed class StorageConcurrencyTests
         byte[] data = Snapshot(dataStream);
         byte[] journal = Snapshot(journalStream);
         (data.Length % Page.Size).ShouldBe(0);
-        for (long pageId = 0; pageId < data.Length / Page.Size; pageId++)
+        // Page 0 has independent identity/slot checksums, validated by the reopen below;
+        // it never enters the buffer pool's page-checksum path.
+        for (long pageId = 1; pageId < data.Length / Page.Size; pageId++)
         {
             Should.NotThrow(() => PageChecksum.Verify(data.AsSpan((int)(pageId * Page.Size), Page.Size), (PageId)pageId));
         }

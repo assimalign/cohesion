@@ -1,5 +1,25 @@
 # Graph engine design
 
+## Storage corruption (#1160)
+
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Graph.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (13 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Graph`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
@@ -120,8 +140,10 @@ flowchart LR
 A filtered incident lookup costs O(t log E + r) index work for t selected type/direction ranges
 and r retained entries in them, decoding k visible references; deterministic identity ordering adds O(k log k) CPU work. Direct
 traversal uses these same selections and ordering with O(Vvisited) visited state. A label scan
-examines node records and sorts its matches. A property equality anchor instead seeks its
-shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
+still decodes every node record and filters by label in `GraphStore.GetNodes(label, snapshot)`
+(`src/Storage/GraphStore.cs:150-154`), then sorts its matches. There is no label index yet;
+reducing label-scan decoding through a label index belongs to #1534. A property equality anchor
+instead seeks its shared B+Tree in `O(log N + candidates)` after locating index metadata, then sorts its matches.
 Index numeric keys normalize
 integral, decimal and finite floating point values through double conversion. Full scalar comparisons
 filter index candidates using exact reduced numeric fractions across all numeric types, including
@@ -266,6 +288,10 @@ plan, and checkpoints last. The process fixture exits after committed graph/inde
 after uncommitted detach/insertion page write-back, without disposal. Restart must recover the
 committed path and index, remove partial nodes/types/edges, and undo partial tombstones; it then
 reopens a second time to verify the recovery checkpoint.
+
+The Database solution includes `Graph.RecoveryFixture` so solution builds keep the fixture in
+the selected configuration. The Graph test build copies that configuration's outputs beside the
+test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
 
 ### Failed statements in explicit transactions (#1188)
 
@@ -527,13 +553,24 @@ Any future plan cache must recompute anchors that depend on parameter values. Ex
 ExecutePaths bind the existing named scalar map on wire 2.0 without changing frame encoding;
 unbound parameters return ExecutionFailure carrying COHDBG001 and leave the connection ready.
 
-Label expressions (#1139) follow one anchor rule: only a node's `Labels` can choose a label scan or
-a property index, and the parser fills `Labels` only for a pure conjunction (`:A`, `:A&B`,
-`:A:B`), whose every match carries each listed label. A disjunction (`:A|B`), negation (`:!A`) or
-wildcard (`:%`) leaves `Labels` empty, so `(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with
-no label and no property and scan every node; anchoring on `A`'s index would silently drop the `B`
-or non-`A` rows. A `WHERE` labeled predicate (`n:A`, `n IS [NOT] LABELED A`) is a Boolean primary,
-never an equality, so `MATCH (n) WHERE n:A AND n.k = 1` also plans no index property. The
+Label expressions (#1139, #1245) supply required labels from a pattern's pure conjunction (`:A`,
+`:A&B`, `:A:B`) and from non-negated labeled predicates in the clause's top-level `AND` chain
+whose label expression is a pure conjunction (`WHERE n:Keep`, `n IS LABELED Keep&Tagged`).
+Pattern labels precede WHERE labels in source order. Every required label participates in property
+index selection with inline or WHERE equality values. Bound entities still take precedence;
+without a seek, the first required label by node position anchors a label scan. This choice is
+positional, not cardinality-based; choosing by cardinality waits for label counts. Thus
+`(a)->(b:Keep)` and `(a)->(b) WHERE b:Keep` can both start at `b`, expanding right then left.
+EXPLAIN reports the actual LabelScan or IndexSeek label and node ordinal. Every candidate still
+passes the full pattern and WHERE residual, including other required labels.
+A disjunction (`:A|B`), negation (`:!A`) or wildcard (`:%`) leaves that node's `Labels` empty.
+When the path has no required label and no bound entity takes precedence,
+`(n:A|B {k: 1})` and `(n:!A {k: 1})` plan an anchor with no label and no property and scan every
+node. Another node's required label can still anchor the path: `(n:A|B)->(m:C)` anchors at `m`.
+Anchoring the disjunction or negation on `A`'s index would silently drop the `B` or non-`A` rows.
+Predicates under OR, XOR, NOT or truth tests, and label expressions using
+disjunction, negation or wildcard, supply no required labels. Collection is clause-local and
+only node variables can supply node anchors; a relationship's labeled predicate tests its type. The
 executor evaluates the expression on every candidate node, and a relationship pattern's expression
 against visible catalog type names before seeking their adjacency ranges. `GraphLabelEvaluator` validates each expression before execution:
 an unknown kind, a null operand, name or operand list, a conjunction or disjunction with fewer than
@@ -555,19 +592,27 @@ decision 2026-10-02: do what Neo4j does; the evidence is in the
 A conjunction or disjunction of labels, and an AND, OR or XOR chain of predicates, is one n-ary node, and the
 engine evaluates it with a loop that stops at the first operand that decides it, under three-valued
 logic for `AND` (false, otherwise unknown, otherwise true). Validation, name collection and the
-anchor's equality search walk with an explicit stack. Anchor selection reads the visible indexes
+anchor's predicate search walk with an explicit stack. Anchor selection reads the visible indexes
 at most once per clause (`GraphStore.GetIndexes`, grouped by label) and that clause's `WHERE`
-chain's equalities once, keeping each variable's first non-null value per key; each node then tries,
+chain once for required label conjunctions and equalities, keeping each variable's first non-null value per key; each node then tries,
 for each distinct label in order, only the keys that label has an index on. Planning each clause
 therefore costs time linear in its `E`
-equalities, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
+equalities and WHERE labels, its `D` pattern labels and properties and its `I` visible indexes, plus for each node the
 indexes its own labels carry, never the product of labels, equalities and indexes. Across `C`
 clauses, listing and grouping visible indexes costs at most `C` times `I`. Neo4j's leaf
 planner likewise groups predicates once and visits only each label's own index descriptors
 (`NodeIndexLeafPlanner.scala`:184, :201, :248-296). Selection agrees with a per-pair search: the
 first label with an index on a key the node has a value for, then that label's key whose value comes
 first, inline properties before `WHERE` equalities. A node carrying more than 16 labels is tested
-through a hash set built once per evaluation. Only label and predicate evaluation recurse, where the
+through a hash set built once per evaluation. Label scans still decode every node record;
+filtering by the anchor label occurs before charging expansion work. #1245 reduces the expansion
+budget charge and the expansion work after that scan, not the scan's decoding cost. A deterministic
+2,010-node fixture with ten Keep nodes still decodes all 2,010 nodes but charges ten anchor
+candidates for the WHERE label scan, as for its pattern form. Label-index decoding is #1534.
+Neo4j likewise builds label scans from selections' HasLabels predicates for any pattern node
+(`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/logical/steps/leafplanner/labelScanLeafPlanner.scala:45-46, :73-78`,
+relative to C:/Source/repos/neo4j/neo4j; behavior consulted, no code copied).
+Only label and predicate evaluation recurse, where the
 tree nests, and each descent calls `RuntimeHelpers.EnsureSufficientExecutionStack`. A statement
 whose parse (`GQL0009`), plan or evaluation needs more stack than the executing thread has left
 fails with `COHDBG008`, statement too complex (ISO SQLSTATE 54001; Neo4j's transient
@@ -811,6 +856,11 @@ before any result header, so failures roll back mutations and preserve pooled-se
 Aggregate syntax adds no catalog data or on-disk format; no catalog version changes.
 
 ### Ordering and paging (#1142)
+
+Queries without ORDER BY have no guaranteed row order. Choosing a later-position anchor can
+change their result row order, even though each matched path retains its source-ordered elements.
+Tests compare unordered results with multiplicity preserved, including complete row tuples when
+columns are related; tests that assert a row sequence specify ORDER BY explicitly.
 
 GraphPlanner binds sort keys against projected names and source bindings. DISTINCT admits only
 projected values, including a projected entity under any alias. Structural expression matching
@@ -1088,10 +1138,11 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine preserves it as an Error in DatabaseException.Diagnostics with a code-free Message. No upgrade path exists |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including format 2: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
+| `COHDBS003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
 
 Planner rejections carry stable codes in `DatabaseException.Diagnostics`, with Error severity
 and source offsets wherever the AST has a location. Their Message has no code prefix; the
@@ -1843,7 +1894,7 @@ and 1 MiB bounds include the notice. See [wire policy](../../Assimalign.Cohesion
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Graph catalog design
 
@@ -1860,12 +1911,13 @@ record operations and on the shared transaction kernel; it does not reference th
 Graph.Storage owns physical node-property B+Trees, while catalog index records supply names
 and object discovery. The engine coordinates both through the same logical transaction.
 
-The dependency diagram repeats these reference directions.
+Catalog and Storage live within `Database.Graph`; the diagram shows their internal
+dependency direction and references to shared kernel packages.
 
 ```mermaid
 flowchart LR
-    Engine["Graph engine"] --> Catalog["Graph.Catalog"]
-    Catalog --> Store["Graph.Storage"]
+    Engine["Graph engine component"] --> Catalog["Graph Catalog component"]
+    Catalog --> Store["Graph Storage component"]
     Catalog --> Tx["Database.Transactions"]
     Catalog --> Root["Database root ownership"]
     Store --> Kernel["Database.Storage"]
@@ -1964,7 +2016,7 @@ the corresponding physical store change; publishing only one side is not an engi
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Graph.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Graph. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Graph`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Graph storage design
 
@@ -1980,7 +2032,7 @@ kernel's durable transaction-sequence namespace, so rollback and restart do not 
 an identity.
 
 The Graph root owns query planning, label/type validation and session scoping.
-Graph.Catalog owns schema metadata. This package owns physical graph records and their
+The Catalog component owns schema metadata. The Storage component owns physical graph records and their
 indexes. The dependency arrows point to the shared Storage, Transactions and Indexing
 packages; no model-specific paging, journal, lock manager or B+Tree is implemented here.
 
@@ -2080,7 +2132,7 @@ records whose nonzero identities the caller reserves from the backing storage's 
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
 changes before first publication. Formats 1 and 2 are refused before recovery scrub with COHDBG017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
-StorageCorruptionException carries the code in its message; the engine preserves it in DatabaseException.Diagnostics.
+StorageCorruptionException carries the code in its message; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
 The graph record and tree-registration version is 3; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
 The owner-directed #1532 bump is shared with #1534: that later label-index tree extends version 3

@@ -672,20 +672,18 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }
-            catch (StorageCorruptionException exception)
+            catch (Exception exception) when (StorageCorruptionException.Find(exception) is { } corruption)
             {
-                var refusal = RefuseInterruptedCreation(name, preserve: true);
+                var diagnostics = RefuseInterruptedCreation(name, preserve: true).Diagnostics;
+                var existingDiagnostics = exception is AggregateException aggregate
+                    ? aggregate.Flatten().InnerExceptions.OfType<DatabaseException>().SelectMany(failure => failure.Diagnostics)
+                    : (exception as DatabaseException)?.Diagnostics ?? [];
+                var refusal = DatabaseCorruptionException.Create(name, corruption,
+                    [.. diagnostics, .. existingDiagnostics.Where(diagnostic => diagnostic.Code != StorageCorruptionException.ErrorCode
+                        && diagnostic.Code != interruptedCreationCode)]);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
-                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
-            }
-            catch (DatabaseException exception) when (exception.Diagnostics.Count == 0
-                && exception.InnerException is StorageCorruptionException)
-            {
-                var refusal = RefuseInterruptedCreation(name, preserve: true);
-                storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
-                storage?.Dispose();
-                throw new DatabaseException(refusal.Message, refusal.Diagnostics, exception);
+                throw refusal;
             }
             catch (Exception exception) when (exception is StorageIOException or IOException
                 || exception is DatabaseException { InnerException: StorageIOException or IOException })

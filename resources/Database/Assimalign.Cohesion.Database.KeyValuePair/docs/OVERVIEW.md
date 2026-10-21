@@ -110,9 +110,9 @@ then execution through the public typed NVI. Results use `DatabaseResult` and
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Catalog: Assimalign.Cohesion.Database.KeyValuePair.Catalog — Overview
+### Catalog: KeyValuePair catalog overview
 
 The key-value model's metadata catalog: the sealed `KeyValueCatalog`, opened over a
 database's dedicated catalog storage file set (`KeyValueCatalog.Open`).
@@ -140,8 +140,8 @@ named key spaces, per-entry expiration (TTL) metadata.
 #### Catalog: Dependencies
 
 - `Assimalign.Cohesion.Database` — the area root (`DatabaseException` ancestry).
-- `Assimalign.Cohesion.Database.Storage` / `.KeyValuePair.Storage` — the catalog
-  file set the records persist on.
+- `Assimalign.Cohesion.Database.Storage` through the local `src/Storage/` component —
+  the catalog file set the records persist on.
 - `Assimalign.Cohesion.Database.Types` — the shared tuple codec records encode with.
 - `Assimalign.Cohesion.Database.Indexing` — `BTreeIndexRegistration`.
 
@@ -153,9 +153,9 @@ database over its `catalog` file set; consumers never compose it directly.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.KeyValuePair.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.KeyValuePair. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.KeyValuePair`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
-### Storage: Assimalign.Cohesion.Database.KeyValuePair.Storage — Overview
+### Storage: KeyValuePair storage overview
 
 The key-value model's storage binding: `KeyValueStorage`, the model-typed storage
 file set (`StorageModel.KeyValue`) the key-value engine composes over the shared

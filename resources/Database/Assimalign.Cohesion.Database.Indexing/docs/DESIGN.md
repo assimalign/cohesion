@@ -31,6 +31,11 @@ continues to compare raw bytes.
 
 ## The B+Tree implementation
 
+The legacy-page refusal fixture recomputes valid storage format-4 checksums after rewriting
+node bodies (#1160). It uses the public BCL CRC-32C primitive in test code, so format tests
+reach the B-tree format fence without disabling page integrity checks or granting access
+to storage internals.
+
 All newly allocated root and split pages carry their object's identity in the storage header
 (#1443). The tag is set before the WAL pre-image, including an allocation later rolled back.
 The storage owner directory for index pages is separate from its row directory. SQL's deferred

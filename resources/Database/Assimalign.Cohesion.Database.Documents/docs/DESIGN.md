@@ -1,5 +1,25 @@
 # Documents engine design
 
+## Storage corruption (#1160)
+
+Storage corruption is `COHDBS003` (#1160). The engine translates a
+`StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
+cause and page id, naming the database and page, and advising restoration from a verified
+backup. Its structured diagnostic crosses the existing wire execution-failure path; a
+failed read never becomes an absent row, document, node, key or blob. Legitimate slot
+reclamation still reads as absence. Create/open failures receive the same translation
+from the root lifecycle after the model has released its resources. Storage format 4
+reserves zero headers for entirely zero pages and identifies reclaimed pages separately.
+
+Corruption translation searches coded inner exceptions and every aggregate branch with
+`StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
+This applies to read/statement and transaction failures as well as synchronous and deferred
+create/open failures. A refused open retains any existing model diagnostics in addition to the
+outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
+when the message does not already contain that prefix.
+
 ## Wire contract ownership
 
 `Assimalign.Cohesion.Database.Documents.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (14 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Documents`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
@@ -1729,7 +1749,7 @@ The endpoint participates in protocol 2.1: Startup may carry capability names an
 
 ## Catalog component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Catalog; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Catalog component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Catalog/` and helpers in `src/Internal/Catalog/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Catalog: Document catalog design
 
@@ -1737,17 +1757,18 @@ The following content moved from Assimalign.Cohesion.Database.Documents.Catalog;
 
 Documents.Catalog depends on the Database root for ownership vocabulary, Documents.Storage for
 record/content access, Database.Transactions for MVCC and statement brackets, Database.Indexing
-for B+Trees, and Database.Types for scalar key encoding. The engine depends on this package and
+for B+Trees, and Database.Types for scalar key encoding. The engine uses this component and
 owns sessions, OQL planning/execution, lock acquisition, ownership enforcement, and
 commit/rollback. There is no Hosting or ApplicationModel dependency and no compiled-schema
 provisioning.
 
-The dependency diagram shows the same reference direction as the prose.
+Catalog and Storage live within `Database.Documents`; the diagram shows their internal
+dependency direction and references to shared packages.
 
 ```mermaid
 flowchart LR
-    Cat["Documents.Catalog"] --> Root["Database"]
-    Cat --> Doc["Documents.Storage"]
+    Cat["Documents Catalog component"] --> Root["Database"]
+    Cat --> Doc["Documents Storage component"]
     Cat --> Tx["Database.Transactions"]
     Cat --> Tree["Database.Indexing"]
     Cat --> Types["Database.Types"]
@@ -1772,7 +1793,10 @@ propagate. Until #1342 the lookup caught only the slot exceptions, so once the p
 metadata page every lookup that reached one of its references failed with "Page N is not
 allocated": 250 versions of one document and a purge pass were enough. Reads choose the newest visible writer whose
 deleter is not visible. Enumeration is ordinal name/identity order, independent of insertion,
-page allocation, or B+Tree scan order.
+page allocation, or B+Tree scan order. The #1287 regression repeats both committed overwrite/purge
+and explicit rollback for 120 rounds, forcing one metadata version per page and asserting each
+reclamation before looking through the same catalog's cached references. Purge is driven directly
+instead of relying on a 100 ms worker schedule.
 
 `SearchIndexAsync` fetches the catalog record behind each visible index entry the same way:
 `TryReadRecord` with owner zero skips an entry whose record was reclaimed beneath it, the
@@ -1834,7 +1858,7 @@ layer. Document content has its separate multi-page chunk mechanism.
 
 Index definitions are lower-level catalog mutations, not a second public engine entry point. The
 Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
-plans, and the plan executor invokes this package under the statement's `TransactionContext`
+plans, and the plan executor invokes this component under the statement's `TransactionContext`
 after lock acquisition and ownership enforcement. `DocumentDatabase` therefore needs no index
 members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
 
@@ -1958,7 +1982,7 @@ dynamic code generation, or Microsoft.Extensions dependencies.
 
 ## Storage component
 
-The following content moved from Assimalign.Cohesion.Database.Documents.Storage; project and assembly references in this retained material now describe folders in Assimalign.Cohesion.Database.Documents. The [model component boundaries](DESIGN.md#model-component-boundaries) govern these components.
+The Storage component is part of `Assimalign.Cohesion.Database.Documents`, with public types in `src/Storage/` and helpers in `src/Internal/Storage/`. Its namespaces are unchanged; it is not a separate project or assembly. The [model component boundaries](DESIGN.md#model-component-boundaries) govern its dependencies.
 
 ### Storage: Document storage design
 
@@ -1973,7 +1997,7 @@ The dependency direction is shown below; both arrows mean references.
 
 ```mermaid
 flowchart LR
-    Doc["Documents.Storage"] --> Storage["Database.Storage"]
+    Doc["Documents Storage component"] --> Storage["Database.Storage"]
     Doc --> Tx["Database.Transactions"]
 ```
 
@@ -2091,7 +2115,7 @@ are not supported as engine file sets. Its retained low-level record APIs remain
 and do not validate or stamp data. They are intentionally excluded from engine composition.
 
 Compiled-schema provisioning, compression, binary-JSON field-offset tables, encryption,
-replication, and a wire streaming protocol are outside this package's scope.
+replication, and a wire streaming protocol are outside this component's scope.
 
 
 ## Public assembly identity changes

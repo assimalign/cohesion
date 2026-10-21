@@ -474,6 +474,13 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error, bool selfCommitted = false)
     {
+        if (error is DatabaseCorruptionException) { return error; }
+
+        if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
+        {
+            return DatabaseCorruptionException.Create(Name, corruption);
+        }
+
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
             || StorageOfflineException.Find(error) is not { } offline)
         {
