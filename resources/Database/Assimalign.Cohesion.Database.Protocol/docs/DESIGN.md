@@ -172,6 +172,29 @@ listens (zero bytes per frame in Release). The allocation tests measure every ca
 await and fail if one did not complete synchronously, so the per-thread allocation count cannot
 miss work that moved to another thread.
 
+## Terminal close contract and TCP conformance (#1087)
+
+Each frame's header and payload cross the Stream boundary in one WriteAsync. The stream may
+flush on write (DuplexPipeStream does), so an explicit FlushAsync does not promise batching.
+The writer rents contiguous payload storage and returns it only after the write completes,
+including cancellation and failure; empty frames use the existing header buffer.
+
+After a terminal Error, every model completes connection Output before disposal can abort the
+transport send pump. A single ShutdownDrainTimeout budget covers write, flush, completion and
+peer-input drain. Hard abort or expiry aborts blocked transport I/O, which teardown joins before
+releasing its registrations and connection. Soft stop allows the shutdown notice to drain.
+Over-capacity rejections use the same close sequence and remain tracked until disposal ends.
+This is a server-side rule over the existing Connections contract, independent of #1086.
+
+Conformance includes the real client opening an absent database over TcpConnectionFactory and
+TcpConnectionListener: at least 200 consecutive DatabaseNotFound errors for each of SQL, Graph,
+Key-Value, Blob and Documents, with no Internal or ProtocolViolation substitution. SQL and
+Key-Value also require 200 TCP cases each for UnsupportedVersion, AuthenticationFailed,
+MaxSessions Unavailable, idle eviction and graceful-drain Unavailable. The unsupported-major
+and unsolicited-notice cases use the public protocol; typed clients exercise admission failures.
+Controlled transports cover blocked/cooperative writes, flush, output completion, deadline
+abort, joining pending completion, and rejection cleanup for all five servers.
+
 ## Shared exchange and payloads
 
 The shared handshake precedes every model-specific exchange, as shown here.
@@ -310,7 +333,8 @@ Define a model-owned identifier enum, a single immutable family, codecs, and its
 ordering rules. Bind that family at endpoint accept and client pool composition.
 Use shared ProtocolPayload primitives where appropriate, and document the exact
 wire payload in the owning model package. Add transport-independent conformance
-coverage through Connections.InMemory. Models do not add payload policy to this core.
+coverage through Connections.InMemory and terminal-close coverage through loopback TCP.
+Models do not add payload policy to this core.
 
 ProtocolException is this child root's independent exception type. Servers translate
 it to the shared wire taxonomy; the client core translates it to DatabaseClientException.

@@ -146,7 +146,8 @@ the code to their `ConnectionFailure` kind, and Graph and Blob keep the code.
 
 A transport that breaks after the dial, during the handshake, reports `Internal`, with
 the transport's exception inside when there is one: a peer that closes the connection
-gives "The server closed the connection mid-exchange.", and one that resets it gives the
+gives "The server closed the connection during the startup handshake before sending the expected response.",
+and one that resets it gives the
 transport's error. The TCP transport completes the connection's input with the raw
 `SocketException` of a reset, and a `SocketException` is not an `IOException`, so the
 handshake and the exchanges translate `IOException`, `SocketException`,

@@ -383,7 +383,7 @@ internal sealed class DatabaseConnector
 
         if (frame is null)
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange."));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.HandshakeClosed));
         }
 
         return frame.Value;
