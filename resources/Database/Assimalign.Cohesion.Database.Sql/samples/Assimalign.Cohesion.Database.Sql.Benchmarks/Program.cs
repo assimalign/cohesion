@@ -37,6 +37,8 @@ namespace Assimalign.Cohesion.Database.Sql.Benchmarks;
 /// <c>ApplySchemaAsync</c> with one precompiled schema immediately after each corresponding build;
 /// those measurements exclude declaration compilation, engine creation, opening and binding.
 /// QB projects four 256-byte binary literals per row; QBS reads one stored 256-byte binary cell.
+/// QC1 and QC200 delete an indexed self-referencing chain in a one-table or 200-table catalog;
+/// setup and row-count verification are outside the measured delete.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -86,6 +88,16 @@ internal static class Program
 
         Console.WriteLine($"label={label} rows={rows} iterations={iterations} aot={!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported} " +
             $"gc={(System.Runtime.GCSettings.IsServerGC ? "server" : "workstation")} os={Environment.OSVersion.VersionString} cpus={Environment.ProcessorCount}");
+
+        foreach (int tables in new[] { 1, 200 })
+        {
+            string name = $"QC{tables}";
+            if (cases.Contains(name))
+            {
+                Report(name, "deleted-row", await MeasureAsync(iterations, () => CascadeAsync(rows, tables)));
+            }
+        }
+        if (cases.All(name => name is "QC1" or "QC200")) { return 0; }
 
         if (cases.Contains("Q8D"))
         {
@@ -139,6 +151,41 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    // Each round starts with fresh storage; seeding and verification are outside the measurement.
+    private static async Task<Sample> CascadeAsync(int rows, int tables)
+    {
+        await using var engine = await SqlDatabaseEngine.CreateBuilder("cascade-benchmark").BuildAsync();
+        var database = await engine.CreateDatabaseAsync("cascade");
+        await using var session = await database.CreateSessionAsync();
+        await ExecuteAsync(session, "CREATE TABLE chain (id INT PRIMARY KEY, parent INT, FOREIGN KEY(parent) REFERENCES chain(id) ON DELETE CASCADE)");
+        await ExecuteAsync(session, "CREATE INDEX ix_parent ON chain(parent)");
+        for (int table = 1; table < tables; table++)
+        {
+            await ExecuteAsync(session, $"CREATE TABLE unrelated_{table} (id INT, CHECK(id > 0))");
+        }
+        for (int start = 1; start <= rows; start += 200)
+        {
+            var sql = new StringBuilder("INSERT INTO chain VALUES ");
+            for (int id = start; id < start + 200 && id <= rows; id++)
+            {
+                if (id != start) { sql.Append(','); }
+                sql.Append('(').Append(id).Append(',').Append(id == 1 ? "NULL" : (id - 1).ToString(CultureInfo.InvariantCulture)).Append(')');
+            }
+            await ExecuteAsync(session, sql.ToString());
+        }
+        var (elapsed, cpu, threadBytes, processBytes, hopped) = await TimeAsync(async () =>
+        {
+            var result = await session.ExecuteAsync("DELETE FROM chain WHERE id = 1");
+            if (result.AffectedCount != 1) { throw new InvalidOperationException("Cascade did not delete its root."); }
+        });
+        await using var remaining = (DatabaseResultSet)await session.ExecuteAsync("SELECT id FROM chain");
+        await foreach (var row in remaining.GetRowsAsync(CancellationToken.None))
+        {
+            throw new InvalidOperationException("Cascade left a row behind.");
+        }
+        return new Sample(elapsed, cpu, threadBytes, processBytes, rows, hopped, rows);
     }
 
 #if !SQL_BENCHMARK_BASELINE

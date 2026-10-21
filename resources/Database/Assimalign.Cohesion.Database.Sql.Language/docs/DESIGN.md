@@ -790,3 +790,6 @@ closing parenthesis and can feed another predicate (gram.y:15632-15668); binary
 comparison, distinct, LIKE and BETWEEN rungs still refuse chaining once at the second operator. Unary signs
 bind above COLLATE (gram.y:910), and NOT EXISTS resumes the ordinary NOT operand
 grammar before choosing the compact leaf. DIALECT.md specifies behavior.
+
+Concurrent FK catalog refresh is engine-owned. DIALECT records retryable COHSQLT006
+for an invalidated target plan; adjacent definition changes rebuild before row reads.

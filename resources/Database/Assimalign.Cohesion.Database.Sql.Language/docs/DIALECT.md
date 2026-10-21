@@ -3383,3 +3383,10 @@ PostgreSQL's corresponding data exception codes are declared in
 ## Wire diagnostics (#1105)
 
 On negotiated protocol 2.1 with the diagnostics capability, Warning and Error diagnostics retain code, severity, message and source span over the model wire within the 4,096-entry and 1 MiB limits. Overflow retains a leading prefix plus COHDBP001 with exact omission counts, preserving the original failure text or successful result and a usable session. Null/empty code and message fields decode as null. Information diagnostics are omitted. A negotiated 2.0 connection retains the existing Error text and result frames. Language admission and execution semantics are unchanged.
+
+## Concurrent foreign-key catalog changes (#1198)
+
+Before reading rows, DML refreshes adjacent foreign-key definitions changed during an
+object-lock wait, including ADD COLUMN and removal of a child table or constraint. A
+changed target table invalidates its already-bound plan: structured code `COHSQLT006`
+is a retryable transaction abort; retry the statement in a fresh transaction.

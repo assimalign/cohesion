@@ -803,9 +803,8 @@ flowchart TD
   call, failure or not.
 - **Name lookups beside expressions.** An index-driven join reads the inner columns of
   its seek prefix from the plan (`SqlJoinIndexPath.InnerColumns`) instead of finding
-  each by name for every outer row. Foreign-key checks and cascades still find their
-  key columns by name for each row they check; binding those ordinals per table
-  version, beside the CHECK trees, is a follow-up.
+  each by name for every outer row. Foreign-key checks and cascades use the key
+  projections bound beside the CHECK trees in `SqlBoundTable` (#1366).
 - **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
   node without operands and a chain's or call's own operand list, so the walkers that
   visit every node of every statement no longer allocate an iterator per leaf. With the
@@ -1406,7 +1405,16 @@ time, but under NativeAOT a build allocates about 160 KB more than at `9bc25a8a`
 4.20 MB) while the JIT build allocates 18 KB less: publishing variants pins the difference to
 `src/Internal/Execution/SqlPlanExecutor.Constraints.cs`, whose new checks do not run in Q8, and the same tree with an
 instrumented harness drops to +35 KB, which points at ILC code generation (inlining and stack
-allocation decisions) rather than at an allocation the change makes; it is not yet explained.
+allocation decisions); that attribution was a hypothesis, not an identified cause.
+
+**Disposition (#1374, 2026-10-21).** The owner-directed current-tree reproduction after
+#1198/#1366, published Release win-arm64 with ILC mstat/map output, measured Q8 at
+5,592,872 NativeAOT bytes/build and 5,344,232 JIT bytes/build (minimum of three rounds
+after warm-up); it cannot reproduce the historical 4.20/4.36 MB pair because B2 has
+replaced that Build path and table binding now includes foreign keys. The historical
+delta, including the later unexplained −34 KB below, is retired as superseded rather
+than an active allocation target; the maps do not establish an inlining or stack-allocation
+cause, and the original ILC attribution remains unproven.
 
 **The shared call path.** A NativeAOT profile of Q1 after the review put about 3% of the
 statement, some 19 ns per call, on the path every call takes between the row and the function's
@@ -4428,6 +4436,59 @@ statement after it ran in auto-commit, and a commit of an ended transaction said
 transaction in state '…'".
 
 ## Integrity constraints
+
+Incoming references are cached by parent ObjectId in shared statement state (#1198),
+once per table reached; cascade frames share that list. Outgoing parent resolution and
+adjacent-table intent-lock batches are shared too, including SET NULL/SET DEFAULT fan-out.
+Discovery costs O(reached tables × catalog definitions), independently of deleted row count.
+The deterministic catalog-visit counters in `SqlCascadeCatalogTests` cover cascade
+and restrict paths at 1 and 200 tables; wall time is supplementary output only.
+
+Cache validity follows the object locks: preparation tries adjacent IS in ObjectId
+order before own IX. A contended preparation releases its new grants before waiting,
+then rebuilds the live graph and retries; earlier transaction and row grants stay held.
+This prevents new preparation grants from cycling with FK DDL's own-X/parent-X order.
+Catalog generation is validated under own IX, rebuilding incoming edges if publication
+preceded that grant. Adding an incoming FK requires X on its referenced parent
+(`LockReferencedTablesAsync`); removing or changing one requires X on its child. Adjacent
+ADD COLUMN, FK removal and child DROP during a wait therefore refresh the graph and
+continue before any row is read. A changed target definition invalidates the bound plan
+and returns retryable `DatabaseTransactionAbortedException` with structured `COHSQLT006`;
+retry in a fresh transaction. This code is reserved for target-plan invalidation, not
+adjacent cache refresh.
+
+| Code | Meaning | Retry |
+| --- | --- | --- |
+| `COHSQLT006` | The statement's target definition was changed, dropped or replaced during lock preparation | Retry in a fresh transaction |
+
+Neither locked endpoint can change until transaction end. Row locks,
+then sorted unique-key locks, precede the apply gate and storage/index latches; a cascade
+locks a discovered row before preparing its adjacent tables, and no latch crosses a wait.
+The cache expires at statement end even inside an explicit transaction. Snapshot's
+BEGIN-time catalog image serves metadata relations; integrity checks use the live,
+lock-protected definitions and latest-state row checks, never that older image.
+
+Foreign-key child ordinals bind when their owning `SqlBoundTable` is built; referenced
+ordinals and effective collations bind lazily in the parent's bound version (#1366).
+The immutable constraint's column-list identity keys each projection, with weak keys
+so replaced child constraints cannot accumulate in a long-lived parent. Parent and
+child version changes invalidate their own projections independently, including an
+unrelated DROP COLUMN that shifts logical ordinals. Concurrent first users publish
+one projection under a private binding lock; it is released before any row lookup.
+Statement edges request both projections lazily, after preparation has validated
+the locked definitions; discovery and unused children bind no keys. They carry them
+through cascade frames, final-state UPDATE checks, ON CONFLICT and SET actions. Index choice, reordered equality-prefix mappings
+and live-index version wrappers are prepared once per statement/table or key;
+seek encoding uses the bound index ordinals. Lookups and tombstones retain the unchecked
+key builder; keys actually written still pass the checked builder (#1266).
+
+The local ARM64 NativeAOT proxy deletes 2,000 indexed chain rows after warm-up,
+using minimum allocation across three rounds: QC1 fell from 12,090 to 7,719 bytes
+per deleted row and QC200 from 158,395 to 7,724. The extra catalog now contributes
+one discovery pass per reached table, rather than a pass per row. These are local
+proxies; the program's SF10 gate remains in cohesion-benchmarks (#1511). The post-lock-order
+NativeAOT rerun reproduced the pre-fix head's Q8 Build allocation and remained below the
+retained baseline, so no allocation redesign was needed.
 
 ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121).
 Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate

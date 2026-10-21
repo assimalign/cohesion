@@ -48,6 +48,11 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// a <c>COMMIT</c> of a transaction the kernel ended rolls it back and throws <c>COHSQLT005</c>.
 /// </para>
 /// <para>
+/// A target table definition changed during a lock wait invalidates the bound statement plan.
+/// Execution throws <see cref="DatabaseTransactionAbortedException"/> with diagnostic
+/// <c>COHSQLT006</c>; retry in a fresh transaction. Adjacent FK changes rebuild before row reads.
+/// </para>
+/// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> A public sealed leaf of the root's language
 /// base, <see cref="DatabaseLanguageSession{TRequest}"/> over <see cref="SqlQueryRequest"/>, with an
 /// internal constructor; <see cref="SqlDatabase.CreateSessionAsync"/> creates it. The session
