@@ -21,6 +21,44 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public class BTreeIndexTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - BTree: 1024-byte keys succeed and 1025-byte keys fail (#1266)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InsertAsync_EncodedKeyLimit_ShouldAccept1024AndReject1025(bool build)
+    {
+        // Arrange
+        var (harness, index) = await CreateIndexAsync();
+        await using var lifetime = harness;
+        var writer = await harness.BeginAsync();
+        var accepted = new IndexKey(new byte[1024]);
+        var rejected = new IndexKey(new byte[1025]);
+
+        // Act
+        if (build)
+        {
+            var bracket = harness.GetStorageTransaction(writer);
+            await index.InsertVersionAsync(bracket, accepted, 42, writer.Sequence, TransactionSequence.None, CancellationToken.None);
+            await Should.ThrowAsync<IndexException>(async () =>
+                await index.InsertVersionAsync(bracket, rejected, 43, writer.Sequence, TransactionSequence.None, CancellationToken.None));
+        }
+        else
+        {
+            await index.InsertAsync(writer, accepted, 42, CancellationToken.None);
+            await Should.ThrowAsync<IndexException>(async () => await index.InsertAsync(writer, rejected, 43, CancellationToken.None));
+        }
+        await harness.CommitAsync(writer);
+
+        // Assert
+        BTreeIndex.MaxKeyLength.ShouldBe(1024);
+        var reader = await harness.BeginAsync();
+        await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+        (await cursor.MoveNextAsync(CancellationToken.None)).ShouldBeTrue();
+        cursor.CurrentKey.Length.ShouldBe(1024);
+        cursor.CurrentEntryReference.ShouldBe(42UL);
+        (await cursor.MoveNextAsync(CancellationToken.None)).ShouldBeFalse();
+        await harness.RollbackAsync(reader);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - BTree: latest live lookup includes own writes and follows rollback stamps")]
     public async Task FindLiveEntryAsync_CommitDeleteAndRollback_ShouldReturnCurrentReference()
     {

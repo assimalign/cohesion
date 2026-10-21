@@ -4975,6 +4975,37 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHSQLE042`,
+mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
+`SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,
+including script receipts. Referential SET NULL/SET DEFAULT records are encoded only after all
+assignments to their final rows are collected, before the apply bracket. The checked index-key
+builder uses Indexing's public `BTreeIndex.MaxKeyLength` (1,024 bytes), with no interface or
+visibility grant. Every unique and nonunique write key is validated before DML apply; index
+construction uses the same checked builder. Exactly-at-limit values
+are accepted. Limits count the encoded representation, including stamps, delimiters and
+collation transforms, rather than the source text length.
+
+ON CONFLICT constructs unchecked keys for lock hashes and arbiter lookups, then encodes only
+proposals that become writes. DO NOTHING and DO UPDATE can discard an oversized proposed row
+or non-arbiter UNIQUE key; the final inserted or replacement row and its write keys must fit.
+PostgreSQL likewise arbitrates before heap/index insertion
+(`src/backend/executor/nodeModifyTable.c:1121-1232`). Tombstones and old-value lock hashes use
+unchecked keys; delete preparation constructs only unique keys. Existing values are never
+subject to a new-write size check.
+
+These are statement failures: DML refuses them before physical writes, preserving an active
+explicit transaction and a usable session. An index build refuses publication and cleans up its
+unpublished tree. The wire carries ExecutionFailure through the existing frames. Upsert checks
+remain inside the pre-apply release scope: sorted key locks precede try-acquired row locks;
+refused rows cause new keys to release before waiting. A size refusal releases all new grants,
+including rows retained after a completed wait, and preserves earlier transaction work and locks.
+The coordinator gate and storage page latches are acquired only after this preparation succeeds.
+The error code is structured in Diagnostics; only the wire writer adds the message prefix.
+PostgreSQL rejects an oversized tuple before mutation using the same SQLSTATE in the local
+reference clone, `src/backend/access/heap/hio.c:527-534`. Live size-limit conformance covers both
+execution boundaries, statement atomicity, exact limits and a repeated, observed upsert row wait.
+
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
 diagnostic COHSQLE041 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.

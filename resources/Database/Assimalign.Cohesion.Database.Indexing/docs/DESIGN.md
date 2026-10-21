@@ -47,8 +47,11 @@ are reclaimable when the containing table is retired (index-only vacuum remains 
 
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
 one node per page, a sorted offset directory with entry data growing from the body
-end, key capacity capped (`MaxKeyLength` = 1 KiB) so a node always holds several
-entries and splits stay correct.
+end, key capacity capped (`BTreeIndex.MaxKeyLength` = 1,024 bytes) so a node always holds several
+entries and splits stay correct. This public constant on the existing concrete type is the
+single write-key limit used by Indexing and model preflight validation, including SQL.
+It counts encoded components, NULL markers and collation transforms; entry-reference and
+writer-stamp tiebreakers are separate. Both insertion paths accept 1,024 bytes and reject 1,025.
 
 - **Every page mutation rides the owning storage transaction** through the storage
   layer's `OpenPageForWrite`/`AllocatePageForWrite` — a full page image on a page's first

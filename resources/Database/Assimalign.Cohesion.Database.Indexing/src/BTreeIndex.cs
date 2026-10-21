@@ -64,6 +64,18 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </remarks>
 public sealed class BTreeIndex
 {
+    /// <summary>
+    /// The maximum encoded key length accepted by a B+Tree, in bytes (1,024).
+    /// </summary>
+    /// <remarks>
+    /// The limit includes all encoded components, NULL markers and collation transforms.
+    /// Entry-reference and writer-stamp tiebreakers are stored separately and do not count
+    /// toward it. Keys exactly this long are accepted. The bound ensures a fresh node
+    /// holds several entries, as required for splitting. Models can validate write keys
+    /// against this limit before beginning a storage mutation.
+    /// </remarks>
+    public const int MaxKeyLength = 1024;
+
     private readonly Storage.Storage _storage;
     private readonly Func<TransactionContext, StorageTransaction> _transactionSource;
     private readonly LockManager? _lockManager;
@@ -191,9 +203,9 @@ public sealed class BTreeIndex
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
-        if (key.Length > BTreeNode.MaxKeyLength)
+        if (key.Length > MaxKeyLength)
         {
-            throw new IndexException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
+            throw new IndexException($"Index key of {key.Length} bytes exceeds the {MaxKeyLength}-byte maximum.");
         }
 
         // Unique keys arbitrate concurrent writers through the lock manager before
@@ -419,9 +431,9 @@ public sealed class BTreeIndex
         ArgumentNullException.ThrowIfNull(transaction);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (key.Length > BTreeNode.MaxKeyLength)
+        if (key.Length > MaxKeyLength)
         {
-            throw new IndexException($"Index key of {key.Length} bytes exceeds the {BTreeNode.MaxKeyLength}-byte maximum.");
+            throw new IndexException($"Index key of {key.Length} bytes exceeds the {MaxKeyLength}-byte maximum.");
         }
 
         _latch.EnterWrite();

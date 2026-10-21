@@ -125,6 +125,19 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <summary>A column that disallows NULL received it (SQLSTATE 23502, not_null_violation).</summary>
     internal const string NotNullViolationCode = "COHSQLE024";
 
+    /// <summary>An encoded row or index key exceeds its storage limit (SQLSTATE 54000).</summary>
+    internal const string ProgramLimitExceededCode = "COHSQLE042";
+
+    /// <summary>Creates a row-size failure before any row mutation.</summary>
+    internal static SqlEvaluationException RowTooLarge(string table, int size, int limit)
+        => new(ProgramLimitExceededCode, string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.RowTooLarge, table, size, limit), null);
+
+    /// <summary>Creates an index-key-size failure before any index mutation.</summary>
+    internal static SqlEvaluationException IndexKeyTooLarge(string table, int size, int limit)
+        => new(ProgramLimitExceededCode, string.Format(CultureInfo.CurrentCulture,
+            ErrorMessages.IndexKeyTooLarge, table, size, limit), null);
+
     /// <summary>Creates an unlocated NOT NULL failure naming the target column.</summary>
     internal static SqlEvaluationException NotNullViolation(string column, bool missingDefault = false)
         => new(NotNullViolationCode, string.Format(CultureInfo.CurrentCulture,

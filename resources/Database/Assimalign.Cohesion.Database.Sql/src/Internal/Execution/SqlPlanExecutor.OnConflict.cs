@@ -34,7 +34,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private async Task<DatabaseResult> ExecuteUpsertRowsAsync(SqlCatalogTable table, List<SqlLiveIndex> indexes,
-        IEnumerable<(byte[] Record, object?[] Values)> proposals, SqlOnConflictPlan plan, IReadOnlyList<SqlProjection>? returning,
+        IEnumerable<object?[]> proposals, SqlOnConflictPlan plan, IReadOnlyList<SqlProjection>? returning,
         SqlStatementContext statement, bool orderedDefaults, CancellationToken cancellationToken)
     {
         var locks = statement.Coordinator.LockManager;
@@ -51,8 +51,8 @@ internal sealed partial class SqlPlanExecutor
             var hashes = new List<ulong>();
             // Build each proposal's keys once, sharing them between locking, arbitration and
             // pending inserts. Without side-effecting defaults the full batch precedes lookup.
-            IEnumerable<(byte[] Record, object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(proposal =>
-                (proposal.Record, proposal.Values, unique.Select(index => BuildIndexKey(table, index.KeyOrdinals, proposal.Values)).ToArray()));
+            IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(values =>
+                (values, unique.Select(index => BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
             if (!orderedDefaults)
             {
                 prepared = prepared.ToList();
@@ -140,10 +140,12 @@ internal sealed partial class SqlPlanExecutor
                     for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                     {
                         var arbiter = arbiters[arbiterIndex];
-                        pending[(arbiter.Metadata.Name, BuildIndexKey(table, arbiter.KeyOrdinals, oldValues))] = null;
+                        pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues))] = null;
                     }
                 }
-                else { write = new(null, null, proposal.Values, proposal.Record); }
+                // PostgreSQL nodeModifyTable.c:1121-1232 arbitrates before heap/index insertion.
+                // Only proposals that survive arbitration need a physical record and write keys.
+                else { write = new(null, null, proposal.Values, SqlRowCodec.Encode(table, proposal.Values, statement.Transaction.Sequence)); }
                 writes.Add(write);
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
@@ -168,9 +170,12 @@ internal sealed partial class SqlPlanExecutor
                 if (write.OldValues is not null)
                 {
                     CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
-                    CollectUniqueKeyHashes(indexes, table, write.Values, hashes);
                 }
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes);
             }
+            // Arbitration takes sorted key locks, then try-acquires rows. A refused row
+            // releases new keys before waiting (WaitForUpsertRowAsync). Size checks stay
+            // inside this release scope and precede the coordinator gate and page latches.
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
             var pendingUpdates = BuildConstraintUpdates(table,

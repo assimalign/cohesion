@@ -3109,6 +3109,7 @@ pin in the same change.
 | `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
 | `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
+| `COHSQLE042` | Error | Encoded row or index key exceeds its size limit (SQLSTATE 54000, program_limit_exceeded); names the table, encoded byte size and limit; the statement writes nothing and an explicit transaction remains active (#1266) |
 | `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
@@ -3123,6 +3124,25 @@ follow PostgreSQL `src/backend/utils/errcodes.txt:237-240`; SQLSTATE is not a se
 in the diagnostic carrier. NOT NULL remains COHSQLE024 (23502). The live constraint corpus
 in SqlLanguageConformanceTests and both-transport SqlConstraintDiagnosticWireTests pin the
 codes, locations, statement rollback and continued use of the session/transaction.
+
+**Row and index-key limits (#1266).** Every encoded row, including its MVCC header and
+physical column layout, must fit the storage record limit (currently 8,092 bytes).
+INSERT VALUES, INSERT SELECT, UPDATE, ON CONFLICT DO UPDATE and referential SET NULL/SET DEFAULT
+check final replacement records before physical apply. Encoded index keys, including collation
+transforms and component delimiters, are limited to 1,024 bytes for both unique and nonunique
+indexes; index construction uses the same check. Equality with either limit is accepted.
+ON CONFLICT checks sizes only for rows and keys it writes: DO NOTHING may discard an oversized
+proposal, and DO UPDATE may replace it with a fitting row even if the proposal's row or a
+non-arbiter UNIQUE key exceeds its limit. Lock hashes, arbiter lookups and old-value tombstones
+do not enforce write-size limits. This follows PostgreSQL's arbitration before insertion
+(`src/backend/executor/nodeModifyTable.c:1121-1232`).
+A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
+The failure leaves the session usable and an explicit transaction active, with earlier statements
+intact. Failed upsert preparation releases its new key and row grants, including a row retained
+after waiting, while preserving earlier transaction locks. SQLSTATE is a documented mapping,
+not a new wire field. PostgreSQL's early oversized-tuple refusal is in
+`src/backend/access/heap/hio.c:527-534`. `SqlProgramLimitConformanceTests` exercises both execution
+boundaries and exact limits; `SqlUpsertArbitrationConformanceTests` exercises release after a wait.
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
