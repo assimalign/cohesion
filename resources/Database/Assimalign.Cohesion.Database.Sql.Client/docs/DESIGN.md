@@ -505,4 +505,6 @@ the session on both InMemory and TCP. Its regression holds a hook inside Match,
 asserts entry, waits for the server lifetime token after disconnect, then releases
 matching. Reverting LIKE token routing must produce StatementStop Error instead of
 Cancelled. The test uses AOT-compatible UnsafeAccessor seams without a public API
-or friend-assembly grant. No client API or protocol format changes are needed.
+or friend-assembly grant. Event assertions wait for the matching SessionClosed and StatementStop
+records with a hang guard: removal from the server's session table precedes close-event publication.
+No client API or protocol format changes are needed.

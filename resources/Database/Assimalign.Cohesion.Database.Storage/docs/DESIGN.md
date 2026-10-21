@@ -1023,10 +1023,11 @@ Two measures bound it now:
   `CREATE INDEX` building 3,508 pages over a 1 MiB pool raised the managed heap by 4.4–5.1 MiB
   at its peak, against 31.8–33.4 MiB in format 2 ("Measurements (#1253)"). The Sql suite guards
   it (`SqlCreateIndexMemoryTests`, #1253 review): a file-backed `CREATE INDEX` builds 1,446
-  pages, eleven times a 1 MiB pool, in one bracket, and the heap a full collection keeps alive
-  at the bracket's peak — inside its commit, with every pre-image held — grows by 1.1 MiB, a
-  tenth of the index's bytes. The test allows a quarter; keeping a full 8 KiB copy per
-  pre-image made it 12.5 MiB, 1.1 times the index.
+  pages, eleven times a 1 MiB pool, in one bracket. It now reads the existing pre-image byte
+  accounting inside commit, with every pre-image held, and requires less than 2% of the index's
+  fixed page bytes with no spills and release after commit. The former whole-process live-heap
+  quarter bound also included runtime/worker state and varied across platforms; it did not
+  isolate pre-images. Pool capacity plus compact pre-images account for at most 12% here.
 - **The spill past a budget.** Each bracket may keep `PreImageBudget` bytes of pre-images, half
   the buffer pool's capacity and at least 16 MiB (16 MiB for the default 32 MiB pool and for the
   1 MiB minimum, about 2,700 pre-images of three-quarters-full pages). The floor is generous on

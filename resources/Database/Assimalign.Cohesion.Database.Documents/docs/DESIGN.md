@@ -728,9 +728,11 @@ lazily compiles and caches tokens once per LIKE node; row-dependent patterns/esc
 for each evaluation. Matching decodes Unicode scalars at UTF-16 offsets without allocating
 a scalar array per input row; a terminal percent accepts the remaining suffix directly. Lazy compilation preserves skipped CASE branches and NULL/MISSING priorities.
 Caches never outlive an execution, so another statement's parameter snapshot cannot reuse them.
-Regression tests repeat the 50,000/25,000-character cancellation probe with a 50 ms cancellation
-and a 500 ms ceiling, cover planning, filtering, grouping, ordering and INSERT, and bound
-allocations across rows with a long constant pattern.
+Regression tests cancel the 50,000/25,000-character probe synchronously at the matcher's second
+1,024-iteration checkpoint through an internal observer, assert the statement token and that no
+later checkpoint runs, and verify session reuse. A long timeout is a hang guard only; no elapsed
+time is asserted. Coverage includes planning, filtering, grouping, ordering and INSERT, plus
+bounded allocations across rows with a long constant pattern.
 
 All Boolean contexts share SQL++ Truth conversion: WHERE, HAVING, both operands of AND/OR,
 NOT and searched WHEN. Nonzero numbers and nonempty strings, arrays and objects are true;

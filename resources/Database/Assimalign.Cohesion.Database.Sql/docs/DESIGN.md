@@ -3553,6 +3553,12 @@ running platform.
 
 ## Secondary indexes
 
+The CREATE INDEX memory regression reads storage's existing encoded pre-image accounting at
+commit through test-only UnsafeAccessor methods. An index of at least ten buffer pools must
+keep pre-images below 2% of its fixed 8 KiB page bytes, spill none, and release them after commit;
+with the configured pool this accounts for at most 12% of index bytes in page buffers and
+pre-images. Whole-process live-heap deltas cannot isolate those structures across runtimes.
+
 `CREATE [UNIQUE] INDEX` / `DROP INDEX` are end-to-end: dialect (the DIALECT.md
 matrix), plan nodes, catalog metadata, and B+Tree trees through
 `Database.Indexing`'s manager — **on the same database file set** (index pages

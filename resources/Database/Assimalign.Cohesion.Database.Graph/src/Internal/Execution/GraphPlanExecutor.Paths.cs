@@ -96,8 +96,10 @@ internal static partial class GraphPlanExecutor
             var incidents = new HashSet<IAsyncEnumerator<StoredGraphRelationship>>();
             try
             {
-                while (frontier.TryPop(out var state))
+                while (frontier.Count != 0)
                 {
+                    budget.OnFrontier?.Invoke(frontier.Count);
+                    var state = frontier.Pop();
                     token.ThrowIfCancellationRequested();
                     operation.EnsureActive();
                     switch (state.Task)

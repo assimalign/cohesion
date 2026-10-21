@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
-using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Language;
@@ -18,14 +16,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 [Collection(nameof(DocumentLikeCancellationCollection))]
 public sealed class DocumentLikeTests
 {
-    private readonly ITestOutputHelper _output;
-
-    public DocumentLikeTests(ITestOutputHelper output)
-    {
-        _output = output;
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Documents] - LIKE: long literal suffix observes statement cancellation within 500 ms")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - LIKE: long literal suffix observes cancellation at a matcher checkpoint")]
     [InlineData("SELECT @input LIKE @pattern FROM items")]
     [InlineData("SELECT 1 FROM items WHERE @input LIKE @pattern")]
     [InlineData("DELETE FROM items WHERE @input LIKE @pattern")]
@@ -34,7 +25,7 @@ public sealed class DocumentLikeTests
     [InlineData("SELECT COUNT(*) FROM items GROUP BY @input LIKE @pattern")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('two', {'match':@input LIKE @pattern})")]
     [InlineData("EXPLAIN SELECT 1 FROM items WHERE score = CASE WHEN @input LIKE @pattern THEN 1 ELSE 0 END")]
-    public async Task Execute_LongLikeSuffix_ShouldCancelWithinHalfSecondAsync(string statement)
+    public async Task Execute_LongLikeSuffix_ShouldStopAtTheCancelledMatcherCheckpointAsync(string statement)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("like-cancel", new());
@@ -47,28 +38,29 @@ public sealed class DocumentLikeTests
             ["input"] = new string('a', 50_000),
             ["pattern"] = "%" + new string('a', 25_000) + "b",
         };
-        int cancellations = 0;
-        var total = Stopwatch.StartNew();
-        // Act / Assert: run for a minimum duration and require the cancellation to occur repeatedly.
-        do
+        using var source = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // Hang guard only.
+        var probes = new List<int>();
+        var previous = DocumentExpressionEvaluator.OnLikeMatchProbe;
+        DocumentExpressionEvaluator.OnLikeMatchProbe = iterations =>
         {
-            using var source = new CancellationTokenSource();
-            var watch = Stopwatch.StartNew();
-            source.CancelAfter(50);
+            probes.Add(iterations);
+            probes.Count.ShouldBeLessThanOrEqualTo(2, "matching must stop at the cancelled checkpoint");
+            if (probes.Count == 2) { source.Cancel(); }
+        };
+        try
+        {
+            // Act: cancel after 1,024 matcher iterations, after pattern compilation and entry.
             var error = await Should.ThrowAsync<OperationCanceledException>(async () =>
             {
                 var result = await session.ExecuteAsync(statement, parameters, source.Token);
                 if (result is DatabaseResultSet rows) { await rows.DisposeAsync(); }
             });
-            watch.Stop();
-            source.IsCancellationRequested.ShouldBeTrue();
+            // Assert: the actual statement token reached the matcher and stopped its work.
+            probes.ShouldBe([1, 1025]);
             error.CancellationToken.ShouldBe(source.Token);
-            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(500));
-            cancellations++;
-            _output.WriteLine($"Cancelled probe {cancellations}: {watch.Elapsed.TotalMilliseconds:F1} ms");
+            source.IsCancellationRequested.ShouldBeTrue();
         }
-        while ((total.Elapsed < TimeSpan.FromMilliseconds(150) || cancellations < 3) && total.Elapsed < TimeSpan.FromSeconds(3));
-        cancellations.ShouldBeGreaterThanOrEqualTo(3);
+        finally { DocumentExpressionEvaluator.OnLikeMatchProbe = previous; }
         // A cancelled automatic statement must release its session for later work.
         await using var next = (DatabaseResultSet)await session.ExecuteAsync("SELECT 1 FROM items", cancellationToken: CancellationToken.None);
         next.Status.ShouldBe(DatabaseResultStatus.Success);
