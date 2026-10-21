@@ -623,8 +623,8 @@ internal sealed partial class SqlPlanExecutor
                     if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
-                return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
-                    : MaterializeProjected(plan.Returning!, returned, replacements.Count);
+                return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
+                    : MaterializeProjected(plan.Returning!, returned, replacements.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
         }
         catch (IndexUniqueViolationException exception)
@@ -717,8 +717,8 @@ internal sealed partial class SqlPlanExecutor
                     throw TranslateUniqueViolation(update.Table, exception);
                 }
             }
-            return returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
-                : MaterializeProjected(plan.Returning!, returned, targets.Count);
+            return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
+                : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
         }, durable: false, cancellationToken).ConfigureAwait(false);
     }
 

@@ -81,11 +81,10 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
                 case (byte)ProtocolMessageType.Error:
                 {
                     ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-                    // The SQL server sends these as the entire failed statement
-                    // response before any results, then returns to its ready loop.
-                    // An Error after result frames cannot certify that boundary.
-                    if (!hasResultFrames &&
-                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure)
+                    // ExecutionFailure also terminates a partially delivered result. Throwing
+                    // discards the buffered columns/rows and keeps this complete response reusable.
+                    if (error.Code == ProtocolErrorCode.ExecutionFailure ||
+                        (!hasResultFrames && error.Code == ProtocolErrorCode.ParseFailure))
                     {
                         MarkResponseComplete();
                     }

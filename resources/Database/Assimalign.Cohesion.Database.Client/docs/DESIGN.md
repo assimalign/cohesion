@@ -101,12 +101,13 @@ transport failure, and an unfinished response invalidate the connection.
 
 SQL, Key-Value and Graph mark the evidence only after decoding a terminal response.
 Before the base owned the reset, each of the three cleared it by hand at the start of
-its exchange. Their server implementations send `ParseFailure` and
-`ExecutionFailure` as complete statement responses before any result frames and
-return to their ready loop; the model exchanges certify that initial response phase
-before throwing the unchanged
-`DatabaseClientException`. Other server errors terminate those sessions. This
-knowledge belongs to the statement exchange, not to a pool-wide list of safe codes.
+its exchange. Key-Value and Graph exchanges currently certify `ParseFailure` and
+`ExecutionFailure` only before result frames, then throw the unchanged
+`DatabaseClientException`. SQL also certifies ExecutionFailure after partial result frames
+(#1651): Error ends that statement and the SQL exchange discards its partial rows.
+ParseFailure after result frames still fails to certify completion. This knowledge belongs
+to the statement exchange, not to a pool-wide list of safe codes; the shared pool continues
+to use only exchange evidence.
 Blob failures do not certify completion: a transfer can leave unread frames even
 when its error code is `ExecutionFailure`. Wire codes and messages reach callers
 unchanged, independently of the health decision.

@@ -1,5 +1,8 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -31,7 +34,8 @@ internal readonly struct SqlStatementContext
         Action<long, long?>? provisioningProgress = null,
         SqlCatalogScriptPublication? scriptReceipt = null,
         DateTimeOffset? transactionStart = null,
-        SqlDdlInterlock? ddlInterlock = null)
+        SqlDdlInterlock? ddlInterlock = null,
+        SqlResultPreparation? resultPreparation = null)
     {
         _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
         _names = provisioningSchema is null ? databaseName : new ProvisioningNames(provisioningSchema, databaseName);
@@ -44,6 +48,7 @@ internal readonly struct SqlStatementContext
         ProvisioningProgress = provisioningProgress;
         ScriptReceipt = scriptReceipt;
         DdlInterlock = ddlInterlock;
+        ResultPreparation = resultPreparation;
     }
 
     /// <summary>
@@ -98,6 +103,12 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
     internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
+
+    private SqlResultPreparation? ResultPreparation { get; }
+
+    // DML calls this before its physical statement bracket can commit.
+    internal ValueTask<DatabaseResult> PrepareResultAsync(DatabaseResult result, CancellationToken cancellationToken)
+        => ResultPreparation is { } preparation ? preparation.PrepareAsync(result, cancellationToken) : ValueTask.FromResult(result);
 
     private sealed class ProvisioningNames
     {

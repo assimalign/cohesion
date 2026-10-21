@@ -30,7 +30,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// <para>
 /// <b>A statement is statement-atomic</b>, so a failed statement leaves the transaction active (a
-/// constraint violation, an evaluation fault, a deadlock victim). Storage corruption or I/O failure
+/// constraint violation, an evaluation fault, a result encoding or size failure, a deadlock victim).
+/// Storage corruption or I/O failure
 /// is the exception (#1364): it aborts the transaction through the base, retains the coded cause,
 /// and requires rollback before further statements. A commit or rollback that started always ends
 /// the context (#1226): the

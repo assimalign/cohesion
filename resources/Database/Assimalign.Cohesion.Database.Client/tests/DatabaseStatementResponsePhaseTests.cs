@@ -18,9 +18,9 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 
 public sealed class DatabaseStatementResponsePhaseTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Client] - Health: a statement error after partial results cannot certify a reusable response")]
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Health: an invalid or terminal error after partial results cannot certify a reusable response")]
     [InlineData(ProtocolErrorCode.ParseFailure)]
-    [InlineData(ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(ProtocolErrorCode.Internal)]
     public async Task ExecuteAsync_ErrorAfterResultFrames_ShouldPreserveCodeAndDiscardRental(ProtocolErrorCode code)
     {
         // Arrange: the scripted peer leaves a completion frame after a partial-response error.

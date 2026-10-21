@@ -27,6 +27,36 @@ successful-statement allocation behavior is unchanged.
 
 `Assimalign.Cohesion.Database.Sql.Protocol` owns this model's wire messages, codecs, family singleton and transferred value shapes (5 public types). Both engine and remote client reference that one assembly. Its public namespace and RootNamespace equal its project name. Engine requests, planning, catalog, storage and server lifecycle stay in `Assimalign.Cohesion.Database.Sql`. This extraction preserves wire bytes and validation; moved public types intentionally change namespace and assembly identity with no forwarders.
 
+Wire result preparation is scoped to writing statements (#1651). SqlResultPreparation encodes
+and size-checks the header and every row inside DML's ApplyStatementAsync, before its physical
+undo bracket closes, autocommit CommitAsync or explicit EndStatement. This includes INSERT SELECT,
+upsert, UPDATE, DELETE and RETURNING. Enumeration and disposal also finish there. DDL and
+transaction control have a fixed zero-count completion, prepared before invoking their execution
+or commit. An encoding or size failure therefore precedes any write commit and result frame;
+DML rolls back only this statement, preserving earlier explicit-transaction work. A committed
+write is never reported as an ordinary statement failure. The pre-commit write ordering follows
+PostgreSQL's output-before-commit ordering (src/backend/tcop/postgres.c:1297-1360 and
+src/backend/access/common/printtup.c:360).
+
+Read-only SELECT, EXPLAIN, system views and SHOW encode one frame at a time during delivery,
+after materialization and statement admission have ended. A late encoding, enumeration or
+disposal failure ends the exchange with ExecutionFailure, even after partial result frames.
+The client discards partial columns and rows; the connection and any explicit transaction stay
+usable because the statement wrote nothing. Uncoded result failures use COHSQLE045; already-coded
+failures retain their diagnostics. Transport failures during delivery remain terminal on both
+paths, as do malformed incoming parameters. Embedded execution allocates no wire buffers.
+
+There is no aggregate encoded-result cap on either path. Results are already fully materialized;
+a 64 MiB cap adds a functional limit without bounding their existing memory. Writes additionally
+retain encoded payloads until delivery, accepting that memory cost to preserve statement atomicity;
+reads retain only the current encoded frame. Every header/row is bounded by
+ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB). Size refusals use COHSQLE045 / SQLSTATE
+54000 and report the encoded size and frame limit. Variable-width sizes include UTF-8 and zero
+escapes and are measured before allocating encoded columns. The row scratch buffer is at most one
+frame; header encoding uses a temporary growable buffer (less than twice the frame limit) plus
+one encoded column name, and string encoding may use one column's UTF-8 sort key (at most one
+frame). Collection/array overhead and existing materialized values are additional. Streaming
+write execution will need a different storage/buffering design.
 
 ## Model component boundaries
 
@@ -4499,7 +4529,8 @@ and leaves it active. A statement is admitted into the transaction through the b
 operation admission, so a statement refused by a transaction that is ending or ended says why.
 
 A statement stays statement-atomic: a failed statement (a constraint violation, an evaluation
-fault, a deadlock victim) writes nothing and leaves the transaction active, the owner's
+fault, a wire result encoding or size failure, a deadlock victim) writes nothing and leaves the
+transaction active, the owner's
 2026-10-04 per-statement decision. Storage corruption and I/O failures abort through the base
 and require rollback before further statements (#1364). A transaction the
 kernel ended under its caller (its database was dropped or closed while the session held it)
