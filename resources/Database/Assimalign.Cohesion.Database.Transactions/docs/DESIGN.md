@@ -467,6 +467,23 @@ request the modes it already holds on the resource cover (every mode the request
 with already conflicts with one of them), which changes nothing for anyone else. No public
 member was added for it.
 
+**Per-wait timeouts (#1231).** EnterLockTimeout(TimeSpan) is a public, flow-local disposable
+scope: zero disables it, nested scopes restore the previous duration, and concurrent flows have
+independent settings. It covers direct and nested unique-index requests in standalone and engine
+modes, without a shipped visibility grant. Durations must be non-negative and at most int.MaxValue
+milliseconds, matching PostgreSQL's bound (guc_parameters.dat:1617-1625). Only a contended wait
+creates a linked cancellation source and arms CancelAfter; each wait gets a new budget, as
+PostgreSQL's ProcSleep does (src/backend/storage/lmgr/proc.c:1407-1425). A timeout removes the
+queued request and throws TransactionLockTimeoutException (SQLSTATE 55P03). The caller owns
+rollback and release of the owner's earlier grants. Caller cancellation and storage abandonment
+keep their existing meanings and take precedence when observed together with the timer.
+The apply-gate refusal still runs before any wait: lock waits precede the coordinator's apply
+gate and storage/index latches. Cancellation callbacks take only the lock table's _sync;
+registrations/timers are disposed outside _sync. Grant/end and cancellation now arbitrate under
+_sync: cancellation can complete only a request it removed, so it cannot replace a grant whose
+notification has not yet run. LockTimeoutTests checks Timeout events, independent flows, scope
+restoration, individual budgets, other end reasons and a counter-driven grant/cancel/timer stress.
+
 **Unwritten statement marks (#1668).** LockManager.MarkStatement(owner) returns an opaque,
 allocation-free LockStatementMark with value equality over manager identity, owner and grant
 boundary. Each resource's first grant to an owner carries a monotonic
@@ -482,7 +499,9 @@ caller serializes the owner's requests, so all its earlier grants have completed
 one can race the mark; concurrent grants to other owners do not change that owner's boundary.
 First grants advance the sequence with Interlocked.Increment, paired with Interlocked.Read.
 
-This is a pre-write operation, never rollback of written data. SQL ON CONFLICT uses it to
+This operation performs no undo: it releases only after unwritten arbitration or a failed
+statement bracket that has already been fully restored physically (#1231). Surviving writes
+retain transaction-duration locking. SQL ON CONFLICT uses it to
 release its whole unapplied arbitration before an AcquireAsync row wait, then keeps the
 wait's row grant and takes a new mark before restarting. Each restart retains a superset of
 the rows it waited for, whose previous holders have finished; re-granting its own row cannot
@@ -1272,7 +1291,7 @@ refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on o
 (event-source.md rule 8): the stop is written in the `finally` around the waiter's await, whatever
 ended it, and names how in `outcome`, the one `Stop` of the area whose ending is a domain outcome
 rather than the area's `status` (the area `DESIGN.md`): `Granted`; `Cancelled` by the caller's
-token; `Ended`, because the owner's transaction ended while it waited; `Deadlock`, because a grant
+token; `Timeout`, because the individual lock timer expired; `Ended`, because the owner's transaction ended while it waited; `Deadlock`, because a grant
 closed a cycle through it (#1390; since the #1390 review's queue no grant can, and the outcome
 stays for the check that would report one); or `Abandoned`, because the storage went offline (the same
 decision `WaitAbandonableAsync` makes). The cancellation

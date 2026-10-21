@@ -509,6 +509,7 @@ public sealed class TransactionEventSourceTests
         var holder = await BeginWriterAsync(coordinator, storage);
         var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+        using var lockTimeout = coordinator.LockManager.EnterLockTimeout(TimeSpan.FromSeconds(5));
         var waiting = coordinator.LockManager.AcquireAsync(waiter.Sequence, Row, LockMode.Exclusive).AsTask();
         storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;

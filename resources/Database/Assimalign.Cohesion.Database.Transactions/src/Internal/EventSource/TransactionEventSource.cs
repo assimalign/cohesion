@@ -238,7 +238,7 @@ internal sealed class TransactionEventSource : EventSource
     /// <param name="owner">The waiting transaction.</param>
     /// <param name="resource">The resource it waited for.</param>
     /// <param name="mode">The mode it requested.</param>
-    /// <param name="outcome">How the wait ended: <c>Granted</c>, <c>Cancelled</c>, <c>Ended</c> or <c>Abandoned</c>.</param>
+    /// <param name="outcome">How the wait ended: <c>Granted</c>, <c>Cancelled</c>, <c>Timeout</c>, <c>Ended</c>, <c>Deadlock</c> or <c>Abandoned</c>.</param>
     /// <param name="startWritten">What <see cref="LockWaitStart(string, TransactionSequence, LockResource, LockMode)"/> returned.</param>
     /// <param name="startTimestamp">The <see cref="Stopwatch.GetTimestamp"/> taken when the wait began.</param>
     [NonEvent]
