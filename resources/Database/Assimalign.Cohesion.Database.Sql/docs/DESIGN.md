@@ -3660,7 +3660,9 @@ description + exported registrations), the engine binds them.
   tree cleanup; deferred brackets remain durable before the single publication. The trade-off
   is an extra tree pass and detecting a duplicate after construction. Full-GC retained-heap
   tests use a 4,096-row, 900-character table over a 1 MiB pool and require less than one quarter
-  of its decoded bytes; minimum-of-three allocation comparisons bound duplicate detection's
+  of its decoded bytes. Samples inside the unique-validation cursor walk include its midpoint
+  and final key, before any retained keys can be released, for inline and deferred index and
+  constraint builds; minimum-of-three allocation comparisons bound duplicate detection's
   overhead against an otherwise identical non-unique build for all paths.
 - **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
   adds entries stamped with the writer's sequence; DELETE stamps entry deleters

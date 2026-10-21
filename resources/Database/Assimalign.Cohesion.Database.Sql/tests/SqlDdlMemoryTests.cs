@@ -9,6 +9,8 @@ using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>Measures retained DDL workspace over a table larger than the buffer pool (#1444).</summary>
@@ -29,10 +31,13 @@ public sealed class SqlDdlMemoryTests
     [InlineData("column")]
     [InlineData("index")]
     [InlineData("constraint-index")]
+    [InlineData("inline-index")]
+    [InlineData("inline-constraint-index")]
     public async Task ExecuteAsync_TableLargerThanPool_ShouldBoundRetainedWorkspace(string operation)
     {
         // Arrange: file-backed rows exceed the fixed 1 MiB pool; a full row/key set
-        // is observable after full collections inside the existing progress callback.
+        // is observable after full collections during row validation, tree construction
+        // and the unique-validation cursor walk, before its workspace is released.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-ddl-memory", Guid.NewGuid().ToString("N"));
         long minimum = long.MaxValue;
         try
@@ -52,30 +57,58 @@ public sealed class SqlDdlMemoryTests
                 long baseline = GC.GetTotalMemory(forceFullCollection: true);
                 long peak = 0;
                 int samples = 0;
+                int cursorEntries = 0;
+                int cursorSamples = 0;
+                bool uniqueBuild = operation is not ("constraint" or "column");
                 session.ProvisioningProgress = (processed, total) =>
                 {
                     total.ShouldBe((long)rows);
                     if (processed == 1 || processed == rows / 2 || processed == rows)
                     {
-                        peak = Math.Max(peak, GC.GetTotalMemory(forceFullCollection: true) - baseline);
-                        samples++;
+                        Sample();
+                    }
+                };
+                if (operation.StartsWith("inline-", StringComparison.Ordinal)) { session.ProvisioningProgress = null; }
+                SqlPlanExecutor.UniqueIndexEntryValidated = () =>
+                {
+                    cursorEntries++;
+                    if (cursorEntries == 1 || cursorEntries == rows / 2 || cursorEntries == rows)
+                    {
+                        Sample();
+                        cursorSamples++;
                     }
                 };
 
                 // Act
-                await session.ExecuteAsync(operation switch
+                try
                 {
-                    "constraint" => "ALTER TABLE t ADD CONSTRAINT ck CHECK (LENGTH(k) > 0)",
-                    "column" => "ALTER TABLE t ADD COLUMN v INT NOT NULL DEFAULT 7",
-                    "index" => "CREATE UNIQUE INDEX ix ON t(k)",
-                    _ => "ALTER TABLE t ADD CONSTRAINT ix UNIQUE(k)",
-                }, cancellationToken: TestTimeout.Token(300));
-                session.ProvisioningProgress = null;
+                    await session.ExecuteAsync(operation switch
+                    {
+                        "constraint" => "ALTER TABLE t ADD CONSTRAINT ck CHECK (LENGTH(k) > 0)",
+                        "column" => "ALTER TABLE t ADD COLUMN v INT NOT NULL DEFAULT 7",
+                        "index" or "inline-index" => "CREATE UNIQUE INDEX ix ON t(k)",
+                        _ => "ALTER TABLE t ADD CONSTRAINT ix UNIQUE(k)",
+                    }, cancellationToken: TestTimeout.Token(300));
+                }
+                finally
+                {
+                    SqlPlanExecutor.UniqueIndexEntryValidated = null;
+                    session.ProvisioningProgress = null;
+                }
                 minimum = Math.Min(minimum, peak);
-                _output.WriteLine($"{operation} round {round}: retained workspace={peak:N0} bytes; samples={samples}");
+                _output.WriteLine($"{operation} round {round}: retained workspace={peak:N0} bytes; samples={samples}; cursor entries={cursorEntries}; cursor samples={cursorSamples}");
 
-                // Assert: prove that the callback sampled actual work, including its end.
+                // Assert: prove sampling occurs inside the cursor walk, including its
+                // midpoint and final key, while an accidentally retained key list is live.
                 samples.ShouldBeGreaterThanOrEqualTo(2);
+                cursorEntries.ShouldBe(uniqueBuild ? rows : 0);
+                cursorSamples.ShouldBe(uniqueBuild ? 3 : 0);
+
+                void Sample()
+                {
+                    peak = Math.Max(peak, GC.GetTotalMemory(forceFullCollection: true) - baseline);
+                    samples++;
+                }
             }
 
             long decodedTableBytes = (long)rows * keyLength * sizeof(char);

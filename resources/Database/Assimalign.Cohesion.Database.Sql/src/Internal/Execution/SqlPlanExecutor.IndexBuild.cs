@@ -11,6 +11,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // Test seam: sample retained workspace while the validation cursor is still walking.
+    internal static Action? UniqueIndexEntryValidated { get; set; }
+
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
         int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken)
     {
@@ -90,6 +93,7 @@ internal sealed partial class SqlPlanExecutor
             }
             // CurrentKey owns its bytes; retaining it across a batch needs no copy.
             previous = key;
+            UniqueIndexEntryValidated?.Invoke();
         }
     }
 
