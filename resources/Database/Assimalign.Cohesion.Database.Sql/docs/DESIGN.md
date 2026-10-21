@@ -5258,6 +5258,11 @@ The pin retains its kernel context and snapshot horizon, but uses
 commit or rollback rate and emits no Verbose kernel lifecycle events. It remains
 in the current-transactions gauge and is released through the existing rollback
 and disposal paths. Read-only pins append no lifecycle records (#1280).
+The SQL reclamation fence also uses `BeginSnapshotPinAsync`: it only waits out older
+readers after DROP, so reclaiming a dropped table adds no transaction or rollback rate.
+Schema provisioner lock contexts remain counted ordinary transactions because they
+hold locks. The diagnostics tests sum every increment over a bounded interval ending
+after reclamation (or the reads), so a later idle sample cannot hide an increment.
 Registered statement snapshots without kernel contexts remain a follow-up.
 The original #1363 measurements on the in-memory engine (Release, one
 process per run at high priority on four pinned cores, four alternating pairs,

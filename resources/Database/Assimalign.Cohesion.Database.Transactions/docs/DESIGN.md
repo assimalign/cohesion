@@ -1308,8 +1308,9 @@ manager registration, and a non-parallel test completes disposal before resuming
 test requires one observed crossing of that window; its timeout is only a hang ceiling. The
 gauge must return and all rates stay fixed. Cancellation before begin, a refused
 second end, a canceled rollback followed by disposal, and each successful end path are covered
-by exact counter deltas. Each model also checks published rates for read hits and misses and
-verifies that its real explicit rollback still counts.
+by exact counter deltas. Each model retains and sums every published increment for read hits
+and misses through publications after the reads finish, then verifies that its real explicit
+rollback still counts. The canonical recorder is wrapped by a test-side rate history.
 
 **Cost when nobody listens** (event-source.md rule 9): every write is behind
 `IsEnabled(level, keywords)`, and every `ToString` and the storage name read are inside it. An
