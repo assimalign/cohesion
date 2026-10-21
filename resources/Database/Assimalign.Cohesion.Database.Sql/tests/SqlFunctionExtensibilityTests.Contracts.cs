@@ -383,13 +383,13 @@ public sealed partial class SqlFunctionExtensibilityTests
             scalar.InvokeResolved("x", DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
         var scalarFailure = Should.Throw<DatabaseException>(() =>
             failingScalar.InvokeResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
-        accumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None);
+        accumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None, null);
         var aggregateOverflow = Should.Throw<DatabaseException>(() =>
-            accumulator.AddResolved(40000L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+            accumulator.AddResolved(40000L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None, null));
         var aggregateMismatch = Should.Throw<DatabaseException>(() =>
-            accumulator.AddResolved("x", DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+            accumulator.AddResolved("x", DatabaseType.Int16, default, Collation.Binary, CancellationToken.None, null));
         var aggregateFailure = Should.Throw<DatabaseException>(() =>
-            failingAccumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None));
+            failingAccumulator.AddResolved(7L, DatabaseType.Int16, default, Collation.Binary, CancellationToken.None, null));
 
         // Assert
         echoed.ShouldBe((short)7);

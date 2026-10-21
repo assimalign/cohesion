@@ -305,7 +305,7 @@ internal sealed partial class SqlPlanExecutor
             row[^1] = definition.MissingValues[^1] is { } literal ? DefaultValue(literal, cancellationToken) : null;
             try
             {
-                CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken), [columns.Length - 1]);
+                CheckDomains(definition, row, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), [columns.Length - 1]);
             }
             catch (SqlConstraintViolationException)
             {
@@ -325,7 +325,7 @@ internal sealed partial class SqlPlanExecutor
         // one durable catalog publication makes the complete addition visible.
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
         var bound = rows.Count == 0 || plan.Column.DomainName is null ? null : _definitions.Get(replacement, cancellationToken);
-        var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken);
+        var evaluator = bound is null ? null : ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart);
 
         // Each existing row is assigned the new column's default, or NULL, of its domain (phase E3).
         int[]? added = bound is null ? null : [columns.Length - 1];

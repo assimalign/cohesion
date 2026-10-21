@@ -946,10 +946,11 @@ flowchart LR
   `SqlFunctionContext`: the database, the call's input collation (resolved when the
   statement was bound) and the statement's cancellation token. Both have public
   constructors, so a test can call a function with a collation or a token. The context has
-  a non-null DateTimeOffset TransactionTimestamp (#1373): the explicit transaction's BEGIN instant,
+  a nullable DateTimeOffset TransactionTimestamp (#1373): the explicit transaction's BEGIN instant,
   or the autocommit statement's own start. Scalar calls, aggregate creation and aggregate row calls
-  receive that same instant. The public four-argument constructor supplies a timestamp directly;
-  the three-argument constructor captures UTC now, and default returns DateTimeOffset.MinValue.
+  receive that same instant, including table and domain CHECK evaluation. The public four-argument
+  constructor supplies a timestamp directly; the three-argument constructor and default return null
+  because no statement or transaction context exists. Aggregate row helpers require the timestamp argument.
 - **Registration.** `SqlDatabaseEngineBuilder.Functions` starts with the standard library,
   added through the same public `Add` (`SqlStandardLibrary.Register`). `Add` refuses
   (`ArgumentException`) a name that is not an identifier, a special form, a keyword, a type

@@ -464,7 +464,8 @@ internal sealed partial class SqlPlanExecutor
         // loaded or the DDL that produced this version ran; a write only evaluates the bound
         // trees, which carry their column ordinals, functions and collations.
         var bound = _definitions.Get(table, cancellationToken);
-        var evaluator = ExecutionEvaluator(null, cancellationToken, containsLike: bound.ChecksContainLike);
+        var evaluator = ExecutionEvaluator(null, cancellationToken, containsLike: bound.ChecksContainLike,
+            transactionTimestamp: statement.TransactionStart);
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)

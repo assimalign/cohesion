@@ -14,8 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <see cref="SqlArguments.Context"/>, and an aggregate receives it when the engine creates the
 /// accumulator for a group (<see cref="SqlAggregateFunction.CreateAccumulator"/>). The
 /// <see langword="default"/> context, which a test calling a function directly can pass, has no
-/// database, the binary collation, a token that is never canceled, and a transaction timestamp of
-/// <see cref="DateTimeOffset.MinValue"/>.
+/// database, the binary collation, a token that is never canceled, and no transaction timestamp.
 /// </remarks>
 public readonly ref struct SqlFunctionContext
 {
@@ -39,9 +38,9 @@ public readonly ref struct SqlFunctionContext
     /// <param name="database">The database whose statement makes the call.</param>
     /// <param name="collation">The collation the call's input compares under; the binary collation when null.</param>
     /// <param name="cancellationToken">The statement's cancellation token.</param>
-    /// <remarks>Captures the current UTC time as the transaction timestamp for a direct call.</remarks>
+    /// <remarks>A direct call has no statement or transaction context, so its timestamp is null.</remarks>
     public SqlFunctionContext(DatabaseName database, Collation? collation, CancellationToken cancellationToken)
-        : this(database, collation, cancellationToken, DateTimeOffset.UtcNow)
+        : this(database, collation, cancellationToken, (DateTimeOffset?)null)
     {
     }
 
@@ -60,8 +59,8 @@ public readonly ref struct SqlFunctionContext
     /// Gets the transaction's start time, shared by every statement in an explicit transaction.
     /// An autocommit statement receives its own start time.
     /// </summary>
-    /// <remarks>The default context returns <see cref="DateTimeOffset.MinValue"/>.</remarks>
-    public DateTimeOffset TransactionTimestamp => _transactionStart.GetValueOrDefault();
+    /// <remarks>Null means there is no statement or transaction context, including a default or direct three-argument context.</remarks>
+    public DateTimeOffset? TransactionTimestamp => _transactionStart;
 
     /// <summary>Gets the database whose statement makes the call; empty when a function is called directly.</summary>
     public DatabaseName Database { get; }

@@ -67,9 +67,9 @@ internal sealed partial class SqlPlanExecutor
     /// preserving their allocation budget even when their statement token is cancellable.
     /// </summary>
     private SqlExpressionEvaluator ExecutionEvaluator(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken,
-        bool[]? sharedColumns = null, bool containsLike = false)
+        bool[]? sharedColumns = null, bool containsLike = false, DateTimeOffset? transactionTimestamp = null)
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
-            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, ViewTransactionStart);
+            _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
     /// <summary>
     /// A registered index paired with its live tree and resolved key ordinals —
