@@ -114,6 +114,13 @@ StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writ
 
 ### Page 0: the identity block and two alternating header slots
 
+Open reads page 0 in two independent 4 KiB halves (#1270), completing short reads within
+each half. An `IOException` invalidates that whole half, including any partially read
+bytes; the other slot can supply the identity and checkpoint state. If no slot verifies,
+the read error is preserved. A recovered leading half uses the existing deferred identity
+repair on the next slot-0 write. This extends the existing self-contained-header design
+from Voron (`src/Voron/Impl/FileHeaders/HeaderAccessor.cs:71-86`) to a sector read failure.
+
 `StorageFileHeader` sits in the **body** of page 0, after the standard 96-byte page header,
 not at file offset 0. An earlier draft overlaid it on the page header, which made page 0
 un-checksummable and un-typed. Storage format 2 (#1251) splits what page 0 holds by how
@@ -881,8 +888,9 @@ Every rule below is stated for a storage transaction (a *bracket*):
    since the checkpoint, the next image would even make it committed content. The storage's own
    exceptions are page 0 (never in the pool), allocation's clear (the allocating bracket images
    the page at its touch, invariant A), the checkpoint anchor pages (written only by header
-   writes, never replayed onto, "Checkpoints"), and the page manager's raw `AllocatePage` and
-   `FreePage` (no production caller; a raw free is lost to a crash before the next checkpoint).
+   writes, never replayed onto, "Checkpoints"). The page manager's raw `AllocatePage` and
+   `FreePage` are internal (#1270); external allocation uses `AllocatePageForWrite`, and
+   releases use transactional record deletion or `FreeOwnerPages` with commit-deferred reuse.
    The debug consistency check audits the rule on every page, whether or not it was imaged
    since the checkpoint ("The debug consistency check").
 
@@ -1135,7 +1143,7 @@ pinned handle right after a checkpoint went unreported whether a checkpoint wrot
 next bracket's image absorbed it (the review's probes A1 and A2, now `StorageConsistencyCheckTests`
 cases). The pages the storage writes outside the journal on purpose — allocation's clear (the
 allocating bracket images the page at its touch, invariant A), a new file set's first page, the
-checkpoint anchor pages, the page manager's raw `AllocatePage` and `FreePage` — are reported to
+checkpoint anchor pages, and test-only raw frees through the internal page-manager API — are reported to
 the check and exempt from those two audits until the next checkpoint has written them; page 0
 never enters the pool. What remains unchecked is a change never marked dirty to a page that is
 neither touched nor written back again: readers see it until the page leaves the pool, and
@@ -1877,7 +1885,9 @@ reference is PostgreSQL's `max_wal_size` of 1 GB (`max_wal_size_mb = 1024`,
   written per truncation stayed between 0.89 and 1.06 sizes (in format 2 a peak reached almost
   ten). It is not a hard bound: a single statement journals all of its bracket before the
   checkpoint can run, so one statement that writes more than the size (a large index build or
-  `INSERT ... SELECT`, a large upload) overshoots it by that much.
+  `INSERT ... SELECT`, a large upload) overshoots it by that much. The owner default for
+  #1270 keeps this soft trigger: bracket caps remain rejected, and splitting a statement
+  requires a separate design that preserves statement atomicity.
 - Recovery replayed about 20 ms per MB of journal from a warm file cache in format 2 (the #1251
   table below: a 50.2 MB journal in 0.9–1.2 s), so the bound capped a crash recovery at about five
   seconds. Format 3 (#1253) replays 5–8 ms per MB from a file, a journal of small deltas or of

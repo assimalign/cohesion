@@ -882,6 +882,10 @@ writes two or three pages; no event is written on a lookup, a cursor or an inser
 - No cost/statistics surface here — planners get statistics through their model catalogs.
 - No in-place upgrade of index pages from an older page format (#1152).
 
+The crash suites link Storage's canonical `CrashSimulationStream`, `CrashPoint` and
+`SimulatedPowerLossException` fixtures (#1270), including sector-selective torn writes;
+there is no independent Indexing copy to drift from the durability model.
+
 ## AOT posture
 
 Pure contracts and span-based value objects. No reflection. The event source writes only

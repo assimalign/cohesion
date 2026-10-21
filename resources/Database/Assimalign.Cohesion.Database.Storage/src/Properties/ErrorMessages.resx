@@ -5,4 +5,5 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="FreePageNonzero" xml:space="preserve"><value>Page {0} has a free header but contains nonzero bytes.</value></data>
+  <data name="HeaderBlockIncomplete" xml:space="preserve"><value>Invalid storage file: the header block at offset {0} ended before 4096 bytes were read.</value></data>
 </root>

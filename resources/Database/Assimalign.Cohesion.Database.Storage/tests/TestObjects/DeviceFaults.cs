@@ -34,6 +34,13 @@ internal sealed class DeviceFaults
     private long _journalWriteFailures;
     private long _pageWrites;
 
+    // A physical 4 KiB block of page 0 that cannot be read; -1 means no fault.
+    internal int UnreadableHeaderBlock { get; set; } = -1;
+    internal int HeaderReadPrefixBytes { get; set; }
+    internal int MaximumDataReadSize { get; set; } = int.MaxValue;
+    private long _headerReadFailures;
+    internal long HeaderReadFailures => Interlocked.Read(ref _headerReadFailures);
+
     // Open while durable flushes of the data file go through; closed while they stall.
     private readonly ManualResetEventSlim _dataFlushGate = new(initialState: true);
     private int _stalledDataFlushes;
@@ -210,6 +217,9 @@ internal sealed class DeviceFaults
         FailPageWrites = false;
         FailNextPageWrites(0);
         FailHeaderWrites = false;
+        UnreadableHeaderBlock = -1;
+        HeaderReadPrefixBytes = 0;
+        MaximumDataReadSize = int.MaxValue;
         FailJournalFlushes = false;
         FailJournalWrites = false;
         RottenPage = null;
@@ -311,6 +321,23 @@ internal sealed class DeviceFaults
         }
     }
 
+    private int BeforeDataRead(long offset, int length)
+    {
+        const int blockSize = Page.Size / 2;
+        long start = (long)UnreadableHeaderBlock * blockSize;
+        if (UnreadableHeaderBlock >= 0 && offset < start + blockSize && offset + length > start)
+        {
+            if (offset < start + HeaderReadPrefixBytes)
+            {
+                return Math.Min(length, (int)(start + HeaderReadPrefixBytes - offset));
+            }
+            Interlocked.Increment(ref _headerReadFailures);
+            throw new System.IO.IOException("Injected header block read failure.");
+        }
+
+        return Math.Min(length, MaximumDataReadSize);
+    }
+
     private void AfterWrite(long offset)
     {
         if (offset >= Page.Size)
@@ -392,6 +419,10 @@ internal sealed class DeviceFaults
 
         public int Read(Span<byte> buffer, long offset)
         {
+            if (!_journal)
+            {
+                buffer = buffer[.._faults.BeforeDataRead(offset, buffer.Length)];
+            }
             int read = _inner.Read(buffer, offset);
             if (!_journal)
             {
@@ -403,6 +434,10 @@ internal sealed class DeviceFaults
 
         public async ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
         {
+            if (!_journal)
+            {
+                buffer = buffer[.._faults.BeforeDataRead(offset, buffer.Length)];
+            }
             int read = await _inner.ReadAsync(buffer, offset, cancellationToken).ConfigureAwait(false);
             if (!_journal)
             {

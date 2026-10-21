@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -3497,7 +3499,32 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         var page0 = new byte[Page.Size];
-        Data.ReadPage((PageId)0L, page0);
+        IOException? readFailure = null;
+        for (int offset = 0; offset < Page.Size; offset += StorageHeaderPage.LeadingBlockSize)
+        {
+            var block = page0.AsSpan(offset, StorageHeaderPage.LeadingBlockSize);
+            try
+            {
+                int total = 0;
+                while (total < block.Length)
+                {
+                    int read = Data.Read(block[total..], (long)offset + total);
+                    if (read == 0)
+                    {
+                        throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                            ErrorMessages.HeaderBlockIncomplete, offset));
+                    }
+                    total += read;
+                }
+            }
+            catch (IOException exception)
+            {
+                // A failed read may have copied a prefix: invalidate the entire physical block.
+                // The other 4 KiB block has an independent slot and identity copy (#1270).
+                block.Clear();
+                readFailure ??= exception;
+            }
+        }
 
         // The format fence reads the two fields every storage format keeps at the same
         // offsets, before any checksum: the checksum algorithm is itself part of the format,
@@ -3522,6 +3549,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         var identity = StorageHeaderPage.IdentityBlock(page0);
+        if (newest is null && readFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(readFailure).Throw();
+        }
         if (magic != StorageFileHeader.ExpectedMagic || !StorageHeaderPage.VerifyIdentity(identity))
         {
             if (newest is null)
