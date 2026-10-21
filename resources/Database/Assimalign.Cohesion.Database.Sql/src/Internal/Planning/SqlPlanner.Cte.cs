@@ -40,7 +40,7 @@ internal sealed partial class SqlPlanner
         if (select.Where is not null)
         {
             ValidatePredicate(select.Where, evaluator, "WHERE", _subqueryTypes);
-            where = evaluator.Bind(select.Where);
+            where = evaluator.BindPredicate(select.Where);
         }
         var outputSlots = BindOrderByProjections(select, projections, 0);
         CaptureViewOrdering(select, [], null, evaluator, outputSlots);

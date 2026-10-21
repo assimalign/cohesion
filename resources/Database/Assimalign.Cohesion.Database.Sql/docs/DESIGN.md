@@ -161,17 +161,26 @@ precision, 7 included, and INTERVAL field restrictions stay unsupported under #1
 WHERE (including UPDATE/DELETE and FROM-less SELECT), JOIN ON, HAVING and ON CONFLICT
 DO UPDATE WHERE require BOOLEAN. The shared planner check uses StaticOperandType with
 binder inference as its fallback, so arithmetic, CASE results, aggregates and supplied
-parameters fail before reading even an empty relation. AND/OR/NOT operands and searched
-CASE conditions use the same rule, including ORDER BY output aliases. The error is
+parameters fail before reading even an empty relation. AND/OR/NOT operands, searched
+CASE conditions and IS TRUE/FALSE/UNKNOWN operands use the same rule, including ORDER BY output aliases. The error is
 COHSQLE003 (SQLSTATE 42804), names the construct and retains its source span. This follows
 PostgreSQL src/backend/parser/parse_coerce.c:1163-1184 without implicit non-Boolean coercion.
-Untyped NULL remains UNKNOWN; a typed non-Boolean NULL expression is refused.
+Untyped NULL remains UNKNOWN; a typed non-Boolean NULL expression is refused. Every CASE result
+and COALESCE alternative in a Boolean position is checked, including unreachable alternatives.
+Valid Boolean input string literals are coerced only in Boolean positions (PostgreSQL
+src/backend/utils/adt/bool.c:37-109); text columns and parameters retain their declared types.
 
 Matches, logical chains, NOT and searched CASE also check values at runtime. Correlated
 branch preparation shares the check before selecting or evaluating another branch.
 Boolean short-circuiting and simple CASE value comparisons retain their existing rules.
 Invalid stored view predicates now fail binding with the same diagnostic; catalog/storage
-encoding is unchanged. No interface, visibility grant, reflection or dynamic code is added.
+encoding is unchanged. SQL function declarations run the Boolean-position walk; stored bodies
+retain the load-only binding path, with COHSQLE003 isolated as a SqlBoundFailure. Legacy invalid
+CASE/logical operands and changed application return types therefore fail on invocation, while
+the database opens. Logical nodes, NOT and searched CASE conditions retain runtime error spans.
+The generic Matches runtime backstop on a bound root has no source span; known-type
+statement roots are checked with their AST spans during planning.
+No interface, visibility grant, reflection or dynamic code is added.
 
 ## Request parameters (#1102)
 
@@ -975,7 +984,9 @@ flowchart LR
   converts to or from text), ten for a pseudo-type, one for a variadic overload.
   The unique cheapest wins; none is `COHSQLE006` (`has no overload that accepts argument
   types (TEXT)`), a tie `COHSQLE008` (SQLSTATE 42725). An integer literal is typed by its
-  magnitude, INTEGER when it fits, as PostgreSQL types one. Inside a grouping, a grouping
+  magnitude, INTEGER when it fits and BIGINT otherwise, as PostgreSQL types one
+  (src/backend/parser/scan.l:1335-1348). Both planner operand inference and the literal evaluator
+  use that same type. Inside a grouping, a grouping
   key or an aggregate result has the type it has over the input row (the group scope
   types a slot through the source scope, only when asked), so `describe(COUNT(*))` calls
   `describe(BIGINT)` as PostgreSQL's does. `ANYELEMENT` arguments of
@@ -5780,7 +5791,7 @@ locate their retained canonical body or type fragment when no declaration AST su
 walks retain the parsed node's span. DROP of an absent domain/function locates the DROP statement.
 The existing COHSQLD002/003 executor ownership and dependency checks are unchanged.
 
-A CHECK that is not Boolean is a definition-binding rejection under COHSQLD001, including
+A CHECK that is not Boolean reports COHSQLE003 / SQLSTATE 42804, including domain CHECK and
 CREATE TABLE c (id INT CHECK (id)). It reports the predicate span before any table is created.
 PostgreSQL likewise rejects a non-Boolean CHECK operand during coercion and reports its expression
 position (src/backend/parser/parse_coerce.c:1163-1191). No runtime row-value failure is converted.

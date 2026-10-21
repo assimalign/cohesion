@@ -67,7 +67,7 @@ internal sealed partial class SqlPlanner
         }
         if (clause.Where is not null) { Validate(clause.Where, "ON CONFLICT DO UPDATE WHERE"); }
         return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
-            clause.Where is null ? null : evaluator.Bind(clause.Where));
+            clause.Where is null ? null : evaluator.BindPredicate(clause.Where));
 
         SqlPlanningException Invalid(string reason) => new("COHSQLE035",
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.UpsertArbiterInvalid, target, table.Schema, table.Name, reason), insert.Location);

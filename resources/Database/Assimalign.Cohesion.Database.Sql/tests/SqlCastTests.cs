@@ -194,12 +194,12 @@ public sealed class SqlCastTests
     /// <param name="expression">A CAST of a statically typed operand that no cast converts.</param>
     /// <param name="pair">The pair the message names.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a pair no cast converts fails while planning with COHSQLE011, rows or not")]
-    [InlineData("CAST(1 AS DATE)", "BIGINT to DATE")]
+    [InlineData("CAST(1 AS DATE)", "INTEGER to DATE")]
     [InlineData("CAST(TRUE AS DOUBLE)", "BOOLEAN to DOUBLE")]
     [InlineData("CAST(TRUE AS INT)", "BOOLEAN to INTEGER")]
-    [InlineData("CAST(1 AS BOOLEAN)", "BIGINT to BOOLEAN")]
+    [InlineData("CAST(1 AS BOOLEAN)", "INTEGER to BOOLEAN")]
     [InlineData("CAST(1.5 AS UUID)", "NUMERIC to UUID")]
-    [InlineData("CAST(1 AS BINARY)", "BIGINT to BINARY")]
+    [InlineData("CAST(1 AS BINARY)", "INTEGER to BINARY")]
     [InlineData("CAST(CAST('1' AS JSON) AS INT)", "JSON to INTEGER")]
     [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END AS INT)", "JSON to INTEGER")]
     [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS INT)", "JSONB to INTEGER")]

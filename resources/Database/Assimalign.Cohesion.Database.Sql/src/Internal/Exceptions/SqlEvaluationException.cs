@@ -138,7 +138,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     private readonly string _detail;
     private readonly Location? _location;
 
-    private SqlEvaluationException(string code, string detail, Exception? innerException, Location? location = null)
+    private SqlEvaluationException(string code, string detail, Exception? innerException, Location? location = null, bool booleanRequired = false)
         : base(detail, [new Diagnostic
         {
             Code = code,
@@ -153,10 +153,14 @@ internal sealed class SqlEvaluationException : DatabaseException
         Code = code;
         _detail = detail;
         _location = location;
+        IsBooleanRequired = booleanRequired;
     }
 
     /// <summary>Gets the stable engine diagnostic code.</summary>
     internal string Code { get; }
+
+    /// <summary>Gets whether a Boolean-position check produced this datatype mismatch.</summary>
+    internal bool IsBooleanRequired { get; }
 
     /// <summary>
     /// Creates a new exception with this one's code, message and inner exception, for a bound node
@@ -164,14 +168,14 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// on two threads.
     /// </summary>
     /// <returns>The copy.</returns>
-    internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException, _location);
+    internal SqlEvaluationException Duplicate() => new(Code, _detail, InnerException, _location, IsBooleanRequired);
 
     /// <summary>Attaches the offending node's location to a planning failure.</summary>
     internal SqlEvaluationException At(Location? location) => _location is not null || location is null
-        ? this : new(Code, _detail, InnerException, location);
+        ? this : new(Code, _detail, InnerException, location, IsBooleanRequired);
 
     /// <summary>Adds assignment context while preserving the diagnostic code and original failure.</summary>
-    internal SqlEvaluationException WithContext(string context) => new(Code, $"{context}: {_detail}", this, _location);
+    internal SqlEvaluationException WithContext(string context) => new(Code, $"{context}: {_detail}", this, _location, IsBooleanRequired);
 
     /// <summary>Creates the failure for a character assignment that would lose non-space content.</summary>
     internal static SqlEvaluationException StringDataRightTruncation(int length)
@@ -297,7 +301,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded datatype mismatch.</returns>
     internal static SqlEvaluationException BooleanRequired(string clause, string operandType)
         => new(InvalidOperandTypeCode, string.Format(CultureInfo.CurrentCulture,
-            ErrorMessages.BooleanPredicateOperand, clause, operandType), null);
+            ErrorMessages.BooleanPredicateOperand, clause, operandType), null, booleanRequired: true);
 
     /// <summary>Creates the failure for a unary sign applied to a value that is not a number.</summary>
     /// <param name="operatorText">The sign, <c>+</c> or <c>-</c>.</param>

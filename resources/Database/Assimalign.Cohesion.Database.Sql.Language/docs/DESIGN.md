@@ -71,7 +71,10 @@ the standard EXTRACT/POSITION and niladic arms apply only without those modifier
 
 Boolean search conditions (#1190) use the existing AST. Engine planning and runtime
 reject non-Boolean predicates with COHSQLE003 (42804), including upsert WHERE; NULL
-retains three-valued logic. The live clause corpus pins these errors.
+retains three-valued logic. Every CASE result and COALESCE alternative in a Boolean position
+must qualify, including unreachable alternatives. Valid Boolean input string literals coerce
+in these positions; text columns and parameters keep their types. Non-Boolean table/domain
+CHECK roots use the same COHSQLE003 / 42804 code. The live clause corpus pins these errors.
 
 FROM-less SELECT (#1373) retains the existing AST and grammar. The engine now uses
 one implicit row for every such query, including views and nested queries; DIALECT.md
@@ -728,8 +731,9 @@ A lowercase quoted unsupported call retains its diagnostic and NULL recovery exp
 renderer round-trip guarantee continues to apply to error-free parser trees. Renderer tests
 cover both accepted spellings and the coded recovery of rejected spellings.
 
-Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLD001 for invalid
-CHECK predicates and absent DROP definitions, including the structured carrier and span fallback.
+Definition-binding diagnostics remain engine-owned. DIALECT.md records COHSQLE003 for non-Boolean
+CHECK predicates and COHSQLD001 for invalid definitions and absent DROP definitions, including
+the structured carrier and span fallback.
 
 Wire diagnostic overflow does not change parser admission or its complete in-process
 carrier. The endpoint bounds delivery with an explicit COHDBP001 prefix/omission notice

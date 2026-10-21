@@ -77,7 +77,7 @@ internal sealed partial class SqlPlanner
             outerScope: OuterScope, outerDependencies: OuterDependencies, slotScope: sourceScope, relation: select.From.Count == 0 ? null : select.From[0].Table);
 
         var source = columns.Select((column, index) => PassThrough(column.Name, index, columns, sourceScope)).ToArray();
-        var where = select.Where is null ? null : evaluator.Bind(select.Where);
+        var where = select.Where is null ? null : evaluator.BindPredicate(select.Where);
         SqlPlan input = bindings is not null
             ? PushJoinPredicates(new SqlJoinPlan(bindings, columns, steps, source, where, [], null, null, false))
             : view is not null
@@ -122,7 +122,7 @@ internal sealed partial class SqlPlanner
         }
 
         if (select.Having is not null) { ValidatePredicate(select.Having, groupScope, "HAVING", _subqueryTypes); }
-        var having = select.Having is null ? null : groupScope.Bind(select.Having);
+        var having = select.Having is null ? null : groupScope.BindPredicate(select.Having);
         var ordering = BindOrdering(select.OrderBy,
             groupScope.ForOrdering(projections, orderByProjections, keys.Length + boundAggregates.Length));
 

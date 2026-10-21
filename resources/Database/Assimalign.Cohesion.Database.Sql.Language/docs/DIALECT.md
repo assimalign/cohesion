@@ -1673,14 +1673,26 @@ format is unchanged. Persisted-text drift tests pin these four spellings.
 
 ### Boolean search conditions (#1190)
 
-WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and operands
-of AND, OR and NOT require BOOLEAN. A known non-Boolean type, including arithmetic,
+WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN, truth tests
+(IS TRUE/FALSE/UNKNOWN) and operands of AND, OR and NOT require BOOLEAN. A known non-Boolean type, including arithmetic,
 CASE or aggregate results and supplied parameters, fails planning before rows are read
 with COHSQLE003 / SQLSTATE 42804, naming the construct. Runtime checks enforce the same
 rule for values whose types were unknown. An untyped NULL is UNKNOWN and retains SQL
 three-valued logic; CAST(NULL AS INT) is a non-Boolean typed expression and is refused.
 Only TRUE admits a row or selects a searched CASE arm. Boolean AND/OR keep their
 short-circuit order; simple CASE compares values and does not require Boolean WHEN values.
+
+Every CASE result and COALESCE alternative in a Boolean position must be Boolean, NULL,
+or a valid Boolean input string literal, even when short-circuiting skips it. Boolean
+string literals accept `t`, `true`, `f`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `y`
+and `n`, case-insensitively (PostgreSQL src/backend/utils/adt/bool.c:37-109). Other strings
+fail with COHSQLE003; text columns and text parameters do not acquire this literal coercion.
+Table CHECK and domain CHECK use COHSQLE003 / 42804 for every non-Boolean position.
+
+Opening a database binds stored SQL function bodies without reapplying declaration-only
+Boolean-position validation. An invalid legacy operand or an application function whose
+result is no longer Boolean fails when the stored body is invoked with COHSQLE003;
+it does not prevent the database from opening.
 
 ## Subqueries and query-source inserts (#1021)
 
@@ -2350,7 +2362,8 @@ Shared constants, function results, parameters, defaults and retained execution 
 when supplying a row value. Fresh stored payloads transfer directly; repeated uses detach
 at their source. Result materialization adds no blanket binary copy.
 
-The engine evaluates an integer literal as BIGINT and a fractional or exponent
+The engine infers and evaluates an integer literal as INTEGER when it fits, otherwise BIGINT,
+and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
 hold reports `COHSQLE002` and names itself, for example
 `integer literal 9223372036854775808 exceeds BIGINT.`: an integer literal above
@@ -2689,7 +2702,7 @@ Parameter-dependent result types are checked when evaluated, including CASE resu
 and polymorphic calls; parameters used only in CASE conditions leave its static result type
 intact. NULLIF now executes as an evaluator form; its result participates in the same CAST signature checks (#1120).
 A NULL operand returns NULL with target metadata; it does not bypass a statically
-unsupported pair or invalid target. SQL integer literals are Int64 and fractional
+unsupported pair or invalid target. SQL integer literals are Int32 when they fit, otherwise Int64, and fractional
 literals are Decimal, including exponent and leading decimal-point forms. To
 supply a floating operand, cast text to REAL or DOUBLE first.
 
@@ -3224,7 +3237,7 @@ Column defaults admit variable-free scalar expressions with Immutable, Stable or
 
 | Code | Meaning |
 | --- | --- |
-| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; non-Boolean CHECK predicate; absent function/domain requested by DROP. |
+| COHSQLD001 | Invalid, duplicate, recursive or volatility-incompatible SQL definition; absent function/domain requested by DROP. |
 | COHSQLD002 | A persisted definition or column depends on the object being dropped. |
 | COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
 | COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
