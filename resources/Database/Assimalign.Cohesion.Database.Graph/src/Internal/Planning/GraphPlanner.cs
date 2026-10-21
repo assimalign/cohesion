@@ -1044,8 +1044,10 @@ internal sealed partial class GraphPlanner
     // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
     // predicates once and visits only each label's own index descriptors
     // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
-    // Without a seek, scan the first required label at any node position, as Neo4j's labelScanLeafPlanner
-    // reads HasLabels selections for pattern nodes (labelScanLeafPlanner.scala:45-46, :73-78).
+    // Without a seek, choose the smallest retained-posting estimate across required labels and
+    // pure pattern unions at every node position; ties keep source order, pattern before WHERE.
+    // Neo4j's labelScanLeafPlanner reads HasLabels selections for pattern nodes
+    // (labelScanLeafPlanner.scala:45-46, :73-78).
     private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables)
     {
         for (int i = 0; i < shape.Nodes.Count; i++)

@@ -2202,8 +2202,11 @@ latches. Writers follow transaction mutation gate -> database writer lock -> coo
 gate -> B+Tree latch -> page latches. Directory publication never holds _sync across an await.
 Cursor cleanup is in finally for normal exhaustion, cancellation and exceptions. Current shared
 BTreeCursor operations complete synchronously; OpenCursor still materializes a selected range
-under its latch (#1542). Instance-local work counters and a nonparallel stress test cover reader
-overlap with replacement, commit, rollback and purge, plus interruption inside a mutation bracket.
+under its latch (#1542). Anchor tests bound selected posting visits so background maintenance
+cannot disturb their measurements. A nonparallel, iteration-bounded stress test holds a posting
+cursor across replacement, commit/rollback and purge, asserts overlap counters, and checks a
+one-node decode bound with unrelated nodes present after both tasks stop; interruption inside
+a mutation bracket is tested separately.
 
 Each label/property definition owns a B+Tree whose object ID is its durable definition
 identity. Keys consist of the shared `DatabaseKeyWriter` scalar encoding followed by

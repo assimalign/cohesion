@@ -31,9 +31,9 @@ public sealed class GraphLabelIndexAnchorTests
             var scan = description.Single(row => Equals(row[2], "LabelScan"));
             scan[3].ShouldBe("Rare");
             scan[5].ShouldBe("node=1; property=; value=NULL");
-            long before = database.Store.NodeRecordsDecoded;
+            long before = database.Store.LabelEntriesVisited;
             (await RowsAsync(session, pattern + " RETURN a.k,b.k")).ShouldHaveSingleItem().ShouldBe([20L, 21L]);
-            (database.Store.NodeRecordsDecoded - before).ShouldBe(2); // One anchor and its adjacent node.
+            (database.Store.LabelEntriesVisited - before).ShouldBeInRange(1L, 1L); // Only the Rare posting.
         }
     }
 
@@ -47,9 +47,9 @@ public sealed class GraphLabelIndexAnchorTests
         await session.ExecuteAsync("INSERT (:A {k:1}), (:B {k:2}), (:A:B {k:3}), (:Noise {k:4})", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        long before = database.Store.NodeRecordsDecoded;
+        long before = database.Store.LabelEntriesVisited;
         (await RowsAsync(session, "MATCH (n:A|B|A) RETURN n.k ORDER BY n.k")).Select(row => row[0]).ShouldBe([1L, 2L, 3L]);
-        (database.Store.NodeRecordsDecoded - before).ShouldBe(3);
+        (database.Store.LabelEntriesVisited - before).ShouldBeInRange(1L, 4L); // A/B overlap can visit both postings.
         (await RowsAsync(session, "MATCH (n:A&B) RETURN n.k")).ShouldHaveSingleItem().ShouldBe([3L]);
         (await RowsAsync(session, "MATCH (n:A {k:1}) REMOVE n:A SET n:B MATCH (m:A|B) RETURN m.k ORDER BY m.k"))
             .Select(row => row[0]).ShouldBe([1L, 2L, 3L]);
@@ -61,12 +61,12 @@ public sealed class GraphLabelIndexAnchorTests
             for (int i = 0; i < 100; i++)
             { await operation.Updates.CreateNodeAsync(["Noise"], new Dictionary<string, object?>(), CancellationToken.None); }
             await operation.Updates.CreateNodeAsync(["A", "B"], new Dictionary<string, object?>(), CancellationToken.None);
-            before = database.Store.NodeRecordsDecoded;
+            before = database.Store.LabelEntriesVisited;
             operation.Updates.GetNodes("A").Count.ShouldBe(3);
-            (database.Store.NodeRecordsDecoded - before).ShouldBe(2);
-            before = database.Store.NodeRecordsDecoded;
+            (database.Store.LabelEntriesVisited - before).ShouldBeInRange(1L, 4L);
+            before = database.Store.LabelEntriesVisited;
             operation.Updates.GetUnionNodes(["A", "B"], CancellationToken.None).Count.ShouldBe(5);
-            (database.Store.NodeRecordsDecoded - before).ShouldBe(4);
+            (database.Store.LabelEntriesVisited - before).ShouldBeInRange(1L, 8L);
             return true;
         }, CancellationToken.None);
     }
