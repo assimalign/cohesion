@@ -55,7 +55,7 @@ public sealed class SqlBoundedExecutionTests
         // Assert
         _output.WriteLine($"ordered={ordered}, eager={eager}, limited={limited}");
         if (!ordered) { limited.ShouldBeLessThan(eager / 10); }
-        else { limited.ShouldBeLessThan(eager); }
+        else { session.LastStatementMetrics.ShouldNotBeNull().PeakOrderedRows.ShouldBe(10); }
 
         long Measure(string sql)
         {
@@ -150,12 +150,19 @@ public sealed class SqlBoundedExecutionTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1,'b'),(2,NULL),(3,'A'),(4,'a'),(5,'B'),(6,'c'),(7,NULL),(8,'b')", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        foreach (string direction in new[] { "ASC NULLS FIRST", "ASC NULLS LAST", "DESC NULLS FIRST", "DESC NULLS LAST" })
+        foreach (var (direction, expected) in new (string, object?[])[]
+        {
+            ("ASC NULLS FIRST", [2, 7, 3, 4, 1, 5, 8, 6]),
+            ("ASC NULLS LAST", [3, 4, 1, 5, 8, 6, 2, 7]),
+            ("DESC NULLS FIRST", [2, 7, 6, 1, 5, 8, 3, 4]),
+            ("DESC NULLS LAST", [6, 1, 5, 8, 3, 4, 2, 7]),
+        })
         {
             string ordered = query + $" ORDER BY label {direction}";
             var all = await RowsAsync(session, ordered);
             var limited = await RowsAsync(session, ordered + " LIMIT 3 OFFSET 2");
-            limited.Select(row => row[0]).ShouldBe(all.Skip(2).Take(3).Select(row => row[0]), ordered);
+            all.Select(row => row[0]).ShouldBe(expected, ordered);
+            limited.Select(row => row[0]).ShouldBe(expected.Skip(2).Take(3), ordered);
         }
     }
 
