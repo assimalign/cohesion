@@ -64,6 +64,9 @@ internal sealed class SqlStatementMetrics
 
     internal int ReferenceIntentLockBatches { get; set; }
 
+    internal int ConstraintLookupBuilds { get; set; }
+    internal int LiveIndexBuilds { get; set; }
+
     internal SqlStatementReferences? References { get; set; }
 
     /// <summary>

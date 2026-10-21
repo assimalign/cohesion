@@ -803,9 +803,8 @@ flowchart TD
   call, failure or not.
 - **Name lookups beside expressions.** An index-driven join reads the inner columns of
   its seek prefix from the plan (`SqlJoinIndexPath.InnerColumns`) instead of finding
-  each by name for every outer row. Foreign-key checks and cascades still find their
-  key columns by name for each row they check; binding those ordinals per table
-  version, beside the CHECK trees, is a follow-up.
+  each by name for every outer row. Foreign-key checks and cascades use the key
+  projections bound beside the CHECK trees in `SqlBoundTable` (#1366).
 - **Planner walkers.** `SqlPlanner.Children` returns the shared empty sequence for a
   node without operands and a chain's or call's own operand list, so the walkers that
   visit every node of every statement no longer allocate an iterator per leaf. With the
@@ -4393,6 +4392,25 @@ locks a discovered row before preparing its adjacent tables, and no latch crosse
 The cache expires at statement end even inside an explicit transaction. Snapshot's
 BEGIN-time catalog image serves metadata relations; integrity checks use the live,
 lock-protected definitions and latest-state row checks, never that older image.
+
+Foreign-key child ordinals bind when their owning `SqlBoundTable` is built; referenced
+ordinals and effective collations bind lazily in the parent's bound version (#1366).
+The immutable constraint's column-list identity keys each projection, with weak keys
+so replaced child constraints cannot accumulate in a long-lived parent. Parent and
+child version changes invalidate their own projections independently, including an
+unrelated DROP COLUMN that shifts logical ordinals. Concurrent first users publish
+one projection under a private binding lock; it is released before any row lookup.
+Statement edges carry both projections through cascade frames, final-state UPDATE
+checks, ON CONFLICT and SET actions. Index choice, reordered equality-prefix mappings
+and live-index version wrappers are prepared once per statement/table or key;
+seek encoding uses the bound index ordinals. Lookups and tombstones retain the unchecked
+key builder; keys actually written still pass the checked builder (#1266).
+
+The local ARM64 NativeAOT proxy deletes 2,000 indexed chain rows after warm-up,
+using minimum allocation across three rounds: QC1 fell from 12,090 to 7,719 bytes
+per deleted row and QC200 from 158,395 to 7,724. The extra catalog now contributes
+one discovery pass per reached table, rather than a pass per row. These are local
+proxies; the program's SF10 gate remains in cohesion-benchmarks (#1511).
 
 ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121).
 Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate

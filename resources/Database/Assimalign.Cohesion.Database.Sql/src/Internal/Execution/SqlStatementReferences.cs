@@ -8,8 +8,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 // this state never survives into the next statement, including in an explicit transaction.
 internal sealed class SqlStatementReferences
 {
-    internal Dictionary<ulong, IReadOnlyList<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)>> Incoming { get; } = [];
+    internal Dictionary<ulong, IReadOnlyList<SqlBoundReference>> Incoming { get; } = [];
     internal Dictionary<SqlCatalogConstraint, SqlCatalogTable> Parents { get; } = [];
+    internal Dictionary<SqlCatalogConstraint, SqlBoundReference> Bindings { get; } = [];
+    internal Dictionary<SqlBoundConstraintKey, SqlConstraintLookup> Lookups { get; } = [];
+    internal Dictionary<SqlCatalogTable, List<SqlLiveIndex>> LiveIndexes { get; } = [];
     internal HashSet<ulong> IncomingLocks { get; } = [];
     internal HashSet<ulong> OutgoingLocks { get; } = [];
 }

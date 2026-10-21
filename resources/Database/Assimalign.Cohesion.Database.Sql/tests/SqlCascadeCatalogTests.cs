@@ -57,6 +57,8 @@ public sealed class SqlCascadeCatalogTests
                 metrics.IncomingReferenceBuilds.ShouldBe(1);
                 metrics.ReferenceCatalogTableVisits.ShouldBe(tables);
                 metrics.ReferenceIntentLockBatches.ShouldBe(2);
+                metrics.LiveIndexBuilds.ShouldBe(1);
+                metrics.ConstraintLookupBuilds.ShouldBe(action == "CASCADE" ? 1 : 2);
                 _output.WriteLine($"{action}: catalog={tables}, round={round}, ms={milliseconds:F3}, catalog visits={metrics.ReferenceCatalogTableVisits}");
             }
         }

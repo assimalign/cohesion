@@ -75,15 +75,6 @@ internal sealed partial class SqlPlanExecutor
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
-    /// <summary>
-    /// A registered index paired with its live tree and resolved key ordinals —
-    /// what one statement's maintenance loop works with.
-    /// </summary>
-    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, BTreeIndex Index, int[] KeyOrdinals)
-    {
-        internal BTreeRecordVersionIndex Versions { get; } = BTreeRecordVersionIndex.Create(Index);
-    }
-
     internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -437,7 +428,7 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var indexes = GetLiveIndexes(plan.Table);
+        var indexes = GetLiveIndexes(plan.Table, statement);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
         // Fully drain and dispose the candidate cursor before row-lock waits or writes.
@@ -497,9 +488,8 @@ internal sealed partial class SqlPlanExecutor
         // the statement leaves alone are already covered by the locks above.
         var released = new List<SqlParentReference>();
         CollectReleasedReferences(plan.Table, replacements.ConvertAll(row => row.OldValues), released, statement, cancellationToken,
-            changed: (constraint, index) => constraint.Columns.Any(column =>
+            changed: (reference, index) => reference.ChildKey.Ordinals.Any(ordinal =>
             {
-                int ordinal = FindColumnOrdinal(plan.Table, column);
                 return !ValuesEqual(replacements[index].NewValues[ordinal], replacements[index].OldValues[ordinal]);
             }));
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
@@ -616,7 +606,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
                 TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
-                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
+                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                     SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
                 if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
                     returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
@@ -628,7 +618,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
-                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table), update.Table, update.OldValues,
+                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.OldValues,
                     SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
             }
             foreach (var update in updates.Values)
@@ -638,7 +628,7 @@ internal sealed partial class SqlPlanExecutor
                 statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                 try
                 {
-                    await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table), update.Table, update.NewValues,
+                    await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                 }
                 catch (IndexUniqueViolationException exception)
@@ -710,7 +700,7 @@ internal sealed partial class SqlPlanExecutor
     /// rules). Index key columns are validated at plan/DDL time, so a miss here
     /// is a programming error surfaced loudly.
     /// </summary>
-    private static int FindColumnOrdinal(SqlCatalogTable table, string columnName)
+    internal static int FindColumnOrdinal(SqlCatalogTable table, string columnName)
     {
         for (int i = 0; i < table.Columns.Count; i++)
         {
@@ -727,14 +717,12 @@ internal sealed partial class SqlPlanExecutor
     /// Resolves the table's registered indexes to their live trees and key
     /// ordinals for one statement.
     /// </summary>
-    private List<SqlLiveIndex> GetLiveIndexes(SqlCatalogTable table)
+    private List<SqlLiveIndex> GetLiveIndexes(SqlCatalogTable table, SqlStatementContext statement)
     {
+        var cached = statement.References.LiveIndexes;
+        if (cached.TryGetValue(table, out var found)) { return found; }
+        statement.Metrics.LiveIndexBuilds++;
         var metadataList = _catalog.GetIndexes(table.ObjectId);
-
-        if (metadataList.Count == 0)
-        {
-            return new List<SqlLiveIndex>();
-        }
 
         var result = new List<SqlLiveIndex>(metadataList.Count);
 
@@ -745,15 +733,12 @@ internal sealed partial class SqlPlanExecutor
                 throw new DatabaseException($"Index '{metadata.Name}' on '{table.Schema}.{table.Name}' is unavailable; writes cannot bypass its constraints.");
             }
 
-            var ordinals = new int[metadata.ColumnNames.Count];
-            for (int i = 0; i < ordinals.Length; i++)
-            {
-                ordinals[i] = FindColumnOrdinal(table, metadata.ColumnNames[i]);
-            }
+            var ordinals = _definitions.Get(table).GetKey(metadata.ColumnNames).Ordinals;
 
             result.Add(new SqlLiveIndex(metadata, index, ordinals));
         }
 
+        cached.Add(table, result);
         return result;
     }
 
@@ -1458,9 +1443,9 @@ internal sealed partial class SqlPlanExecutor
         BTreeIndex index,
         SqlStatementContext statement,
         CancellationToken cancellationToken,
-        TransactionSnapshot? snapshotOverride = null)
+        TransactionSnapshot? snapshotOverride = null, int[]? indexOrdinals = null)
     {
-        var range = BuildSeekRange(table, seek);
+        var range = BuildSeekRange(table, seek, indexOrdinals ?? _definitions.Get(table, cancellationToken).GetKey(seek.Index.ColumnNames).Ordinals);
         var snapshot = snapshotOverride ?? statement.Snapshot;
         var defaults = _definitions.Get(table, cancellationToken).MissingValues;
 
@@ -1521,13 +1506,13 @@ internal sealed partial class SqlPlanExecutor
     /// prefix P sorts in [P, successor(P)), where successor increments the last
     /// non-0xFF byte.
     /// </summary>
-    private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
+    private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals)
     {
         var prefixWriter = new DatabaseKeyWriter();
 
         for (int i = 0; i < seek.EqualityValues.Count; i++)
         {
-            int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
+            int ordinal = indexOrdinals[i];
             SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
@@ -1543,7 +1528,7 @@ internal sealed partial class SqlPlanExecutor
                 IsEndInclusive: false);
         }
 
-        int rangeOrdinal = FindColumnOrdinal(table, seek.Index.ColumnNames[seek.EqualityValues.Count]);
+        int rangeOrdinal = indexOrdinals[seek.EqualityValues.Count];
         var rangeType = table.Columns[rangeOrdinal].Type.Type;
         var rangeCollation = table.Columns[rangeOrdinal].Collation ?? _catalog.DefaultCollation;
 

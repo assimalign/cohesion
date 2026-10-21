@@ -179,7 +179,7 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        var adopted = new SqlBindingEntry<SqlBoundTable>(new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, bound.Domains, bound.MissingValues));
+        var adopted = new SqlBindingEntry<SqlBoundTable>(new SqlBoundTable(published, checks.ToArray(), bound.DefaultValues, _catalog.DefaultCollation, bound.Domains, bound.MissingValues));
         return state.Bound.GetValue(published, _ => adopted).Get(cancellationToken);
     }
 
@@ -346,7 +346,7 @@ internal sealed class SqlBoundTableCache
             }
         }
 
-        return new SqlBoundTable(table, checks.ToArray(), defaults, domains?.ToArray(), missing);
+        return new SqlBoundTable(table, checks.ToArray(), defaults, _catalog.DefaultCollation, domains?.ToArray(), missing);
     }
 
     /// <summary>

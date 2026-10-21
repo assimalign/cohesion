@@ -195,9 +195,8 @@ internal sealed partial class SqlPlanExecutor
             await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
             var released = new List<SqlParentReference>();
             CollectReleasedReferences(table, replacements.Select(write => write.OldValues!).ToList(), released, statement, cancellationToken,
-                changed: (constraint, index) => constraint.Columns.Any(column =>
+                changed: (reference, index) => reference.ChildKey.Ordinals.Any(ordinal =>
                 {
-                    int ordinal = FindColumnOrdinal(table, column);
                     return !ValuesEqual(replacements[index].Values[ordinal], replacements[index].OldValues![ordinal]);
                 }));
             if (ContendedUpsertParent(released, statement) is { } releasedParent)

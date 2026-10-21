@@ -58,7 +58,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
-        var indexes = GetLiveIndexes(table);
+        var indexes = GetLiveIndexes(table, statement);
         EnsureUpsertIndexes(table, indexes, onConflict);
         var bound = _definitions.Get(table, cancellationToken);
         var defaults = bound.DefaultValues;
