@@ -217,6 +217,49 @@ public sealed class SqlTransactionRollbackTests
             .ShouldBe([(1L, 10L)]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Commit: a full-buffer drain before the commit append aborts and takes storage offline")]
+    public async Task CommitAsync_FullBufferDrainBeforeCommitRecord_ShouldAbortAndGoOffline()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
+        await using var engine = SqlDatabaseEngine.Create("commit-drain", QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync("drain-db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT)", cancellationToken: CancellationToken.None);
+        await using var transaction = await session.BeginTransactionAsync(cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None);
+        var journal = database.DataStorage.WriteAheadJournal;
+        JournalFrames.FillAppendBuffer(journal);
+        long lastBeforeCommit = journal.LastLsn;
+        journal.WrittenLsn.ShouldBeLessThan(lastBeforeCommit);
+
+        // Act: the pre-append drain fails before the commit record gets an LSN.
+        DatabaseOfflineException error;
+        using (var failures = FaultInjectingJournalSqlStorageStrategy.FailJournalWrites(1))
+        {
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync(CancellationToken.None));
+            failures.Remaining.ShouldBe(0);
+        }
+
+        // Assert: the kernel aborted; the engine translates the cause as offline, not unconfirmed.
+        journal.LastLsn.ShouldBe(lastBeforeCommit);
+        error.Code.ShouldBe("COHSQLT004");
+        var offline = StorageOfflineException.Find(error).ShouldNotBeNull();
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.CommitRecordWritten.ShouldBeFalse();
+        offline.InnerException.ShouldBeOfType<IOException>();
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeNull();
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(CancellationToken.None));
+        await session.DisposeAsync();
+        await database.DisposeAsync();
+        var recovered = await engine.OpenDatabaseAsync("drain-db", CancellationToken.None);
+        await using var observer = await recovered.CreateSessionAsync(CancellationToken.None);
+        (await Rows(observer, "SELECT id FROM t")).ShouldBeEmpty();
+    }
+
     // The engine's own maintenance workers stay out of the way, the deferred-undo retry included:
     // these tests drive the purge pass and the checkpoint themselves.
     private static SqlDatabaseEngineOptions QuietOptions(FaultInjectingJournalSqlStorageStrategy strategy) => new()

@@ -253,6 +253,22 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         }
     }
 
+    // Test-only completion wait: does not collect outcomes or alter the worker's schedule.
+    internal bool WaitForIdle(TimeSpan timeout)
+    {
+        long started = Stopwatch.GetTimestamp();
+        lock (_sync)
+        {
+            while (_running > 0)
+            {
+                var remaining = timeout - Stopwatch.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero) { return false; }
+                Monitor.Wait(_sync, remaining);
+            }
+            return true;
+        }
+    }
+
     private void StartRunner(object database, Lane lane)
     {
         try

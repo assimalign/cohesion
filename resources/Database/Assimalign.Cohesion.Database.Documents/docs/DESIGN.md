@@ -1334,6 +1334,31 @@ its data and its journal (up to the checkpoint size, briefly twice that while th
 past it, released by the checkpoint). The reasoning is in `Database.Storage` DESIGN.md
 ("Capacity", "Checkpoint triggers").
 
+If history maintenance fails after a failed purge pass, the purge exception escapes unchanged,
+with the maintenance exception attached as Data["HistoryMaintenanceFailure"]. Busy, cancellation
+and disposal classifications survive cleanup; a maintenance failure alone escapes normally.
+
+Persistent storage refusals (#1277) are reported once through the worker's per-database
+failure path after at least three refused attempts spanning FailureBackoff on the engine clock
+against the same blocked page and owning bracket. Not-due retries do not count. A changed blocker
+or completion of the refused work resets the episode; unrelated writes and WAL activity do not.
+This follows PostgreSQL's retry bound for the conflicting lock
+(src/backend/access/heap/vacuumlazy.c:3205-3219). A busy full pass retries after FailureBackoff,
+so a client bracket can clear without waiting a MaintenanceInterval. Close, drop or replacement
+ends the episode. This report sets the
+observational worker fault until the work completes, but never starts the offline window or
+increments its minimum-pass count or makes HasFailingWorker true (owner default). Clients remain
+served throughout an observational refusal. A foreign-storage refusal is an operational error
+and is reported immediately through the normal offline-capable failure path. The shared
+checkpoint worker makes the same distinction; a statement-deferred foreign-storage checkpoint
+failure reaches the next checkpoint call rather than being swallowed as busy.
+
+Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
+assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
+the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
+writer. This is distinct from a failed drain after buffering COMMIT, whose outcome is
+committed-unconfirmed. The journal-buffer fault helper uses only the public journal API.
+
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a

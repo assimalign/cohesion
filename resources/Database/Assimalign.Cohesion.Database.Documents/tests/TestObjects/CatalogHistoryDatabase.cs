@@ -26,6 +26,8 @@ internal sealed class CatalogHistoryDatabase : IAsyncDisposable
     internal DocumentCatalog Catalog { get; set; }
     internal bool FailUndo { get => _records.FailUndo; set => _records.FailUndo = value; }
 
+    internal Exception? UndoFailure { get => _records.UndoFailure; set => _records.UndoFailure = value; }
+
     public async ValueTask DisposeAsync()
     {
         _records.FailUndo = false;
@@ -40,21 +42,22 @@ internal sealed class CatalogHistoryDatabase : IAsyncDisposable
         internal FaultingRecordSpace(TransactionRecordSpace inner) => _inner = inner;
 
         internal bool FailUndo { get; set; }
+        internal Exception? UndoFailure { get; set; }
 
         protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex)
         {
-            if (FailUndo) { throw new IOException("Injected catalog undo failure."); }
+            if (FailUndo) { throw UndoFailure ?? new IOException("Injected catalog undo failure."); }
             return _inner.Read(pageId, slotIndex);
         }
 
         protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
         {
-            if (FailUndo) { throw new IOException("Injected catalog undo failure."); }
+            if (FailUndo) { throw UndoFailure ?? new IOException("Injected catalog undo failure."); }
             _inner.Update(transaction, pageId, slotIndex, record);
         }
         protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
         {
-            if (FailUndo) { throw new IOException("Injected catalog undo failure."); }
+            if (FailUndo) { throw UndoFailure ?? new IOException("Injected catalog undo failure."); }
             _inner.Delete(transaction, pageId, slotIndex);
         }
         protected override ulong PackLocationCore(PageId pageId, int slotIndex) => _inner.PackLocation(pageId, slotIndex);

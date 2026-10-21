@@ -1125,6 +1125,10 @@ database's gate while another is written past forty sizes, with the written data
 truncated on average before it held four sizes, and the held one checkpointed as its statement
 ends.
 
+Foreign-storage transaction refusals are operational failures (#1277), including a checkpoint
+run by a statement for a deferred request. They are retained for the next worker checkpoint
+call; only ordinary storage-bracket contention is retried as busy.
+
 **A checkpoint is refused inside a statement apply.** The semaphore is not reentrant, so a
 checkpoint asked for from an `ApplyStatementAsync` callback would wait forever for the semaphore
 its own caller holds. The coordinator marks the apply's asynchronous flow (an `AsyncLocal`) and

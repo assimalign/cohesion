@@ -134,6 +134,12 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
         return ValueTask.CompletedTask;
     }
 
+    // Test-only hook on the type that dispatches the checkpoint to its lane.
+    internal Action<TDatabase>? BeforeCheckpoint { get; set; }
+
+    // Deterministic tests wait for lane completion before running the collecting pass.
+    internal bool WaitForCheckpoints(TimeSpan timeout) => _lanes.WaitForIdle(timeout);
+
     /// <summary>Gets the engine's open databases.</summary>
     /// <returns>The snapshot of the engine's open databases.</returns>
     protected abstract TDatabase[] GetDatabases();
@@ -274,7 +280,11 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
             }
 
             // The worker waits for the checkpoint only while no other database needs it.
-            if (!_lanes.Run(database, () => Checkpoint(database, interval, cancellationToken), CheckpointNeededSignal, wait, cancellationToken, out outcome))
+            if (!_lanes.Run(database, () =>
+            {
+                BeforeCheckpoint?.Invoke(database);
+                return Checkpoint(database, interval, cancellationToken);
+            }, CheckpointNeededSignal, wait, cancellationToken, out outcome))
             {
                 // Left running on its lane; a later pass collects it.
                 if (!unfinishedReported)
@@ -303,7 +313,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
                 // Deferred to the statement holding the apply gate, which runs it as it ends.
                 break;
 
-            case StorageTransactionException:
+            case StorageTransactionException { Code: not StorageTransactionErrorCode.ForeignStorage }:
                 // A transaction is active on this storage; retry on the next pass.
                 break;
 
