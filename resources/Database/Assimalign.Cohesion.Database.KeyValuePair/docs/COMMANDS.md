@@ -69,7 +69,8 @@ A missing parameter, a non-`@` operand token, or a wrong operand type is a
 command never reaches execution.
 
 For `SCAN`, a zero-length `@prefix`, `@start` or `@end` byte array means an absent
-bound (#1088). Thus `SCAN TO @empty` equals `SCAN`, and `SCAN PREFIX @p FROM @empty`
+bound (#1088). Previously, `TO @empty` returned no entries; it now means no upper bound.
+Thus `SCAN TO @empty` equals `SCAN`, and `SCAN PREFIX @p FROM @empty`
 equals `SCAN PREFIX @p`. A null operand remains a `COHKV012` parse error. An empty
 operand still counts as a clause: `FROM @empty FROM @s` is `COHKV010`.
 `KeyValueScanOptions`, `KeyValueScanRange` and `KeyValueScanRequest` use the same
