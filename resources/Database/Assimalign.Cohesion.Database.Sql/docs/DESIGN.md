@@ -4375,6 +4375,25 @@ transaction in state '…'".
 
 ## Integrity constraints
 
+Incoming references are cached by parent ObjectId in shared statement state (#1198),
+once per table reached; cascade frames share that list. Outgoing parent resolution and
+adjacent-table intent-lock batches are shared too, including SET NULL/SET DEFAULT fan-out.
+Discovery costs O(reached tables × catalog definitions), independently of deleted row count.
+The deterministic catalog-visit counters and the 1-versus-200-table ratio guard in
+`SqlCascadeCatalogTests` cover cascade and restrict paths.
+
+Cache validity follows the object locks: the writer takes IX on its own table before
+discovery, then IS on adjacent tables in ObjectId order, and verifies their immutable
+definitions after every wait. Adding an incoming FK requires X on its referenced parent
+(`LockReferencedTablesAsync`); removing or changing one requires X on its child. A child
+that changes between discovery and its IS grant causes a retry refusal before any write.
+Once the grants are held, neither endpoint can change until transaction end. Row locks,
+then sorted unique-key locks, precede the apply gate and storage/index latches; a cascade
+locks a discovered row before preparing its adjacent tables, and no latch crosses a wait.
+The cache expires at statement end even inside an explicit transaction. Snapshot's
+BEGIN-time catalog image serves metadata relations; integrity checks use the live,
+lock-protected definitions and latest-state row checks, never that older image.
+
 ON DELETE supports CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT (#1121).
 Omitted SQL actions are NO ACTION; nondeferrable RESTRICT and NO ACTION both validate
 the complete statement result. The cascade walk collects only CASCADE edges, with no

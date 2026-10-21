@@ -32,7 +32,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private sealed class SqlCascadeFrame
     {
-        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming,
+        public SqlCascadeFrame(SqlCatalogTable table, object?[] values, IReadOnlyList<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> incoming,
             int lastCascade)
         {
             Table = table;
@@ -48,7 +48,7 @@ internal sealed partial class SqlPlanExecutor
         public object?[] Values { get; }
 
         /// <summary>The references into <see cref="Table"/>, read once the row was locked.</summary>
-        public List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> Incoming { get; }
+        public IReadOnlyList<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> Incoming { get; }
 
         /// <summary>
         /// The index in <see cref="Incoming"/> of the last reference this row's
@@ -146,6 +146,8 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask AcquireOutgoingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        await LockReferenceTableAsync(table, statement, cancellationToken).ConfigureAwait(false);
+        if (statement.References.OutgoingLocks.Contains(table.ObjectId)) { return; }
         var parents = new SortedSet<ulong>();
         foreach (var constraint in table.Constraints)
         {
@@ -154,15 +156,18 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
-            {
-                throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' is unavailable.");
-            }
+            var parent = ReferenceParent(table, constraint, statement);
 
             parents.Add(parent.ObjectId);
         }
 
         await AcquireIntentSharedLocksAsync(parents, statement, cancellationToken).ConfigureAwait(false);
+        foreach (var constraint in table.Constraints)
+        {
+            if (constraint.Kind == SqlCatalogConstraintKind.Reference) { EnsureCurrentDefinition(ReferenceParent(table, constraint, statement)); }
+        }
+        statement.References.OutgoingLocks.Add(table.ObjectId);
+        statement.Metrics.ReferenceIntentLockBatches++;
     }
 
     /// <summary>
@@ -172,13 +177,18 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask AcquireIncomingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        await LockReferenceTableAsync(table, statement, cancellationToken).ConfigureAwait(false);
+        if (statement.References.IncomingLocks.Contains(table.ObjectId)) { return; }
         var children = new SortedSet<ulong>();
-        foreach (var (child, _) in IncomingReferences(table))
+        foreach (var (child, _) in IncomingReferences(table, statement))
         {
             children.Add(child.ObjectId);
         }
 
         await AcquireIntentSharedLocksAsync(children, statement, cancellationToken).ConfigureAwait(false);
+        foreach (var (child, _) in IncomingReferences(table, statement)) { EnsureCurrentDefinition(child); }
+        statement.References.IncomingLocks.Add(table.ObjectId);
+        statement.Metrics.ReferenceIntentLockBatches++;
     }
 
     private static async ValueTask AcquireIntentSharedLocksAsync(SortedSet<ulong> objectIds, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -276,16 +286,7 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
-            {
-                if (!string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                parent = table;
-            }
+            var parent = ReferenceParent(table, constraint, statement);
 
             for (int index = 0; index < rows.Count; index++)
             {
@@ -334,6 +335,56 @@ internal sealed partial class SqlPlanExecutor
     // instead (EnsureSnapshotSeesCascadeRow, #1370).
     private static TransactionSnapshot ConstraintCurrentSnapshot(SqlStatementContext statement)
         => new(statement.Transaction.Sequence, new TransactionSequence(ulong.MaxValue), new TransactionSequence(ulong.MaxValue), Array.Empty<TransactionSequence>());
+
+    private IReadOnlyList<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> IncomingReferences(
+        SqlCatalogTable parent, SqlStatementContext statement)
+    {
+        var incoming = statement.References.Incoming;
+        if (incoming.TryGetValue(parent.ObjectId, out var cached)) { return cached; }
+        var result = new List<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)>();
+        foreach (var child in _catalog.Tables)
+        {
+            statement.Metrics.ReferenceCatalogTableVisits++;
+            foreach (var constraint in child.Constraints)
+            {
+                if (constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                    string.Equals(constraint.ReferencedSchema, parent.Schema, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(constraint.ReferencedTable, parent.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Add((child, constraint));
+                }
+            }
+        }
+        statement.Metrics.IncomingReferenceBuilds++;
+        incoming.Add(parent.ObjectId, result);
+        return result;
+    }
+
+    private SqlCatalogTable ReferenceParent(SqlCatalogTable child, SqlCatalogConstraint constraint, SqlStatementContext statement)
+    {
+        var parents = statement.References.Parents;
+        if (parents.TryGetValue(constraint, out var parent)) { return parent; }
+        if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out parent))
+        {
+            if (string.Equals(constraint.ReferencedSchema, child.Schema, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(constraint.ReferencedTable, child.Name, StringComparison.OrdinalIgnoreCase)) { parent = child; }
+            else { throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' does not exist."); }
+        }
+        parents.Add(constraint, parent);
+        return parent;
+    }
+
+    // Direct writers take own-table IX, adjacent-table IS in object-id order, then row
+    // locks. Cascades take IX and the discovered row before its adjacent-table IS locks.
+    // Both finish row locks before sorted unique-key locks, the apply gate and latches. No latch
+    // crosses a lock wait. DDL takes X on the child or referenced parent; recheck definitions
+    // after waiting for IS so a cached edge can never bind a replaced table version.
+    private async ValueTask LockReferenceTableAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+            LockResource.Object(table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentDefinition(table);
+    }
 
     private IEnumerable<(SqlCatalogTable Child, SqlCatalogConstraint Constraint)> IncomingReferences(SqlCatalogTable parent)
         => _catalog.Tables.SelectMany(child => child.Constraints
@@ -496,18 +547,8 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
             if (checksOnly) { continue; }
-            if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
-            {
-                if (string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    parent = table;
-                }
-                else
-                {
-                    throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' does not exist.");
-                }
-            }
+            var parent = ReferenceParent(table, constraint, statement);
+
             HashSet<object?[]>? selfKeys = null;
             if (parent.ObjectId == table.ObjectId)
             {
@@ -562,7 +603,7 @@ internal sealed partial class SqlPlanExecutor
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
         SqlConstraintUpdates? updates = null)
     {
-        foreach (var (child, constraint) in IncomingReferences(table))
+        foreach (var (child, constraint) in IncomingReferences(table, statement))
         {
             var keys = constraint.ReferencedColumns!.Select(column => oldValues[FindColumnOrdinal(table, column)]).ToArray();
             if (keys.Any(value => value is null))
@@ -680,6 +721,7 @@ internal sealed partial class SqlPlanExecutor
 
         if (scannedTables.Add(table.ObjectId))
         {
+            EnsureCurrentDefinition(table);
             await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
             await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
         }
@@ -691,7 +733,7 @@ internal sealed partial class SqlPlanExecutor
 
         // The incoming references are read after the row and its table are locked,
         // exactly where the recursive walk read them.
-        var incoming = IncomingReferences(table).ToList();
+        var incoming = IncomingReferences(table, statement);
         int lastCascade = incoming.Count - 1;
         while (lastCascade >= 0 && CascadeKeys(table, values, incoming[lastCascade].Constraint) is null)
         {
@@ -874,7 +916,7 @@ internal sealed partial class SqlPlanExecutor
         // which is what makes the latest-state child reads below sound.
         foreach (var deletion in deletions.Values)
         {
-            foreach (var (child, constraint) in IncomingReferences(deletion.Table))
+            foreach (var (child, constraint) in IncomingReferences(deletion.Table, statement))
             {
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
                 {

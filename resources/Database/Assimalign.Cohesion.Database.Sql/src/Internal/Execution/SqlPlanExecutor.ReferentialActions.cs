@@ -90,12 +90,12 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        SqlStatementContext statement, CancellationToken cancellationToken)
+        HashSet<ulong> scannedTables, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var updates = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
         foreach (var deletion in deletions.Values)
         {
-            foreach (var (child, constraint) in IncomingReferences(deletion.Table))
+            foreach (var (child, constraint) in IncomingReferences(deletion.Table, statement))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
@@ -114,9 +114,12 @@ internal sealed partial class SqlPlanExecutor
                         await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken).ConfigureAwait(false);
                         EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
                             constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
-                        await AcquireIncomingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
-                        await AcquireOutgoingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
-                        EnsureCurrentDefinition(child);
+                        if (scannedTables.Add(child.ObjectId))
+                        {
+                            EnsureCurrentDefinition(child);
+                            await AcquireIncomingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
+                            await AcquireOutgoingReferenceIntentLocksAsync(child, statement, cancellationToken).ConfigureAwait(false);
+                        }
                         update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
                         updates.Add(key, update);
                     }

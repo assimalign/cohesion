@@ -600,7 +600,7 @@ internal sealed partial class SqlPlanExecutor
         // instead of reading the tombstones as absence.
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-        var updates = await CollectReferentialUpdatesAsync(deletions, statement, cancellationToken).ConfigureAwait(false);
+        var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
         ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
         await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>

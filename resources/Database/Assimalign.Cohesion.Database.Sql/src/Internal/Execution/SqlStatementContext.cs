@@ -81,6 +81,8 @@ internal readonly struct SqlStatementContext
     /// </summary>
     internal SqlStatementMetrics Metrics { get; }
 
+    internal SqlStatementReferences References => Metrics.References ??= new SqlStatementReferences();
+
     /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
     internal string? ProvisioningSchema => (_names as ProvisioningNames)?.Schema;
 
