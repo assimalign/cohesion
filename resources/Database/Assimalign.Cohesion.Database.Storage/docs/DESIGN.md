@@ -89,6 +89,19 @@ StoragePageLatch.EnterRead(CancellationToken) observes cancellation while a writ
 
 ## The page model
 
+`Page.AsSpan` and `AsBodySpan` validate a single snapshot of the overflow body length
+before constructing a span (#1162), including over caller-owned memory. The owner default
+is to throw `StorageCorruptionException` with the page id for a length outside
+`0..Page.Size - Page.HeaderSize`; clamping could silently change the meaning of damaged
+content. Pool loads reuse the same check with the physical page id. Multi-page overflow
+storage remains reserved: `OverflowSize` currently means the body length inside one
+8 KiB buffer. The pointer constructor requires that full buffer; its length-taking overload
+rejects undersized caller memory before reading any header, and ignores extra bytes.
+A default page's span accessors throw `InvalidOperationException` before dereferencing.
+The memory-safety goal is shared with Neo4j's bounded cursor access
+(`community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnPageCursor.java:517-533`);
+Cohesion throws immediately rather than deferring the cursor's out-of-bounds flag.
+
 - **8 KiB pages, 96-byte header.** The header layout (`Page.Header`) is an explicit
   struct persisted on disk, so field offsets are a wire contract: id (0), LSN (8),
   checksum (16), flags (20), type (21), slot count (22), free-data end (24), overflow
@@ -2197,9 +2210,9 @@ to another page, and the dead space stays until its page holds no live record.
 (The SQL index seek and the version store used to read any `StorageException` from a record
 read as reclamation, `StorageCorruptionException` included; #1342 closed that with
 `Storage.TryReadRecord`, "Reading a record through a reference" above.)
-Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
-the header only because the pool refuses an oversized one at load, and a `Page` built
-over caller memory carries no such check. Each follow-up needs its own work item.
+Overflow pages themselves remain unimplemented. Their reserved body length is checked
+by both span accessors and the pool (#1162, "The page model"); caller memory follows the
+same throw-on-invalid-geometry rule. Compaction and multi-page overflow need their own work items.
 
 ## Measurements (#1251, 2026-10-04)
 
