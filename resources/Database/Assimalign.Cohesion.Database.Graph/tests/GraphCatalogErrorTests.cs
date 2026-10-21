@@ -7,10 +7,12 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
+[Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GraphCatalogErrorTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Catalog: deterministic metadata errors are caller failures")]
