@@ -35,8 +35,7 @@ public sealed class GraphOperationOutcomeTests
         int streams = 0;
         Action fail = () =>
         {
-            serverSession.BeforeResultWrite = null;
-            serverSession.BeforeTransportWrite = null;
+            if (!transport) { serverSession.BeforeResultWrite = null; }
             streams++;
             throw new ObjectDisposedException(transport ? "protocol channel" : "result materializer");
         };
@@ -62,8 +61,12 @@ public sealed class GraphOperationOutcomeTests
 
         // Assert
         streams.ShouldBe(1);
-        recorder.Events.ShouldNotContain(item => item.EventId == 7);
-        if (transport) { serverSession.CloseReason.ShouldBe(GraphDatabaseEventSource.CloseReason.TransportFailed); }
+        if (transport)
+        {
+            serverSession.CloseReason.ShouldBe(GraphDatabaseEventSource.CloseReason.Faulted);
+            recorder.Events.Where(item => item.EventId == 7).ShouldHaveSingleItem();
+        }
+        else { recorder.Events.ShouldNotContain(item => item.EventId == 7); }
         await using var observer = await session.Database.CreateSessionAsync(timeout.Token);
         (await GraphCatalogIntrospectionTests.Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
     }

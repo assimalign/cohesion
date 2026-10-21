@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
-  <data name="TransportDisposed" xml:space="preserve"><value>The graph protocol transport has been disposed.</value></data>
   <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>

@@ -11,9 +11,10 @@ outcome or inviting a duplicate retry.
 A CommitAsync or RollbackAsync that the closing coordinator refuses before claiming its
 end reports DatabaseException with structured COHDBG019 and ObjectDisposedException as
 its cause. The transaction ends without committing; database disposal aborts its context.
-An ODE from a protocol read/write is a transport failure and closes the session without an
-error write. A non-transport ODE during result streaming aborts an explicit transaction and
-reports COHDBG019 while keeping the authenticated session ready.
+An ODE from a protocol read/write faults the server session without any further error write,
+including the generic pump's best-effort Internal response. A non-transport ODE during result
+streaming aborts an explicit transaction and reports COHDBG019 while keeping the authenticated
+session ready.
 
 Runtime storage failures, including wrapped I/O, use structured `COHDBG006` Diagnostics and
 plain embedded messages, matching open. Only the wire writer adds the prefix. Begin and

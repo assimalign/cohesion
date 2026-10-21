@@ -50,6 +50,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     // Set by Abort before it cancels the lifetime, so the pump can tell the server's own teardown
     // from a transport that closed under it.
     private bool _abortRequested;
+    private bool _transportDisposed;
 
     // Per-session fault seams distinguish result materialization from transport I/O.
     internal Action? BeforeResultWrite { get; set; }
@@ -161,6 +162,13 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             // The server stopped or aborted the session mid-frame.
             _closeReason = GraphDatabaseEventSource.CloseReason.Cancelled;
+        }
+        catch (ObjectDisposedException exception) when (_transportDisposed)
+        {
+            // A disposed channel is a session fault. No error frame can be sent through
+            // that channel, including the generic pump's best-effort Internal response.
+            _closeReason = GraphDatabaseEventSource.CloseReason.Faulted;
+            GraphDatabaseEventSource.Log.SessionFaulted(this, exception);
         }
         catch (Exception exception) when (TransportCloseReason(exception) is { } reason)
         {
@@ -434,7 +442,8 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException or ObjectDisposedException)
+            catch (Exception exception) when (exception is DatabaseException or DatabaseTypeException
+                || exception is ObjectDisposedException && !_transportDisposed)
             {
                 // The client sees this statement fail, so it aborts an explicit transaction as an
                 // execution failure does, although its operation already completed. Bolt marks the
@@ -472,7 +481,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, errorText, cancellationToken).ConfigureAwait(false);
             return;
         }
-        catch (ObjectDisposedException exception)
+        catch (ObjectDisposedException exception) when (!_transportDisposed)
         {
             // Early session/database guards precede the engine's statement bracket. Preserve
             // their direct-API contract while answering a disposed wire statement with a code.
@@ -666,11 +675,13 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
     private async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken)
     {
         try { return await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false); }
-        catch (ObjectDisposedException exception)
+        catch (ObjectDisposedException)
         {
-            throw new ConnectionException(ErrorMessages.TransportDisposed, exception);
+            _transportDisposed = true;
+            throw;
         }
     }
+
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         try
@@ -679,11 +690,12 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             await _writer!.WriteFrameAsync(new ProtocolFrame(type, payload), cancellationToken).ConfigureAwait(false);
             await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (ObjectDisposedException exception)
+        catch (ObjectDisposedException)
         {
-            // Only this transport boundary classifies a disposed writer as a connection
+            // Only this transport boundary classifies a disposed writer as a session
             // failure. The execution handler must never try to write another frame to it.
-            throw new ConnectionException(ErrorMessages.TransportDisposed, exception);
+            _transportDisposed = true;
+            throw;
         }
     }
 
