@@ -93,9 +93,9 @@ internal sealed partial class SqlPlanExecutor
             return await ExecuteUpsertRowsAsync(table, indexes, BuildRows(), onConflict, returning, statement,
                 orderedDefaults, cancellationToken).ConfigureAwait(false);
         }
-        rows.AddRange(BuildRows());
+        rows.AddRange(BuildRows().Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
 
-        IEnumerable<(byte[] Record, object?[] Values)> BuildRows()
+        IEnumerable<object?[]> BuildRows()
         {
             for (int rowIndex = 0; rowIndex < sourceRows.Count; rowIndex++)
             {
@@ -147,7 +147,8 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomains(bound, values, domainEvaluator);
                 }
 
-                yield return (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values);
+                // A conflict proposal may be discarded without ever becoming a stored row.
+                yield return values;
             }
 
         }

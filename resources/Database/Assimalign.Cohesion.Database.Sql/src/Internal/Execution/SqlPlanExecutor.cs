@@ -511,7 +511,7 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
             ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
         }
 
@@ -759,7 +759,7 @@ internal sealed partial class SqlPlanExecutor
     /// temporal identity (null components participate — nulls sort first and
     /// count as key values).
     /// </summary>
-    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
         var writer = new DatabaseKeyWriter();
 
@@ -769,15 +769,36 @@ internal sealed partial class SqlPlanExecutor
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
-        var key = IndexKey.From(writer);
-        // SQL's documented key limit matches Indexing's internal BTreeNode.MaxKeyLength.
-        // Keep the policy local: no shipped-assembly visibility grant is needed (#1266).
-        const int maxKeyLength = 1024;
-        if (key.Length > maxKeyLength)
+        return IndexKey.From(writer);
+    }
+
+    /// <summary>
+    /// Builds and validates a key that will be written, including during index construction.
+    /// Locking, lookups and tombstones use the unchecked builder so old values and
+    /// discarded conflict proposals never fail a write-size check.
+    /// </summary>
+    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    {
+        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values);
+        if (key.Length > BTreeIndex.MaxKeyLength)
         {
-            throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, maxKeyLength);
+            throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, BTreeIndex.MaxKeyLength);
         }
         return key;
+    }
+
+    /// <summary>
+    /// Collects lock hashes for existing values without validating or building nonunique keys.
+    /// </summary>
+    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    {
+        foreach (var liveIndex in indexes)
+        {
+            if (liveIndex.Metadata.IsUnique)
+            {
+                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
+            }
+        }
     }
 
     /// <summary>
@@ -868,7 +889,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
             await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
             statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }

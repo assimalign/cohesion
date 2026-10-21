@@ -3131,6 +3131,11 @@ INSERT VALUES, INSERT SELECT, UPDATE, ON CONFLICT DO UPDATE and referential SET 
 check final replacement records before physical apply. Encoded index keys, including collation
 transforms and component delimiters, are limited to 1,024 bytes for both unique and nonunique
 indexes; index construction uses the same check. Equality with either limit is accepted.
+ON CONFLICT checks sizes only for rows and keys it writes: DO NOTHING may discard an oversized
+proposal, and DO UPDATE may replace it with a fitting row even if the proposal's row or a
+non-arbiter UNIQUE key exceeds its limit. Lock hashes, arbiter lookups and old-value tombstones
+do not enforce write-size limits. This follows PostgreSQL's arbitration before insertion
+(`src/backend/executor/nodeModifyTable.c:1121-1232`).
 A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements
 intact. Failed upsert preparation releases its new key and row grants, including a row retained

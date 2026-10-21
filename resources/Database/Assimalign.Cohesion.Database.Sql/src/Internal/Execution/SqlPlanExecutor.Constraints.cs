@@ -909,9 +909,10 @@ internal sealed partial class SqlPlanExecutor
         {
             await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken).ConfigureAwait(false);
             var hashes = new List<ulong>();
+            var indexes = GetLiveIndexes(group.First().Table);
             foreach (var row in group)
             {
-                ValidateIndexKeysAndCollectUniqueHashes(GetLiveIndexes(row.Table), row.Table, row.Values, hashes);
+                CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
             }
 
             await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken).ConfigureAwait(false);

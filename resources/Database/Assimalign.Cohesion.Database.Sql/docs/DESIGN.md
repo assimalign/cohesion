@@ -4979,12 +4979,20 @@ Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHS
 mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
 `SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,
 including script receipts. Referential SET NULL/SET DEFAULT records are encoded only after all
-assignments to their final rows are collected, before the apply bracket. The common index-key
-builder enforces SQL's 1,024-byte limit, matching Indexing's internal BTreeNode limit without
-an assembly visibility grant or a new public bridge. Every unique and nonunique write key is
-validated before DML apply; index construction uses the same builder. Exactly-at-limit values
+assignments to their final rows are collected, before the apply bracket. The checked index-key
+builder uses Indexing's public `BTreeIndex.MaxKeyLength` (1,024 bytes), with no interface or
+visibility grant. Every unique and nonunique write key is validated before DML apply; index
+construction uses the same checked builder. Exactly-at-limit values
 are accepted. Limits count the encoded representation, including stamps, delimiters and
 collation transforms, rather than the source text length.
+
+ON CONFLICT constructs unchecked keys for lock hashes and arbiter lookups, then encodes only
+proposals that become writes. DO NOTHING and DO UPDATE can discard an oversized proposed row
+or non-arbiter UNIQUE key; the final inserted or replacement row and its write keys must fit.
+PostgreSQL likewise arbitrates before heap/index insertion
+(`src/backend/executor/nodeModifyTable.c:1121-1232`). Tombstones and old-value lock hashes use
+unchecked keys; delete preparation constructs only unique keys. Existing values are never
+subject to a new-write size check.
 
 These are statement failures: DML refuses them before physical writes, preserving an active
 explicit transaction and a usable session. An index build refuses publication and cleans up its

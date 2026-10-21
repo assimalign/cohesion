@@ -168,7 +168,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.OldValues, hashes);
+                CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes);
                 ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes);
             }
             await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
