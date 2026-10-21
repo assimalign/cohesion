@@ -1088,6 +1088,11 @@ JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
 and ambiguous columns report located COHSQLE015 before rows are read; duplicate aliases
 report COHSQLE019. An explicit alias hides the base name in every join form and in DML.
+New CHECK declarations likewise reject a qualifier that does not name the constrained table
+or its schema with located COHSQLE015, for CREATE TABLE, ADD CONSTRAINT and ADD COLUMN.
+Bare column names, table.column and schema.table.column are valid. Previously persisted
+CHECKs keep their original binding behavior when reopened. SqlQualifierConformanceTests
+covers stored-table query clauses and the CHECK declaration/reopen contract (#1191).
 PostgreSQL anchors: doc/src/sgml/queries.sgml:217-227 and
 src/backend/parser/parse_clause.c:370-386 (the ON scope contains only its join inputs).
 

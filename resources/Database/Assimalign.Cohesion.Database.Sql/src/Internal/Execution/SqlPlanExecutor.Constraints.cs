@@ -1113,6 +1113,18 @@ internal sealed partial class SqlPlanExecutor
                 throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
             }
 
+            // Declaration-only qualifier check: persisted predicates retain the older binding
+            // contract. Sql.Language owns AST construction, so use the catalog's identity here
+            // without manufacturing a relation node or widening the language boundary.
+            if (_declaring && expression is SqlColumnReferenceExpression { TableAlias: not null } qualifiedColumn &&
+                (!string.Equals(qualifiedColumn.TableAlias, _table.Name, StringComparison.OrdinalIgnoreCase) ||
+                 qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
+            {
+                string name = string.Join('.', new[] { qualifiedColumn.SchemaName, qualifiedColumn.TableAlias, qualifiedColumn.ColumnName }.Where(part => part is not null));
+                throw new SqlPlanningException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.MissingFromClauseEntry, name), qualifiedColumn.Location);
+            }
+
             // A call's arguments were matched against its overloads when the statement was planned
             // (DDL) or the persisted predicate was bound (open); here only its function is checked.
             var called = expression is SqlFunctionCallExpression function ? CheckFunction(function) : null;

@@ -51,6 +51,18 @@ commit/delivery and carry the direct affected count; ordinary query sets retain 
 ResultComplete already carries that value. No new plan wrapper, public interface,
 visibility grant, persisted text, storage version or protocol change is needed.
 
+## CHECK qualifier declarations (#1191)
+
+New CHECK declarations resolve table and schema qualifiers against the constrained table,
+using the same case-insensitive identity as query binding. An unknown qualifier fails DDL
+validation with located COHSQLE015, before publication, including CREATE, ADD CONSTRAINT and
+ADD COLUMN. Bare, table-qualified and schema-qualified column names remain valid. The CHECK
+syntax walk validates this against catalog identity locally; it needs no new language AST
+constructor or shipped-assembly visibility grant. BindPersistedCheck retains its older lenient
+qualifier contract, so previously accepted stored predicates still open and enforce their checks.
+Stored-table query conformance covers SELECT, WHERE, GROUP BY, HAVING, ORDER BY, alias hiding
+and nested references alongside the existing join, correlation and DML suites.
+
 ## Invalid statement declarations (#1192)
 
 UPDATE binds each target ordinal only once and rejects repeated assignments with COHSQLE019,
