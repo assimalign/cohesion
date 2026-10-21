@@ -115,13 +115,13 @@ public sealed partial class GraphDatabase
         // An element whose record or index key outgrows storage fails its statement; the store
         // wrote nothing for it. It derives from StorageException, so it is matched first.
         GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
-        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
-            => new DatabaseTransactionAbortedException("COHDBG007: " + error.Message, error),
         _ when DatabaseFailure.Find<StorageException>(error) is not null || DatabaseFailure.Find<System.IO.IOException>(error) is not null
             || DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexException>(error) is not null
-            || DatabaseFailure.Find<GraphCatalogException>(error) is not null
+            || DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: false }
             => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
+            => new DatabaseTransactionAbortedException("COHDBG007: " + error.Message, error),
         _ => error,
     };
 

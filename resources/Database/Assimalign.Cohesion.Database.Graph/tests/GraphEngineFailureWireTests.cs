@@ -126,5 +126,8 @@ public sealed class GraphEngineFailureWireTests
         lifetime.InnerException.ShouldBeSameAs(disposed);
         database.TranslateFailure(lifetime).ShouldBeSameAs(lifetime);
         database.TranslateFailure(new InvalidOperationException("Data mismatch.")).Message.ShouldStartWith("COHDBG003:", Case.Sensitive);
+        var mixed = database.TranslateFailure(new AggregateException(conflict, new IndexException("Index failed during cleanup.")))
+            .ShouldBeOfType<DatabaseException>();
+        mixed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
     }
 }

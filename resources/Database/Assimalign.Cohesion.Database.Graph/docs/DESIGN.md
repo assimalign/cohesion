@@ -1187,6 +1187,7 @@ index/page corruption retains the common `COHDBS003` corruption signal. Catalog 
 conflicts carry an internal classification and become `DatabaseTransactionAbortedException`
 (`COHDBG007`), retaining the catalog cause. Disposal inside an admitted operation is
 `COHDBG019`, checked before the general InvalidOperationException/schema mismatch mapping.
+An accompanying storage/index/I/O failure takes precedence over a retryable catalog conflict.
 The wire statement handler also maps ObjectDisposedException from the early lifetime guards
 to that code. Each is an ExecutionFailure and keeps the authenticated session ready. An
 explicit transaction aborts on a failed admitted statement and must be rolled back.
