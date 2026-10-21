@@ -1438,6 +1438,12 @@ checkpoint size, briefly twice that while the buffer doubles past it, released b
 checkpoint). The reasoning is in `Database.Storage` DESIGN.md ("Capacity", "Checkpoint
 triggers").
 
+Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
+assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
+the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
+writer. This is distinct from a failed drain after buffering COMMIT, whose outcome is
+committed-unconfirmed. The journal-buffer fault helper uses only the public journal API.
+
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 rollback's failed undo about 100 ms after the deferral, then at doubling delays up to
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a

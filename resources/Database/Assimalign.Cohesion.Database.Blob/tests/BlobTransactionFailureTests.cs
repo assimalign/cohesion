@@ -1164,6 +1164,57 @@ public sealed class BlobTransactionFailureTests
         (await NamesAsync(await AutocommitContainer.GetAsync(recovered, "files"))).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Blob] - Commit: a full-buffer drain before the commit append aborts and takes storage offline")]
+    public async Task CommitAsync_FullBufferDrainBeforeCommitRecord_ShouldAbortAndGoOffline()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using var engine = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
+        var database = await engine.CreateDatabaseAsync("test");
+        await AutocommitContainer.CreateAsync(database, "files");
+        await using var session = await database.CreateSessionAsync();
+        var files = await session.GetContainerAsync("files");
+        var transaction = await session.BeginTransactionAsync();
+        await WriteAsync(files, "pending", "pending");
+
+        // Arrange: fill the append buffer so the next append must first drain the preceding frames.
+        var journal = database.DataStorage.WriteAheadJournal;
+        JournalFrames.FillAppendBuffer(journal);
+        long lastBeforeCommit = journal.LastLsn;
+        journal.WrittenLsn.ShouldBeLessThan(lastBeforeCommit);
+
+        // Act: fail the drain of the preceding frames, before COMMIT gets an LSN.
+        DatabaseOfflineException error;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync());
+            unspent = failures.Remaining;
+        }
+        var stateAfterCommit = transaction.State;
+        journal.LastLsn.ShouldBe(lastBeforeCommit);
+        var offline = StorageOfflineException.Find(error).ShouldNotBeNull();
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.CommitRecordWritten.ShouldBeFalse();
+        offline.InnerException.ShouldBeOfType<System.IO.IOException>();
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync());
+        await session.DisposeAsync();
+        engine.Dispose();
+        await using var reopened = BlobDatabaseEngine.Create("blob-engine", QuietOptions(strategy));
+        var recovered = await reopened.OpenDatabaseAsync("test");
+
+        // Assert
+        unspent.ShouldBe(0);
+        StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Code.ShouldBe("COHDBB002");
+        stateAfterCommit.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeNull();
+        (await NamesAsync(await AutocommitContainer.GetAsync(recovered, "files"))).ShouldBeEmpty();
+    }
+
+
     private static async Task FailAsync(string failure, BlobDatabaseSession session, BlobContainer files)
     {
         switch (failure)

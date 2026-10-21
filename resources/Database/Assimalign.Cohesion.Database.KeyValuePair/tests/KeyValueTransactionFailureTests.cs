@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
@@ -431,6 +432,55 @@ public sealed class KeyValueTransactionFailureTests
         session.CurrentTransaction.ShouldBeNull();
         (await Keys(recovered, observer)).ShouldBeEmpty();
     }
+
+    [Fact(DisplayName = "Cohesion Test [KeyValuePair] - Commit: a full-buffer drain before the commit append aborts and takes storage offline")]
+    public async Task CommitAsync_FullBufferDrainBeforeCommitRecord_ShouldAbortAndGoOffline()
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        var (engine, database) = await CreateAsync(options => Quiet(options, strategy));
+        await using var session = await database.CreateSessionAsync();
+        var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
+        await database.PutAsync(session, Bytes("pending"), Bytes("v"), cancellationToken: TestTimeout.Token());
+
+        // Arrange: fill the append buffer so the next append must first drain the preceding frames.
+        var journal = database.DataStorage.WriteAheadJournal;
+        JournalFrames.FillAppendBuffer(journal);
+        long lastBeforeCommit = journal.LastLsn;
+        journal.WrittenLsn.ShouldBeLessThan(lastBeforeCommit);
+
+        // Act: fail the drain of the preceding frames, before COMMIT gets an LSN.
+        DatabaseOfflineException error;
+        int unspent;
+        using (var failures = FaultInjectingJournalStorageStrategy.FailJournalWrites(1))
+        {
+            error = await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.CommitAsync(TestTimeout.Token()));
+            unspent = failures.Remaining;
+        }
+        var stateAfterCommit = transaction.State;
+        journal.LastLsn.ShouldBe(lastBeforeCommit);
+        var offline = StorageOfflineException.Find(error).ShouldNotBeNull();
+        offline.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
+        offline.CommitRecordWritten.ShouldBeFalse();
+        offline.InnerException.ShouldBeOfType<System.IO.IOException>();
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.Coordinator.PairedTransactionCount.ShouldBe(0);
+        await Should.ThrowAsync<DatabaseOfflineException>(async () => await transaction.RollbackAsync(TestTimeout.Token()));
+        await session.DisposeAsync();
+        await engine.DisposeAsync();
+        await using var reopened = KeyValueDatabaseEngine.Create("kv-tests", new KeyValueDatabaseEngineOptions { StorageStrategy = strategy });
+        var recovered = await reopened.OpenDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await using var observer = await recovered.CreateSessionAsync();
+
+        // Assert
+        unspent.ShouldBe(0);
+        StorageOfflineException.Find(error).ShouldNotBeNull();
+        error.Code.ShouldBe("COHDBK002");
+        stateAfterCommit.ShouldBe(TransactionState.Faulted);
+        session.CurrentTransaction.ShouldBeNull();
+        (await Keys(recovered, observer)).ShouldBeEmpty();
+    }
+
 
     // Background workers stay out of the way: a record a test loses must still be in the journal's
     // append buffer when the drain the test fails comes, not written by a worker's drain first.

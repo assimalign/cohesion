@@ -4079,6 +4079,12 @@ database grew its journal to 130 times a 4 MiB size in six seconds. A checkpoint
 reader and writer of its database while it flushes ("Checkpoint triggers" in `Database.Storage`
 DESIGN.md has the scale).
 
+Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
+assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
+the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
+writer. This is distinct from a failed drain after buffering COMMIT, whose outcome is
+committed-unconfirmed. The journal-buffer fault helper uses only the public journal API.
+
 **Deferred undo is retried on its own backoff (#1226).** A rollback whose undo fails keeps the
 writer's locks until a retry completes it; the version-purge worker retries about 100 ms later,
 then at doubling delays up to `MaintenanceInterval` (`Database.Transactions` DESIGN.md). A

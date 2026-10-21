@@ -705,6 +705,12 @@ waits for a statement: one holding a database's apply gate runs that database's 
 ends (`TransactionCoordinator.TryCheckpoint`), so a long command in one database cannot stop the
 other databases' checkpoints.
 
+Engine tests also force COMMIT's pre-append full-buffer drain to fail: no commit LSN is
+assigned, the kernel transaction ends Faulted, storage goes offline with JournalFlush, and
+the model's existing offline diagnostic reaches the caller. Reopen scrubs the uncommitted
+writer. This is distinct from a failed drain after buffering COMMIT, whose outcome is
+committed-unconfirmed. The journal-buffer fault helper uses only the public journal API.
+
 **Deferred undo is retried on its own backoff (#1226).** The version-purge worker retries a
 failed undo about 100 ms after the deferral, then at doubling delays up to `MaintenanceInterval`.
 A retry that fails makes the engine report `Faulted`; the first pass with no failure and no undo

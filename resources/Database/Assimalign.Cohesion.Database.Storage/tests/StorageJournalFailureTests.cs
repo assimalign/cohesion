@@ -28,6 +28,21 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </remarks>
 public sealed class StorageJournalFailureTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal fault helper: fill leaves exactly the maximum buffer pending")]
+    public void FillAppendBuffer_DefaultJournal_ShouldFillExactlyTheMaximumBuffer()
+    {
+        // Arrange
+        using var stream = new MemoryStream();
+        using var journal = StorageJournal.Create(stream, leaveOpen: true);
+
+        // Act
+        TestObjects.JournalFrames.FillAppendBuffer(journal);
+
+        // Assert
+        journal.BufferedLength.ShouldBe(journal.MaximumBufferBytes);
+        journal.WrittenLsn.ShouldBeLessThan(journal.LastLsn);
+    }
+
     /// <summary>
     /// The drain's failure takes the storage offline through the same hook every other offline path
     /// raises (<see cref="Storage.OnOffline"/>, which the engines wire to the coordinator's
