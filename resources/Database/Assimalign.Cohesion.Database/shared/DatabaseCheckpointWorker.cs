@@ -137,6 +137,9 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     // Test-only hook on the type that dispatches the checkpoint to its lane.
     internal Action<TDatabase>? BeforeCheckpoint { get; set; }
 
+    // Deterministic tests wait for lane completion before running the collecting pass.
+    internal bool WaitForCheckpoints(TimeSpan timeout) => _lanes.WaitForIdle(timeout);
+
     /// <summary>Gets the engine's open databases.</summary>
     /// <returns>The snapshot of the engine's open databases.</returns>
     protected abstract TDatabase[] GetDatabases();

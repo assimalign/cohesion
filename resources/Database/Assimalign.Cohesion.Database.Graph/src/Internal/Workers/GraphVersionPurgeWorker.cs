@@ -80,7 +80,7 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
 
     // Only passes touch this state: DatabaseEngineWorker serializes RunIteration before entering
     // the coordinator's apply gate and storage/page locks. The failure-record monitor never spans them.
-    private readonly Dictionary<GraphDatabase, (ulong Writer, string Refusal, long LastLsn, int Passes, bool Reported)> _busy = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<GraphDatabase, (ulong Writer, string Refusal, long FirstRefusedAt, int Passes, bool Reported)> _busy = new(ReferenceEqualityComparer.Instance);
     private const int busyPassLimit = 3;
 
     internal GraphVersionPurgeWorker(GraphDatabaseEngine engine)
@@ -97,6 +97,9 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
     /// deferred-undo retries too (the hook is on the type that makes the call, <c>database-area.md</c>).
     /// </summary>
     internal Action<GraphDatabase>? BeforeFullPass { get; set; }
+
+    // Test-only hook at the call site: drives refused undo independently of the kernel's clock.
+    internal Action<GraphDatabase>? BeforeDeferredUndoRetry { get; set; }
 
     /// <inheritdoc />
     protected override void WaitForTrigger(CancellationToken cancellationToken)
@@ -199,10 +202,8 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
                 // The engine's full pass, or the retry of a full pass that failed on this database
                 // once the backoff has passed (owner decision 46).
                 bool full = fullPass || (_fullPassFailed.TryGetValue(database, out long retryAt) && now >= retryAt);
-                long beforePassLsn = 0;
                 try
                 {
-                    beforePassLsn = database.DataStorage.WriteAheadJournal.LastLsn;
                     if (full)
                     {
                         BeforeFullPass?.Invoke(database);
@@ -211,6 +212,7 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
                     }
                     else
                     {
+                        BeforeDeferredUndoRetry?.Invoke(database);
                         database.Coordinator.RetryDeferredUndo(cancellationToken);
                     }
 
@@ -240,12 +242,12 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
 
                     // A storage bracket is active on this database; retry next pass. A failed full
                     // pass found busy is retried a backoff later, so the retry does not spin.
-                    if (full && _fullPassFailed.ContainsKey(database))
+                    if (full)
                     {
                         ScheduleRetry(database);
                     }
 
-                    ReportBusy(database, exception, beforePassLsn);
+                    ReportBusy(database, exception);
                     ReportUnfinished(database.Name);
                 }
                 catch (ObjectDisposedException) when (!_engine.IsOpen(database))
@@ -283,19 +285,21 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
         }
     }
 
-    // The refusal message identifies the locked page and its owning bracket. Use it only as a
-    // progress token, never to classify errors: changing owners under sustained writes reset the
-    // bound. WAL activity between attempts also resets the count (our own retry appends are
-    // excluded). The oldest pending writer changes when undo makes progress. A successful full
-    // pass (or completed deferred undo) ends the episode; not-due retries do not count or reset it.
-    private void ReportBusy(GraphDatabase database, StorageTransactionException exception, long beforePassLsn)
+    // The blocked page and owning bracket identify the refused work. Unrelated WAL movement
+    // says nothing about it. Messages identify work; error classification uses the exception code.
+    // Bound retries on this blocker, as PostgreSQL does for the conflicting
+    // lock (src/backend/access/heap/vacuumlazy.c:3205-3219), and require one backoff on the engine's
+    // clock as well as three attempts. Successful work or a changed blocker starts a new episode;
+    // not-due retries do not count. Writer identifies deferred undo when deciding completion.
+    private void ReportBusy(GraphDatabase database, StorageTransactionException exception)
     {
         ulong writer = database.Coordinator.VersionStore.PendingAbortedPurges.DefaultIfEmpty().Min();
         var prior = _busy.GetValueOrDefault(database);
-        bool sameWork = prior.Writer == writer && prior.Refusal == exception.Message;
-        int passes = sameWork && prior.LastLsn == beforePassLsn ? prior.Passes + 1 : 1;
+        bool sameWork = prior.Refusal == exception.Message;
+        int passes = sameWork ? prior.Passes + 1 : 1;
+        long firstRefusedAt = sameWork ? prior.FirstRefusedAt : _clock.GetTimestamp();
         bool reported = sameWork && prior.Reported;
-        if (!reported && passes >= busyPassLimit)
+        if (!reported && passes >= busyPassLimit && _clock.GetElapsedTime(firstRefusedAt) >= FailureBackoff)
         {
             // Owner default (#1277): a persistent refusal is observable, but never contributes
             // to taking the database offline. Operational errors retain the usual give-up path.
@@ -303,7 +307,7 @@ internal sealed class GraphVersionPurgeWorker : DatabaseEngineWorker
             reported = true;
         }
 
-        _busy[database] = (writer, exception.Message, database.DataStorage.WriteAheadJournal.LastLsn, Math.Min(passes, busyPassLimit), reported);
+        _busy[database] = (writer, exception.Message, firstRefusedAt, Math.Min(passes, busyPassLimit), reported);
     }
 
     // Retries the database's full pass a backoff from now, on the engine's clock.

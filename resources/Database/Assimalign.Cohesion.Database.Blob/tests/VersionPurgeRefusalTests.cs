@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +8,9 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Blob.Protocol;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Tests;
 
@@ -39,10 +41,9 @@ public sealed class VersionPurgeRefusalTests
         long failuresBefore = worker.FailureCount;
         int episodes = 0;
         int refusedPasses = 0;
-        var watch = Stopwatch.StartNew();
 
-        // Act: run for a minimum, then until counters prove repeated refusal/recovery, with a ceiling.
-        do
+        // Act: three complete refusal/recovery episodes, each with twelve refused attempts.
+        for (int episode = 0; episode < 3; episode++)
         {
             await using var transaction = await session.BeginTransactionAsync(cancellationToken: token);
             await PutAsync(session, episodes, token);
@@ -67,7 +68,7 @@ public sealed class VersionPurgeRefusalTests
                 }, token);
                 worker.FailureCount.ShouldBe(failuresBefore + episodes + 1);
                 worker.Fault.ShouldBeOfType<StorageTransactionException>();
-                engine.HasFailingWorker(database.Name).ShouldBeTrue();
+                engine.HasFailingWorker(database.Name).ShouldBeFalse();
                 engine.HasFailingWorker(healthy.Name).ShouldBeFalse();
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
@@ -84,11 +85,9 @@ public sealed class VersionPurgeRefusalTests
             database.Coordinator.Checkpoint();
             episodes++;
         }
-        while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || episodes < 3) && watch.Elapsed < TimeSpan.FromSeconds(10));
 
         // Assert: no offline work was queued although the clock crossed the give-up window.
-        await Task.Delay(20, token);
-        episodes.ShouldBeGreaterThanOrEqualTo(3);
+        episodes.ShouldBe(3);
         refusedPasses.ShouldBe(12 * episodes);
         healthyPasses.ShouldBeGreaterThanOrEqualTo(refusedPasses);
         worker.FailureCount.ShouldBe(failuresBefore + episodes);
@@ -126,8 +125,9 @@ public sealed class VersionPurgeRefusalTests
 
         // Assert
         owner.ShouldBe(passes);
-        worker.FailureCount.ShouldBe(foreign ? 1 : 0);
+        worker.FailureCount.ShouldBe(foreign || walProgress ? 1 : 0);
         if (foreign) { worker.Fault.ShouldBeOfType<StorageTransactionException>().Code.ShouldBe(StorageTransactionErrorCode.ForeignStorage); }
+        else if (walProgress) { worker.Fault.ShouldBeOfType<StorageTransactionException>(); }
         else { worker.Fault.ShouldBeNull(); }
         worker.BeforeFullPass = null;
         clock.Advance(TimeSpan.FromHours(1));
@@ -160,18 +160,13 @@ public sealed class VersionPurgeRefusalTests
         };
         try
         {
-            // Act: run until the first failure is collected, or a second busy attempt proves the
-            // first was collected. Keep a minimum and a ceiling, and assert those counters.
+            // Act: wait for each dispatched lane, then collect it with the next fixed pass.
             await PutAsync(session, 0, token);
-            var watch = Stopwatch.StartNew();
-            do
+            for (int pass = 0; pass < 3; pass++)
             {
                 worker.RunIteration(token);
-                await Task.Delay(5, token);
+                worker.WaitForCheckpoints(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             }
-            while ((watch.Elapsed < TimeSpan.FromMilliseconds(100)
-                || (foreign ? worker.FailureCount == 0 : Volatile.Read(ref attempts) < 2))
-                && watch.Elapsed < TimeSpan.FromSeconds(10));
 
             // Assert
             Volatile.Read(ref attempts).ShouldBeGreaterThanOrEqualTo(foreign ? 1 : 2);
@@ -220,6 +215,168 @@ public sealed class VersionPurgeRefusalTests
         worker.FailureCount.ShouldBe(0);
         worker.Fault.ShouldBeNull();
         engine.HasFailingWorker(database.Name).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Blob] - Purge: a busy full pass retries after the backoff")]
+    public async Task RunIteration_BusyFullPass_ShouldRetryAfterBackoff()
+    {
+        // Arrange
+        var clock = new ManualTimeProvider();
+        await using var engine = CreateEngine(clock);
+        await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        var worker = engine.Workers.OfType<BlobVersionPurgeWorker>().Single();
+        int attempts = 0;
+        worker.BeforeFullPass = _ =>
+        {
+            attempts++;
+            throw new StorageTransactionException("Page 1 is locked by transaction 9.");
+        };
+
+        // Act
+        clock.Advance(TimeSpan.FromHours(1));
+        worker.RunIteration(CancellationToken.None);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
+        worker.RunIteration(CancellationToken.None);
+        attempts.ShouldBe(1);
+        clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
+        worker.RunIteration(CancellationToken.None);
+
+        // Assert
+        attempts.ShouldBe(2);
+        worker.BeforeFullPass = null;
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Blob] - Purge: three short refused undo retries do not report an ordinary bracket")]
+    public async Task RunIteration_ShortRefusal_ShouldWaitForMinimumElapsedTime()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        var clock = new ManualTimeProvider();
+        await using var engine = CreateEngine(clock);
+        var database = await engine.CreateDatabaseAsync("test", token);
+        await using var session = await database.CreateSessionAsync(token);
+        await SetupAsync(session, token);
+        var worker = new BlobVersionPurgeWorker(engine);
+        worker.BeforeDeferredUndoRetry = current => current.Coordinator.RunVersionPurgePass(token);
+        await using var transaction = await session.BeginTransactionAsync(cancellationToken: token);
+        await PutAsync(session, 0, token);
+        using (var holder = PageWriteLockHolder.LockEveryPage(database.DataStorage))
+        {
+            await transaction.RollbackAsync(token);
+
+            // Act: force real undo retries at 100, 300 and 700 ms, spanning only 600 ms.
+            // The local worker has no pump; the kernel's system-clock due time cannot race it.
+            await Task.Run(() =>
+            {
+                foreach (int milliseconds in new[] { 100, 200, 400 })
+                {
+                    clock.Advance(TimeSpan.FromMilliseconds(milliseconds));
+                    worker.RunIteration(token);
+                }
+                worker.FailureCount.ShouldBe(0);
+                clock.Advance(TimeSpan.FromMilliseconds(800));
+                worker.RunIteration(token);
+            }, token);
+
+            // Assert
+            worker.FailureCount.ShouldBe(1);
+            engine.HasFailingWorker(database.Name).ShouldBeFalse();
+        }
+        clock.Advance(TimeSpan.FromSeconds(2));
+        worker.RunIteration(token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Blob] - Purge: unrelated committed page writes cannot suppress a blocked committed tombstone")]
+    public async Task RunIteration_CommittedPurgeWithUnrelatedTraffic_ShouldReportTheSameBlocker()
+    {
+        // Arrange: commit a deletion, then retain every existing page's write lock except the
+        // separate traffic page. There is no deferred undo or changing logical writer.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        var clock = new ManualTimeProvider();
+        await using var engine = CreateEngine(clock);
+        var database = await engine.CreateDatabaseAsync("test", token);
+        await using var session = await database.CreateSessionAsync(token);
+        await SetupAsync(session, token);
+        await PutAsync(session, 0, token);
+        var items = await session.GetContainerAsync("items", cancellationToken: token);
+        (await items.DeleteAsync("0", token)).ShouldBeTrue();
+        database.Coordinator.VersionStore.TrackedVersionCount.ShouldBeGreaterThan(0);
+        database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        PageId traffic;
+        using (var allocation = database.DataStorage.BeginTransaction())
+        {
+            using (var page = database.DataStorage.AllocatePageForWrite(allocation, PageType.Index)) { traffic = page.Id; }
+            allocation.Commit();
+        }
+        var worker = engine.Workers.OfType<BlobVersionPurgeWorker>().Single();
+        using (var blocker = database.DataStorage.BeginTransaction())
+        {
+            for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
+            {
+                if ((PageId)page == traffic) { continue; }
+                using var locked = database.DataStorage.OpenPageForWrite(blocker, (PageId)page);
+            }
+
+            // Act: twelve refusals with real, committed writes elsewhere in the same storage.
+            for (int pass = 0; pass < 12; pass++)
+            {
+                long beforeTraffic = database.DataStorage.WriteAheadJournal.LastLsn;
+                using (var write = database.DataStorage.BeginTransaction())
+                {
+                    using (var page = database.DataStorage.OpenPageForWrite(write, traffic)) { page.Page.AsBodySpan()[0] = (byte)(pass + 1); }
+                    write.Commit();
+                }
+                database.DataStorage.WriteAheadJournal.LastLsn.ShouldBeGreaterThan(beforeTraffic);
+                clock.Advance(TimeSpan.FromHours(1));
+                worker.RunIteration(token);
+            }
+
+            // Assert: the same page and owning bracket are one bounded refusal episode.
+            worker.FailureCount.ShouldBe(1);
+            worker.Fault.ShouldBeOfType<StorageTransactionException>();
+            database.Coordinator.VersionStore.TrackedVersionCount.ShouldBeGreaterThan(0);
+            engine.HasFailingWorker(database.Name).ShouldBeFalse();
+            database.IsOffline.ShouldBeFalse();
+            blocker.Rollback();
+        }
+        clock.Advance(TimeSpan.FromHours(1));
+        worker.RunIteration(token);
+        worker.Fault.ShouldBeNull();
+        database.Coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Blob] - Purge: a reported refusal leaves existing clients and new handshakes served")]
+    public async Task RunIteration_ReportedRefusal_ShouldKeepClientsServed()
+    {
+        // Arrange
+        var clock = new ManualTimeProvider();
+        var engine = CreateEngine(clock);
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var harness = await BlobServerHarness.StartAsync(engine);
+        await using var existing = await harness.DialAsync();
+        await existing.HandshakeAsync("test");
+        var worker = engine.Workers.OfType<BlobVersionPurgeWorker>().Single();
+        worker.BeforeFullPass = _ => throw new StorageTransactionException("Page 1 is locked by transaction 9.");
+
+        // Act
+        for (int pass = 0; pass < 3; pass++)
+        {
+            clock.Advance(TimeSpan.FromHours(1));
+            worker.RunIteration(CancellationToken.None);
+        }
+        worker.Fault.ShouldBeOfType<StorageTransactionException>();
+        await using var fresh = await harness.DialAsync();
+        await fresh.HandshakeAsync("test");
+        await existing.SendAsync(BlobProtocolMessageType.List, new BlobListMessage("missing", "").Encode());
+        var response = await existing.ExpectAsync(ProtocolMessageType.Error);
+
+        // Assert: the operation is served and reports its missing container, not COHDBB003.
+        var error = ProtocolErrorMessage.Decode(response.Payload.Span);
+        error.Message.ShouldNotContain("COHDBB003", Case.Sensitive);
+        engine.HasFailingWorker(database.Name).ShouldBeFalse();
+        worker.BeforeFullPass = null;
     }
 
     private static BlobDatabaseEngine CreateEngine(ManualTimeProvider clock, bool checkpoint = false)

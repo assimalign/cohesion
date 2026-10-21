@@ -706,12 +706,16 @@ ends (`TransactionCoordinator.TryCheckpoint`), so a long command in one database
 other databases' checkpoints.
 
 Persistent storage refusals (#1277) are reported once through the worker's per-database
-failure path after three refused attempts against the same blocked page/bracket and oldest
-pending writer without intervening WAL progress. Not-due retries do not count; changing lock
-owners or WAL activity between attempts reset the bound, so sustained writes remain ordinary
-busy work. Completion, close, drop or replacement ends the episode. This report sets the
+failure path after at least three refused attempts spanning FailureBackoff on the engine clock
+against the same blocked page and owning bracket. Not-due retries do not count. A changed blocker
+or completion of the refused work resets the episode; unrelated writes and WAL activity do not.
+This follows PostgreSQL's retry bound for the conflicting lock
+(src/backend/access/heap/vacuumlazy.c:3205-3219). A busy full pass retries after FailureBackoff,
+so a client bracket can clear without waiting a MaintenanceInterval. Close, drop or replacement
+ends the episode. This report sets the
 observational worker fault until the work completes, but never starts the offline window or
-increments its minimum-pass count (owner default). A foreign-storage refusal is an operational error
+increments its minimum-pass count or makes HasFailingWorker true (owner default). Clients remain
+served throughout an observational refusal. A foreign-storage refusal is an operational error
 and is reported immediately through the normal offline-capable failure path. The shared
 checkpoint worker makes the same distinction; a statement-deferred foreign-storage checkpoint
 failure reaches the next checkpoint call rather than being swallowed as busy.
