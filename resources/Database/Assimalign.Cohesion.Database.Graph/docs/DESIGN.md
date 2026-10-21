@@ -2269,10 +2269,11 @@ available to older snapshots until the shared version-purge worker's safe bound 
 Opening follows this order:
 
 1. `GraphStorage.Open(..., checkpointOnOpen: false)` runs shared physical recovery.
-2. Construct the coordinator and call `AnalyzeAndScrub()` to undo unproven record writers.
-3. `GraphStore.Open` loads owner-two record directories and owner-one registrations.
-4. `RecoverIndexesAsync(plan.Aborted)` scrubs aborted index writers and deleters.
-5. `CompleteRecovery()` checkpoints after lifecycle classification has been consumed.
+2. Construct the coordinator and call `GraphStore.EnsureIndexFormat` before logical recovery writes.
+3. `AnalyzeAndScrub()` undoes unproven record writers.
+4. `GraphStore.Open` loads owner-two record directories and owner-one registrations.
+5. `RecoverIndexesAsync(plan.Aborted)` scrubs aborted index writers and deleters.
+6. `CompleteRecovery()` checkpoints after lifecycle classification has been consumed.
 
 Crash tests ordinarily flush the journal and clone data and journal memory streams
 without disposing the live database. MemoryStream has no durable-flush contract;

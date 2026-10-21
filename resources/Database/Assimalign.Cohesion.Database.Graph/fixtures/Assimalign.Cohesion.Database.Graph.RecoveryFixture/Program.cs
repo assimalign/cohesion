@@ -79,11 +79,11 @@ else if (args[0] == "verify")
 }
 else { throw new ArgumentException("Unknown fixture mode."); }
 
-static async Task<List<string>> PersonNamesAsync(GraphDatabaseSession session)
+static async Task<List<string>> PersonNamesAsync(GraphDatabaseSession session, CancellationToken cancellationToken = default)
 {
     await using var result = (DatabaseResultSet)await session.ExecuteAsync(
-        "MATCH (n:Person) RETURN n.name ORDER BY n.name", cancellationToken: CancellationToken.None);
+        "MATCH (n:Person) RETURN n.name ORDER BY n.name", cancellationToken: cancellationToken);
     var names = new List<string>();
-    await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { names.Add(row.GetString(0)!); }
+    await foreach (var row in result.GetRowsAsync(cancellationToken)) { names.Add(row.GetString(0)!); }
     return names;
 }
