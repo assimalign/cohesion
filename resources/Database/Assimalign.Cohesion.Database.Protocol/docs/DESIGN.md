@@ -187,10 +187,12 @@ and disposal, flush at result and latency boundaries, and await transport writes
 backpressure. Disposal discards an unfinished batch. Buffers stay owned by the writer until
 pending I/O completes and are cleared before return on success, failure and cancellation.
 FrameWritten events are emitted after successful transport writes, once per enclosed frame.
-A failed batch write (including cancellation before copying any bytes), standalone oversized
-write or explicit transport flush faults the batched writer. Later writes and flushes throw
-IOException, since the accepted frames may have been sent partially or not at all. Disposal
-still returns its cleared batch without retrying or sending any subsequent frames.
+A failed batch write (including cancellation before copying any bytes) or standalone oversized
+write faults the batched writer. Later writes and flushes throw IOException, since the accepted
+frames may have been sent partially or not at all. Disposal still returns its cleared batch
+without retrying or sending any subsequent frames. A separate flush failure after a successful
+batch write does not fault it: complete frames were written, so a session can still attempt
+its terminal notice after soft-stop cancellation of the final handshake flush (#1087).
 
 `ReadFrameAsync` still returns owned memory. The optional `SupportsBorrowedPayloads` capability
 and `ReadBorrowedFrameAsync` scope reader-owned pooled memory to a synchronous consume callback.

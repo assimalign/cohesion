@@ -12,6 +12,6 @@
   <data name="AgreementAlreadySet" xml:space="preserve"><value>The channel agreement was already set.</value></data>
   <data name="DiagnosticPayloadInvalid" xml:space="preserve"><value>Malformed diagnostics payload or diagnostic bounds exceeded.</value></data>
   <data name="FrameWriterFaulted" xml:space="preserve">
-    <value>The batched frame writer cannot be reused after a failed transport write or flush.</value>
+    <value>The batched frame writer cannot be reused after a failed transport write.</value>
   </data>
 </root>

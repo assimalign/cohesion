@@ -1529,8 +1529,9 @@ attribute work independently of listeners. Execute includes parse/planning/mater
 encode counts each attempted path; send counts each attempted Path handoff, including
 backpressure and latency flush waits. Diagnostics and PathsComplete do not increment path
 send counts or timings. Failure and cancellation still close the attempted phase. A failed
-transport send or flush faults the batched writer, so even a best-effort soft-stop terminal
-notice cannot append to an uncertain stream; the session closes.
+transport write faults the batched writer, so even a best-effort soft-stop terminal notice
+cannot append to an uncertain stream; the session closes. Canceling only the final Ready
+flush after a successful write preserves the terminal Unavailable notice (#1087).
 Shared protocol transport-write-calls and transport-flush-calls expose batching at the
 Stream boundary; for DuplexPipeStream their sum counts implicit plus explicit flush requests.
 GraphClient's decode counters complete the per-phase view. No durability setting or Path

@@ -176,9 +176,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         catch (OperationCanceledException) when (softStop.IsCancellationRequested && !_lifetimeSource.IsCancellationRequested && _databaseSession is not null)
         {
             // Ready can reach the peer before its explicit flush resumes. If soft stop
-            // cancels that final handshake flush, attempt the authenticated peer's terminal
-            // notice. A writer faulted by the canceled send/flush refuses this best-effort
-            // write: the pump must close rather than append to an uncertain frame stream.
+            // cancels only that flush, complete frames were written and the terminal notice
+            // can still be sent. If it canceled the batch write itself, the faulted writer
+            // refuses this best-effort notice rather than append to an uncertain frame stream.
             _closeReason = GraphDatabaseEventSource.CloseReason.Shutdown;
             await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
         }

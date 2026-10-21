@@ -102,8 +102,9 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         if (_maxBatchBytes != 0) { ThrowIfFaulted(); }
         await SendBatchAsync(cancellationToken).ConfigureAwait(false);
         if (_maxBatchBytes != 0) { ProtocolEventSource.Log.TransportFlush(); }
-        try { await _stream.FlushAsync(cancellationToken).ConfigureAwait(false); }
-        catch when (_maxBatchBytes != 0) { _faulted = true; throw; }
+        // A completed batch write established complete frame boundaries. Cancellation of
+        // this separate flush still permits the session's best-effort terminal notice.
+        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask SendBatchAsync(CancellationToken cancellationToken)
