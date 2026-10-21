@@ -197,7 +197,8 @@ internal sealed partial class SqlPlanner
         }
 
         // Ordering keys that name an output by alias or position read it from the slots that
-        // follow the source row (ProjectAndSortRows); every other key reads the source row.
+        // follow the source row during one-pass projection/key evaluation; every other
+        // key reads the source row. Only outputs and fixed keys are retained.
         var ordering = BindOrdering(select.OrderBy, evaluator.ForOrdering(projections, orderByProjections, columns.Count));
 
         if (bindings is not null)

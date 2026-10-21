@@ -1430,6 +1430,15 @@ over the SQL wire protocol (#1100). Negative and non-integer counts retain the
 `<clause> requires a non-negative integer.`
 diagnostics.
 
+For non-DISTINCT stored-table and system-view queries without ORDER BY, execution
+stops after OFFSET + LIMIT qualifying rows; LIMIT 0 reads no input rows (#1523).
+Expressions in unvisited rows are not evaluated. Non-DISTINCT ORDER BY + LIMIT
+with fixed ordering collations evaluates every input and retains only the best
+OFFSET + LIMIT rows, with stable input order for ties and the same collation/NULL
+placement as a full sort. Deferred collations keep full sorting. DISTINCT still completes
+before pagination. Results remain fully evaluated before delivery; ordered index
+access and spillable sorting are separate work.
+
 ## VALUES and counts have no column scope (#1165)
 
 A row of `INSERT ... VALUES` is evaluated once, against no table row: ISO SQL

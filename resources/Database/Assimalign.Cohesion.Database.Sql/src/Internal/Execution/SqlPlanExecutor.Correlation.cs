@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -140,27 +139,24 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlProjection> projections, SqlBoundExpression? where, IReadOnlyList<SqlBoundOrdering> orderBy,
         SqlRowCount? limit, SqlRowCount? offset, bool distinct, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var matches = new List<object?[]>();
-        foreach (var row in rows)
-        {
-            await PrepareSubqueriesAsync(where, row, statement, cancellationToken).ConfigureAwait(false);
-            if (evaluator.Matches(where, row)) { matches.Add(row); }
-        }
-        return await MaterializeCorrelatedSelectAsync(matches, projections, orderBy, limit, offset, distinct,
-            evaluator, statement, cancellationToken).ConfigureAwait(false);
+        return await MaterializeCorrelatedSelectAsync(rows, projections, orderBy, limit, offset, distinct,
+            ExecutionEvaluator(_subqueryValues, cancellationToken), statement, cancellationToken, where).ConfigureAwait(false);
     }
 
     /// <summary>Computes projection and sort values within each outer row's frame, then sorts fixed keys.</summary>
-    private async Task<DatabaseResult> MaterializeCorrelatedSelectAsync(List<object?[]> matches,
+    private async Task<DatabaseResult> MaterializeCorrelatedSelectAsync(IEnumerable<object?[]> matches,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
-        bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken)
+        bool distinct, SqlExpressionEvaluator evaluator, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlBoundExpression? where = null)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        int operations = 0;
-        var keyed = new List<(object?[] Output, object?[] Keys)>();
+        var collected = new SqlRowCollector(orderBy, _subqueryValues,
+            distinct ? null : limit, distinct ? null : offset, cancellationToken);
+        if (collected.IsComplete) { return MaterializeProjected(projections, []); }
         foreach (var source in matches)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            await PrepareSubqueriesAsync(where, source, statement, cancellationToken).ConfigureAwait(false);
+            if (!evaluator.Matches(where, source)) { continue; }
             var output = new object?[projections.Count];
             for (int i = 0; i < output.Length; i++)
             {
@@ -190,39 +186,9 @@ internal sealed partial class SqlPlanExecutor
                 await PrepareSubqueriesAsync(orderBy[i].Key, orderedRow, statement, cancellationToken).ConfigureAwait(false);
                 keys[i] = evaluator.Evaluate(orderBy[i].Key, orderedRow);
             }
-            keyed.Add((output, keys));
+            collected.Add(output, keys);
+            if (collected.IsComplete) { break; }
         }
-        IOrderedEnumerable<(object?[] Output, object?[] Keys)>? sorted = null;
-        for (int i = 0; i < orderBy.Count; i++)
-        {
-            int key = i;
-            var ordering = orderBy[i];
-            var collation = ordering.Collation.Resolve(_subqueryValues);
-            int direction = ordering.IsDescending ? -1 : 1;
-            int nullComparison = ordering.NullsFirst ? -1 : 1;
-            var comparer = Comparer<object?>.Create((left, right) =>
-            {
-                if ((operations++ & 31) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                return CompareOrderingValues(left, right, direction, nullComparison, collation);
-            });
-            sorted = sorted is null
-                ? keyed.OrderBy(item => item.Keys[key], comparer)
-                : sorted.ThenBy(item => item.Keys[key], comparer);
-        }
-        List<object?[]> projected;
-        try { projected = (sorted is null ? keyed : sorted.AsEnumerable()).Select(item => item.Output).ToList(); }
-        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException or OperationCanceledException)
-        {
-            ExceptionDispatchInfo.Throw(exception.InnerException);
-            throw;
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        if (distinct) { projected = Deduplicate(projected, projections, evaluator); }
-        var columns = projections.Select((projection, ordinal) => new DatabaseColumn
-        {
-            Name = projection.Name, Ordinal = ordinal, Type = projection.Type,
-            MaxLength = projection.MaxLength, IsNullable = projection.IsNullable,
-        }).ToArray();
-        return new SqlMaterializedResultSet(columns, ApplyRowWindow(projected, limit, offset));
+        return FinishSelect(collected.Finish(), projections, limit, offset, distinct, evaluator, cancellationToken);
     }
 }

@@ -371,8 +371,9 @@ scalar ordering expressions. Qualified references and aggregate operands retain
 their source scope. Invalid numeric ordinals fail during binding, even for an
 empty input; compound constants such as `1 + 1` remain scalar expressions.
 
-The executor materializes each referenced projection before sorting and retains
-source values alongside it for other ordering keys. Grouped queries use the
+The executor evaluates each projection and its ordering keys in one pass. Source
+values are available while keys are evaluated; only completed outputs and fixed
+keys survive that iteration. Grouped queries use the
 same binding against completed group outputs. The planner compiles each ordering
 key once, in the ordering scope (`SqlExpressionEvaluator.ForOrdering`): a node bound
 to an output becomes a slot read (`SqlBoundSlot`) at the ordinal after the source
@@ -383,8 +384,7 @@ last descending by default, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL
 overrides placement per key independently of direction (#1112). Binding resolves the default
 to SqlBoundOrdering.NullsFirst; the shared comparer applies direction only to non-NULL
 values. Ordinary, correlated, grouped and aggregate-input ordering use this comparer,
-including DISTINCT aggregate representative selection. Both sort paths capture direction and
-NULL-placement signs once per key before constructing their comparison delegates. Outer derived-table outputs use
+including DISTINCT aggregate representative selection. Outer derived-table outputs use
 ordinary alias, ordinal and source bindings. Structural aggregate/query equality includes
 placement. Format 24 fences the newly storable NULLS text in view bodies; formats through
 23 are refused at open, without an upgrade reader. Canonical rendering preserves explicit
@@ -3394,18 +3394,35 @@ project reference or InternalsVisibleTo change is required.
   spelled as one of them as the unsupported function (`Function '<name>' is not
   supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
   a column, until the parser gives them a function node.
-- **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
-  this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
-  rows. Streaming operators arrive with the planner build-out.
+- **Bounded SELECT execution (#1523, slice 1).** Stored-table and system-view
+  matches feed projection and key evaluation directly, without a source-row list.
+  Unordered scans allocate only their output list, keeping sort state off the
+  ordinary lookup path and preserving its existing allocation budget.
+  An unordered non-DISTINCT LIMIT stops after OFFSET + LIMIT qualifying rows;
+  LIMIT 0 reads none. Each evaluated row still reports its expression failures,
+  while unvisited rows are not evaluated. ORDER BY with a non-DISTINCT LIMIT
+  evaluates every input but retains a max-heap of at most OFFSET + LIMIT outputs
+  and fixed key tuples, then sorts that heap. The input ordinal breaks key ties
+  to preserve the full sort's stability, collations and independent NULL placement.
+  Deferred ordering collations retain full sorting so resolution still sees the
+  completed correlated frame. The heap follows the reversed-bound principle in PostgreSQL
+  `src/backend/utils/sort/tuplesort.c:2482-2523`; its storage grows from actual
+  retained rows, never from the requested count. DISTINCT keeps the full ordering
+  and deduplication path before pagination. Group and set operators share bounded
+  final ordering, but aggregation states, set operands, join inputs/results and
+  correlated grouped outputs still materialize. A full sort remains in memory.
+  `SqlMaterializedResultSet` contains completed output rows before delivery;
+  snapshot, locks and reader-epoch ownership remain statement-scoped. Ordered index
+  access, pull/batch result delivery, mid-stream errors and granted spilling are
+  deferred slices; this change adds no public option, visibility grant or wire frame.
 - **Row-window counts retain Int64 semantics (#1100).** The planner accepts
   nonnegative integers through `Int64.MaxValue`, as PostgreSQL evaluates its
   offset and limit as Int64 (`src/backend/executor/nodeLimit.c:369-399`). After
   ordering and `DISTINCT`, stored-table/join, system-view and grouped execution
-  use one private `ApplyRowWindow` helper. It clamps the offset to the materialized
-  row count and the limit to the remaining row count before checked Int32
-  conversions for `List.GetRange`. The collection bounds justify each conversion;
-  no count wraps or allocates according to the requested size, and the helper
-  never adds the two Int64 counts. A large limit keeps all remaining rows and a
+  use bounded collection or the private `ApplyRowWindow` helper. The helper clamps
+  counts to actual rows and removes excluded ranges in place, avoiding a copy.
+  The heap bound saturates OFFSET + LIMIT at Int64.MaxValue, without narrowing or
+  preallocating from either count. A large limit keeps all remaining rows and a
   large offset keeps none. Count evaluation and invalid-count diagnostics stay
   in the planner. The live conformance corpus and Sql.Client wire tests cover
   every plan shape, zero and small windows, the Int32 and UInt32 boundaries, and
