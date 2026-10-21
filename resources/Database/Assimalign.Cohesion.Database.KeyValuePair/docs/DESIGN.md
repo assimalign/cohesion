@@ -636,7 +636,7 @@ section in `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-15
 `data_sync_retry` off, `src/backend/storage/file/fd.c:3966-3987`), without stopping the process.
 The command whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its
 message leading with `COHDBK002` (owner decision 24); every later operation — a new session, a
-typed or text command, BEGIN, and the COMMIT or ROLLBACK of a transaction open at the failure —
+typed or text command, `BeginTransactionAsync`, and the `CommitAsync` or `RollbackAsync` of a transaction open at the failure —
 is refused with `DatabaseOfflineException`, code
 `COHDBK002`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
 command on an existing session, and a handshake for the database, with `Unavailable` and the
@@ -905,8 +905,9 @@ byte `Q + 4`, a nonnegative signed 32-bit big-endian encoded-value length `V` at
 count at bytes 0–3; each repeated column has the same four-byte name length and UTF-8 name,
 followed immediately by one unsigned `DatabaseType` byte. `ResultRow` (7) concatenates one
 self-describing scalar component per result field from byte 0 through the payload end, with
-no count prefix. `Transaction` (9) is reserved and has no implemented payload; supported
-key-value transaction commands travel as statement text in `Execute`.
+no count prefix. `Transaction` (9) is reserved and has no implemented payload; the command
+grammar has no transaction verbs, so an explicit transaction exists only in process
+(`KeyValueDatabaseSession.BeginTransactionAsync`); each wire command auto-commits.
 
 `ResultComplete` (8) is the implemented family's one fixed-width payload. Its encoder emits
 exactly eight bytes: bytes 0–7 (bits 0–63) are the signed 64-bit affected count in big-endian
