@@ -38,6 +38,22 @@ public sealed class SqlDatabaseEngineOptions
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.FromMilliseconds(5);
 
     /// <summary>
+    /// Gets or sets the maximum statement execution time. Zero (the default) disables the timer.
+    /// Must be non-negative and at most <see cref="int.MaxValue"/> milliseconds. A session may
+    /// override it through <see cref="SqlDatabaseSession.StatementTimeout"/>. A started commit
+    /// always completes; this timeout only cancels execution before that boundary.
+    /// </summary>
+    public TimeSpan StatementTimeout { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum duration of each individual lock wait, including unique-index
+    /// key waits. Zero (the default) disables the timer. Must be non-negative and at most
+    /// <see cref="int.MaxValue"/> milliseconds. A session may override it through
+    /// <see cref="SqlDatabaseSession.LockTimeout"/>.
+    /// </summary>
+    public TimeSpan LockTimeout { get; set; }
+
+    /// <summary>
     /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
     /// journal received records waits for a checkpoint, which durably flushes its pages and
     /// truncates its journal. Defaults to 5 minutes, PostgreSQL's <c>checkpoint_timeout</c>;
@@ -220,6 +236,8 @@ public sealed class SqlDatabaseEngineOptions
     {
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
+        StatementTimeout = StatementTimeout,
+        LockTimeout = LockTimeout,
         CheckpointInterval = CheckpointInterval,
         CheckpointJournalSize = CheckpointJournalSize,
         WorkerFailureWindow = WorkerFailureWindow,

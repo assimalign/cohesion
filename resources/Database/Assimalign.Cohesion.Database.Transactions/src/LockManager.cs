@@ -150,7 +150,7 @@ public sealed class LockManager
     // How a lock request's wait ended, as the LockWaitStop event names it.
     private const string WaitGranted = "Granted";
     private const string WaitCancelled = "Cancelled";
-    private const string WaitTimedOut = "Timeout";
+    private const string waitTimedOut = "Timeout";
     private const string WaitEnded = "Ended";
     private const string WaitAbandoned = "Abandoned";
     private const string WaitDeadlock = "Deadlock";
@@ -456,7 +456,7 @@ public sealed class LockManager
     {
         TaskStatus.RanToCompletion => WaitGranted,
         TaskStatus.Canceled when !callerToken.IsCancellationRequested && Volatile.Read(ref _abandonCause) is not null => WaitAbandoned,
-        TaskStatus.Canceled when !callerToken.IsCancellationRequested => WaitTimedOut,
+        TaskStatus.Canceled when !callerToken.IsCancellationRequested => waitTimedOut,
         TaskStatus.Canceled => WaitCancelled,
         _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => WaitDeadlock,
         _ => WaitEnded,
