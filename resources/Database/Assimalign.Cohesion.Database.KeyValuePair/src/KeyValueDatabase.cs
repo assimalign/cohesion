@@ -467,7 +467,6 @@ public sealed class KeyValueDatabase : DatabaseInstance
         if (error is DatabaseException { Diagnostics: [{ Code: "COHDBS003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
         if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK001" }, ..] }) { return error; }
-        if (DatabaseFailure.HasCleanupFailure(error)) { return error; }
         var translated = TranslateOffline(error);
         if (!ReferenceEquals(translated, error)) { return translated; }
         if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK005" }, ..] }) { return error; }

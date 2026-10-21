@@ -208,8 +208,8 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
             try { await transaction.AbortForFailedStatementAsync(error).ConfigureAwait(false); }
             catch (Exception abortFailure)
             {
-                // Undo must not replace the statement's coded cause.
-                return DatabaseFailure.WithCleanupFailure(error, abortFailure);
+                // Keep the exact coded exception, including the common corruption type.
+                KeyValueDatabaseEventSource.Log.TransactionCleanupFailed(transaction, abortFailure);
             }
         }
         return error;

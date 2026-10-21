@@ -508,7 +508,6 @@ public sealed class SqlDatabase : DatabaseInstance
         if (error is DatabaseException { Diagnostics: [{ Code: "COHDBS003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
         if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLT005" }, ..] }) { return error; }
-        if (DatabaseFailure.HasCleanupFailure(error)) { return error; }
         var translated = TranslateOffline(error, selfCommitted);
         if (!ReferenceEquals(translated, error)) { return translated; }
         if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLE041" }, ..] }) { return error; }

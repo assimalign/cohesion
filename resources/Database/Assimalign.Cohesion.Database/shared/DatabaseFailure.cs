@@ -42,19 +42,4 @@ internal static class DatabaseFailure
                             or Transactions.TransactionAbortedException or Transactions.TransactionDeadlockException)
                         || Find<IndexCorruptionException>(error) is not null)));
 
-    // An explicit marker distinguishes a failed cleanup from an arbitrary aggregate. Corruption
-    // in any branch of an ordinary wrapper still takes precedence at the engine boundary.
-    private const string primaryFailureKey = "Assimalign.Cohesion.Database.PrimaryFailure";
-
-    internal static bool HasCleanupFailure(Exception error)
-        => error is DatabaseException && error.Data[primaryFailureKey] is Exception primary
-            && error.InnerException is AggregateException aggregate
-            && ReferenceEquals(aggregate.InnerExceptions[0], primary);
-
-    internal static DatabaseException WithCleanupFailure(Exception cause, Exception cleanup)
-    {
-        var failure = new DatabaseException(cause.Message, (cause as DatabaseException)?.Diagnostics ?? [], new AggregateException(cause, cleanup));
-        failure.Data[primaryFailureKey] = cause;
-        return failure;
-    }
 }

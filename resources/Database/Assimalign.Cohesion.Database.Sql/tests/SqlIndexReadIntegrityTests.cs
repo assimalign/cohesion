@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using EventRecorder = Assimalign.Cohesion.Testing.EventSourceRecorder;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -28,6 +31,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// failing the statement. PostgreSQL's heap fetch makes the same split: a line pointer past the
 /// page or no longer in use is "not found", and an invalid page is <c>ERRCODE_DATA_CORRUPTED</c>.
 /// </summary>
+[Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlIndexReadIntegrityTests
 {
     private const string Seek = "SELECT id FROM t WHERE val = 20";
@@ -263,10 +267,12 @@ public sealed class SqlIndexReadIntegrityTests
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Abort: rollback failure retains the coded read cause and both inner failures")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptCleanup)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Abort: rollback failure preserves the exact coded read cause and emits cleanup evidence")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptRead, bool corruptCleanup)
     {
         // Arrange
         var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
@@ -281,12 +287,13 @@ public sealed class SqlIndexReadIntegrityTests
         Evict(database, pageId);
         var faults = strategy.Faults("abort-failure");
         faults.RottenPage = pageId;
-        faults.WrapCorruption = _ => new StorageIOException("Injected read failure.");
+        if (!corruptRead) { faults.WrapCorruption = _ => new StorageIOException("Injected read failure."); }
         int aborts = 0;
         var original = database.Coordinator.OnUndoDeferred;
         Exception abortFailure = corruptCleanup ? new StorageCorruptionException(pageId, "Injected cleanup corruption.")
             : new InvalidOperationException("Injected abort notification failure.");
         database.Coordinator.OnUndoDeferred = () => { Interlocked.Increment(ref aborts); throw abortFailure; };
+        using var recorder = new EventRecorder(SqlDatabaseEventSource.Log, EventLevel.Warning);
         try
         {
             // Act
@@ -295,11 +302,17 @@ public sealed class SqlIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
-            var causes = failure.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions;
-            causes[0].ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
-            if (corruptCleanup) { StorageCorruptionException.Find(causes[1]).ShouldBeSameAs(abortFailure); }
-            else { causes[1].ShouldBeSameAs(abortFailure); }
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHSQLE041");
+            if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
+            transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(failure);
+            var cleanup = recorder.Events.Where(item => item.EventId == 25).ShouldHaveSingleItem();
+            cleanup.EventName.ShouldBe("TransactionCleanupFailed");
+            cleanup.Level.ShouldBe(EventLevel.Warning);
+            cleanup.PayloadNames.ShouldNotBeNull().ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+            cleanup.Payload.ShouldNotBeNull()[0].ShouldBe(transaction.Id.ToString());
+            cleanup.Payload[1].ShouldBe(corruptCleanup ? typeof(DatabaseCorruptionException).FullName : typeof(InvalidOperationException).FullName);
+            cleanup.Payload[2].ShouldBeOfType<string>().ShouldContain(abortFailure.Message, Case.Sensitive);
+            recorder.Events.ShouldNotContain(item => item.EventId == 0);
             transaction.State.ShouldBe(TransactionState.Faulted);
         }
         finally

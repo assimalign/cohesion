@@ -3,14 +3,17 @@
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
-and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes. Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and
-`COHDBK005`; other index failures use `COHDBK005`. Begin, command, commit and rollback share
-classification. Create and open also code child failures before publication; known format
-refusals retain their authored messages, source diagnostics and inner causes. A failed command aborts an explicit transaction after releasing admission.
-If that abort also fails, the original coded diagnostics remain primary and both causes are
-retained in an inner aggregate. Transaction refusals keep their own code. Real device-read
-regressions cover slot, journal and storage-transaction failures through both wrapper shapes,
-and a failed deferred-undo notification proves an abort cannot replace the read diagnosis.
+and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHDBK005`;
+other index failures use `COHDBK005`. Begin, command, commit and rollback share classification.
+Create and open also code child failures before publication. Known format refusals retain their
+authored messages, source diagnostics and inner causes. A failed command aborts an explicit
+transaction after releasing admission. If that abort also fails, the exact coded exception
+remains primary, including its corruption type; the model EventSource records the cleanup
+failure as `TransactionCleanupFailed`. Transaction refusals retain their own code. Real
+device-read regressions cover slot, journal and storage-transaction failures through both
+wrapper shapes. A failed deferred-undo notification proves an abort cannot replace the read
+diagnosis or its exception type.
 
 
 ## Wire contract ownership
@@ -1063,6 +1066,7 @@ bounded peer-sent names) are in the area's
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
 | 10 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code`, `exceptionType`, `suppressedCount` (int) |
+| 11 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 Event 10 reports a wire command that failed to parse before the typed execution member ran.
 It writes only the exception type and code, never command text or the parse message. It is

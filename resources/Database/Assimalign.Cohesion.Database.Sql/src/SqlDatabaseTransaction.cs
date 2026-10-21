@@ -1,8 +1,8 @@
 using System;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -118,13 +118,13 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         var cause = _storageFailure;
         _storageFailure = null;
+        if (cleanupFailure is not null) { SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, cleanupFailure); }
         if (cause is null) { return; }
         try { await AbortAsync(cause).ConfigureAwait(false); }
         catch (Exception abortFailure)
         {
-            cleanupFailure = cleanupFailure is null ? abortFailure : new AggregateException(cleanupFailure, abortFailure);
+            SqlDatabaseEventSource.Log.TransactionCleanupFailed(this, abortFailure);
         }
-        if (cleanupFailure is not null) { throw DatabaseFailure.WithCleanupFailure(cause, cleanupFailure); }
     }
 
     /// <inheritdoc />

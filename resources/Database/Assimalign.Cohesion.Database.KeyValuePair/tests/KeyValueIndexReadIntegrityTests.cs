@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics.Tracing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using EventRecorder = Assimalign.Cohesion.Testing.EventSourceRecorder;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;
@@ -28,6 +31,7 @@ using static KeyValueTestHarness;
 /// checksum made its keys disappear from Get, and a Put over such a key resolved it as missing and
 /// failed with a retryable write-write conflict that no retry could clear.
 /// </summary>
+[Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueIndexReadIntegrityTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Index reads: a Get over an entry page that fails its checksum fails instead of reading the key as missing (#1342)")]
@@ -246,10 +250,12 @@ public sealed class KeyValueIndexReadIntegrityTests
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(serverSession.Id);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Abort: rollback failure retains the coded read cause and both inner failures")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptCleanup)
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Abort: rollback failure preserves the exact coded read cause and emits cleanup evidence")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Execute_AbortNotificationFails_ShouldRetainCodedCause(bool corruptRead, bool corruptCleanup)
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
@@ -263,12 +269,13 @@ public sealed class KeyValueIndexReadIntegrityTests
         Evict(database, pageId);
         var faults = strategy.Faults("abort-failure");
         faults.RottenPage = pageId;
-        faults.WrapCorruption = _ => new StorageIOException("Injected read failure.");
+        if (!corruptRead) { faults.WrapCorruption = _ => new StorageIOException("Injected read failure."); }
         int aborts = 0;
         var original = database.Coordinator.OnUndoDeferred;
         Exception abortFailure = corruptCleanup ? new StorageCorruptionException(pageId, "Injected cleanup corruption.")
             : new InvalidOperationException("Injected abort notification failure.");
         database.Coordinator.OnUndoDeferred = () => { Interlocked.Increment(ref aborts); throw abortFailure; };
+        using var recorder = new EventRecorder(KeyValueDatabaseEventSource.Log, EventLevel.Warning);
         try
         {
             // Act
@@ -277,11 +284,17 @@ public sealed class KeyValueIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
-            var causes = failure.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions;
-            causes[0].ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK005");
-            if (corruptCleanup) { StorageCorruptionException.Find(causes[1]).ShouldBeSameAs(abortFailure); }
-            else { causes[1].ShouldBeSameAs(abortFailure); }
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHDBK005");
+            if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
+            transaction.CreateCommandRefusal().InnerException.ShouldBeSameAs(failure);
+            var cleanup = recorder.Events.Where(item => item.EventId == 11).ShouldHaveSingleItem();
+            cleanup.EventName.ShouldBe("TransactionCleanupFailed");
+            cleanup.Level.ShouldBe(EventLevel.Warning);
+            cleanup.PayloadNames.ShouldNotBeNull().ShouldBe(["transactionId", "exceptionType", "exceptionMessage"]);
+            cleanup.Payload.ShouldNotBeNull()[0].ShouldBe(transaction.Id.ToString());
+            cleanup.Payload[1].ShouldBe(corruptCleanup ? typeof(DatabaseCorruptionException).FullName : typeof(InvalidOperationException).FullName);
+            cleanup.Payload[2].ShouldBeOfType<string>().ShouldContain(abortFailure.Message, Case.Sensitive);
+            recorder.Events.ShouldNotContain(item => item.EventId == 0);
             transaction.State.ShouldBe(TransactionState.Faulted);
         }
         finally

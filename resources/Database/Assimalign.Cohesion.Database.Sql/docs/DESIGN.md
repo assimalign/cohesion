@@ -3,16 +3,16 @@
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
-and aggregate causes, use `COHSQLE041`. Offline and format refusals retain their specific codes. Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and
-`COHSQLE041`; other index failures use `COHSQLE041`. Begin, statement, commit and rollback
-share classification. Create and open also code wrapped child failures before publication.
-Existing format refusals retain their authored type, message and source diagnostic; a second
-model wrapper never hides the specific format diagnosis. Failed-statement snapshot release
-and transaction abort each preserve
-the coded statement cause; cleanup failures are retained alongside it in an inner aggregate.
-Transaction refusals keep their own code. Real device-read regressions cover slot, journal and
-storage-transaction failures through both wrapper shapes, plus a failed abort notification.
-All added work is on error paths; successful-statement allocation behavior is unchanged.
+and aggregate causes, use `COHSQLE041`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHSQLE041`;
+other index failures use `COHSQLE041`. Begin, statement, commit and rollback share classification.
+Create and open also code child failures before publication. Known format refusals retain their
+authored types, messages and source diagnostics. Snapshot release and transaction abort preserve
+the exact coded statement exception, including its corruption type. The model EventSource
+records secondary cleanup failures as `TransactionCleanupFailed`. Transaction refusals retain
+their own code. Real device-read regressions cover slot, journal and storage-transaction failures
+through both wrapper shapes, plus a failed abort notification. All added work is on error paths;
+successful-statement allocation behavior is unchanged.
 
 
 ## Wire contract ownership
@@ -5476,6 +5476,7 @@ bounded peer-sent names) are in the area's
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
+| 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
 
