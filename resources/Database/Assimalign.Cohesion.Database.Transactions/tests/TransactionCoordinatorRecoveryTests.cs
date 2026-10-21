@@ -20,6 +20,87 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection("Journal enrollment")]
 public class TransactionCoordinatorRecoveryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Checkpoint: readers begin, pin and end while the physical checkpoint owns both gates (#1269)")]
+    public async Task BeginAsync_CheckpointBlockedInDataIo_ShouldAllowReadersAndPreserveLateWriter()
+    {
+        // Arrange: stop in real checkpoint I/O, after its sequence floor was captured.
+        using var data = new CheckpointDataStream();
+        using var storage = CoordinatorStorage.Create(data);
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        PageId pageId;
+        using (var page = storage.PageManager.AllocatePage(PageType.Data))
+        {
+            pageId = page.Id;
+        }
+        long before = storage.ReserveTransactionSequence();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        data.BeforeWrite = () =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
+        };
+        var checkpoint = Task.Run(coordinator.Checkpoint);
+        TransactionContext? late = null;
+        int completed = 0;
+        try
+        {
+            entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+
+            // Act: reservation cannot take the physical checkpoint's transaction lock;
+            // begin/commit/rollback cannot take its lifecycle gate, nor pins its pool lock.
+            await Task.Run(async () =>
+            {
+                using var canceled = new CancellationTokenSource();
+                canceled.Cancel();
+                await Should.ThrowAsync<OperationCanceledException>(async () =>
+                    await coordinator.BeginAsync(IsolationLevel.Snapshot, canceled.Token));
+                for (int i = 0; i < 32; i++)
+                {
+                    var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+                    using (var page = storage.PageManager.GetPage(pageId))
+                    {
+                        page.Page.Type.ShouldBe(PageType.Data);
+                    }
+                    if ((i & 1) == 0)
+                    {
+                        await coordinator.CommitAsync(reader, CancellationToken.None);
+                    }
+                    else
+                    {
+                        await coordinator.RollbackAsync(reader, CancellationToken.None);
+                    }
+                    completed++;
+                }
+                late = await coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+            }).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            data.BeforeWrite = null;
+            release.Set();
+            await checkpoint.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert: a reservation above that captured floor can later stamp only with fresh
+        // enrollment in the retained WAL, and recovery still classifies it as uncommitted.
+        completed.ShouldBe(32);
+        var promoted = late.ShouldNotBeNull();
+        promoted.Sequence.Value.ShouldBeGreaterThan((ulong)before);
+        storage.Log.ReadAll().ShouldNotContain(record => record.Type == JournalRecordType.BeginTransaction);
+        await coordinator.ApplyStatementAsync(promoted, bracket =>
+            storage.Insert(bracket, Stamped(promoted.Sequence, TransactionSequence.None)).SlotIndex);
+        var images = storage.CaptureImages();
+        using var reopened = CoordinatorStorage.Open(images.Data, images.Journal);
+        await using var recovered = new TransactionCoordinator(reopened, reopened.Log, reopened.Records);
+        var plan = recovered.AnalyzeAndScrub();
+        plan.Aborted.ShouldContain(promoted.Sequence);
+        RecordCount(reopened).ShouldBe(0);
+        var next = await recovered.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        next.Sequence.ShouldBeGreaterThan(promoted.Sequence);
+        await recovered.CommitAsync(next, CancellationToken.None);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Lazy enrollment: cancellation before admission leaves a reader and a failed callback releases the gate (#1280)")]
     public async Task ApplyStatement_CancellationAndCallbackFailure_ShouldReleaseAdmissionAndKeepClassification()
     {
@@ -646,7 +727,7 @@ public class TransactionCoordinatorRecoveryTests
 
         internal StorageJournal Log => WriteAheadLog;
 
-        internal static CoordinatorStorage Create() => new(new MemoryStream(), new MemoryStream(), reopen: false);
+        internal static CoordinatorStorage Create(MemoryStream? data = null) => new(data ?? new MemoryStream(), new MemoryStream(), reopen: false);
 
         internal static CoordinatorStorage Open(byte[] data, byte[] journal)
             => new(Copy(data), Copy(journal), reopen: true);
@@ -710,6 +791,17 @@ public class TransactionCoordinatorRecoveryTests
             stream.Write(bytes);
             stream.Position = 0;
             return stream;
+        }
+    }
+
+    private sealed class CheckpointDataStream : MemoryStream
+    {
+        internal Action? BeforeWrite;
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            BeforeWrite?.Invoke();
+            base.Write(buffer);
         }
     }
 }

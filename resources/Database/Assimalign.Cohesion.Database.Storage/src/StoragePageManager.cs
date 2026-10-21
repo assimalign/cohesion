@@ -60,36 +60,59 @@ public sealed class StoragePageManager
         // Pin the page without reading it: every byte is cleared below, so the free page's
         // old content is never needed, and a free page whose last write a crash tore (an
         // unjournaled checkpoint anchor page) must not fail its checksum here (#1251).
-        var handle = _bufferPool.PinForOverwrite(pageId, _stream);
+        StoragePageHandle handle;
+        try
+        {
+            handle = _bufferPool.PinForOverwrite(pageId, _stream);
+        }
+        catch
+        {
+            // No buffer was obtained or changed. In particular, pool exhaustion must
+            // not leak the reserved id on every refused allocation (#1269).
+            _freeSpaceMap.Free(pageId);
+            throw;
+        }
 
-        // Now extend the stream to accommodate the new page. Grow only, and under the pool
-        // lock that every page read and write-back holds: a concurrent allocation of a
-        // higher page may already have extended it (a shorter length would cut that page
-        // off), and an in-memory stream replaces its array when it grows, which would drop
-        // a write-back landing in the old array.
-        _bufferPool.EnsureLength(_stream, ((long)pageId + 1) * Page.Size);
+        try
+        {
+            // Now extend the stream to accommodate the new page. Grow only, and under the pool
+            // monitor: a concurrent allocation of a
+            // higher page may already have extended it (a shorter length would cut that page
+            // off), and an in-memory stream replaces its array when it grows, which would drop
+            // a write-back landing in the old array. The backing handle serializes growth with
+            // flush write-back too, which now runs outside the pool monitor.
+            _bufferPool.EnsureLength(_stream, ((long)pageId + 1) * Page.Size);
 
-        // Initialize the fresh page (local copy shares the same pointer). The clear spans
-        // the pool buffer's fixed size, never a length read from the page's own header.
-        //
-        // Invariant A (#1253): allocation zeroes the page LSN, with every other byte. Zero is at
-        // or below the redo point, so the allocating transaction's first touch journals the page's
-        // full image, initialization included. A page freed and reallocated within one checkpoint
-        // interval otherwise kept the LSN of its free, its next delta chained onto the freed page,
-        // and the initialization done before the touch (type, owner tag, slotted header) was in
-        // no record: recovery would rebuild the free page plus the delta, a page that never existed.
-        var page = handle.Page;
-        new Span<byte>(page.Pointer, Page.Size).Clear();
-        page.Id = (long)pageId;
-        page.Type = type;
-        handle.MarkDirty();
+            // Run the audit hook before changing the buffer: if it refuses the allocation,
+            // a resident free page must keep its previous bytes and dirty version.
+            WroteOutsideJournal?.Invoke((long)pageId);
 
-        // The clear is outside the journal: an allocating storage transaction images the page at
-        // its touch, initialization included (invariant A), and anything else allocating is the
-        // storage itself (its first page, an anchor page) or a raw caller.
-        WroteOutsideJournal?.Invoke((long)pageId);
+            // Initialize the fresh page (local copy shares the same pointer). The clear spans
+            // the pool buffer's fixed size, never a length read from the page's own header.
+            //
+            // Invariant A (#1253): allocation zeroes the page LSN, with every other byte. Zero is at
+            // or below the redo point, so the allocating transaction's first touch journals the page's
+            // full image, initialization included. A page freed and reallocated within one checkpoint
+            // interval otherwise kept the LSN of its free, its next delta chained onto the freed page,
+            // and the initialization done before the touch (type, owner tag, slotted header) was in
+            // no record: recovery would rebuild the free page plus the delta, a page that never existed.
+            var page = handle.Page;
+            new Span<byte>(page.Pointer, Page.Size).Clear();
+            page.Id = (long)pageId;
+            page.Type = type;
+            // The clear is outside the journal: an allocating storage transaction images the page at
+            // its touch, initialization included (invariant A), and anything else allocating is the
+            // storage itself (its first page, an anchor page) or a raw caller.
+            handle.MarkDirty();
 
-        return handle;
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            _freeSpaceMap.Free(pageId);
+            throw;
+        }
     }
 
     /// <summary>
