@@ -159,9 +159,9 @@ public sealed class DatabaseConnection : IAsyncDisposable
             {
                 throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
             }
-            if (!_connector.IsOpen)
+            if (!_connector.CanExecute)
             {
-                throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
+                throw new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ConnectionNotOpen);
             }
             if (_operation is not null)
             {

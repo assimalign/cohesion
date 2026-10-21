@@ -14,6 +14,31 @@ namespace Assimalign.Cohesion.Database.Protocol.Tests;
 /// </summary>
 public class ProtocolFramingTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Protocol] - Every frame is one complete stream write")]
+    [InlineData(0)]
+    [InlineData(128)]
+    [InlineData((int)ProtocolFrameHeader.MaxPayloadLength)]
+    public async Task WriteFrame_HeaderAndPayload_ShouldUseOneStreamWrite(int length)
+    {
+        // Arrange
+        using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var stream = new RecordingWriteStream();
+        await using var writer = ProtocolFrameWriter.Create(stream, leaveOpen: true);
+        var payload = new byte[length];
+        if (length > 0) { payload[^1] = 123; }
+
+        // Act
+        await writer.WriteFrameAsync(new(ProtocolMessageType.Error, payload), timeout.Token);
+
+        // Assert
+        stream.WriteLengths.ShouldBe([ProtocolFrameHeader.Size + length]);
+        stream.Position = 0;
+        await using var reader = ProtocolFrameReader.Create(stream, leaveOpen: true);
+        var frame = (await reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull();
+        frame.Type.ShouldBe(ProtocolMessageType.Error);
+        frame.Payload.ToArray().ShouldBe(payload);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Framing: frames round-trip through a stream in order")]
     public async Task WriteFrames_ThenRead_ShouldRoundTripInOrder()
     {

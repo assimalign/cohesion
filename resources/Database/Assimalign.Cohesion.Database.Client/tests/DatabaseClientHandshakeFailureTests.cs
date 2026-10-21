@@ -28,6 +28,43 @@ namespace Assimalign.Cohesion.Database.Client.Tests;
 /// </summary>
 public sealed class DatabaseClientHandshakeFailureTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Client] - Clean handshake EOF names startup and releases the pool slot")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RentAsync_CleanHandshakeEof_ShouldNameStartupAndReleaseSlot(bool afterChallenge)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var listener = new InMemoryConnectionListener();
+        await using var client = CreateClient(listener);
+        Task server = Task.Run(async () =>
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                await using var peer = await listener.AcceptAsync(timeout.Token);
+                await using var channel = new ProtocolChannel(peer.AsStream(), SqlProtocol.Family, leaveOpen: true);
+                await ReadAsync(channel.Reader, timeout.Token);
+                if (afterChallenge)
+                {
+                    await WriteAsync(channel.Writer, ProtocolMessageType.Authenticate, ReadOnlyMemory<byte>.Empty, timeout.Token);
+                    await ReadAsync(channel.Reader, timeout.Token);
+                }
+                await peer.Output.CompleteAsync();
+                await DrainAsync(channel.Reader, timeout.Token);
+            }
+        });
+
+        // Act / Assert: the second attempt also proves the one-slot pool was released.
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            var error = await Should.ThrowAsync<DatabaseClientException>(async () => await client.RentAsync(timeout.Token));
+            error.Code.ShouldBe(ProtocolErrorCode.Internal);
+            error.Message.ShouldContain("during the startup handshake", Case.Sensitive);
+            error.Message.ShouldNotContain("mid-exchange", Case.Sensitive);
+        }
+        await server;
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Client] - Handshake: a peer reset after the startup frame is wrapped with the socket error and frees the slot")]
     public async Task RentAsync_PeerResetsDuringHandshake_ShouldWrapSocketException()
     {

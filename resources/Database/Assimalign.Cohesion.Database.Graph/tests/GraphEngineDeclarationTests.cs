@@ -323,6 +323,7 @@ public sealed class GraphEngineDeclarationTests : IDisposable
             AuthenticationTimeout = TimeSpan.FromSeconds(3),
             IdleTimeout = TimeSpan.FromMinutes(2),
             ShutdownDrainTimeout = TimeSpan.FromSeconds(4),
+            TerminalDrainLinger = TimeSpan.FromSeconds(1),
         };
         await using var engine = GraphDatabaseEngine.Create("server-copy", new GraphDatabaseEngineOptions());
 
@@ -338,9 +339,10 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         copy.AuthenticationTimeout.ShouldBe(options.AuthenticationTimeout);
         copy.IdleTimeout.ShouldBe(options.IdleTimeout);
         copy.ShutdownDrainTimeout.ShouldBe(options.ShutdownDrainTimeout);
+        copy.TerminalDrainLinger.ShouldBe(options.TerminalDrainLinger);
         typeof(GraphDatabaseServerOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(6);
+            .Length.ShouldBe(7);
         await server.DisposeAsync();
     }
 

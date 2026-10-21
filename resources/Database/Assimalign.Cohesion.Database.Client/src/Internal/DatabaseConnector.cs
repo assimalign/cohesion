@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -63,6 +64,10 @@ internal sealed class DatabaseConnector
 
     /// <summary>Gets the capabilities agreed during startup.</summary>
     public IReadOnlyList<string> Capabilities { get; private set; } = Array.Empty<string>();
+
+    // A transport can close with a terminal Error still buffered. An admitted lease may
+    // consume that error once, while IsOpen continues to describe physical health to the pool.
+    internal bool CanExecute => _isOpen && !_isClosed;
 
     internal void Invalidate() => _isOpen = false;
 
@@ -240,6 +245,28 @@ internal sealed class DatabaseConnector
     {
         try
         {
+            // An admitted exchange owns cancellation on an open, empty transport (#1313).
+            // Do not bypass its core and cancellation hooks on that normal path.
+            if (!IsOpen || _connection!.ConnectionClosed.IsCancellationRequested || HasBufferedResponse())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ProtocolFrame? terminal;
+                try { terminal = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false); }
+                catch (InvalidOperationException exception)
+                {
+                    throw new IOException(ErrorMessages.ResponseReadClosed, exception);
+                }
+                if (terminal is null)
+                {
+                    throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ConnectionNotOpen));
+                }
+                if (terminal.Value.Type != ProtocolMessageType.Error)
+                {
+                    throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation,
+                        string.Format(CultureInfo.CurrentCulture, ErrorMessages.TerminalFrameUnexpected, terminal.Value.Type)));
+                }
+                throw FromErrorFrame(terminal.Value);
+            }
             return await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception) when (exception.Code == ProtocolErrorCode.ConnectionFailure)
@@ -282,6 +309,29 @@ internal sealed class DatabaseConnector
                 _isOpen = false;
             }
             throw;
+        }
+    }
+
+    private bool HasBufferedResponse()
+    {
+        // The lease admits one operation under its lock, then releases it before any I/O.
+        // No reader can overlap this peek. Preserve both consumed and examined positions
+        // so the frame reader sees exactly the same bytes, including fragmented headers.
+        try
+        {
+            if (!_connection!.Input.TryRead(out var result)) { return false; }
+            try
+            {
+                return !result.Buffer.IsEmpty || result.IsCompleted;
+            }
+            finally
+            {
+                _connection.Input.AdvanceTo(result.Buffer.Start, result.Buffer.Start);
+            }
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new IOException(ErrorMessages.ResponseReadClosed, exception);
         }
     }
 
@@ -383,7 +433,7 @@ internal sealed class DatabaseConnector
 
         if (frame is null)
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange."));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.HandshakeClosed));
         }
 
         return frame.Value;
@@ -402,8 +452,8 @@ internal sealed class DatabaseConnector
     }
 
     /// <summary>
-    /// Translates a handshake error frame into a client exception carrying the
-    /// server's wire code; the connection never reached ready, so it is broken.
+    /// Translates an error received during startup or between exchanges into a client
+    /// exception carrying the server's wire code; either path terminates the connection.
     /// </summary>
     /// <remarks>
     /// A malformed error payload, or one that carries the client-local

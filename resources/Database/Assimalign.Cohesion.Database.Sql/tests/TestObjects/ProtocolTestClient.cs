@@ -34,7 +34,12 @@ internal sealed class ProtocolTestClient : IAsyncDisposable
     }
 
     public async Task<ProtocolFrame?> ReadAsync(int timeoutSeconds = 10)
-        => await _reader.ReadFrameAsync(TestTimeout.Token(timeoutSeconds));
+    {
+        ProtocolFrame? frame = await _reader.ReadFrameAsync(TestTimeout.Token(timeoutSeconds));
+        // After observing the server's EOF, close the peer half so terminal drains can join.
+        if (frame is null) { await _connection.Output.CompleteAsync(); }
+        return frame;
+    }
 
     /// <summary>
     /// Reads the next frame, asserting the stream did not end.

@@ -1380,12 +1380,47 @@ engine-owned implementation of the shared storage flush duty.
 
 ## Document wire family
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close, TerminalDrainLinger or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain. A stop racing the final Ready flush
+retains that notice after authentication, even before the ready loop begins.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
+TerminalDrainLinger defaults to two seconds and begins after output completion, including for
+capacity refusals. It bounds only the peer-close wait; ShutdownDrainTimeout remains the outer
+bound starting before any terminal write. An unread idle pooled client therefore cannot occupy
+a MaxSessions slot or hold soft stop until the outer budget. Both options are positive, finite,
+and at most 4,294,967,294 ms, checked at construction in every model. Rejection setup, including
+linked-token creation and CancelAfter, is inside its cleanup boundary: setup failure still
+disposes the transport and completes/removes the registry entry. ObjectDisposedException while
+draining input means the transport closed, including a TLS reader closed by output completion;
+it is not SessionCleanupFailed.
+
+StopCoreAsync intentionally joins all session and rejection completions after hard abort,
+without another timeout. Abort must release transport I/O, and teardown must join that I/O
+before disposing its token sources, transport and engine session. Abandoning the final join
+would release resources still owned by pending I/O. A transport or execution that ignores abort
+can therefore delay the final join; ShutdownDrainTimeout bounds graceful work, not an unsafe
+abandonment of cleanup. The controlled unwind gate verifies this ordering with the 20 s safety
+token, without elapsed-time margins.
+
+TerminalDrainTimedOut warns when the outer terminal deadline aborts a session. Event 14 carries
+sessionId, drainTimeoutMilliseconds and suppressedCount, at most once per second per source.
+The total-terminal-drain-timeouts counter counts every expiry, including suppressed warnings.
+Normal peer-close linger expiry and a server hard abort do not emit this event.
+
 `DocumentDatabaseServer.Create(engine, options)` binds its listener on Start and owns it through
 Stop. An `AddServer(options => ...)` builder registration creates the same server; the factory
 verb remains available. Options are snapshotted: listener, authenticator (AllowAll by default),
 MaxSessions (100), AuthenticationTimeout (10 seconds), IdleTimeout (30 minutes), and
-ShutdownDrainTimeout (30 seconds). Timer durations must fit the runtime timer range, or be
-`Timeout.InfiniteTimeSpan`. Stop cancels accepts and idle/handshake reads, drains active operations,
+ShutdownDrainTimeout (30 seconds) and TerminalDrainLinger (two seconds). Authentication and idle
+timers may be infinite; the drain budget and linger must be positive and finite in the runtime timer range. Stop cancels accepts and idle/handshake reads, drains active operations,
 then aborts them when the drain budget expires. Rejected-peer cleanup is tracked through Stop.
 Readiness is the shared DatabaseServer state after a successful bind. The engine remains owned
 by the composition root; an engine-built server is disposed by that engine.
@@ -1769,14 +1804,15 @@ Before writing a terminal shared Error, the server starts one ShutdownDrainTimeo
 That same deadline covers the error write, its flush, transport output completion and the wait
 for connection closure. Expiry aborts the connection to release blocked transport I/O; the pump
 joins that I/O before releasing the session and its counter. The hard-abort registration stays
-attached through the drain, and shutdown can interrupt output completion and the closure wait.
+attached through the drain; hard abort can interrupt output completion and the closure wait.
+Soft stop alone leaves the terminal notice its bounded delivery opportunity.
 A flush only queues pipe bytes; immediate TCP disposal can discard a queued fatal frame. This
 local drain uses the existing connection contract and adds no public transport member. A deferred
 send fixture deterministically verifies error delivery before disposal; TCP unknown-database
 coverage verifies the real transport path.
 Controlled-output regressions block the terminal frame write (ignoring or observing cancellation),
 explicit flush and asynchronous completion separately, and assert session completion and
-registry/counter release within the 100 ms budget plus a 500 ms scheduling margin. A separate unwind gate verifies that an abort
+registry/counter release after the deadline signals abort, using only the 20 s safety token. A separate unwind gate verifies that an abort
 does not release the session before pending output completion returns.
 
 Streaming regressions count all 128 rows and 130 wire frames and verify a distinct marker in

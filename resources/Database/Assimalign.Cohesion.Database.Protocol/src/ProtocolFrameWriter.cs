@@ -47,8 +47,8 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
     /// <returns>The frame writer.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="stream"/> is null.</exception>
     /// <remarks>
-    /// The writer writes a frame's header and payload without flushing, so the caller batches
-    /// small frames into one transport write with <see cref="FlushAsync(CancellationToken)"/>.
+    /// The writer emits a frame's header and payload in one stream write. A stream may flush
+    /// on write; callers can also request a flush with <see cref="FlushAsync(CancellationToken)"/>.
     /// It does not check message identifiers against a family; <see cref="ProtocolChannel"/>
     /// does.
     /// </remarks>

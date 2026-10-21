@@ -56,9 +56,17 @@ public sealed class DocumentDatabaseServerOptions
     /// <summary>
     /// Gets or sets the drain budget honored by <see cref="DatabaseServer.StopAsync"/>
     /// before remaining sessions are aborted. Also bounds a terminal error's write, flush,
-    /// output completion and connection-closure wait with one deadline.
+    /// output completion and connection-closure wait with one deadline. Must be positive, finite,
+    /// and at most 4,294,967,294 milliseconds.
     /// </summary>
     public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets or sets the peer-close wait after terminal output completes. Defaults to two seconds.
+    /// Must be positive, finite, and at most 4,294,967,294 milliseconds.
+    /// The shutdown drain budget remains the outer limit on all terminal I/O.
+    /// </summary>
+    public TimeSpan TerminalDrainLinger { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// Copies every option, so a server keeps settings its caller can no longer change: a later
@@ -74,5 +82,6 @@ public sealed class DocumentDatabaseServerOptions
         AuthenticationTimeout = AuthenticationTimeout,
         IdleTimeout = IdleTimeout,
         ShutdownDrainTimeout = ShutdownDrainTimeout,
+        TerminalDrainLinger = TerminalDrainLinger,
     };
 }

@@ -291,18 +291,14 @@ public class SqlDatabaseServerTests
         await client.HandshakeAsync();
 
         // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        await harness.Server.StopAsync(TestTimeout.Token(30));
-        stopwatch.Stop();
-
-        // Assert: the drain closed the idle session at the frame boundary — far
-        // inside the budget — and told the client why.
-        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
-        harness.Server.Sessions.ShouldBeEmpty();
-
+        Task stop = harness.Server.StopAsync(TestTimeout.Token(30));
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         ProtocolErrorMessage.Decode(frame.Payload.Span).Code.ShouldBe(ProtocolErrorCode.Unavailable);
         (await client.ReadAsync()).ShouldBeNull();
+        await stop;
+
+        // Assert: server completion follows output completion while the peer stays open.
+        harness.Server.Sessions.ShouldBeEmpty();
     }
 
     /// <summary>

@@ -1506,6 +1506,41 @@ their syntax; the existing closed projection gate propagates entity-valued resul
 
 ## Graph wire family
 
+Terminal shared Errors (#1087) use one ShutdownDrainTimeout deadline starting before the
+write. The pump flushes the complete frame, completes connection Output, consumes remaining
+peer input until close, TerminalDrainLinger or deadline, then disposes. Deadline and hard-abort callbacks abort the
+transport to release tokenless output completion; teardown joins that I/O and detaches callbacks
+before disposing their token sources. Abort is claimed atomically before lifetime cancellation;
+no lock is held across callbacks or transport I/O. Soft stop permits the graceful notice to drain. A stop racing the final Ready flush
+retains that notice after authentication, even before the ready loop begins.
+Capacity refusals follow the same rule without creating a session. They enter the rejection
+registry before I/O, and Stop joins them after joining the accept loop. Every resource release is
+attempted even when an earlier disposal fails. This Database-side close rule unblocks #1087;
+Connections.Tcp's transport disposal contract remains #1086.
+
+TerminalDrainLinger defaults to two seconds and begins after output completion, including for
+capacity refusals. It bounds only the peer-close wait; ShutdownDrainTimeout remains the outer
+bound starting before any terminal write. An unread idle pooled client therefore cannot occupy
+a MaxSessions slot or hold soft stop until the outer budget. Both options are positive, finite,
+and at most 4,294,967,294 ms, checked at construction in every model. Rejection setup, including
+linked-token creation and CancelAfter, is inside its cleanup boundary: setup failure still
+disposes the transport and completes/removes the registry entry. ObjectDisposedException while
+draining input means the transport closed, including a TLS reader closed by output completion;
+it is not SessionCleanupFailed.
+
+StopCoreAsync intentionally joins all session and rejection completions after hard abort,
+without another timeout. Abort must release transport I/O, and teardown must join that I/O
+before disposing its token sources, transport and engine session. Abandoning the final join
+would release resources still owned by pending I/O. A transport or execution that ignores abort
+can therefore delay the final join; ShutdownDrainTimeout bounds graceful work, not an unsafe
+abandonment of cleanup. The controlled unwind gate verifies this ordering with the 20 s safety
+token, without elapsed-time margins.
+
+TerminalDrainTimedOut warns when the outer terminal deadline aborts a session. Event 14 carries
+sessionId, drainTimeoutMilliseconds and suppressedCount, at most once per second per source.
+The total-terminal-drain-timeouts counter counts every expiry, including suppressed warnings.
+Normal peer-close linger expiry and a server hard abort do not emit this event.
+
 `GraphProtocol.Family` fixes the graph vocabulary for an accepted connection. Shared
 `ProtocolChannel` handles framing and validates every type against the bound family; Graph owns
 all request/result payloads. The endpoint selects Graph before startup. No model discriminator is
@@ -1817,6 +1852,7 @@ four servers.
 
 | Id | Event | Level | Keyword | Payload |
 | --- | --- | --- | --- | --- |
+| 14 | TerminalDrainTimedOut | Warning | — | sessionId, drainTimeoutMilliseconds, suppressedCount |
 | 1 | `SessionAccepted` | Verbose | `Sessions` | `engineName`, `sessionId`, `activeSessions` (this one included, as the accept loop counted them) |
 | 2 | `SessionRejected` | Warning | — | `engineName`, `reason` (`SessionLimit`), `activeSessions`, `maxSessions` |
 | 3 | `HandshakeRefused` | Warning | — | `sessionId`, `database` and `principal` (as the startup named them, cut to 256 characters; empty before it was read), `code` (the `ProtocolErrorCode` name), `detail` (the error frame's message, cut to 1024 characters) |

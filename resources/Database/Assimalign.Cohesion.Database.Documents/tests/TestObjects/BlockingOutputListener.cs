@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO.Pipelines;
 using System.Net;
 using System.Threading;
@@ -25,6 +26,10 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
         _holdOutputAfterAbort = holdOutputAfterAbort;
     }
 
+    private readonly TaskCompletionSource<BlockingConnection> _secondAccepted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _accepts;
+    internal Task<BlockingConnection> SecondAccepted => _secondAccepted.Task;
+
     internal Task<BlockingConnection> Accepted => _accepted.Task;
     internal IDuplexConnectionFactory Factory => _inner.CreateFactory();
     public override ListenerId Id => _inner.Id;
@@ -36,7 +41,8 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
     protected override async ValueTask<IDuplexConnection> AcceptCoreAsync(CancellationToken cancellationToken = default)
     {
         var connection = new BlockingConnection(await _inner.AcceptAsync(cancellationToken), _blockedFlush, _holdOutputAfterAbort);
-        _accepted.TrySetResult(connection);
+        if (Interlocked.Increment(ref _accepts) == 1) { _accepted.TrySetResult(connection); }
+        else { _secondAccepted.TrySetResult(connection); }
         return connection;
     }
 
@@ -44,6 +50,7 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
     {
         private readonly IDuplexConnection _inner;
         private readonly BlockingWriter _output;
+        private readonly DrainReader _input;
         private readonly bool _holdOutputAfterAbort;
         private readonly TaskCompletionSource _blocked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _aborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -59,6 +66,7 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
             _inner = inner;
             _holdOutputAfterAbort = holdOutputAfterAbort;
             _output = new BlockingWriter(this, inner.Output, blockedFlush);
+            _input = new DrainReader(this, inner.Input);
         }
 
         internal Task Blocked => _blocked.Task;
@@ -74,8 +82,10 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
         public override EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
         public override ConnectionCapabilities Capabilities => _inner.Capabilities;
         public override ConnectionState State => _inner.State;
-        public override CancellationToken ConnectionClosed => _inner.ConnectionClosed;
-        public override PipeReader Input => _inner.Input;
+        internal bool FailSetup { get; set; }
+        public override CancellationToken ConnectionClosed => FailSetup ? throw new InvalidOperationException("Forced rejection setup failure.") : _inner.ConnectionClosed;
+        internal bool CloseInputOnDrain { get; set; }
+        public override PipeReader Input => _input;
         public override PipeWriter Output => _output;
 
         public override void Abort(Exception? reason = null)
@@ -102,6 +112,31 @@ internal sealed class BlockingOutputListener : DuplexConnectionListener
             finally { Interlocked.Decrement(ref _pendingOperations); }
         }
 
+        private sealed class DrainReader : PipeReader
+        {
+            private readonly BlockingConnection _owner;
+            private readonly PipeReader _inner;
+
+            internal DrainReader(BlockingConnection owner, PipeReader inner)
+            {
+                _owner = owner;
+                _inner = inner;
+            }
+
+            public override void AdvanceTo(SequencePosition consumed) => _inner.AdvanceTo(consumed);
+            public override void AdvanceTo(SequencePosition consumed, SequencePosition examined) => _inner.AdvanceTo(consumed, examined);
+            public override void CancelPendingRead() => _inner.CancelPendingRead();
+            public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+            public override bool TryRead(out ReadResult result) => _inner.TryRead(out result);
+            public override ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
+            {
+                if (_owner.CloseInputOnDrain && _owner.Completions != 0)
+                {
+                    throw new ObjectDisposedException("Controlled closed transport");
+                }
+                return _inner.ReadAsync(cancellationToken);
+            }
+        }
         private sealed class BlockingWriter : PipeWriter
         {
             private readonly BlockingConnection _owner;
