@@ -60,6 +60,11 @@ ADD COLUMN. Bare, table-qualified and schema-qualified column names remain valid
 syntax walk validates this against catalog identity locally; it needs no new language AST
 constructor or shipped-assembly visibility grant. BindPersistedCheck retains its older lenient
 qualifier contract, so previously accepted stored predicates still open and enforce their checks.
+Declared and imperative schemas with an already-applied hash also retain that qualifier contract.
+Engine build binds other declaration rules before I/O, then provisioning validates qualifiers only
+for a new or changed hash, after reading the catalog and before any migration step. The validation
+cache tracks strict qualifier validation separately, so a previously lenient bind cannot authorize
+a later application of that hash after another schema replaces it.
 Stored-table query conformance covers SELECT, WHERE, GROUP BY, HAVING, ORDER BY, alias hiding
 and nested references alongside the existing join, correlation and DML suites.
 
@@ -1187,12 +1192,13 @@ flowchart LR
 - **Declared CHECKs bind before any file** (part 2, design §5.2 phase 3). A compiled
   schema's `table.Check(name, sql)` (`Sql.Schema`) carries its SQL text as written. The
   engine builder's phase 3, after the catalog is frozen and before the engine exists, binds
-  every declared CHECK as the DDL that applies it will (`SqlSchemaProvisioner.BindDeclaredChecks`):
+  every declared CHECK (`SqlSchemaProvisioner.BindDeclaredChecks`), deferring qualifier identity
+  until provisioning knows the recorded schema hash:
   the text must parse, under the engine's nesting limit, as exactly one expression, so no
   text can close the constraint's parentheses and declare more than the schema shows, and
   must parse as one inside the parentheses the DDL embeds it in, so a trailing `-- comment`
   or an unterminated `/*` cannot swallow the closing one and fail after files exist
-  (`SqlPersistedExpression.ParseDeclaration`); every name must resolve, every call's count
+  (`SqlPersistedExpression.ParseDeclaration`); every column and function must resolve, every call's count
   and types must match an overload (`SqlPlanner.ValidateDeclaredCalls`, then
   `ValidateCheck` over a table shaped from the compiled columns); and every function must
   be `Immutable`. A refusal is `COHSQLP001` naming the engine, the database, the table and
@@ -1201,8 +1207,10 @@ flowchart LR
   it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build. Nothing was
   opened or written.`). An imperative `SqlDatabase.ApplySchemaAsync` binds the same way
   before any step runs and refuses with `COHSQLP005`; the apply or verify a build runs
-  skips that bind when the schema's hash is the one the engine declares for the database,
-  which phase 3 already bound against the same catalog and parser options. The SDK reads the text without
+  skips that bind when the schema's hash is both already applied and the one the engine declares
+  for the database. New or changed hashes validate qualifiers before any step; already-applied
+  hashes bind qualifiers leniently like stored predicates (#1191). Phase 3 already bound the
+  remaining rules against the same catalog and parser options. The SDK reads the text without
   parsing it (it references no SQL parser and never sees the engine's functions), so a
   CHECK that names a registered function compiles into the artifact and is validated here.
 - **A stored definition that names an unregistered function** (part 2, decision 65,

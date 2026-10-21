@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -98,6 +99,83 @@ public sealed class SqlQualifierConformanceTests
         await connection.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: TestTimeout.Token());
         (await connection.QueryAsync("SELECT id FROM t", cancellationToken: TestTimeout.Token())).ShouldHaveSingleItem()["id"].ShouldBe(1);
     }
+
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Qualifiers: an applied schema restarts leniently and a changed hash is refused (#1191)")]
+    [InlineData("apply")]
+    [InlineData("verify")]
+    [InlineData("imperative")]
+    public async Task BuildAsync_PreviouslyAppliedCheckQualifier_ShouldStartAndRejectChangedSchema(string mode)
+    {
+        // Arrange: seed the schema-owned catalog and applied marker an earlier engine accepted.
+        string directory = Path.Combine(Path.GetTempPath(), "cohesion-schema-qualifier", Guid.NewGuid().ToString("N"));
+        var declaration = QualifierSchema(changed: false);
+        var schema = declaration.Compile();
+        try
+        {
+            await using (var engine = SqlDatabaseEngine.Create("schema-check", new() { RootPath = directory }))
+            {
+                var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+                await database.Catalog.CreateTableAsync("dbo", "t", [new SqlCatalogColumn("A", new DatabaseTypeInfo(DatabaseType.Int32), false)], [], DatabaseObjectOwner.Schema, "db",
+                    constraints: [new SqlCatalogConstraint("ck_old", SqlCatalogConstraintKind.Check, ["A"], checkExpression: "nosuch.a > 0")], cancellationToken: CancellationToken.None);
+                await database.Catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, database.Catalog.DdlGeneration), CancellationToken.None);
+            }
+
+            // Act
+            var builder = SqlDatabaseEngine.CreateBuilder("schema-check");
+            builder.Options.RootPath = directory;
+            if (mode != "imperative")
+            {
+                builder.AddDatabase("db", database =>
+                {
+                    database.Schema(declaration);
+                    database.Provisioning = mode == "verify" ? SqlProvisioningMode.Verify : SqlProvisioningMode.Apply;
+                });
+            }
+            await using (var reopenedEngine = await builder.BuildAsync(CancellationToken.None))
+            {
+                var reopened = reopenedEngine.TryGetDatabase("db", out var opened)
+                    ? opened! : await reopenedEngine.OpenDatabaseAsync("db", CancellationToken.None);
+                var result = mode == "imperative"
+                    ? await reopened.ApplySchemaAsync(schema, CancellationToken.None)
+                    : reopenedEngine.DeclaredDatabases.ShouldHaveSingleItem().Result.ShouldNotBeNull();
+
+                // Assert: startup/apply skipped DDL, and the stored CHECK still enforces.
+                result.WasAlreadyApplied.ShouldBeTrue();
+                result.OperationCount.ShouldBe(0);
+                await using var session = await reopened.CreateSessionAsync(CancellationToken.None);
+                await session.ExecuteAsync("INSERT INTO t VALUES (1)", cancellationToken: CancellationToken.None);
+                var invalid = await SqlConstraintAssertions.ThrowAsync(async () =>
+                    await session.ExecuteAsync("INSERT INTO t VALUES (-1)", cancellationToken: CancellationToken.None));
+                invalid.ConstraintName.ShouldBe("ck_old");
+                if (mode == "imperative")
+                {
+                    var changed = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+                        await reopened.ApplySchemaAsync(QualifierSchema(changed: true).Compile(), CancellationToken.None));
+                    changed.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+                }
+                reopened.Catalog.SchemaState.ShouldNotBeNull().ContentHash.ShouldBe(schema.Hash);
+            }
+
+            var changedBuilder = SqlDatabaseEngine.CreateBuilder("schema-check");
+            changedBuilder.Options.RootPath = directory;
+            changedBuilder.AddDatabase(QualifierSchema(changed: true));
+            var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () =>
+                await changedBuilder.BuildAsync(CancellationToken.None));
+            refused.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+            refused.Message.ShouldContain("nosuch.a", Case.Sensitive);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) { Directory.Delete(directory, recursive: true); }
+        }
+    }
+
+    private static SqlSchema QualifierSchema(bool changed)
+        => SqlSchema.Create("db", schema => schema.Table<QualifierRow>("t", table =>
+        {
+            table.Column(row => row.A);
+            table.Check("ck_old", changed ? "nosuch.a > 1" : "nosuch.a > 0");
+        }));
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Qualifiers: a persisted CHECK accepted by an earlier engine still opens and enforces (#1191)")]
     public async Task OpenDatabaseAsync_PreviouslyAcceptedCheckQualifier_ShouldKeepBinding()

@@ -132,7 +132,9 @@ internal sealed partial class SqlDeclaredDatabase
             {
                 var environment = new SqlFunctionEnvironment(functions, declaration.Name, types);
                 SqlSchemaProvisioner.BindDeclaredTypes(compiled, types);
-                SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, environment, parserOptions);
+                // Qualifier rules depend on whether this hash was already applied. The
+                // provisioner checks them after opening the catalog, before applying any DDL.
+                SqlSchemaProvisioner.BindDeclaredChecks(compiled, collation, environment, parserOptions, validateQualifiers: false);
                 // Identity belongs to compilation, before any I/O. The provisioning
                 // phase reads the cached hash and never serializes or hashes a declaration.
                 _ = compiled.Hash;

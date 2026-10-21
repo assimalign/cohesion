@@ -922,15 +922,16 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="defaultCollation">The database default collation.</param>
     /// <param name="functions">The engine's function catalog and the database.</param>
     /// <param name="bindingContext">Whether the named slots are table columns or domain VALUE.</param>
+    /// <param name="validateQualifiers">Whether to apply declaration-only qualifier rules; deferred until schema application knows the recorded hash.</param>
     /// <returns>The resolved identities of its function calls, in expression preorder.</returns>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
     internal static IReadOnlyList<string> ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation,
-        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table)
+        SqlFunctionEnvironment functions, SqlBindingContext bindingContext = SqlBindingContext.Table, bool validateQualifiers = true)
     {
         var scope = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation, functions: functions,
             bindingContext: bindingContext);
         SqlPlanner.ValidateExpression(expression, scope);
-        new SqlCheckSyntax(table, scope, declaring: true).Validate(expression, requireBoolean: true);
+        new SqlCheckSyntax(table, scope, declaring: true, validateQualifiers).Validate(expression, requireBoolean: true);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
 
@@ -1090,6 +1091,7 @@ internal sealed partial class SqlPlanExecutor
         private readonly SqlCatalogTable _table;
         private readonly SqlExpressionEvaluator _scope;
         private readonly bool _declaring;
+        private readonly bool _validateQualifiers;
 
         /// <summary>Initializes the check of one predicate.</summary>
         /// <param name="table">The table version the predicate constrains.</param>
@@ -1099,11 +1101,13 @@ internal sealed partial class SqlPlanExecutor
         /// rules against casts and functions that are not immutable; <see langword="false"/> when
         /// the catalog's persisted predicate binds.
         /// </param>
-        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring)
+        /// <param name="validateQualifiers">Whether to enforce qualifier identity for a new or changed schema.</param>
+        internal SqlCheckSyntax(SqlCatalogTable table, SqlExpressionEvaluator scope, bool declaring, bool validateQualifiers = true)
         {
             _table = table;
             _scope = scope;
             _declaring = declaring;
+            _validateQualifiers = validateQualifiers;
         }
 
         /// <summary>Checks one node.</summary>
@@ -1122,7 +1126,7 @@ internal sealed partial class SqlPlanExecutor
             // Declaration-only qualifier check: persisted predicates retain the older binding
             // contract. Sql.Language owns AST construction, so use the catalog's identity here
             // without manufacturing a relation node or widening the language boundary.
-            if (_declaring && expression is SqlColumnReferenceExpression { TableAlias: not null } qualifiedColumn &&
+            if (_declaring && _validateQualifiers && expression is SqlColumnReferenceExpression { TableAlias: not null } qualifiedColumn &&
                 (!string.Equals(qualifiedColumn.TableAlias, _table.Name, StringComparison.OrdinalIgnoreCase) ||
                  qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
             {
