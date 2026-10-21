@@ -64,7 +64,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 {
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
-    private readonly Dictionary<long, long> _pageWriteLocks = new();
+    private readonly Dictionary<long, StorageTransaction> _pageWriteLocks = new();
     private readonly object _transactionLock = new();
     private readonly StorageGroupCommitGate _groupCommitGate = new();
     private readonly StorageModel _model;
@@ -1421,7 +1421,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page to modify.</param>
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the page is owned by another transaction.</exception>
     /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId)
     {
@@ -1440,7 +1440,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="latch">The latch the structure's readers hold while they read the page; the caller holds it exclusively.</param>
     /// <returns>A handle to the pinned page; the caller marks it dirty after mutating.</returns>
     /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the page is owned by another transaction.</exception>
     /// <exception cref="StorageIOException">The page is not allocated, or it is page 0, the file header, which is never a data page.</exception>
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId, StoragePageLatch latch)
     {
@@ -1460,7 +1460,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="type">The type of page to allocate.</param>
     /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
-    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage or is not active.</exception>
     public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
@@ -1479,7 +1479,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="ownerId">The object's stable identity for an index page; zero for an unowned page.</param>
     /// <returns>A handle to the new pinned page.</returns>
     /// <exception cref="InvalidOperationException">The current thread does not hold <paramref name="latch"/> exclusively.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage or is not active.</exception>
     public StoragePageHandle AllocatePageForWrite(StorageTransaction transaction, PageType type, StoragePageLatch latch, ulong ownerId = 0)
     {
         var owner = ValidateTransaction(transaction);
@@ -1718,7 +1718,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ReadOnlySpan<byte> data)
         => InsertRecord(transaction, 0, data);
 
@@ -1733,7 +1733,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="data">The record data to insert.</param>
     /// <returns>The page identifier and slot index where the record was stored.</returns>
     /// <exception cref="SlottedPageException">The record is larger than a single page can hold.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe (PageId PageId, int SlotIndex) InsertRecord(StorageTransaction transaction, ulong ownerId, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
@@ -1978,7 +1978,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe void DeleteRecord(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         var owner = ValidateTransaction(transaction);
@@ -2027,7 +2027,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="pageId">The page containing the record.</param>
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <param name="data">The new record data.</param>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or the target page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or the target page is owned by another transaction.</exception>
     protected unsafe void UpdateRecord(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> data)
     {
         var owner = ValidateTransaction(transaction);
@@ -2147,7 +2147,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="maximumPages">The positive maximum number of pages to release; defaults to the whole owner.</param>
     /// <returns>The number of pages released.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumPages"/> is not positive.</exception>
-    /// <exception cref="StorageTransactionException">The transaction is not active, or a chain page is owned by another transaction.</exception>
+    /// <exception cref="StorageTransactionException">The transaction belongs to another storage, is not active, or a chain page is owned by another transaction.</exception>
     public unsafe int FreeOwnerPages(StorageTransaction transaction, ulong ownerId, int maximumPages = int.MaxValue)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPages);
@@ -2960,6 +2960,12 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
+        if (!ReferenceEquals(transaction.Owner, this))
+        {
+            throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.TransactionStorageMismatch, transaction.Sequence, transaction.Owner.Name, Name));
+        }
+
         if (!transaction.IsActive)
         {
             throw new StorageTransactionException($"Storage transaction {transaction.Sequence} has already completed.");
@@ -3024,19 +3030,24 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         long pageId = (long)handle.Id;
         bool locked = false;
 
+        // Any structure latch and the page pin are already held; the pool monitor is not.
+        // Never acquire a structure latch or wait for pool I/O under _transactionLock.
+        // Completion takes _ownerLock (then the free-map lock) inside this monitor; page
+        // lookup/allocation releases those locks before it comes here. Owners are bracket
+        // identities, including their Storage, never per-storage sequence numbers (#1286).
         lock (_transactionLock)
         {
-            if (_pageWriteLocks.TryGetValue(pageId, out long owner))
+            if (_pageWriteLocks.TryGetValue(pageId, out var owner))
             {
-                if (owner != transaction.Sequence)
+                if (!ReferenceEquals(owner, transaction))
                 {
                     throw new StorageTransactionException(
-                        $"Page {pageId} is write-locked by transaction {owner}.");
+                        $"Page {pageId} is write-locked by transaction {owner.Sequence}.");
                 }
             }
             else
             {
-                _pageWriteLocks[pageId] = transaction.Sequence;
+                _pageWriteLocks[pageId] = transaction;
                 locked = true;
             }
         }
@@ -3161,7 +3172,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             foreach (long pageId in transaction.PreImages.Keys)
             {
-                if (_pageWriteLocks.TryGetValue(pageId, out long owner) && owner == transaction.Sequence)
+                if (_pageWriteLocks.TryGetValue(pageId, out var owner) && ReferenceEquals(owner, transaction))
                 {
                     _pageWriteLocks.Remove(pageId);
                 }

@@ -6,4 +6,5 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="FreePageNonzero" xml:space="preserve"><value>Page {0} has a free header but contains nonzero bytes.</value></data>
   <data name="HeaderBlockIncomplete" xml:space="preserve"><value>Invalid storage file: the header block at offset {0} ended before 4096 bytes were read.</value></data>
+  <data name="TransactionStorageMismatch" xml:space="preserve"><value>Storage transaction {0} belongs to storage '{1}' and cannot be used by storage '{2}'.</value></data>
 </root>

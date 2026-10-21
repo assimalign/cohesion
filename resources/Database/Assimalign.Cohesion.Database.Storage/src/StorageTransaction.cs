@@ -79,6 +79,9 @@ public sealed class StorageTransaction : IDisposable
     /// </summary>
     public long Sequence { get; }
 
+    /// <summary>Gets the storage instance that alone may use and complete this bracket.</summary>
+    internal Storage Owner => _owner;
+
     /// <summary>
     /// Gets a value indicating whether the transaction is still active (neither
     /// committed nor rolled back).

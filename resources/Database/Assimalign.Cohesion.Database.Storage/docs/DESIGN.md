@@ -874,7 +874,18 @@ Every rule below is stated for a storage transaction (a *bracket*):
    checkpoint interval would keep the LSN of its free, its next delta would chain onto the freed
    page, and the initialization made before the touch would be in no record — recovery would
    rebuild a page that never existed (`StorageRedoTests`, "freed and reallocated").
-7. **Page-level single-writer.** A page touched by an active transaction is
+7. **Storage-qualified transaction ownership (#1286).** Every record or page mutation
+   validates the bracket's owning Storage by reference before enlisting a latch or taking a pin, lock,
+   pre-image or journal record. A foreign bracket throws `StorageTransactionException`
+   naming both storages. Page write locks hold the bracket object itself, so equal
+   sequence numbers from different storages never identify the same lock owner.
+   Commit and rollback route through the bracket's immutable owner. The lock order at
+   first touch is an already-held structure latch and pin, then the transaction monitor;
+   the pool monitor is released before that monitor is taken. Completion takes the owner
+   directory and free-map locks inside the transaction monitor, and releases page locks
+   before publishing pending frees. No structure latch or pool I/O is acquired under it.
+
+   A page touched by an active transaction is
    write-locked to it (conflicts throw rather than wait). Record-level concurrency is
    `Database.Transactions`' job above this layer; a delta computed against a private pre-image
    is only correct because two transactions can never interleave on one page. This division is
