@@ -628,7 +628,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 Error("OQL0002", "An identifier cannot be empty.", token);
             }
 
-            return token.Text.Length >= 2 ? token.Text[1..^1] : string.Empty;
+            return token.Text.Length >= 2 ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : string.Empty;
         }
         if ((token.Type is TokenType.Identifier or TokenType.Function || allowKeyword && token.Type == TokenType.Keyword) &&
             token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_'))
@@ -691,7 +691,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
-            if (quote == '\'' && i + 1 < text.Length && text[i + 1] == quote) { i++; continue; }
+            if (i + 1 < text.Length && text[i + 1] == quote) { i++; continue; }
             return i == text.Length - 1;
         }
         return false;

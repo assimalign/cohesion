@@ -119,6 +119,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveLabelAsync(GraphLabelMetadata label, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(Label: label), context, cancellationToken);
@@ -130,6 +131,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The definition is invalid.</exception>
     /// <exception cref="GraphCatalogException">The identity or name conflicts with an existing definition.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, TransactionContext context, CancellationToken cancellationToken = default)
         => SaveDefinitionAsync(new CatalogRecord(RelationshipType: relationshipType), context, cancellationToken);
@@ -167,6 +169,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
     {
@@ -209,6 +212,7 @@ public sealed class GraphCatalog
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The index metadata is invalid.</exception>
     /// <exception cref="GraphCatalogException">The label is absent or the name identifies another property.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The label is schema-owned.</exception>
     public ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default)
     {

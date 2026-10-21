@@ -437,11 +437,11 @@ public sealed partial class SqlQueryParser : QueryParser
             var value = lexer.Current.Value;
             switch (lexer.Current.Type)
             {
-                case TokenType.String when !IsTerminatedString(value):
+                case TokenType.String when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
                         "Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.");
                     break;
-                case TokenType.QuotedIdentifier when value.Length < 2 || value[^1] != '"':
+                case TokenType.QuotedIdentifier when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
                         "Unterminated quoted identifier: the closing \" is missing, so the identifier runs to the end of the text.");
                     break;
@@ -482,17 +482,19 @@ public sealed partial class SqlQueryParser : QueryParser
             : $"'{value.ToString()}'";
     }
 
-    // Mirrors TokenLexer.ScanString: '' is an escaped quote and a lone ' closes the literal.
-    private static bool IsTerminatedString(ReadOnlySpan<char> value)
+    // Mirrors both lexer scans: doubled delimiters escape themselves; a lone one closes.
+    private static bool IsTerminatedQuoted(ReadOnlySpan<char> value)
     {
+        if (value.Length < 2) { return false; }
+        char quote = value[0];
         int index = 1;
         while (index < value.Length)
         {
-            if (value[index] != '\'')
+            if (value[index] != quote)
             {
                 index++;
             }
-            else if (index + 1 < value.Length && value[index + 1] == '\'')
+            else if (index + 1 < value.Length && value[index + 1] == quote)
             {
                 index += 2;
             }
@@ -683,7 +685,7 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         var value = lexer.Current.Value;
         return lexer.Current.Type == TokenType.QuotedIdentifier && value.Length >= 2 && value[^1] == '"'
-            ? value[1..^1].ToString()
+            ? value[1..^1].ToString().Replace("\"\"", "\"", StringComparison.Ordinal)
             : CurrentText(ref lexer);
     }
 

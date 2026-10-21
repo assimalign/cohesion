@@ -202,6 +202,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                Mutation("INSERT (: \"L\"\"X\" {\"p\"\"q\": 7})-[:\"T\"\"Y\"]->()", 3,
+                    new ExecutionCase("MATCH (\"a\"\"b\":\"L\"\"X\")-[:\"T\"\"Y\"]->() RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"", [[7L]])),
                 new("INSERT (:Person {name: $name})", [], 1,
                     [new("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])],
                     new Dictionary<string, object?> { ["name"] = "Cara" }),

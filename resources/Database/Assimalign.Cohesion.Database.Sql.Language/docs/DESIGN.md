@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Delimited identifiers (#1235)
+
+The shared lexer keeps `"a""b"` as one identifier token; CurrentIdentifierText decodes it to
+`a"b` for every name position. Expression rendering doubles embedded quotes in ordinary and
+function identifiers. Lexical completeness checks distinguish a closing quote from a final
+escaped quote, so `"a""` is SQL0003. Parser conformance, identifier-value and renderer round-trip
+tests pin the behavior. See Database.Language DESIGN for the PostgreSQL scanner reference.
+
 ## INSERT conflict clauses (#1118)
 
 SqlOnConflictClause retains inference kind, column set or constraint name, action,
@@ -316,8 +324,8 @@ COHDBL001. ORDER BY aliases and ordinals count visible wildcard output after USI
   strips the surrounding double quotes for tables, schemas, aliases, columns,
   indexes and constraints. Tokens retain their quoted-identifier classification,
   so a quoted reserved word cannot become a keyword or literal. Keyword dispatch,
-  literal parsing and diagnostics continue to consume raw token text. Embedded
-  double-quote escapes are outside the current lexer subset.
+  literal parsing and diagnostics continue to consume raw token text. Doubled
+  double quotes decode to one embedded quote; rendering escapes them the same way (#1235).
 - **Type names resolve through one table.** `SqlTypeNames` is the single
   SQL-name → `DatabaseType` mapping (with the `DECIMAL(p[,s])`
   argument-is-precision rule); catalogs and the schema compiler must not grow

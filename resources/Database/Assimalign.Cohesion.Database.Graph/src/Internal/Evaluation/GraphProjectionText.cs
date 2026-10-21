@@ -51,5 +51,5 @@ internal static class GraphProjectionText
     }
 
     private static string Name(string name) => name.Length > 0 && (char.IsLetter(name[0]) || name[0] == '_') &&
-        name.All(character => char.IsLetterOrDigit(character) || character == '_') ? name : "\"" + name + "\"";
+        name.All(character => char.IsLetterOrDigit(character) || character == '_') ? name : "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
 }

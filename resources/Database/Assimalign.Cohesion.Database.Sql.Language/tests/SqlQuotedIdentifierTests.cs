@@ -1,3 +1,5 @@
+using System.Linq;
+
 using Shouldly;
 using Xunit;
 
@@ -5,6 +7,33 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlQuotedIdentifierTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Identifier: doubled quotes decode in table, column and alias names")]
+    public void Parse_DelimitedNames_ShouldDecodeEmbeddedQuotes()
+    {
+        // Arrange
+        const string sql = "SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\";";
+
+        // Act
+        var select = Parse(sql).ShouldBeOfType<SqlSelectExpression>();
+
+        // Assert
+        select.From.Single().Table.ShouldBeOfType<SqlTableReference>().TableName.ShouldBe("t\"x");
+        select.Columns.Single().Alias.ShouldBe("c\"d");
+        select.Columns.Single().Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe("a\"b");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Identifier: an escaped final quote does not terminate a name")]
+    [InlineData("SELECT \"a\"\"")]
+    [InlineData("SELECT \"\"\"")]
+    public void Parse_UnterminatedDelimitedName_ShouldReportSyntaxFailure(string sql)
+    {
+        // Arrange / Act
+        var statement = new SqlQueryParser().Parse(sql);
+
+        // Assert
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+    }
+
     [Fact]
     public void Select_QuotedNamesAndAliases_ContainIdentifierValuesWithoutDelimiters()
     {

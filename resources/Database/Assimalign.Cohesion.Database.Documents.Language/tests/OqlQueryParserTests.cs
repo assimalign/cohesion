@@ -9,12 +9,31 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlQueryParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Identifier: doubled quotes decode in collection, property and alias names")]
+    public void Parse_DelimitedNames_ShouldDecodeEmbeddedQuotes()
+    {
+        // Arrange
+        const string text = "SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\"";
+
+        // Act
+        var statement = Parse(text);
+        var select = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        select.Collection.ShouldBe("t\"x");
+        var projection = select.Projections.ShouldHaveSingleItem();
+        projection.Alias.ShouldBe("c\"d");
+        projection.Expression.ShouldBeOfType<OqlPathExpression>().Segments.ShouldHaveSingleItem().Name.ShouldBe("a\"b");
+    }
+
     [Theory]
     [InlineData("SELECT * FROM people")]
     [InlineData("select * from people;")]
     [InlineData("SELECT p.name FROM people AS p WHERE p.age >= $age")]
     [InlineData("SELECT p.name FROM people p WHERE p.age >= @age")]
     [InlineData("SELECT \"first name\" FROM \"person collection\"")]
+    [InlineData("SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\"")]
     [InlineData("SELECT p.address.city, p.orders[0].total FROM people p")]
     [InlineData("SELECT p['unusual-field'][2] FROM people p")]
     [InlineData("SELECT TRUE, FALSE, NULL, NIL, 'it''s', .5, 1e2 FROM valueset")]
@@ -51,6 +70,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT name people", "OQL0002")]
     [InlineData("SELECT * FROM", "OQL0002")]
     [InlineData("SELECT * FROM \"\"", "OQL0002")]
+    [InlineData("SELECT * FROM \"a\"\"", "OQL0003")]
     [InlineData("SELECT * FROM people WHERE", "OQL0002")]
     [InlineData("SELECT * FROM people WHERE age =", "OQL0002")]
     [InlineData("SELECT * FROM people WHERE age = 1 AND", "OQL0002")]

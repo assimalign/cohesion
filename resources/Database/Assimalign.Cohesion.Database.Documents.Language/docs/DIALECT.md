@@ -1,5 +1,9 @@
 # OQL SQL++ dialect
 
+Double-quoted collection, property and alias names accept doubled `""` as one embedded
+double quote: `"a""b"` names `a"b`. This extends the existing double-quoted identifier syntax;
+it does not add backtick quoting. A missing closing delimiter is OQL0003 (#1235).
+
 ## Storage integrity errors (#1160)
 
 A read that detects storage corruption fails with `COHDBS003`, naming the database and

@@ -186,7 +186,11 @@ bracketed relationships and edge label expressions such as `-[r:T|U]->`. The lex
 `:` or `IS` as labels, so neither `IS` nor a keyword-spelled label reports `COHDBL001` there). Scalar literals are null, Boolean, signed 64-bit integer,
 finite double, and single-quoted string with doubled-quote escaping. Names are case-sensitive;
 keywords are case-insensitive, and a label name may spell a keyword (`(n:Order)`, `n:A|Order`).
-Double-quoted names preserve spaces. A single optional trailing semicolon is accepted. Multiple
+Double-quoted names preserve spaces and decode doubled `""` to one embedded double quote
+(#1235). Label-expression rendering and the engine's source-free projection renderer double
+embedded quotes, preserving parse/render/parse identity. This uses the shared lexer rule in
+Database.Language; `GqlDelimitedIdentifierTests` and the live INSERT clause corpus cover it.
+A single optional trailing semicolon is accepted. Multiple
 statements, the tilde (undirected) edges, Cypher arrows, nested property access, and
 return-after-delete are not accepted.
 

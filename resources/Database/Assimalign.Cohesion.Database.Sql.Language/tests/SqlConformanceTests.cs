@@ -54,6 +54,7 @@ public class SqlConformanceTests
     [InlineData("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON dbo.users (email, tenant_id);", SqlQueryCommandType.Create)]
     [InlineData("DROP INDEX IF EXISTS ix_users_name ON users;", SqlQueryCommandType.Drop)]
     [InlineData("select lower(NAME) from USERS where ID = 1;", SqlQueryCommandType.Select)] // case-insensitivity
+    [InlineData("SELECT \"a\"\"b\" AS \"c\"\"d\" FROM \"t\"\"x\";", SqlQueryCommandType.Select)]
     [InlineData("SELECT /* block /* nested */ comment */ id FROM t; -- trailing", SqlQueryCommandType.Select)]
     public void Parse_SupportedCorpus_ShouldParseWithoutErrors(string sql, SqlQueryCommandType expected)
     {

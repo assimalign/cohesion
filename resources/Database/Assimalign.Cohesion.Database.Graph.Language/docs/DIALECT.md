@@ -4,6 +4,18 @@ The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DES
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
 
+Double-quoted identifiers double an embedded `"`: `"a""b"` names `a"b` in variables,
+labels, relationship types, property keys and aliases. Rendered label expressions and
+source-free projection names use the same escape. A missing closing quote is GQL0003.
+Catalog metadata must fit one 8,092-byte encoded record; an oversized name or schema name
+fails with COHDBG009 and preserves the session (#1235).
+
+Unsigned property parameters retain their CLR types at storage. Type checking classifies
+byte as Int16, UInt16 as Int32, UInt32 as Int64 and UInt64 as Decimal without loss; it does
+not rewrite persisted values. Negotiated graph.composite-values preserves those unsigned
+runtime types on the wire, while unnegotiated projections fail with COHDBG016. This is the
+documented owner default for #1235, preserving #1146's value contract.
+
 ## Storage integrity errors (#1160)
 
 A read that detects storage corruption fails with `COHDBS003`, naming the database and

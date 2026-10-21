@@ -1,5 +1,9 @@
 # The Declared SQL Dialect
 
+Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
+`a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
+An escaped final quote without a closing delimiter is SQL0003 (#1235).
+
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without

@@ -1127,7 +1127,12 @@ deleted. Discovery sees the session snapshot. New data introduces ad-hoc definit
 property definition can require a value and its database scalar type; adding a constraint
 validates existing objects first. Unsigned integer values map to the next wider signed database
 type (`byte` to Int16, `ushort` to Int32, `uint` to Int64, `ulong` to Decimal); persisted CLR types
-remain unchanged. Unsupported property types are refused. Dropping an in-use label/type is refused. Schema ownership is
+remain unchanged. This conversion is a lossless database-type classification, not a store-time
+rewrite (#1235 owner default): graph.composite-values carries the original unsigned CLR type,
+and an unnegotiated scalar projection fails with COHDBG016 before output. GraphHygieneTests
+pins all four maximum unsigned values through storage and the negotiated value codec.
+Unsupported property types are refused. Dropping an unknown relationship type names it in
+the COHDBG002 diagnostic, as the unknown-label path does. Dropping an in-use label/type is refused. Schema ownership is
 enforced on drop and every alter/index/property-metadata path with `DatabaseObjectLockedException`,
 naming the object, owning schema and operation. An initial directly marked definition is supported
 to exercise that enforcement path; compiled provisioning is not included.
@@ -2020,7 +2025,10 @@ UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 re
 null, accepted only for owning schema. Definition IDs must be nonempty; names and index keys
 must be nonblank. Only schema-owned definitions may carry a schema name, and they must carry
 one. Unknown kinds, versions, enum values, invalid lengths, malformed UTF-8, and trailing bytes
-are rejected with `GraphCatalogException`. Decoding has no reflection or dynamic serialization.
+are rejected with `GraphCatalogException`. Encoding checks the complete UTF-8 record size against
+SlottedPage.MaxRecordSize before any physical apply; oversized names, schema names and index keys
+throw GraphElementTooLargeException, reported by the engine as COHDBG009. Exact-fit records are
+accepted. Decoding has no reflection or dynamic serialization.
 
 #### Catalog: MVCC, mutation, and recovery
 

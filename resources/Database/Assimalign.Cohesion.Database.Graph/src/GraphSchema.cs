@@ -119,7 +119,7 @@ public sealed class GraphSchema
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session is closed, another statement holds it, or its transaction refuses statements
+    /// The catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
     /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
@@ -140,7 +140,7 @@ public sealed class GraphSchema
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session is closed, another statement holds it, or its transaction refuses statements
+    /// The catalog record exceeds one record (<c>COHDBG009</c>); the session is closed, another statement holds it, or its transaction refuses statements
     /// (<c>COHDBG007</c>); or the transaction ended while the statement waited for the writer lock.
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
@@ -268,7 +268,10 @@ public sealed class GraphSchema
     public ValueTask DropRelationshipTypeAsync(string name, CancellationToken cancellationToken = default)
         => WriteAsync(async op =>
         {
-            var type = _database.Catalog.FindRelationshipType(name, op.Context.Snapshot) ?? throw new DatabaseException("COHDBG002: Unknown relationship type.");
+            var type = _database.Catalog.FindRelationshipType(name, op.Context.Snapshot) ?? throw new DatabaseException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RelationshipTypeUnknown, name),
+                [new Types.Diagnostic { Code = "COHDBG002", Message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.RelationshipTypeUnknown, name), Severity = Types.DiagnosticSeverity.Error }]);
             EnsureMutable(type.Name, type.Owner, type.OwningSchema, "DROP RELATIONSHIP TYPE");
             var latest = _database.LatestSnapshot(op.Context);
             foreach (var node in _database.Store.GetNodes(null, latest))
