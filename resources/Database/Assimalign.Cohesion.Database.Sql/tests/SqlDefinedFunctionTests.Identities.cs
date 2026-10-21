@@ -22,7 +22,7 @@ public sealed partial class SqlDefinedFunctionTests
         await ExecuteAsync(session, "CREATE FUNCTION allowed(p INT) RETURNS BOOLEAN VOLATILE RETURN TRUE");
         // Assert
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t VALUES(-1)"));
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION allowed(BIGINT)"))).Message.ShouldContain("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
         await ExecuteAsync(session, "DROP FUNCTION allowed(INT)");
     }
 
@@ -52,8 +52,8 @@ public sealed partial class SqlDefinedFunctionTests
             // Assert
             (await RowsAsync(read, "SELECT v, body(id) FROM t")).ShouldBe([[1, 1]]);
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "INSERT INTO t(id,p) VALUES(2,-1)"));
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION value_of(BIGINT)"))).Message.ShouldContain("COHSQLD002");
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION allowed(BIGINT)"))).Message.ShouldContain("COHSQLD002");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION value_of(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(read, "DROP FUNCTION allowed(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }

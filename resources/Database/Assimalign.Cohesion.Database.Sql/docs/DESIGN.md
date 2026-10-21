@@ -5283,6 +5283,26 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
+SqlExecutionException covers cardinality, store assignment, DDL admission, persisted-expression
+damage and executor invariants; scalar evaluation keeps SqlEvaluationException. COHSQLE046–061
+and their PostgreSQL SQLSTATE mappings are listed in the SQL dialect. Invalid store text reuses
+COHSQLE022, numeric overflow keeps COHSQLE002, and NOT NULL keeps COHSQLE024. Catalog DDL
+guards use the same codes without depending on engine-layer types. An otherwise uncoded catalog
+or plain DatabaseException escaping statement execution receives COHSQLE060 (XX000); ownership
+refusals receive COHSQLE057 (0A000), preserving DatabaseObjectLockedException metadata.
+The session uses its existing catch slot to attach the enclosing statement span to unlocated
+diagnostics, retaining a more precise expression span and concrete constraint/catalog/ownership
+exception types. Already translated storage failures and aborted-transaction refusals retain
+their exact exception identity and recorded cause (#1364). Open-time failures have no statement span. DEFAULT wrappers retain the inner
+carrier and cause. Definition dependency/native-drop codes COHSQLD002/003 move from message
+prefixes into the carrier, so the wire composes one prefix. Successful statements allocate no
+diagnostics or additional async state. Messages at the changed executor sites use generated
+resources; the remaining SQL resource migration is left to #1470.
+The mappings follow PostgreSQL src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500;
+no reference implementation code was copied. There is no public API, visibility-grant, storage
+format or wire-format change.
+
 Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHSQLE042`,
 mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
 `SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,

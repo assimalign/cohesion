@@ -187,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
             SqlPersistedExpression.Bind(expression, scope);
             if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
             {
-                throw new DatabaseException($"The recorded function signatures {string.Join(", ", column.DefaultFunctionCalls)} do not resolve.");
+                throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultSignaturesUnresolved, string.Join(", ", column.DefaultFunctionCalls)));
             }
             if (declaring)
             {
@@ -211,7 +211,8 @@ internal sealed partial class SqlPlanExecutor
         }
         catch (DatabaseException failure) when (!declaring)
         {
-            throw new DatabaseException($"{subject} cannot be loaded: {failure.Message} {SqlPersistedExpression.DamagedCatalogHint}", failure);
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLoadFailed, subject, failure.Message, SqlPersistedExpression.DamagedCatalogHint),
+                SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode), failure);
         }
     }
 
@@ -343,7 +344,7 @@ internal sealed partial class SqlPlanExecutor
             };
             if (literalType is { } declared && declared != column.Type.Type)
             {
-                throw new DatabaseException($"Typed DEFAULT {typed!.LiteralType} does not match column type {column.Type.Type}.");
+                throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLiteralTypeMismatch, typed!.LiteralType, column.Type.Type));
             }
             object? value = literalType is not null ? CoerceForColumn(SqlExpressionEvaluator.EvaluateLiteral(typed!), column)
                 : column.Type.Type is DatabaseType.Binary or DatabaseType.JsonBinary
@@ -365,7 +366,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 if (mantissa.IndexOfAnyInRange('1', '9') >= 0)
                 {
-                    throw new DatabaseException("Nonzero floating-point default underflows to zero.");
+                    throw new SqlExecutionException(SqlEvaluationException.NumericValueOutOfRangeCode, ErrorMessages.DefaultUnderflows);
                 }
             }
             return value;
@@ -377,12 +378,14 @@ internal sealed partial class SqlPlanExecutor
         catch (OverflowException exception) when (column.Type.Type == DatabaseType.Decimal)
         {
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"Column '{column.Name}': DEFAULT value cannot be stored as {column.Type.Type}. {exception.Message}", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultValueStorageFailed, column.Name, column.Type.Type, exception.Message), exception);
         }
-        catch (Exception exception) when (exception is DatabaseException or FormatException or OverflowException or InvalidCastException)
+        catch (Exception exception) when (exception is DatabaseException or FormatException or OverflowException or InvalidCastException or ArgumentOutOfRangeException)
         {
             throw new DatabaseException(
-                $"Column '{column.Name}': DEFAULT value cannot be stored as {column.Type.Type}. {exception.Message}", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultValueStorageFailed, column.Name, column.Type.Type, exception.Message),
+                exception is DatabaseException coded ? SqlExecutionException.DiagnosticsOf(coded) : new SqlExecutionException(
+                    SqlExecutionException.ConversionCode(column.Type.Type, exception), exception.Message).Diagnostics, exception);
         }
     }
 

@@ -130,7 +130,7 @@ internal sealed partial class SqlPlanExecutor
                 if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Character or Types.DatabaseType.Json
                     && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
                 {
-                    throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");
+                    throw new SqlExecutionException(SqlExecutionException.UnsupportedCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintCollationUnsupported, name));
                 }
             }
         }
@@ -239,7 +239,7 @@ internal sealed partial class SqlPlanExecutor
         _catalog.TryGetTable(plan.Schema, plan.Name, out var table);
         if (table.FindColumn(plan.Column.Name) is not null)
         {
-            throw new DatabaseException($"Column '{plan.Column.Name}' already exists.");
+            throw new SqlExecutionException(SqlExecutionException.DuplicateColumnCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionColumnExists, plan.Column.Name));
         }
 
         if (plan.Column.Identity is not null && Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
@@ -380,7 +380,7 @@ internal sealed partial class SqlPlanExecutor
         }
         else
         {
-            throw new DatabaseException($"Constraint '{plan.ConstraintName}' does not exist on '{plan.Table.Name}'.");
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionConstraintMissing, plan.ConstraintName, plan.Table.Name));
         }
 
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
@@ -391,7 +391,7 @@ internal sealed partial class SqlPlanExecutor
         if (index.IsUnique && (index.IsPrimaryKey ||
             IncomingReferences(table).Any(reference => SameConstraintColumns(reference.Constraint.ReferencedColumns!, index.ColumnNames))))
         {
-            throw new DatabaseException($"Index '{index.Name}' supports a primary key or foreign key and cannot be dropped.");
+            throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintIndexDependent, index.Name));
         }
     }
 

@@ -12,6 +12,35 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlPersistedExpressionTests
 {
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted queries: invalid catalog text has an execution diagnostic (#1653)")]
+    [InlineData("SELECT (")]
+    [InlineData("DELETE FROM t")]
+    public void LoadQuery_InvalidDefinition_ShouldCarryDamageDiagnostic(string text)
+    {
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadQuery(text, "view 'dbo.v'"));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.Diagnostics[0].Start.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted bindings: an unknown catalog collation has a damage diagnostic (#1653)")]
+    public void Bind_UnknownCollation_ShouldCarryDamageDiagnostic()
+    {
+        // Arrange: deliberately pass an invalid parsed tree beyond ordinary language admission.
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("SELECT 'x' COLLATE absent_collation");
+        var expression = ((SqlSelectExpression)statement.SqlExpression).Columns[0].Expression;
+        var evaluator = new SqlExpressionEvaluator([], null);
+
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.Bind(expression, evaluator));
+
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.InnerException.ShouldNotBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: canonical text reloads to an equivalent tree")]
     public void Canonicalize_ParsedPredicate_ShouldReloadEquivalent()
     {
@@ -40,6 +69,7 @@ public sealed class SqlPersistedExpressionTests
 
         // Assert
         failure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.t' cannot be stored:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE059");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: text that is not exactly one expression does not load")]
@@ -58,6 +88,8 @@ public sealed class SqlPersistedExpressionTests
         // Assert
         failure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.t' cannot be loaded:", Case.Sensitive);
         failure.Message.ShouldContain(SqlPersistedExpression.DamagedCatalogHint, Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.Diagnostics[0].Start.ShouldBeNull();
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: a DEFAULT loads only as one non-NULL literal")]

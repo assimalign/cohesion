@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -318,18 +320,13 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // keeps its own type. Both lead with COHSQLT004.
             throw translated;
         }
-        catch (Exception exception) when (exception is SqlConstraintViolationException or InsufficientExecutionStackException
-            or SqlEvaluationException { Code: SqlEvaluationException.StatementTooComplexCode })
+        catch (Exception exception) when (exception is DatabaseException or InsufficientExecutionStackException)
         {
             // Share the existing catch slot: an additional catch variable grows the Debug
             // async state machine and allocates another eight bytes on every statement.
-            if (exception is SqlConstraintViolationException)
+            if (exception is DatabaseException && exception is not SqlEvaluationException { Code: SqlEvaluationException.StatementTooComplexCode })
             {
-                if (((SqlConstraintViolationException)exception).Diagnostics[0].Start is null
-                    && request.Statement.SqlExpression.Location is not null)
-                {
-                    throw ((SqlConstraintViolationException)exception).At(request.Statement.SqlExpression.Location);
-                }
+                ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression.Location);
                 throw;
             }
             SqlDatabaseEventSource.Log.StatementTooComplex(_database.Name, -1);
@@ -344,8 +341,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             // stays usable.
             if (exception is InsufficientExecutionStackException)
             {
-                throw SqlEvaluationException.StatementTooComplex((InsufficientExecutionStackException)exception);
+                throw SqlEvaluationException.StatementTooComplex((InsufficientExecutionStackException)exception).At(request.Statement.SqlExpression.Location);
             }
+            ThrowLocatedFailure((DatabaseException)exception, request.Statement.SqlExpression.Location);
             throw;
         }
         finally
@@ -365,6 +363,44 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 _database.TableReclamation.ExitStatement(readerEpoch);
             }
         }
+    }
+
+    // Kept outside the async state machine: locating failures adds no successful-statement fields
+    // or allocations. Preserve concrete exception contracts and any more specific expression span.
+    private static void ThrowLocatedFailure(DatabaseException failure, Location? location)
+    {
+        var located = LocateFailure(failure, location);
+        if (!ReferenceEquals(located, failure)) { throw located; }
+    }
+
+    private static DatabaseException LocateFailure(DatabaseException failure, Location? location)
+    {
+        // The abort path retains this exact coded cause (#1364). Location attachment must not
+        // substitute another exception for a storage failure already recorded on the transaction.
+        if (failure.Diagnostics is [{ Code: "COHSQLT005" or "COHSQLE041" or "COHDBS003" }, ..]
+            || SqlDatabase.IsStorageFailure(failure)) { return failure; }
+        if (failure is SqlConstraintViolationException constraint) { return constraint.At(location); }
+        if (failure is SqlExecutionException execution) { return execution.At(location); }
+        if (failure is SqlEvaluationException evaluation) { return evaluation.At(location); }
+        if (failure is SqlPlanningException planning) { return planning.At(location); }
+        if (failure is SqlFunctionResultMismatchException mismatch) { return mismatch.At(location); }
+        if (failure.Diagnostics.Count > 0 && (location is null || failure.Diagnostics.All(diagnostic => diagnostic.Start is not null))) { return failure; }
+        // Child failures already translated by the preceding catch keep their authored type.
+        if (failure is not (SqlCatalogException or DatabaseObjectLockedException) && failure.GetType() != typeof(DatabaseException)) { return failure; }
+        var diagnostics = failure.Diagnostics.Count == 0
+            ? new[] { new Diagnostic { Code = failure is DatabaseObjectLockedException ? SqlExecutionException.UnsupportedCode : SqlExecutionException.InternalErrorCode,
+                Message = failure.Message, Severity = DiagnosticSeverity.Error } }
+            : failure.Diagnostics;
+        var located = diagnostics.Select(diagnostic => diagnostic.Start is not null || location is null ? diagnostic : new Diagnostic
+        {
+            Code = diagnostic.Code, Message = diagnostic.Message, Severity = diagnostic.Severity,
+            Start = location.Start, End = location.End, Line = location.StartLine, Location = DiagnosticLocation.Absolute,
+        }).ToArray();
+        if (failure is DatabaseObjectLockedException ownership)
+        { return new DatabaseObjectLockedException(ownership.ObjectName, ownership.OwningSchema, ownership.Operation, ownership.Message, located[0]); }
+        if (failure is SqlCatalogException)
+        { return new SqlCatalogException(located[0].Code!, failure.Message, failure, located[0]); }
+        return new DatabaseException(failure.Message, located, failure);
     }
 
     private void TraceStatementCompletion(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)

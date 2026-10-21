@@ -31,10 +31,17 @@ internal static class SqlPersistedExpression
 
     internal static SqlQueryBodyExpression LoadQuery(string text, string subject)
     {
-        var request = SqlQueryRequest.FromSql(text, null, SqlQueryRequest.CeilingParserOptions);
-        if (request.Statement.SqlExpression is not SqlQueryBodyExpression query)
-        { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewLoadInvalid, subject, DamagedCatalogHint)); }
-        return query;
+        try
+        {
+            var request = SqlQueryRequest.FromSql(text, null, SqlQueryRequest.CeilingParserOptions);
+            if (request.Statement.SqlExpression is not SqlQueryBodyExpression query)
+            { throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewLoadInvalid, subject, DamagedCatalogHint)); }
+            return query;
+        }
+        catch (DatabaseParseException failure)
+        {
+            throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, failure.Message, failure);
+        }
     }
 
     /// <summary>
@@ -80,7 +87,7 @@ internal static class SqlPersistedExpression
         }
         catch (NotSupportedException exception)
         {
-            throw new DatabaseException($"{subject} cannot be stored: {exception.Message}", exception);
+            throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionStoreUnsupported, subject, exception.Message), exception);
         }
 
         bool parsed = TryParse(text, out var reloaded, out string? problem, out bool outOfStack);
@@ -94,9 +101,8 @@ internal static class SqlPersistedExpression
 
         if (!parsed || !AreEquivalent(expression, reloaded))
         {
-            throw new DatabaseException(
-                $"{subject} cannot be stored: its canonical text '{text}' does not reproduce the declared expression" +
-                $"{(problem is null ? string.Empty : $" ({problem})")}. This is an engine defect; nothing was changed.");
+            throw new SqlExecutionException(SqlExecutionException.InternalErrorCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRoundTripFailed, subject, text, (problem is null ? string.Empty : $" ({problem})")));
         }
 
         return text;
@@ -120,8 +126,8 @@ internal static class SqlPersistedExpression
                 throw OutOfStack(subject);
             }
 
-            throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{text}' is not a valid SQL expression ({problem}). {DamagedCatalogHint}");
+            throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionLoadInvalid, subject, text, problem, DamagedCatalogHint));
         }
 
         return expression;
@@ -169,8 +175,8 @@ internal static class SqlPersistedExpression
             SqlUnaryExpression { Operator: SqlUnaryOperator.Negate,
                 Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float } numeric }
                 => "-" + numeric.Value,
-            _ => throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{text}' is not a literal value. {DamagedCatalogHint}"),
+            _ => throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLoadNotLiteral, subject, text, DamagedCatalogHint)),
         };
     }
 
@@ -217,15 +223,17 @@ internal static class SqlPersistedExpression
                 evaluator.ResolveColumn(column);
                 break;
             case SqlCollateExpression collate:
-                Collation.FromName(collate.CollationName);
+                try { Collation.FromName(collate.CollationName); }
+                catch (DatabaseTypeException failure)
+                { throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, failure.Message, failure); }
                 break;
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 SqlPlanner.ResolveCastTarget(cast, evaluator.Functions.Types);
                 break;
             case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
-                throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.PersistedRowExpressionInvalid);
             case SqlFunctionCallExpression call when evaluator.Functions.Catalog.IsAggregate(call.FunctionName):
-                throw new DatabaseException($"Aggregate function '{call.FunctionName}' has no value in a persisted row expression.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PersistedAggregateInvalid, call.FunctionName));
         }
 
         foreach (var child in SqlPlanner.Children(expression))
@@ -284,7 +292,7 @@ internal static class SqlPersistedExpression
                 throw new InsufficientExecutionStackException("Reading the declared SQL text needs more stack than the thread has left.");
             }
 
-            throw new DatabaseException($"its SQL text '{text}' is not exactly one SQL expression ({problem}).");
+            throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionDeclarationInvalid, text, problem));
         }
 
         return expression;

@@ -44,6 +44,14 @@ parameters and explicit transactions; failed writes preserve rows. No protocol c
 
 ## Constraint diagnostics (#1666)
 
+Execution, conversion, persisted-expression and DDL failures also retain structured diagnostics
+(#1653): COHSQLE046–061, existing COHSQLE022/024 and definition COHSQLD002/003. The engine
+attaches the statement span when no expression span exists; the wire composes the code prefix
+once. Both transports cover execution and DDL refusals; engine-owned wire regressions also
+include a damaged stored DEFAULT and a default-conversion wrapper, preserving the carrier,
+ExecutionFailure and a reusable connection. SQLSTATE mappings
+remain documented in the SQL dialect; no client API or protocol format changes.
+
 SqlConnection preserves the existing ExecutionFailure category and exposes the single
 constraint diagnostic through SqlClientException.Diagnostics: COHSQLE037 (23505) for
 uniqueness, COHSQLE038 (23514) for CHECK/domain checks, COHSQLE039 (23503) for foreign

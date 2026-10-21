@@ -249,7 +249,7 @@ public sealed partial class SqlDefinedFunctionTests
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT read_positive(CAST(-1 AS INT)) FROM t"));
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(CAST(-1 AS INT)) FROM t"));
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(NULL) FROM t"));
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Message.ShouldContain("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
     }
 
     private sealed class ScriptRow

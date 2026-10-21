@@ -255,7 +255,7 @@ public sealed partial class SqlCatalog
             }
             if (_tables.Count > 0)
             {
-                throw new SqlCatalogException("The database default collation cannot change after tables are created; existing index keys depend on it.");
+                throw new SqlCatalogException("COHSQLE057", "The database default collation cannot change after tables are created; existing index keys depend on it.");
             }
 
             var writer = new DatabaseKeyWriter();
@@ -452,7 +452,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
-                throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
+                throw new SqlCatalogException("COHSQLE049", $"Table '{schema}.{name}' already exists.");
             }
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
@@ -528,7 +528,7 @@ public sealed partial class SqlCatalog
                     CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name));
                     return default;
                 }
-                throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
+                throw new SqlCatalogException("COHSQLE051", $"Table '{schema}.{name}' does not exist.");
             }
 
             EnsureNoViewReads(slot.Table);
@@ -539,7 +539,7 @@ public sealed partial class SqlCatalog
                     string.Equals(constraint.ReferencedSchema, schema, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(constraint.ReferencedTable, name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new SqlCatalogException($"Table '{schema}.{name}' is referenced by '{dependent.Table.Schema}.{dependent.Table.Name}'. Drop the foreign key first.");
+                    throw new SqlCatalogException("COHSQLE056", $"Table '{schema}.{name}' is referenced by '{dependent.Table.Schema}.{dependent.Table.Name}'. Drop the foreign key first.");
                 }
             }
 
@@ -679,7 +679,7 @@ public sealed partial class SqlCatalog
 
             if (slot.Table.FindColumn(column.Name) is not null)
             {
-                throw new SqlCatalogException($"Table '{schema}.{name}' already has a column named '{column.Name}'.");
+                throw new SqlCatalogException("COHSQLE061", $"Table '{schema}.{name}' already has a column named '{column.Name}'.");
             }
 
             // The new column takes the next physical ordinal, after every live and dropped
@@ -776,12 +776,12 @@ public sealed partial class SqlCatalog
 
             if (ordinal < 0)
             {
-                throw new SqlCatalogException($"Table '{schema}.{name}' has no column named '{columnName}'.");
+                throw new SqlCatalogException("COHSQLE015", $"Table '{schema}.{name}' has no column named '{columnName}'.");
             }
 
             if (slot.Table.PrimaryKeyColumns.Any(pk => string.Equals(pk, columnName, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new SqlCatalogException($"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
+                throw new SqlCatalogException("COHSQLE056", $"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
             }
 
             foreach (var dependent in _tables.Values)
@@ -796,7 +796,7 @@ public sealed partial class SqlCatalog
                         constraint.ReferencedColumns.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase));
                     if (local || referenced)
                     {
-                        throw new SqlCatalogException($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.");
+                        throw new SqlCatalogException("COHSQLE056", $"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.");
                     }
                 }
             }
@@ -807,14 +807,14 @@ public sealed partial class SqlCatalog
                 if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
                     indexSlot.Index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
                 {
-                    throw new SqlCatalogException(
+                    throw new SqlCatalogException("COHSQLE056",
                         $"Column '{columnName}' is referenced by index '{indexSlot.Index.Name}' on '{schema}.{name}'. Drop the index first.");
                 }
             }
 
             if (slot.Table.Columns.Count == 1)
             {
-                throw new SqlCatalogException($"Cannot drop the last column of '{schema}.{name}'.");
+                throw new SqlCatalogException("COHSQLE053", $"Cannot drop the last column of '{schema}.{name}'.");
             }
 
             // The whole of DROP COLUMN: the column leaves the live list and its physical
@@ -945,19 +945,19 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             var table = FindTableByObjectId(index.TableObjectId)
-                ?? throw new SqlCatalogException($"No table with object id {index.TableObjectId} exists.");
+                ?? throw new SqlCatalogException("COHSQLE051", $"No table with object id {index.TableObjectId} exists.");
 
             if (_indexes.ContainsKey((index.TableObjectId, index.Name)) ||
                 table.Constraints.Any(constraint => string.Equals(constraint.Name, index.Name, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new SqlCatalogException($"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
+                throw new SqlCatalogException("COHSQLE050", $"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
             }
 
             foreach (string column in index.ColumnNames)
             {
                 if (table.FindColumn(column) is null)
                 {
-                    throw new SqlCatalogException($"Index '{index.Name}': table '{table.Schema}.{table.Name}' has no column named '{column}'.");
+                    throw new SqlCatalogException("COHSQLE015", $"Index '{index.Name}': table '{table.Schema}.{table.Name}' has no column named '{column}'.");
                 }
             }
 
@@ -1046,7 +1046,7 @@ public sealed partial class SqlCatalog
                     CommitScriptAbsence(publication, SqlObjectIdentity.Index(existingTable.Schema, existingTable.Name, name));
                     return default;
                 }
-                throw new SqlCatalogException($"No index named '{name}' exists on object {tableObjectId}.");
+                throw new SqlCatalogException("COHSQLE052", $"No index named '{name}' exists on object {tableObjectId}.");
             }
 
             var table = FindTableByObjectId(tableObjectId)!;
@@ -1081,7 +1081,7 @@ public sealed partial class SqlCatalog
             if (matches.Length != 1 || matches[0].Definition.IsUnique != index.IsUnique ||
                 matches[0].Definition.Kind != IndexKind.BTree || matches[0].RootPageId <= 0)
             {
-                throw new SqlCatalogException(
+                throw new SqlCatalogException("COHSQLE060",
                     $"Index '{index.Name}' requires exactly one matching B-tree registration with a positive root page id in the same publication.");
             }
             merged[(index.TableObjectId, index.Name)] = matches[0];
@@ -1471,7 +1471,7 @@ public sealed partial class SqlCatalog
     {
         if (!_tables.TryGetValue((schema, name), out var slot))
         {
-            throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
+            throw new SqlCatalogException("COHSQLE051", $"Table '{schema}.{name}' does not exist.");
         }
 
         return slot;
@@ -1543,7 +1543,7 @@ public sealed partial class SqlCatalog
     {
         if (_ddlGeneration == ulong.MaxValue)
         {
-            throw new SqlCatalogException("The catalog DDL generation is exhausted.");
+            throw new SqlCatalogException("COHSQLE060", "The catalog DDL generation is exhausted.");
         }
         if (publication is not null)
         {
@@ -1591,19 +1591,19 @@ public sealed partial class SqlCatalog
             {
                 if (column.Type.Type is not (DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("COHSQLE053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
                 if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
                     identity.Start < minimum || identity.Start > maximum)
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("COHSQLE053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 hasIdentity = true;
             }
             if (!seen.Add(column.Name))
             {
-                throw new SqlCatalogException($"Table '{schema}.{name}' declares column '{column.Name}' more than once.");
+                throw new SqlCatalogException("COHSQLE061", $"Table '{schema}.{name}' declares column '{column.Name}' more than once.");
             }
         }
 
@@ -1613,7 +1613,7 @@ public sealed partial class SqlCatalog
             {
                 if (!seen.Contains(pk))
                 {
-                    throw new SqlCatalogException($"Primary-key column '{pk}' is not a column of '{schema}.{name}'.");
+                    throw new SqlCatalogException("COHSQLE015", $"Primary-key column '{pk}' is not a column of '{schema}.{name}'.");
                 }
             }
         }
@@ -1637,7 +1637,7 @@ public sealed partial class SqlCatalog
     {
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException(
+            throw new SqlCatalogException("COHSQLE057",
                 $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold." +
                 (remedy is null ? string.Empty : " " + remedy));
         }
@@ -2048,13 +2048,13 @@ public sealed partial class SqlCatalog
         {
             if (!names.Add(constraint.Name))
             {
-                throw new SqlCatalogException($"Constraint '{constraint.Name}' is declared more than once on '{table.Schema}.{table.Name}'.");
+                throw new SqlCatalogException("COHSQLE050", $"Constraint '{constraint.Name}' is declared more than once on '{table.Schema}.{table.Name}'.");
             }
             foreach (string column in constraint.Columns)
             {
                 if (table.FindColumn(column) is null)
                 {
-                    throw new SqlCatalogException($"Constraint '{constraint.Name}' refers to unknown column '{column}'.");
+                    throw new SqlCatalogException("COHSQLE015", $"Constraint '{constraint.Name}' refers to unknown column '{column}'.");
                 }
             }
         }
@@ -2198,7 +2198,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
             {
-                throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
+                throw new SqlCatalogException("COHSQLE049", $"Table '{schema}.{name}' already exists.");
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
             var table = new SqlCatalogTable(_nextObjectId, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
@@ -2309,13 +2309,13 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!replaceExisting && (table.ObjectId == 0 || table.ObjectId >= _nextObjectId))
             {
-                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
+                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
             }
             _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
             if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
             {
-                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
+                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
             }
             if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("COHSQLE033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
@@ -2337,7 +2337,7 @@ public sealed partial class SqlCatalog
             {
                 if (!names.Add(index.Name) || index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException($"Index '{index.Name}' conflicts with the replacement table definition.");
+                    throw new SqlCatalogException("COHSQLE060", $"Index '{index.Name}' conflicts with the replacement table definition.");
                 }
             }
             foreach (SqlCatalogIndex index in indexes)
@@ -2345,7 +2345,7 @@ public sealed partial class SqlCatalog
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
                     index.ColumnNames.Any(column => table.FindColumn(column) is null))
                 {
-                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a new index on '{table.Schema}.{table.Name}'.");
+                    throw new SqlCatalogException("COHSQLE060", $"Index '{index.Name}' does not describe a new index on '{table.Schema}.{table.Name}'.");
                 }
             }
             var mergedRegistrations = MergePublishedRegistrations(registrations, indexes);
@@ -2383,7 +2383,7 @@ public sealed partial class SqlCatalog
         {
             if (table.DroppedColumnOrdinals.Count > 0)
             {
-                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' cannot be created with dropped columns.");
+                throw new SqlCatalogException("COHSQLE060", $"Table '{table.Schema}.{table.Name}' cannot be created with dropped columns.");
             }
 
             return;
@@ -2396,13 +2396,13 @@ public sealed partial class SqlCatalog
             kept = string.Equals(existing.Columns[ordinal].Name, table.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase);
             if (!string.Equals(existing.Columns[ordinal].MissingValueLiteral, table.Columns[ordinal].MissingValueLiteral, StringComparison.Ordinal))
             {
-                throw new SqlCatalogException($"The frozen missing value of column '{existing.Columns[ordinal].Name}' cannot be changed by replacement publication.");
+                throw new SqlCatalogException("COHSQLE060", $"The frozen missing value of column '{existing.Columns[ordinal].Name}' cannot be changed by replacement publication.");
             }
         }
 
         if (!kept)
         {
-            throw new SqlCatalogException(
+            throw new SqlCatalogException("COHSQLE060",
                 $"The replacement definition of '{table.Schema}.{table.Name}' does not keep the physical column layout of the current one: " +
                 "it may only append columns.");
         }
@@ -2424,7 +2424,7 @@ public sealed partial class SqlCatalog
             var slot = GetSlot(schema, name);
             if (_indexes.ContainsKey((slot.Table.ObjectId, constraint.Name)))
             {
-                throw new SqlCatalogException($"Constraint or index '{constraint.Name}' already exists on '{schema}.{name}'.");
+                throw new SqlCatalogException("COHSQLE050", $"Constraint or index '{constraint.Name}' already exists on '{schema}.{name}'.");
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
@@ -2503,7 +2503,7 @@ public sealed partial class SqlCatalog
                 !string.Equals(constraint.Name, constraintName, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (constraints.Length == slot.Table.Constraints.Count)
             {
-                throw new SqlCatalogException($"Constraint '{constraintName}' does not exist on '{schema}.{name}'.");
+                throw new SqlCatalogException("COHSQLE052", $"Constraint '{constraintName}' does not exist on '{schema}.{name}'.");
             }
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
                 slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints, slot.Table.DroppedColumnOrdinals);

@@ -120,31 +120,31 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!_tables.TryGetValue((expected.Schema, expected.Name), out var original) || !ReferenceEquals(original.Table, expected))
             {
-                throw new SqlCatalogException($"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
+                throw new SqlCatalogException("COHSQLE051", $"Table '{expected.Schema}.{expected.Name}' changed while the statement was waiting. Retry the statement.");
             }
             EnsureNoViewReads(expected, columnName, rename: true);
             if (columnName is null)
             {
                 if (_tables.ContainsKey((expected.Schema, newName)) || _views.ContainsKey(SqlObjectIdentity.View(expected.Schema, newName)))
                 {
-                    throw new SqlCatalogException($"Table '{expected.Schema}.{newName}' already exists.");
+                    throw new SqlCatalogException("COHSQLE049", $"Table '{expected.Schema}.{newName}' already exists.");
                 }
             }
             else
             {
                 if (expected.FindColumn(columnName) is null)
                 {
-                    throw new SqlCatalogException($"Table '{expected.Schema}.{expected.Name}' has no column named '{columnName}'.");
+                    throw new SqlCatalogException("COHSQLE015", $"Table '{expected.Schema}.{expected.Name}' has no column named '{columnName}'.");
                 }
                 if (expected.FindColumn(newName) is not null)
                 {
-                    throw new SqlCatalogException($"Column '{newName}' already exists on '{expected.Name}'.");
+                    throw new SqlCatalogException("COHSQLE061", $"Column '{newName}' already exists on '{expected.Name}'.");
                 }
             }
             var checks = expected.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Check).ToArray();
             if (checks.Length != checkExpressions.Count || checks.Any(check => !checkExpressions.TryGetValue(check.Name, out var text) || string.IsNullOrWhiteSpace(text)))
             {
-                throw new SqlCatalogException($"Rename of '{expected.Name}' requires every rewritten CHECK definition.");
+                throw new SqlCatalogException("COHSQLE060", $"Rename of '{expected.Name}' requires every rewritten CHECK definition.");
             }
 
             string RenameColumn(string name) => columnName is not null && string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase) ? newName : name;

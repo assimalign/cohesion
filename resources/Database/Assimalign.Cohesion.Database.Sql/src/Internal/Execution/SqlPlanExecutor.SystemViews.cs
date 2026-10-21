@@ -182,7 +182,7 @@ internal sealed partial class SqlPlanExecutor
                                 SqlCatalogReferentialAction.NoAction => "NO ACTION",
                                 SqlCatalogReferentialAction.SetNull => "SET NULL",
                                 SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
-                                _ => throw new DatabaseException(ErrorMessages.DeleteActionUnknown),
+                                _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
                             },
                         ];
                     }
@@ -218,7 +218,7 @@ internal sealed partial class SqlPlanExecutor
                     break;
 
                 default:
-                    throw new DatabaseException($"System view '{view.Schema}.{view.Name}' is not executable.");
+                    throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SystemViewNotExecutable, view.Schema, view.Name));
             }
         }
     }

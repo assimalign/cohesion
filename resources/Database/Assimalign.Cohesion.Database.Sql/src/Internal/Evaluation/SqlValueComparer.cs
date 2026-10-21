@@ -89,7 +89,8 @@ internal static class SqlValueComparer
             return comparable.CompareTo(right);
         }
         string hint = left is DateOnly && right is string || left is string && right is DateOnly ? " Use DATE 'yyyy-mm-dd' for a date literal." : string.Empty;
-        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.{hint}");
+        throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValuesNotComparable, left.GetType().Name, right.GetType().Name, hint));
     }
 
     /// <summary>

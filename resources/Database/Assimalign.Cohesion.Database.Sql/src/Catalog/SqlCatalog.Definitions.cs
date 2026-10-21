@@ -213,7 +213,7 @@ public sealed partial class SqlCatalog
         byte[] record = new DatabaseKeyWriter().AppendInt32(kind).AppendString(JsonSerializer.Serialize(value, typeInfo), Collation.Binary).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException($"SQL definition '{key}' exceeds the catalog record limit of {SlottedPage.MaxRecordSize} bytes.");
+            throw new SqlCatalogException("COHSQLE057", $"SQL definition '{key}' exceeds the catalog record limit of {SlottedPage.MaxRecordSize} bytes.");
         }
 
         lock (_sync)
@@ -221,7 +221,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (directory.ContainsKey(key))
             {
-                throw new SqlCatalogException($"SQL definition '{key}' already exists.");
+                throw new SqlCatalogException("COHSQLE050", $"SQL definition '{key}' already exists.");
             }
             using var transaction = _storage.BeginTransaction();
             var location = _storage.InsertRow(transaction, record);
@@ -243,7 +243,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (!directory.TryGetValue(key, out var slot))
             {
-                throw new SqlCatalogException($"SQL definition '{key}' does not exist.");
+                throw new SqlCatalogException("COHSQLE052", $"SQL definition '{key}' does not exist.");
             }
             if (slot.Value is SqlCatalogFunction function)
             {

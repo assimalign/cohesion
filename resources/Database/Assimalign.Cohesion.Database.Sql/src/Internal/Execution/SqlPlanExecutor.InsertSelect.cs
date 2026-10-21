@@ -24,8 +24,8 @@ internal sealed partial class SqlPlanExecutor
         await using var source = (DatabaseResultSet)await ExecuteAsync(plan.Source, statement, cancellationToken).ConfigureAwait(false);
         if (source.Columns.Count != plan.TargetOrdinals.Count)
         {
-            throw new DatabaseException(
-                $"INSERT SELECT has {source.Columns.Count} source columns but {plan.TargetOrdinals.Count} target columns.");
+            throw new SqlExecutionException(SqlExecutionException.InternalErrorCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertSelectWidth, source.Columns.Count, plan.TargetOrdinals.Count));
         }
         var rows = new List<object?[]>();
         await foreach (var sourceRow in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
@@ -98,8 +98,8 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 if (sourceRow.Length != targetOrdinals.Count)
                 {
-                    throw new DatabaseException(
-                        $"INSERT row has {sourceRow.Length} values but {targetOrdinals.Count} target columns.");
+                    throw new SqlExecutionException(SqlExecutionException.InternalErrorCode,
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertRowWidth, sourceRow.Length, targetOrdinals.Count));
                 }
                 var values = new object?[table.Columns.Count];
                 var assigned = new bool[table.Columns.Count];

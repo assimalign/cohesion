@@ -3411,17 +3411,49 @@ quoted names to match uppercase vocabulary entries.
 
 | Code | Meaning | PostgreSQL SQLSTATE |
 | --- | --- | --- |
+| `COHSQLE015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
 | `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
-| `COHSQLE022` | A CAST input has invalid text representation | 22P02 |
+| `COHSQLE022` | A CAST input or stored-column assignment has invalid text representation | 22P02 |
 | `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
 | `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
 | `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
 | `COHSQLE003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 
-NOT NULL failures carry one error diagnostic naming the column, with no source span at
-execution time. The existing missing-default and explicit-NULL message texts are unchanged.
+NOT NULL failures carry one error diagnostic naming the column and the executing statement's
+span when source text is available. The existing missing-default and explicit-NULL message texts are unchanged.
 PostgreSQL raises the same constraint category in `src/backend/executor/execMain.c:2268-2274`.
 Execution-time diagnostic work #1653 now treats NOT NULL as done; `COHSQLE023` belongs to #1102.
+
+Execution and DDL diagnostic completion (#1653) uses the following additional mappings.
+Codes are separate from in-process message text; wire errors compose `CODE: message` once.
+Unlocated execution failures receive the statement span; a more precise expression span is
+preserved. These are the parser's existing locations: SELECT query tails can extend beyond
+the root location (parser span completion remains separate work). Failures during database open have no statement text. DEFAULT wrappers retain
+the original diagnostic carrier and cause. The live execution conformance corpus covers these
+families in process and over the wire, including transaction and connection reuse.
+
+| Code | Meaning | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| `COHSQLE046` | Scalar subquery returns more than one row | 21000 (`cardinality_violation`) |
+| `COHSQLE047` | Invalid temporal text in a stored-column assignment or DEFAULT | 22007 (`invalid_datetime_format`) |
+| `COHSQLE048` | Temporal store-assignment or DEFAULT range overflow | 22008 (`datetime_field_overflow`) |
+| `COHSQLE049` | Table name already exists, including provisioning collisions | 42P07 (`duplicate_table`) |
+| `COHSQLE050` | Constraint, index or SQL definition name already exists | 42710 (`duplicate_object`) |
+| `COHSQLE051` | Missing or replaced table during execution/DDL | 42P01 (`undefined_table`) |
+| `COHSQLE052` | Missing constraint, index or catalog object | 42704 (`undefined_object`) |
+| `COHSQLE053` | Invalid table definition, including nullable primary key or dropping the last column | 42P16 (`invalid_table_definition`) |
+| `COHSQLE054` | Invalid FOREIGN KEY column lists or referenced key is not unique | 42830 (`invalid_foreign_key`) |
+| `COHSQLE055` | Incompatible store value, DEFAULT, FOREIGN KEY column type/collation, CHECK function result or compared values | 42804 (`datatype_mismatch`) |
+| `COHSQLE056` | DDL refused because constraints or indexes depend on the object | 2BP01 (`dependent_objects_still_exist`) |
+| `COHSQLE057` | Unsupported execution/DDL operation or compiled-schema ownership refusal | 0A000 (`feature_not_supported`) |
+| `COHSQLE058` | Damaged or incompatible persisted expression or missing-value literal | XX001 (`data_corrupted`) |
+| `COHSQLE059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
+| `COHSQLE060` | Executor/catalog invariant failure, including unavailable constraint indexes | XX000 (`internal_error`) |
+| `COHSQLE061` | Column already exists | 42701 (`duplicate_column`) |
+
+Definition dependency refusals retain `COHSQLD002` (2BP01), and engine-registered
+function/type drops retain `COHSQLD003` (0A000), now carried as structured diagnostics.
+The mappings follow PostgreSQL `src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500`.
 
 CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
 uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic

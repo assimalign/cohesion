@@ -551,7 +551,7 @@ public sealed class SqlArithmeticFaultTests
         // Assert
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith("Cannot compare values of types", Case.Sensitive);
+        error.Message.ShouldStartWith("COHSQLE055: Cannot compare values of types", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
         (await CountAsync(client)).ShouldBe(2L);
     }

@@ -37,7 +37,7 @@ internal sealed partial class SqlPlanExecutor
         }
         if (column.IsNullable && plan.Table.PrimaryKeyColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
         {
-            throw new DatabaseException("A primary-key column cannot become nullable.");
+            throw new SqlExecutionException(SqlExecutionException.InvalidTableCode, ErrorMessages.PrimaryKeyNullable);
         }
         SqlBoundExpression? declaredDefault = null;
         if (column.DefaultLiteral is not null)
@@ -87,7 +87,7 @@ internal sealed partial class SqlPlanExecutor
                 // their padding differs. New wrappers around the same padded string do not.
                 if (!Equals(SqlCharacter.Output(value), SqlCharacter.Output(converted)))
                 {
-                    throw new DatabaseException($"ALTER COLUMN '{column.Name}' would rewrite existing values; only validation-only changes are supported. Use an explicit table-copy migration; in-place rewrites are tracked by #1447.");
+                    throw new SqlExecutionException(SqlExecutionException.UnsupportedCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AlterColumnRewrite, column.Name));
                 }
                 statement.ProvisioningProgress?.Invoke(++processed, total);
             }

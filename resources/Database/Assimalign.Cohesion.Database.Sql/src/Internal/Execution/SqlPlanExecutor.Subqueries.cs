@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 if (query.Kind == SqlSubqueryKind.Scalar && found)
                 {
-                    throw new DatabaseException(ErrorMessages.ScalarSubqueryCardinality);
+                    throw new SqlExecutionException(SqlExecutionException.CardinalityCode, ErrorMessages.ScalarSubqueryCardinality);
                 }
                 found = true;
                 if (query.Kind == SqlSubqueryKind.Exists) { break; }

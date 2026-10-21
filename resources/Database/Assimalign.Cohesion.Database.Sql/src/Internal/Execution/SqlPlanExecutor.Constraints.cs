@@ -452,7 +452,7 @@ internal sealed partial class SqlPlanExecutor
         BTreeIndex? index = null;
         if (selected is not null && !_indexManager.TryGetIndex(key.Table.ObjectId, selected.Name, out index))
         {
-            throw new DatabaseException($"Constraint index '{selected.Name}' is unavailable.");
+            throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintIndexUnavailable, selected.Name));
         }
         lookup = new SqlConstraintLookup(selected, index, prefix, indexOrdinals);
         lookups.Add(key, lookup);
@@ -1109,7 +1109,7 @@ internal sealed partial class SqlPlanExecutor
             SqlConstraintDeclaration.ValidateColumns(definition, name);
             if (!names.Add(name))
             {
-                throw new DatabaseException($"Constraint or index '{name}' already exists on '{table.Name}'.");
+                throw new SqlExecutionException(SqlExecutionException.DuplicateObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintNameExists, name, table.Name));
             }
 
             foreach (string column in definition.Columns)
@@ -1125,7 +1125,7 @@ internal sealed partial class SqlPlanExecutor
             if (definition.Kind == SqlConstraintKind.Check)
             {
                 var expression = definition.CheckExpression
-                    ?? throw new DatabaseException("CHECK requires a valid scalar predicate.");
+                    ?? throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.CheckPredicateRequired);
                 var calls = ValidateCheck(expression, table, _catalog.DefaultCollation, _definitions.Functions);
 
                 // The catalog stores the canonical text of the parsed predicate, not the text as
@@ -1147,12 +1147,12 @@ internal sealed partial class SqlPlanExecutor
             }
             else if (!_catalog.TryGetTable(schema, referenced.TableName, out parent!))
             {
-                throw new DatabaseException($"Referenced table '{schema}.{referenced.TableName}' does not exist.");
+                throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyTableMissing, schema, referenced.TableName));
             }
 
             if (definition.Columns.Count != definition.ReferencedColumns.Count || definition.Columns.Count == 0)
             {
-                throw new DatabaseException($"FOREIGN KEY '{name}' requires matching nonempty column lists.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidForeignKeyCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnCount, name));
             }
 
             for (int column = 0; column < definition.Columns.Count; column++)
@@ -1161,13 +1161,13 @@ internal sealed partial class SqlPlanExecutor
                 int parentOrdinal = FindColumnOrdinal(parent, definition.ReferencedColumns[column]);
                 if (table.Columns[childOrdinal].Type.Type != parent.Columns[parentOrdinal].Type.Type)
                 {
-                    throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column types.");
+                    throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnTypes, name));
                 }
                 if (table.Columns[childOrdinal].Type.Type is DatabaseType.String or DatabaseType.Character
                     && (table.Columns[childOrdinal].Collation ?? _catalog.DefaultCollation)
                         != (parent.Columns[parentOrdinal].Collation ?? _catalog.DefaultCollation))
                 {
-                    throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column collations.");
+                    throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyColumnCollations, name));
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||
@@ -1175,7 +1175,7 @@ internal sealed partial class SqlPlanExecutor
                 (self && definitions.Any(d => d.Kind is SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey && SameConstraintColumns(d.Columns, definition.ReferencedColumns)));
             if (!unique)
             {
-                throw new DatabaseException($"FOREIGN KEY '{name}' must reference a primary key or unique index.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidForeignKeyCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyUniqueRequired, name));
             }
 
             result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Reference, definition.Columns, schema, referenced.TableName,
@@ -1186,7 +1186,7 @@ internal sealed partial class SqlPlanExecutor
                     SqlReferentialAction.NoAction => SqlCatalogReferentialAction.NoAction,
                     SqlReferentialAction.SetNull => SqlCatalogReferentialAction.SetNull,
                     SqlReferentialAction.SetDefault => SqlCatalogReferentialAction.SetDefault,
-                    _ => throw new DatabaseException(ErrorMessages.DeleteActionUnknown),
+                    _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
                 }));
         }
         return result;
@@ -1240,7 +1240,7 @@ internal sealed partial class SqlPlanExecutor
             if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression
                 or SqlInExpression { Subquery: not null } || (_declaring && expression is SqlCastExpression))
             {
-                throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode, ErrorMessages.CheckExpressionInvalid);
             }
 
             // Declaration-only qualifier check: persisted predicates retain the older binding
@@ -1459,13 +1459,12 @@ internal sealed partial class SqlPlanExecutor
 
             if (_scope.ResolveFunction(call) is not SqlScalarFunction function)
             {
-                throw new DatabaseException($"Function '{call.FunctionName}' is not supported in CHECK.");
+                throw new SqlExecutionException(SqlExecutionException.UnsupportedCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckFunctionUnsupported, call.FunctionName));
             }
             if (function.Volatility != SqlFunctionVolatility.Immutable)
             {
-                throw new DatabaseException(
-                    $"Function '{call.FunctionName}' is {(function.Volatility == SqlFunctionVolatility.Stable ? "STABLE" : "VOLATILE")}, and a CHECK admits only IMMUTABLE functions. " +
-                    "Register the function as SqlFunctionVolatility.Immutable if its result depends on nothing but its arguments.");
+                throw new SqlExecutionException(SqlExecutionException.InvalidDefinitionCode,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckFunctionVolatility, call.FunctionName, (function.Volatility == SqlFunctionVolatility.Stable ? "STABLE" : "VOLATILE")));
             }
             if (function is SqlExpressionFunction { Unresolved: { } reason })
             {
