@@ -7,7 +7,7 @@ loopback TCP for at least one second and 200 consecutive coded refusals per tran
 tests assert DatabaseNotFound and ConnectionFailure kind and reuse a one-slot pool to expose leaked failed rentals.
 TCP also covers 200 authentication and capacity refusals through the typed client, 200
 unsupported-major handshakes through the public protocol (production clients send Current),
-and 200 idle and graceful-stop notices read directly as unsolicited protocol frames.
+and 200 idle and graceful-stop notices surfaced by the next concrete-client operation.
 
 ## Contract-only dependencies
 

@@ -71,7 +71,7 @@ public sealed class SqlClientTerminalPathTests
     [InlineData(true)]
     public async Task ReadyAsync_IdleOrSoftStop_ShouldDeliverUnavailable(bool shutdown)
     {
-        // Arrange: read unsolicited notices without first writing to the closed peer.
+        // Arrange: use the concrete client after the server has completed its terminal close.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var harness = await SqlClientTestHarness.StartAsync();
         var factory = new TcpConnectionFactory();
@@ -87,21 +87,21 @@ public sealed class SqlClientTerminalPathTests
                 ShutdownDrainTimeout = TimeSpan.FromSeconds(2),
             });
             await server.StartAsync(timeout.Token);
-            await using var peer = await factory.ConnectAsync(listener.EndPoint, timeout.Token);
-            await using var channel = new ProtocolChannel(peer.AsStream(), SqlProtocol.Family, leaveOpen: true);
-            await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Startup,
-                new ProtocolStartupMessage(ProtocolVersion.Current, "app", "tester").Encode()), timeout.Token);
-            (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Authenticate);
-            await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty), timeout.Token);
-            (await channel.Reader.ReadFrameAsync(timeout.Token)).ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Ready);
-            Task stopped = shutdown ? server.StopAsync(timeout.Token) : Task.CompletedTask;
-            var frame = await channel.Reader.ReadFrameAsync(timeout.Token);
-            frame.ShouldNotBeNull().Type.ShouldBe(ProtocolMessageType.Error);
-            var error = ProtocolErrorMessage.Decode(frame.Value.Payload.Span);
-            error.Code.ShouldBe(ProtocolErrorCode.Unavailable);
+            await using var client = SqlClient.Create(new()
+            {
+                Settings = new DatabaseConnectionSettings { Database = "app", EndPoint = listener.EndPoint, MaxPoolSize = 1 },
+                ConnectionFactory = factory,
+            });
+            await using var connection = await client.ConnectAsync(timeout.Token);
+            if (shutdown) { await server.StopAsync(timeout.Token); }
+            else
+            {
+                while (server.Sessions.Count != 0) { await Task.Delay(1, timeout.Token); }
+            }
+            var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync("SELECT 1", cancellationToken: timeout.Token));
+            error.Code.ShouldBe(ProtocolErrorCode.Unavailable, error.Message);
+            error.Kind.ShouldBe(SqlClientErrorKind.Unavailable);
             error.Message.ShouldContain(shutdown ? "shutting down" : "idle timeout", Case.Sensitive);
-            await peer.DisposeAsync();
-            await stopped;
         }
     }
 }

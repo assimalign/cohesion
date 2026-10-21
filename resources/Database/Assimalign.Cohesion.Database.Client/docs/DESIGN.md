@@ -112,8 +112,15 @@ when its error code is `ExecutionFailure`. Wire codes and messages reach callers
 unchanged, independently of the health decision.
 
 Handshake rejections preserve their wire code in `DatabaseClientException`.
-Idle server-side evictions remain discoverable at next use; rent-time pings are
-future work.
+Idle and graceful-stop terminal errors remain discoverable at next use, including when
+the transport is already closed. Under the lease's single-operation admission, the connector
+checks for buffered input or a closed transport before writing a model request.
+It consumes the terminal response once and discards the connector. Physical IsOpen remains
+false for a closed transport; logical admission permits only this final error read. Streaming
+startup uses the same operation gate and preflight. No I/O runs under the lease lock, and a
+buffer peek preserves consumed and examined positions for the frame reader. Unexpected or
+malformed terminal frames are ProtocolViolation; clean EOF keeps Internal. Rent-time pings
+remain future work.
 
 A failed dial is a `DatabaseClientException` too (owner decision 39 of 2026-10-07).
 The internal `DatabaseConnector.OpenAsync` dials through the connection factory and

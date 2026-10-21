@@ -54,10 +54,6 @@ internal sealed class DatabaseDownloadStream : Stream
             {
                 throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
             }
-            if (!connection.IsOpen)
-            {
-                throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
-            }
         }
         catch
         {

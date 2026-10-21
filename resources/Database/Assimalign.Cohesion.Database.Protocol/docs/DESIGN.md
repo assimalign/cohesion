@@ -191,7 +191,7 @@ TcpConnectionListener: at least 200 consecutive DatabaseNotFound errors for each
 Key-Value, Blob and Documents, with no Internal or ProtocolViolation substitution. SQL and
 Key-Value also require 200 TCP cases each for UnsupportedVersion, AuthenticationFailed,
 MaxSessions Unavailable, idle eviction and graceful-drain Unavailable. The unsupported-major
-and unsolicited-notice cases use the public protocol; typed clients exercise admission failures.
+case uses the public protocol; typed clients exercise admission failures and queued notices.
 Controlled transports cover blocked/cooperative writes, flush, output completion, deadline
 abort, joining pending completion, and rejection cleanup for all five servers.
 
