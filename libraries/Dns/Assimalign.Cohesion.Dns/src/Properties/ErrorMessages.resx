@@ -13,4 +13,5 @@
   <data name="TxtStringTooLong" xml:space="preserve"><value>TXT record string exceeds the RFC 1035 limit of 255 octets (got {0}).</value></data>
   <data name="TxtRDataLengthMismatch" xml:space="preserve"><value>TXT RDATA: declared length {0} but consumed {1} octets</value></data>
   <data name="TxtRDataEmpty" xml:space="preserve"><value>TXT record must contain at least one string</value></data>
+  <data name="WireLabelTooLong" xml:space="preserve"><value>label '{0}' exceeds the RFC 1035 limit of 63 octets in wire form</value></data>
 </root>

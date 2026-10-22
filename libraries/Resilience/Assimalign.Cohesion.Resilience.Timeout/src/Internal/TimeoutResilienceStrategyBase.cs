@@ -59,36 +59,47 @@ internal abstract class TimeoutResilienceStrategyBase
                 cancellationTokenSource);
 
             IResilienceContext timeoutContext = new TimeoutResilienceContext(context, cancellationTokenSource.Token);
-            Task<TOutcome> executionTask = callback.Invoke(timeoutContext, state).AsTask();
-            Task timeoutTask = Task.Delay(timeout, TimeProvider, CancellationToken.None);
+            ValueTask<TOutcome> execution = callback.Invoke(timeoutContext, state);
+            TOutcome outcome;
 
-            Task completedTask = await Task.WhenAny(executionTask, timeoutTask).ConfigureAwait(context.ContinueOnCapturedContext);
-
-            if (ReferenceEquals(completedTask, executionTask))
+            if (execution.IsCompletedSuccessfully)
             {
-                TOutcome outcome = await executionTask.ConfigureAwait(context.ContinueOnCapturedContext);
+                outcome = execution.Result;
+            }
+            else
+            {
+                Task<TOutcome> executionTask = execution.AsTask();
 
-                bool timedOut = cancellationTokenSource.IsCancellationRequested && !previousCancellationToken.IsCancellationRequested;
-
-                if (!timedOut || !IsOutcomeOperationCancelledException(outcome, out OperationCanceledException cancelled))
+                try
                 {
-                    return outcome;
+                    // WaitAsync disposes its timer when either the callback or the deadline wins.
+                    // The callback adapters represent failures as outcomes, including TimeoutException.
+                    outcome = await executionTask.WaitAsync(timeout, TimeProvider)
+                        .ConfigureAwait(context.ContinueOnCapturedContext);
                 }
-
-                if (OnTimeout is not null)
+                catch (TimeoutException)
                 {
-                    await OnTimeout.Invoke(new OnTimeoutArguments(context, timeout)).ConfigureAwait(context.ContinueOnCapturedContext);
-                }
+                    cancellationTokenSource.Cancel();
+                    cleanupDeferred = true;
+                    _ = ObserveLateCompletionAsync(executionTask, registration, cancellationTokenSource);
 
-                return error.Invoke(new TimeoutRejectedException(
-                    $"The operation didn't complete within the allowed timeout of '{timeout}'.",
-                    timeout,
-                    cancelled));
+                    if (OnTimeout is not null)
+                    {
+                        await OnTimeout.Invoke(new OnTimeoutArguments(context, timeout)).ConfigureAwait(context.ContinueOnCapturedContext);
+                    }
+
+                    return error.Invoke(new TimeoutRejectedException(
+                        string.Format(ErrorMessages.OperationTimeout, timeout),
+                        timeout));
+                }
             }
 
-            cancellationTokenSource.Cancel();
-            cleanupDeferred = true;
-            _ = ObserveLateCompletionAsync(executionTask, registration, cancellationTokenSource);
+            bool timedOut = cancellationTokenSource.IsCancellationRequested && !previousCancellationToken.IsCancellationRequested;
+
+            if (!timedOut || !IsOutcomeOperationCancelledException(outcome, out OperationCanceledException cancelled))
+            {
+                return outcome;
+            }
 
             if (OnTimeout is not null)
             {
@@ -96,8 +107,9 @@ internal abstract class TimeoutResilienceStrategyBase
             }
 
             return error.Invoke(new TimeoutRejectedException(
-                $"The operation didn't complete within the allowed timeout of '{timeout}'.",
-                timeout));
+                string.Format(ErrorMessages.OperationTimeout, timeout),
+                timeout,
+                cancelled));
         }
         finally
         {

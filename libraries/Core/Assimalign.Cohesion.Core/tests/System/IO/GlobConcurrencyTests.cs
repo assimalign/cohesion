@@ -116,7 +116,7 @@ public class GlobConcurrencyTests
     {
         // Arrange
         string pattern = $"/d{Guid.NewGuid():N}/**/file[0-9].{{cs,txt}}";
-        TokenBase[] tokens = Parser.Tokenize(pattern);
+        var tokens = Parser.Tokenize(pattern);
         long globBytes = MeasureAllocations(() => new Glob(tokens));
 
         // Act: the cache is process-wide and another test's parses can clear it between the warm-up

@@ -189,7 +189,7 @@ public sealed class MemoryCache : ICache
             {
                 throw new CacheException(
                     CacheErrorCode.InvalidEntry,
-                    "When MemoryCacheOptions.SizeLimit is set every committed entry must declare a Size.");
+                    ErrorMessages.EntrySizeRequired);
             }
 
             if (size > sizeLimit)
@@ -197,11 +197,11 @@ public sealed class MemoryCache : ICache
                 FireOrphanCallbacks(entry, CacheEvictionReason.Capacity);
                 throw new CacheException(
                     CacheErrorCode.CapacityExceeded,
-                    "The entry's Size exceeds the cache's SizeLimit.");
+                    ErrorMessages.EntrySizeLimitExceeded);
             }
         }
 
-        IDisposable[] subscriptions = SubscribeTokens(entry);
+        IDisposable[] subscriptions = SubscribeTokens(entry, out TokenBinding? binding);
 
         var stored = new StoredEntry(
             entry.Key,
@@ -213,6 +213,8 @@ public sealed class MemoryCache : ICache
             now,
             entry.Callbacks,
             subscriptions);
+
+        binding?.Attach(stored);
 
         // Replace any prior entry atomically.
         StoredEntry? previous = null;
@@ -258,7 +260,7 @@ public sealed class MemoryCache : ICache
     {
         if (Volatile.Read(ref _disposed) != 0)
         {
-            throw new CacheException(CacheErrorCode.Disposed, "The MemoryCache has been disposed.");
+            throw new CacheException(CacheErrorCode.Disposed, ErrorMessages.CacheDisposed);
         }
     }
 
@@ -268,21 +270,21 @@ public sealed class MemoryCache : ICache
         {
             throw new CacheException(
                 CacheErrorCode.InvalidEntry,
-                "AbsoluteExpirationRelativeToNow must be greater than zero.");
+                ErrorMessages.RelativeExpirationInvalid);
         }
 
         if (sliding is { } slidingValue && slidingValue <= TimeSpan.Zero)
         {
             throw new CacheException(
                 CacheErrorCode.InvalidEntry,
-                "SlidingExpiration must be greater than zero.");
+                ErrorMessages.SlidingExpirationInvalid);
         }
 
         if (entry.Size is { } size && size < 0)
         {
             throw new CacheException(
                 CacheErrorCode.InvalidEntry,
-                "Size must be greater than or equal to zero.");
+                ErrorMessages.EntrySizeInvalid);
         }
 
         // Absolute expiration in the past is allowed at the entry level (the entry expires
@@ -303,36 +305,35 @@ public sealed class MemoryCache : ICache
         return result;
     }
 
-    private IDisposable[] SubscribeTokens(MemoryCacheEntry entry)
+    private IDisposable[] SubscribeTokens(MemoryCacheEntry entry, out TokenBinding? binding)
     {
         var tokens = entry.Tokens;
         if (tokens.Count == 0)
         {
+            binding = null;
             return [];
         }
 
         var subscriptions = new IDisposable[tokens.Count];
+        binding = new TokenBinding(this);
 
         for (int i = 0; i < tokens.Count; i++)
         {
             var token = tokens[i];
 
-            // The real stored entry is resolved at notification time through the dictionary so
-            // this works even when the entry was replaced between commit and notification. Tokens
-            // that fire synchronously during OnChange (for example, already-fired tokens) execute
-            // their callback before the entry has been added to the dictionary; in that case the
-            // lookup is a miss and the entry is committed unaffected. Callers that need eager
-            // detection of an already-fired token should test the token before passing it in.
+            // A retired callback must never invalidate a replacement with the same key. Bind all
+            // subscriptions to this commit's exact entry. Synchronous notifications during OnChange
+            // still precede publication and leave the entry unaffected, as documented.
             subscriptions[i] = token.OnChange(
                 static state =>
                 {
                     var binding = (TokenBinding)state!;
-                    if (binding.Cache._entries.TryGetValue(binding.Key, out var current))
+                    if (binding.Entry is { } current)
                     {
-                        binding.Cache.OnTokenExpired(binding.Key, current);
+                        binding.Cache.OnTokenExpired(current.Key, current);
                     }
                 },
-                new TokenBinding(this, entry.Key));
+                binding);
         }
 
         return subscriptions;
@@ -466,14 +467,17 @@ public sealed class MemoryCache : ICache
 
     private sealed class TokenBinding
     {
-        public TokenBinding(MemoryCache cache, object key)
+        private StoredEntry? _entry;
+
+        public TokenBinding(MemoryCache cache)
         {
             Cache = cache;
-            Key = key;
         }
 
         public MemoryCache Cache { get; }
 
-        public object Key { get; }
+        public StoredEntry? Entry => Volatile.Read(ref _entry);
+
+        public void Attach(StoredEntry entry) => Volatile.Write(ref _entry, entry);
     }
 }

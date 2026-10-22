@@ -171,7 +171,7 @@ public sealed partial class Glob
         private const uint cacheCapacity = 1024;
 
         // Lookups are lock-free and allocation-free, so a cached Glob.Parse allocates only the Glob.
-        private static readonly ConcurrentDictionary<string, TokenBase[]> _cache = new ConcurrentDictionary<string, TokenBase[]>(StringComparer.Ordinal);
+        private static readonly ConcurrentDictionary<string, GlobPattern> _cache = new(StringComparer.Ordinal);
         private static uint _cacheMisses;
 
         // Per-parse state: Tokenize creates a parser for each miss, so concurrent parses never
@@ -183,9 +183,9 @@ public sealed partial class Glob
             _buffer = new StringBuilder();
         }
 
-        public static TokenBase[] Tokenize(string pattern)
+        public static GlobPattern Tokenize(string pattern)
         {
-            if (_cache.TryGetValue(pattern, out TokenBase[]? cached))
+            if (_cache.TryGetValue(pattern, out GlobPattern? cached))
             {
                 return cached;
             }
@@ -199,7 +199,7 @@ public sealed partial class Glob
             }
 
             // When first parses of one pattern race, every caller gets the array that was stored.
-            return _cache.GetOrAdd(pattern, tokens);
+            return _cache.GetOrAdd(pattern, new GlobPattern(tokens));
         }
 
         private TokenBase[] Parse(string pattern)

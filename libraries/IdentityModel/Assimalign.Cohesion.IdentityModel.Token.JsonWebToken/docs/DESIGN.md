@@ -42,6 +42,13 @@ XML-DSig/XML encryption, and key-resolution suites, but not these moved RSA/ECDS
 
 ## Compact writing
 
+Compact segment parsing locates delimiters before allocating the three owned segment strings,
+avoiding a temporary split array (#1698). Received text and signing input are unchanged, and
+an empty signature remains accepted by the parts carrier. `TryParse` now returns false for a
+whitespace-only header or payload instead of throwing through the three-argument constructor
+(#1699). Direct constructors retain their existing validation and exception behavior. This is
+a malformed-input failure-behavior correction with no public signature change.
+
 The public sealed `JsonWebTokenWriter` implements `IJsonWebTokenWriter`; its private constructor
 is reached through `CreateEs256`, which returns the concrete writer. Creation requires a
 NIST P-256 ECDSA key and a non-empty `kid`; the writer owns both `alg=ES256` and `kid`, rejects those

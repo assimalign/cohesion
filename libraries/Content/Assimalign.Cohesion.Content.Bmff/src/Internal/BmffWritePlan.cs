@@ -46,16 +46,17 @@ internal sealed class BmffWritePlan
             var prefix = Array.Empty<byte>();
             if (box is BmffBoxComposite composite)
             {
-                using var memory = new MemoryStream();
-                using (var stream = new BmffStream(memory, 0, composite.PrefixSize))
+                int prefixSize = composite.PrefixSize;
+                prefix = prefixSize == 0 ? Array.Empty<byte>() : new byte[prefixSize];
+                using var memory = new MemoryStream(prefix, writable: true);
+                using (var stream = new BmffStream(memory, 0, prefix.Length))
                 {
                     composite.WritePrefix(stream);
-                    if (stream.Position != composite.PrefixSize)
+                    if (stream.Position != prefix.Length)
                     {
                         throw new ContentFormatException(ErrorMessages.IncompleteBox, ContentFormatErrorCode.InvalidStructure, box.Offset);
                     }
                 }
-                prefix = memory.ToArray();
                 payloadSize = 0;
                 children = new BmffWritePlan[composite.Children.Count];
                 for (var index = 0; index < children.Length; index++)

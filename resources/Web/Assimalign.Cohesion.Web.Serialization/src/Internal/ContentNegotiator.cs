@@ -69,10 +69,12 @@ internal static class ContentNegotiator
             return options;
         }
 
-        foreach (IContentWriter writer in writers)
+        for (int writerIndex = 0; writerIndex < writers.Count; writerIndex++)
         {
-            foreach (HttpMediaType candidate in writer.MediaTypes)
+            IReadOnlyList<HttpMediaType> mediaTypes = writers[writerIndex].MediaTypes;
+            for (int mediaTypeIndex = 0; mediaTypeIndex < mediaTypes.Count; mediaTypeIndex++)
             {
+                HttpMediaType candidate = mediaTypes[mediaTypeIndex];
                 if (candidate.IsEmpty || candidate.HasWildcard)
                 {
                     continue;
@@ -113,8 +115,9 @@ internal static class ContentNegotiator
     {
         mediaType = default;
 
-        foreach (HttpMediaTypeQuality entry in accept)
+        for (int acceptIndex = 0; acceptIndex < accept.Count; acceptIndex++)
         {
+            HttpMediaTypeQuality entry = accept[acceptIndex];
             HttpMediaType range = entry.MediaType;
 
             // Only a bare base type broadens to its suffix family. An already-suffixed range
@@ -125,8 +128,9 @@ internal static class ContentNegotiator
                 continue;
             }
 
-            foreach (HttpMediaType option in serverOptions)
+            for (int optionIndex = 0; optionIndex < serverOptions.Count; optionIndex++)
             {
+                HttpMediaType option = serverOptions[optionIndex];
                 if (string.Equals(option.Type, range.Type, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(option.Suffix, range.SubType, StringComparison.OrdinalIgnoreCase)
                     && !IsExplicitlyRejected(accept, option))
@@ -147,8 +151,9 @@ internal static class ContentNegotiator
     /// </summary>
     private static bool IsExplicitlyRejected(IReadOnlyList<HttpMediaTypeQuality> accept, HttpMediaType option)
     {
-        foreach (HttpMediaTypeQuality entry in accept)
+        for (int i = 0; i < accept.Count; i++)
         {
+            HttpMediaTypeQuality entry = accept[i];
             if (!entry.Quality.IsAcceptable && entry.MediaType.Includes(option))
             {
                 return true;

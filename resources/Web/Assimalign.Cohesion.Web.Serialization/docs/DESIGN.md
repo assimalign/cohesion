@@ -92,6 +92,13 @@ layer, composing over the same seam.
 
 ## Content negotiation (#149)
 
+Request-time registry lookup and negotiation traverse media-type lists by index, avoiding boxed
+interface enumerators. The registry still reads each custom reader or writer's current `MediaTypes`
+on every call; it snapshots registrations at build time, not the advertisements of custom codecs.
+Negotiated writes scan existing `Vary` tokens as trimmed spans, preserving token text and Unicode
+whitespace handling without allocating split arrays or trimmed token strings. These internal
+changes preserve selection order, specificity, suffix fallback and header behavior (#1688).
+
 Server-driven negotiation composes *over* the registry as a thin layer, never redoing its work:
 the q-value / precedence engine is the shared `HttpContentNegotiation` primitive (#771), and the
 selectable representations are exactly the registry's writers. `HttpContentNegotiationExtensions`

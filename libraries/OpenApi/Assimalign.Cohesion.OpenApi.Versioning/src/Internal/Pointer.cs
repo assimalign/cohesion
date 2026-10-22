@@ -11,6 +11,11 @@ internal static class Pointer
 
     internal static string Append(string pointer, params string[] tokens)
     {
+        if (tokens.Length == 1)
+        {
+            return string.Concat(pointer, "/", Escape(tokens[0]));
+        }
+
         var builder = new StringBuilder(pointer);
         foreach (var token in tokens)
         {

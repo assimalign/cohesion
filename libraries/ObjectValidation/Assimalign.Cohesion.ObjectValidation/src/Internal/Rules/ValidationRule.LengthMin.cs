@@ -63,7 +63,7 @@ internal sealed class LengthMinValidationRule<TValue> : ValidationRuleBase<TValu
         return member switch
         {
             null => true,
-            string stringValue      when stringValue is not null && stringValue.Length < this._length => true,
+            string stringValue      => stringValue.Length < this._length,
             ICollection collection  when collection.Count < this._length => true,
             Array array             when array.Length < this._length => true,
             IEnumerable enumerable  when enumerable.Cast<object>().Count() < this._length => true,

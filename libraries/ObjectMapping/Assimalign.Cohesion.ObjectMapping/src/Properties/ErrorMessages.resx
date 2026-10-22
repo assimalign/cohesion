@@ -120,4 +120,22 @@
   <data name="TargetMappingChainInvalid" xml:space="preserve">
     <value>Chained mapping is not allowed for target. The target member expression: '{0}' Target values must be of the parent type: '{1}'.</value>
   </data>
+  <data name="MappingResultTypeMismatch" xml:space="preserve">
+    <value>The mapping result could not be assigned to type '{0}'.</value>
+  </data>
+  <data name="MappingSourceTypeMismatch" xml:space="preserve">
+    <value>The source object of type '{0}' is not assignable to the declared source type '{1}'.</value>
+  </data>
+  <data name="MappingTargetTypeMismatch" xml:space="preserve">
+    <value>The target object of type '{0}' is not assignable to the declared target type '{1}'.</value>
+  </data>
+  <data name="TargetExpressionMemberRequired" xml:space="preserve">
+    <value>The target expression body: '{0}' must be a MemberExpression.</value>
+  </data>
+  <data name="TargetExpressionPathRequired" xml:space="preserve">
+    <value>The target expression '{0}' must be a member access path on the parameter (e.g. 't => t.A.B').</value>
+  </data>
+  <data name="SourceExpressionTypeMismatch" xml:space="preserve">
+    <value>The source expression '{0}' cannot be assigned to the target expression '{1}'.</value>
+  </data>
 </root>

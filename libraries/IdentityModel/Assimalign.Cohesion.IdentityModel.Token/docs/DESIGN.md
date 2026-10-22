@@ -45,6 +45,10 @@ grade-up features (#608, #612).
 
 ## AOT posture
 
+Neutral validation allocates its diagnostic list on the first finding. A successful call keeps
+returning the existing shared `TokenValidationResult.Success`; failure findings, order, temporal
+boundaries, issuer/audience checks and the defensive result snapshot are unchanged (#1694).
+
 `<IsAotCompatible>true</IsAotCompatible>`. Plain-old CLR object models, no
 serializers, no reflection, no runtime code generation. Removing the neutral
 layer's `object?` value bags in favor of the typed `IdentityClaimValue` is part

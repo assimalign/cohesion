@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Threading;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.ObjectValidation;
 
@@ -16,8 +18,15 @@ public sealed class ValidationContext<T> : IValidationContext
     // Queues, not stacks: errors and invocations enumerate in the order they were added, which is the order
     // the rules ran. A nested profile's errors are copied into each enclosing context in that order too, so
     // they stay in place under their parent member.
-    private readonly ConcurrentQueue<IValidationError> _errors;
-    private readonly ConcurrentQueue<ValidationInvocation> _invocations;
+    private ConcurrentQueue<IValidationError>? _errors;
+    private ConcurrentQueue<ValidationInvocation>? _invocations;
+
+    private ConcurrentQueue<IValidationError> ErrorQueue => LazyInitializer.EnsureInitialized(ref _errors);
+    private ConcurrentQueue<ValidationInvocation> InvocationQueue => LazyInitializer.EnsureInitialized(ref _invocations);
+
+    // Only internal, immediate enumeration may observe this empty view. Public callers receive the
+    // stable live queue, so retaining Errors before a later AddFailure keeps its original behavior.
+    internal IEnumerable<IValidationError> GetErrors() => _errors is { } errors ? errors : Array.Empty<IValidationError>();
 
     private ValidationContext() { }
 
@@ -29,8 +38,6 @@ public sealed class ValidationContext<T> : IValidationContext
     public ValidationContext(T instance)
     {
         this._type = typeof(T);
-        this._errors = new ConcurrentQueue<IValidationError>();
-        this._invocations = new ConcurrentQueue<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -42,11 +49,9 @@ public sealed class ValidationContext<T> : IValidationContext
         {
             throw new ArgumentNullException(
                 paramName: nameof(instance),
-                message: $"The instance of type '{typeof(T).Name}' cannot be null");
+                message: string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValidationInstanceNull, typeof(T).Name));
         } 
         this._type = typeof(T);
-        this._errors = new ConcurrentQueue<IValidationError>();
-        this._invocations = new ConcurrentQueue<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -67,12 +72,12 @@ public sealed class ValidationContext<T> : IValidationContext
     /// The validation failures that occurred, in the order they were added: the order the rules that
     /// reported them ran.
     /// </summary>
-    public IEnumerable<IValidationError> Errors => this._errors;
+    public IEnumerable<IValidationError> Errors => ErrorQueue;
 
     /// <summary>
     /// The rule invocations, in the order they were added: the order the rules ran.
     /// </summary>
-    public IEnumerable<ValidationInvocation> Invocations => this._invocations;
+    public IEnumerable<ValidationInvocation> Invocations => InvocationQueue;
 
    
     /// <inheritdoc cref="IValidationContext.ThrowExceptionOnFailure"/>
@@ -88,7 +93,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// 
     /// </summary>
     /// <param name="error"></param>
-    public void AddFailure(IValidationError error) => this._errors.Enqueue(new ValidationError(error));
+    public void AddFailure(IValidationError error) => ErrorQueue.Enqueue(new ValidationError(error));
 
     /// <summary>
     /// 
@@ -96,7 +101,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureMessage)
     {
-        _errors.Enqueue(new ValidationError()
+        ErrorQueue.Enqueue(new ValidationError()
         {
             Message = failureMessage
         });
@@ -109,7 +114,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureSource, string failureMessage)
     {
-        _errors.Enqueue(new ValidationError()
+        ErrorQueue.Enqueue(new ValidationError()
         {
             Message = failureMessage,
             Source = failureSource
@@ -122,6 +127,6 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="invocation"></param>
     public void AddInvocation(ValidationInvocation invocation)
     {
-        this._invocations.Enqueue(invocation);
+        InvocationQueue.Enqueue(invocation);
     }
 }

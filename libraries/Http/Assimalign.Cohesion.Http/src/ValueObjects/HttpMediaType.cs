@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 using Assimalign.Cohesion.Http.Internal;
@@ -293,6 +294,7 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
 
     private static HttpMediaTypeParameter[]? ParseParameters(ReadOnlySpan<char> span)
     {
+        HttpMediaTypeParameter first = default;
         List<HttpMediaTypeParameter>? list = null;
 
         while (!span.IsEmpty)
@@ -322,10 +324,23 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
 
             string name = ToLowerString(nameSpan);
             string value = HttpFieldSyntax.UnquoteValue(valueSpan);
-            (list ??= new List<HttpMediaTypeParameter>()).Add(new HttpMediaTypeParameter(name, value));
+            var parameter = new HttpMediaTypeParameter(name, value);
+            if (first.Name is null)
+            {
+                first = parameter;
+            }
+            else
+            {
+                // A single valid parameter needs only its final array, not a temporary list.
+                (list ??= new List<HttpMediaTypeParameter> { first }).Add(parameter);
+            }
         }
 
-        return list?.ToArray();
+        if (list is not null)
+        {
+            return list.ToArray();
+        }
+        return first.Name is null ? null : [first];
     }
 
     private static string ToLowerString(ReadOnlySpan<char> span)
@@ -349,20 +364,83 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
         {
             return false;
         }
-        if (count == 0)
+        if (count == 0 || ReferenceEquals(_parameters, other._parameters))
+        {
+            return true;
+        }
+        if (count == 1)
+        {
+            return _parameters![0].Equals(other._parameters![0]);
+        }
+        if (count == 2)
+        {
+            if (_parameters![0].HasName(other._parameters![0].Name))
+            {
+                return string.Equals(_parameters[0].Value, other._parameters[0].Value, StringComparison.OrdinalIgnoreCase)
+                    && _parameters[1].Equals(other._parameters[1]);
+            }
+            return _parameters[0].Equals(other._parameters[1]) && _parameters[1].Equals(other._parameters[0]);
+        }
+
+        return ParametersEqual(_parameters!, other._parameters!);
+    }
+
+    private static bool ParametersEqual(HttpMediaTypeParameter[] left, HttpMediaTypeParameter[] right)
+    {
+        if (left.AsSpan().SequenceEqual(right))
         {
             return true;
         }
 
-        foreach (HttpMediaTypeParameter parameter in _parameters!)
+        int count = right.Length;
+        // Bound stack use, while retaining the same matching algorithm for large inputs.
+        int words = (count + 63) / 64;
+        Span<ulong> matched = count <= 4096 ? stackalloc ulong[words] : new ulong[words];
+        if (count <= 4096)
         {
-            if (!other.TryGetParameter(parameter.Name, out string? otherValue)
-                || !string.Equals(parameter.Value, otherValue, StringComparison.OrdinalIgnoreCase))
+            matched.Clear();
+        }
+        foreach (HttpMediaTypeParameter parameter in left)
+        {
+            int start = 0;
+            while (true)
             {
-                return false;
+                int i = FindParameter(right, parameter.Name, start);
+                if (i < 0)
+                {
+                    return false;
+                }
+                ulong bit = 1UL << (i & 63);
+                if ((matched[i >> 6] & bit) != 0)
+                {
+                    start = i + 1;
+                    continue;
+                }
+
+                // Consume the first unmatched occurrence of this name, preserving its value order.
+                if (!string.Equals(parameter.Value, right[i].Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                matched[i >> 6] |= bit;
+                break;
             }
         }
         return true;
+    }
+
+    // Keep the name scan independent of the bitmap's span and matching state.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int FindParameter(HttpMediaTypeParameter[] parameters, string name, int start)
+    {
+        for (int i = start; (uint)i < (uint)parameters.Length; i++)
+        {
+            if (parameters[i].HasName(name))
+            {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /// <inheritdoc />
@@ -388,15 +466,17 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
             return string.Empty;
         }
 
+        if (_parameters is null)
+        {
+            return string.Concat(Type, "/", SubType);
+        }
+
         var builder = new StringBuilder(Type.Length + SubType.Length + 1);
         builder.Append(Type).Append('/').Append(SubType);
-        if (_parameters is not null)
+        foreach (HttpMediaTypeParameter parameter in _parameters)
         {
-            foreach (HttpMediaTypeParameter parameter in _parameters)
-            {
-                builder.Append("; ").Append(parameter.Name).Append('=');
-                AppendValue(builder, parameter.Value);
-            }
+            builder.Append("; ").Append(parameter.Name).Append('=');
+            AppendValue(builder, parameter.Value);
         }
         return builder.ToString();
     }

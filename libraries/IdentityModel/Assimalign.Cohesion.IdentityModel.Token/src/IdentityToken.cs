@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 
 using Assimalign.Cohesion.IdentityModel;
 
@@ -114,12 +115,12 @@ public abstract class IdentityToken : IIdentityToken
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var diagnostics = new List<TokenValidationDiagnostic>();
+        List<TokenValidationDiagnostic>? diagnostics = null;
 
         if (options.ExpectedIssuer is not null &&
             !string.Equals(Issuer, options.ExpectedIssuer, StringComparison.Ordinal))
         {
-            diagnostics.Add(new TokenValidationDiagnostic(
+            (diagnostics ??= new List<TokenValidationDiagnostic>()).Add(new TokenValidationDiagnostic(
                 TokenValidationSeverity.Error,
                 TokenValidationCodes.IssuerMismatch,
                 "The token issuer does not match the expected issuer.",
@@ -128,7 +129,7 @@ public abstract class IdentityToken : IIdentityToken
 
         if (options.ExpectedAudience is not null && !ContainsAudience(options.ExpectedAudience))
         {
-            diagnostics.Add(new TokenValidationDiagnostic(
+            (diagnostics ??= new List<TokenValidationDiagnostic>()).Add(new TokenValidationDiagnostic(
                 TokenValidationSeverity.Error,
                 TokenValidationCodes.AudienceMismatch,
                 "The token is not intended for the expected audience.",
@@ -137,7 +138,7 @@ public abstract class IdentityToken : IIdentityToken
 
         if (ExpiresAt is { } expiresAt && options.ValidateAt - options.ClockSkew >= expiresAt)
         {
-            diagnostics.Add(new TokenValidationDiagnostic(
+            (diagnostics ??= new List<TokenValidationDiagnostic>()).Add(new TokenValidationDiagnostic(
                 TokenValidationSeverity.Error,
                 TokenValidationCodes.Expired,
                 "The token is expired.",
@@ -146,14 +147,14 @@ public abstract class IdentityToken : IIdentityToken
 
         if (NotBefore is { } notBefore && options.ValidateAt + options.ClockSkew < notBefore)
         {
-            diagnostics.Add(new TokenValidationDiagnostic(
+            (diagnostics ??= new List<TokenValidationDiagnostic>()).Add(new TokenValidationDiagnostic(
                 TokenValidationSeverity.Error,
                 TokenValidationCodes.NotYetValid,
                 "The token is not yet valid.",
                 member: nameof(NotBefore)));
         }
 
-        return diagnostics.Count == 0 ? TokenValidationResult.Success : new TokenValidationResult(diagnostics);
+        return diagnostics is null ? TokenValidationResult.Success : new TokenValidationResult(diagnostics);
     }
 
     private bool ContainsAudience(string audience)
@@ -208,7 +209,7 @@ public abstract class IdentityToken : IIdentityToken
             if (value.IsUndefined)
             {
                 throw new ArgumentException(
-                    $"The token property '{name}' must not have an undefined value. Use IdentityClaimValue.Null for explicit null.",
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.TokenPropertyUndefined, name),
                     nameof(properties));
             }
 

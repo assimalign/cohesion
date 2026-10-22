@@ -77,6 +77,28 @@ The context's collections changed with the queues, and for the same reason. Had 
 stack, `ValidationResult.Errors` would have listed members newest first, and a nested profile's errors, which
 are copied into every enclosing context, would have been reversed once per level of nesting.
 
+### Context storage
+
+Each context owns its own concurrent error and invocation queues. Storage is created on the first
+write or public collection access, using thread-safe publication. Public `Errors` and `Invocations`
+always return the same live queues: a caller retaining an empty collection observes later additions,
+and a result retains its context's collections. No context or queue is pooled across validations.
+
+Internal scalar and collection evaluators can inspect an unallocated built-in rule context as empty
+without creating its error queue. This view is consumed immediately and never returned to public
+callers. Custom context implementations retain their own `Errors` enumeration. Evaluation order,
+error copying, per-rule timings and invocation records remain unchanged; successful rules no longer
+need two otherwise empty concurrent queues. Nested source composition retains its existing algorithm.
+
+### String rule evaluation
+
+The empty/not-empty and exact/minimum/maximum/range length rules handle every string directly.
+A successful or failed string check must not fall through to the general `IEnumerable` path:
+that fallback otherwise enumerates and boxes characters to count them. Length checks use the
+same UTF-16 `string.Length` result in constant time; whitespace checks retain
+`string.IsNullOrWhiteSpace`. Null handling in the public rule entry points and the behavior of
+non-string collections/enumerables remain unchanged.
+
 Until #1221 both queues enumerated newest first and the context held its errors on a stack. A chain reported
 its last failing rule: `RuleFor(x => x.Name).NotEmpty().MinLength(3)` on `""` reported `MinLength`'s message,
 not `NotEmpty`'s. `Stop` reported the last-declared failing member, and Web.Validation's `errors` map listed
@@ -263,3 +285,6 @@ root namespace by MSBuild's GenerateResource task through
 `obj/`; no checked-in designer or Visual Studio custom tool is required. Ordinary
 `dotnet build`, CI and NativeAOT publication use the same embedded resources.
 Existing message text is preserved.
+
+The null-instance diagnostic uses the same generated-resource mechanism through `ErrorMessages.resx`;
+its exception type, parameter name and message text remain unchanged.

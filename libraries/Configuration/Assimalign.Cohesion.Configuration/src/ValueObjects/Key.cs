@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -13,9 +14,10 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public readonly string _value;
 
 
-    public Key(string value) : this(value.AsSpan())
+    public Key(string value)
     {
-        
+        Validate(value.AsSpan());
+        _value = value ?? string.Empty;
     }
 
     /// <summary>
@@ -26,11 +28,19 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <exception cref="ArgumentNullException"></exception>
     public Key(ReadOnlySpan<char> span)
     {
-        ArgumentException.ThrowIf(
-            span.ContainsAny(Path.Delimiters),
-            $"Key value cannot have any path delimiters: {string.Join(',', [.. Path.Delimiters])}");
-
+        Validate(span);
         _value = new string(span);
+    }
+
+    private static void Validate(ReadOnlySpan<char> span)
+    {
+        if (span.ContainsAny(Path.Delimiters))
+        {
+            throw new ArgumentException(string.Format(
+                CultureInfo.CurrentCulture,
+                ErrorMessages.KeyPathDelimiters,
+                string.Join(',', [.. Path.Delimiters])));
+        }
     }
 
     /// <summary>
@@ -279,7 +289,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator ==(in Key? left, in Key right) => left.HasValue && left.Equals(right);
+    public static bool operator ==(in Key? left, in Key right) => left.HasValue && left.Value.Equals(right);
 
     /// <summary>
     /// 
@@ -287,7 +297,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator !=(in Key? left, in Key right) => left.HasValue && !left.Equals(right);
+    public static bool operator !=(in Key? left, in Key right) => !left.HasValue || !left.Value.Equals(right);
 
     /// <summary>
     /// 
@@ -295,7 +305,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator ==(in Key left, in Key? right) => right.HasValue && left.Equals(right);
+    public static bool operator ==(in Key left, in Key? right) => right.HasValue && left.Equals(right.Value);
 
     /// <summary>
     /// 
@@ -303,7 +313,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator !=(in Key left, in Key? right) => right.HasValue && !left.Equals(right);
+    public static bool operator !=(in Key left, in Key? right) => !right.HasValue || !left.Equals(right.Value);
 
     /// <summary>
     /// 
@@ -319,7 +329,7 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     /// <param name="left"></param>
     /// <param name="right"></param>
     /// <returns></returns>
-    public static bool operator !=(in Key? left, in Key? right) => (!left.HasValue && right.HasValue) || (left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && left.Value.Equals(right.Value));
+    public static bool operator !=(in Key? left, in Key? right) => (!left.HasValue && right.HasValue) || (left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && !left.Value.Equals(right.Value));
 
 
     partial class KeyJsonConverter : JsonConverter<Key>
@@ -328,14 +338,14 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         {
             if (reader.TokenType != JsonTokenType.String)
             {
-                throw new JsonException("Key expected a string token type.");
+                throw new JsonException(ErrorMessages.KeyStringTokenRequired);
             }
 
             var str = reader.GetString();
 
             if (str is null || str == string.Empty)
             {
-                throw new JsonException("Key expected a string token type.");
+                throw new JsonException(ErrorMessages.KeyStringTokenRequired);
             }
 
             return new Key(str);
