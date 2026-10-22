@@ -558,6 +558,35 @@ public sealed class GraphDatabaseEventSourceTests
         events[1].Payload![1].ShouldBe("Error");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: parse tracing prefers the first error diagnostic (#1350)")]
+    [InlineData(true, "TESTE001")]
+    [InlineData(false, "TESTW001")]
+    public async Task StatementParseFailed_Diagnostics_ShouldPreferError(bool hasError, string expected)
+    {
+        // Arrange
+        await using var harness = await GraphServerHarness.StartAsync(engineName: UniqueEngineName());
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var session = harness.Server.Sessions.ShouldHaveSingleItem();
+        var diagnostics = new List<Types.Diagnostic>
+        {
+            new("TESTW001", "private warning", 0, 1, Types.DiagnosticSeverity.Warning),
+        };
+        if (hasError) { diagnostics.Add(new("TESTE001", "private error", 2, 3, Types.DiagnosticSeverity.Error)); }
+        var failure = new DatabaseException("private statement", diagnostics);
+        using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Error);
+
+        // Act
+        GraphDatabaseEventSource.Log.StatementParseFailed(session, new DatabaseName(GraphServerHarness.DatabaseName), failure);
+
+        // Assert
+        var failed = recorder.Events.Where(e => e.EventId == 12 && Equals(e.Payload![0], session.Id)).ShouldHaveSingleItem();
+        failed.Payload![2].ShouldBe(expected);
+        failed.Payload!.OfType<string>().ShouldNotContain(failure.Message);
+        failed.Payload!.OfType<string>().ShouldNotContain("private warning");
+        failed.Payload!.OfType<string>().ShouldNotContain("private error");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should report a wire statement that fails to parse once, before the root sees it")]
     [InlineData(false)]
     [InlineData(true)]
@@ -585,7 +614,7 @@ public sealed class GraphDatabaseEventSourceTests
         failed.EventName.ShouldBe("StatementParseFailed");
         failed.Level.ShouldBe(EventLevel.Error);
         failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType"]);
-        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, string.Empty, typeof(DatabaseParseException).FullName]);
+        failed.Payload.ShouldBe([sessionId, GraphServerHarness.DatabaseName, "GQL0008", typeof(DatabaseParseException).FullName]);
         failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the statement; the event writes its type only.");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
 
@@ -618,6 +647,7 @@ public sealed class GraphDatabaseEventSourceTests
         long sessionNumber = (long)root.Events.Where(e => e.EventId == 23 && Equals(e.Payload![0], engineName)).ShouldHaveSingleItem().Payload![2]!;
         var failed = root.Events.Where(e => e.EventId == 28 && Equals(e.Payload![1], sessionNumber)).ShouldHaveSingleItem();
         failed.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
+        failed.Payload![3].ShouldBe("GQL0008");
         failed.Payload![4].ShouldBe(typeof(DatabaseParseException).FullName);
         failed.Payload!.OfType<string>().ShouldNotContain(failure.Message);
     }

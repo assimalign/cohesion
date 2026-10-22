@@ -3351,9 +3351,9 @@ project reference or InternalsVisibleTo change is required.
   the `InvalidOperationException` the runtime sort puts around a throwing
   comparer, so incomparable `ORDER BY` keys fail the statement with the
   comparer's own `DatabaseException` instead of ending a wire session. The
-  exception is an internal `DatabaseException` whose message leads with the code, the convention
-  Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
-  carrier. Evaluation runs in a write statement's first phase, before any
+  exception is an internal `DatabaseException` whose `Diagnostics` carry the code and
+  unprefixed detail. The root statement-failure event reads that carrier without parsing
+  Message. Evaluation runs in a write statement's first phase, before any
   physical bracket opens, so a fault writes nothing. The session's ordinary
   failure path then applies: auto-commit rolls back, and an explicit transaction
   stays active.
@@ -4143,7 +4143,7 @@ writes the operating system already dropped. The engine stops the database, not 
   (`RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`, `XLogFlush` at
   `:1544`); an error before it aborts the transaction.
 - Every later operation on the database is refused with `DatabaseOfflineException`, code
-  `COHSQLT004` (`Code`, and the message leads with it), carrying the storage's
+  `COHSQLT004` (`Diagnostics` and the existing `Code` getter), carrying the storage's
   `StorageOfflineException`: a new session, every statement on an existing one, BEGIN, and the
   COMMIT or ROLLBACK of a transaction that was open at the failure. A statement already
   running fails with the same error when it next reaches the storage.
@@ -7282,3 +7282,13 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.

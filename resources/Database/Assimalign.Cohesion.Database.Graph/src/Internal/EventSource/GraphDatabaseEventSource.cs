@@ -362,9 +362,9 @@ internal sealed class GraphDatabaseEventSource : EventSource
     /// <param name="session">The server session that received the statement.</param>
     /// <param name="database">The session's database.</param>
     /// <param name="exception">
-    /// The parse or validation failure; it propagates unchanged. Written by its code (an offline
-    /// refusal's; empty otherwise) and its type only: a parse error quotes the token it stopped at
-    /// (the area's failure rule).
+    /// The parse or validation failure; it propagates unchanged. Written by its first Error
+    /// diagnostic's code (otherwise its first diagnostic; empty when absent) and its type only.
+    /// A parse error quotes the token it stopped at, so its message is never written.
     /// </param>
     [NonEvent]
     public void StatementParseFailed(DatabaseServerSession session, DatabaseName database, Exception exception)
@@ -374,9 +374,20 @@ internal sealed class GraphDatabaseEventSource : EventSource
             StatementParseFailed(
                 session.Id,
                 database.ToString(),
-                exception is DatabaseOfflineException offline ? offline.Code : string.Empty,
+                FailureCode(exception),
                 exception.GetType().FullName ?? exception.GetType().Name);
         }
+    }
+
+    [NonEvent]
+    private static string FailureCode(Exception exception)
+    {
+        if (exception is not DatabaseException failure || failure.Diagnostics.Count == 0) { return string.Empty; }
+        foreach (var diagnostic in failure.Diagnostics)
+        {
+            if (diagnostic.Severity == Types.DiagnosticSeverity.Error) { return diagnostic.Code ?? string.Empty; }
+        }
+        return failure.Diagnostics[0].Code ?? string.Empty;
     }
 
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]

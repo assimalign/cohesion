@@ -195,3 +195,7 @@ pages, buffer pool, free-space map, WAL, and recovery are the kernel's, unchange
 The engine's storage strategies (`Assimalign.Cohesion.Database.KeyValuePair`'s
 in-memory and file-system strategies) create and open instances; consumers never
 compose this type directly.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).

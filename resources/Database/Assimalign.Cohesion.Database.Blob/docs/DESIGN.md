@@ -508,9 +508,9 @@ commit whose record was written but could not be made durable, which leaves the 
 `Committed`), never as the kernel's own exception types, for operations
 and for every end of the explicit transaction: commit, rollback, disposal, the session's closure,
 and the abort an operation failure starts. One translation (`BlobDatabase.TranslateKernelFailure`)
-serves them all. The unconfirmed commit's message leads with the model's code on every path, the
+serves them all. The unconfirmed commit's Diagnostics carry the model's code on every path, the
 explicit commit and an upload's own commit alike (owner decision 24 of 2026-10-06, #1272):
-`COHDBB002: Database '{name}' went offline while a transaction was committing: ...`, built by the
+`Database '{name}' went offline while a transaction was committing: ...`, built by the
 root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` with the
 kernel's `TransactionCommitUnconfirmedException` as its inner exception; before #1272 this path
 carried the kernel's message alone. The lifecycle is the Documents state diagram with operations
@@ -1663,3 +1663,13 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.

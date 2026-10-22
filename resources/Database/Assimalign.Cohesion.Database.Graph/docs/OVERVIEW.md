@@ -153,3 +153,7 @@ Owner-zero pages remain available to `Graph.Catalog` through the low-level recor
 
 See [DESIGN.md](DESIGN.md) for the binary format, adjacency costs, numeric index
 semantics, transaction lifecycle, recovery sequence and current limits.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).

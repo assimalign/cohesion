@@ -402,7 +402,7 @@ public sealed class KeyValueWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Message.StartsWith("COHDBK002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBK002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
         StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
@@ -747,7 +747,8 @@ public sealed class KeyValueWorkerResilienceTests
         offline.ShouldBeTrue();
         failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
         refusal.Code.ShouldBe("COHDBK002");
-        refusal.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
+        refusal.Diagnostics.ShouldContain(d => d.Code == "COHDBK002");
+        refusal.Message.ShouldStartWith("Database", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);

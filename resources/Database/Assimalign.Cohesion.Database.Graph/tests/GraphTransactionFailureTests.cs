@@ -905,7 +905,8 @@ public sealed class GraphTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Message.ShouldStartWith("COHDBG012: Database 'graph' went offline while a transaction was committing", Case.Sensitive);
+        error.Diagnostics.ShouldContain(d => d.Code == "COHDBG012");
+        error.Message.ShouldStartWith("Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
@@ -1103,8 +1104,9 @@ public sealed class GraphTransactionFailureTests
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBG012");
         unconfirmed.Message.ShouldBe(
-            "COHDBG012: Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
+            "Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
             "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +
             "database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
             "reading the data back then tells which.");

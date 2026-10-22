@@ -134,10 +134,11 @@ public sealed class DocumentStorageOperationsTests
         var ids = await IdsAsync(observer);
 
         // Assert
-        unconfirmed.Message.ShouldStartWith("COHDBD002: Database 'test' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBD002");
+        unconfirmed.Message.ShouldStartWith("Database 'test' went offline while a transaction was committing", Case.Sensitive);
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Message.StartsWith("COHDBD002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBD002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
         collectionRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002");

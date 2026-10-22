@@ -153,9 +153,10 @@ public sealed class BlobStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHDBB002: Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBB002");
+        unconfirmed.Message.ShouldStartWith("Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBB002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
         containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");

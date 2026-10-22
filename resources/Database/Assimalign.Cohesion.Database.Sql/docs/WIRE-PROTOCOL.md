@@ -182,3 +182,10 @@ the 128-character ASCII bound before decoding or allocating a name string.
 A write with RETURNING emits ResultHeader and ResultRow frames followed by
 ResultComplete with its affected count n. Ordinary SELECT reports -1. Projection
 failures roll back the statement before any result frame is sent.
+
+## Offline diagnostic carriers (#1350)
+
+Offline refusals and unconfirmed commits now supply the model code through the existing
+exception Diagnostics carrier. Negotiated diagnostics use the existing frame and capability;
+legacy handshake and error text keeps a single code prefix. The wire version and framing are
+unchanged. Exception detail is unprefixed in process, and original causes remain attached.

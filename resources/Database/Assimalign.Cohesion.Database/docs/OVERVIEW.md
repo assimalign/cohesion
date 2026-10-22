@@ -77,7 +77,7 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
 - **Error root** — `DatabaseException` for the contract root and everything built above it;
   `DatabaseNotFoundException` for the exact missing-database outcome of
   `DatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for statement text a session's
-  language rejects; `DatabaseOfflineException` (with a model `Code`) for every operation on a
+  language rejects; `DatabaseOfflineException` (with its model code in `Diagnostics` and the existing `Code` getter) for every operation on a
   database whose journal or data fsync (#1243), journal drain (#1252) or header slot write
   (#1268) failed, or whose engine gave up on it (owner decision 25), until it is reopened, and
   `DatabaseTransactionCommitUnconfirmedException` for work that may have committed when it did.
@@ -112,3 +112,8 @@ disposal ownership. Named engine operations use `DatabaseName`. `IDatabaseApplic
 asynchronously disposable, its context includes all engines and ordinal `GetEngine(name)`, and its
 builder exposes AddEngine(instance) and AddEngine(name, factory) plus one-shot Build without a
 mutable registry or Use stage.
+
+Thrown statement failures report the first error diagnostic's code, or the first diagnostic
+when none is an error. Events never recover codes from exception messages. Offline and
+unconfirmed-commit exceptions now carry structured model diagnostics and unprefixed detail;
+legacy wire error text keeps its single code prefix. See DESIGN, structured failure-event codes.

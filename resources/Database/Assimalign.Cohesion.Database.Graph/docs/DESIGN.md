@@ -423,9 +423,9 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    but could not be made durable is not an abort: it throws
    `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
    (`Database.Transactions` DESIGN.md, "A commit record that was written but not made durable").
-   Its message leads with the model's code on every path, the explicit commit and an autocommit
+   Its Diagnostics carry the model's code on every path, the explicit commit and an autocommit
    statement's own commit alike (owner decision 24 of 2026-10-06, #1272):
-   `COHDBG012: Database '{name}' went offline while a transaction was committing: ...`, built by
+   `Database '{name}' went offline while a transaction was committing: ...`, built by
    the root's `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)` in
    `GraphDatabase.TranslateKernelFailure`, now an instance member so it knows the database, with
    the kernel's `TransactionCommitUnconfirmedException` as its inner exception. Before #1272 this
@@ -1973,7 +1973,7 @@ four servers.
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
 | 10 | `IndexRecoveryStart` | Informational | — | `database`, `abortedWriters` (the writers the journal's analysis found aborted) |
 | 11 | `IndexRecoveryStop` | Informational | — | `database`, `status` (`Success`, or `Error` for a recovery that threw), `durationMilliseconds` (written when the recovery ends, whatever ended it) |
-| 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (an offline refusal's model code; empty otherwise), `exceptionType` |
+| 12 | `StatementParseFailed` | Error | — | `sessionId`, `database`, `code` (first Error diagnostic, otherwise the first diagnostic; empty when absent), `exceptionType` |
 | 13 | `StatementCleanupFailed` | Warning | — | `database`, `exceptionType`; snapshot-pin cleanup failed after a successful autocommit |
 | 15 | `PathPhaseCompleted` | Verbose | `Sessions` | `sessionId`, `phase`, `durationMilliseconds` |
 
@@ -2563,3 +2563,13 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.

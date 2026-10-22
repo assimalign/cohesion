@@ -3527,3 +3527,9 @@ remain unsupported. Quoted names use the ordinary delimited-identifier decoding.
 Constraint validation streams rows and unique-index validation walks adjacent live keys.
 The cross-platform regression guard attributes row/key retention, separately from unrelated
 managed-heap activity; this verification change adds no SQL syntax, error code or format version.
+
+## Structured failure tracing (#1350)
+
+Thrown statement failures report their structured diagnostic code without exposing statement
+text in tracing. Offline and unconfirmed-commit exception detail is unprefixed; Diagnostics
+carries the existing model code. This adds no language syntax or diagnostic number.

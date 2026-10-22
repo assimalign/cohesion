@@ -1,6 +1,8 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -36,7 +38,7 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// The commit whose flush failed is reported to its caller as
 /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>; this exception is what every
-/// operation after it gets. The message leads with the model's code (<see cref="Code"/>):
+/// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
 /// <c>COHSQLT004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
 /// <c>COHDBG012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
 /// <c>COHDBS002</c> error is the inner exception.
@@ -47,20 +49,31 @@ public sealed class DatabaseOfflineException : DatabaseException
     /// <summary>
     /// Initializes a new <see cref="DatabaseOfflineException"/>.
     /// </summary>
-    /// <param name="code">The model's code that leads the message.</param>
-    /// <param name="message">The error message, which leads with <paramref name="code"/>.</param>
+    /// <param name="code">The model's structured code.</param>
+    /// <param name="message">The error detail. An existing leading <paramref name="code"/> prefix is removed.</param>
     /// <param name="innerException">The storage failure that took the database offline.</param>
     public DatabaseOfflineException(string code, string message, Exception? innerException)
-        : base(message, innerException)
+        : base(Unprefixed(code, message), [new Diagnostic
+        {
+            Code = code,
+            Message = Unprefixed(code, message),
+            Severity = DiagnosticSeverity.Error,
+        }], innerException)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         Code = code;
     }
 
     /// <summary>
-    /// Gets the model's code that leads the message.
+    /// Gets the model's structured code, also available in Diagnostics.
     /// </summary>
     public string Code { get; }
+
+    private static string Unprefixed(string code, string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        return message is not null && message.StartsWith(code + ": ", StringComparison.Ordinal) ? message[(code.Length + 2)..] : message!;
+    }
 
     /// <summary>
     /// Creates the refusal an engine raises for an operation on an offline database.
@@ -75,9 +88,7 @@ public sealed class DatabaseOfflineException : DatabaseException
 
         return new DatabaseOfflineException(
             code,
-            $"{code}: Database '{database}' is offline: {DescribeFailure(cause)}, so nothing " +
-            "more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the " +
-            "reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.DatabaseOffline, database, DescribeFailure(cause)),
             cause);
     }
 

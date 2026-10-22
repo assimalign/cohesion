@@ -304,3 +304,7 @@ factory methods (`Create`/`Open`) the engine's storage strategies call.
 - **Docs:** design record in [DESIGN.md](DESIGN.md); the substrate's invariants
   (WAL ordering, recovery, buffer pool, per-owner record chains) are documented in
   the Storage project's `docs/DESIGN.md`.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).

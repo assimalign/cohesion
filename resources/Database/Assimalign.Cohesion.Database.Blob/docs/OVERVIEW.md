@@ -181,3 +181,7 @@ disposal callback keeps the caller's snapshot pinned until the download closes.
 Cancellation and failed uploads invoke the abort callback with the failure and cannot publish.
 
 The [design](DESIGN.md) specifies the binary format and recovery invariants.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).

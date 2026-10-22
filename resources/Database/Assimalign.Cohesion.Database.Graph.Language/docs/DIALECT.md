@@ -426,3 +426,9 @@ for the grammar, precedence, promotion decisions, comments and reference evidenc
 ## Wire diagnostics (#1105)
 
 On negotiated protocol 2.1 with the diagnostics capability, Warning and Error diagnostics retain their complete code, severity, message and source span over the model wire. Information diagnostics are omitted. A negotiated 2.0 connection retains the existing Error text and result frames. Language admission and execution semantics are unchanged.
+
+## Structured failure tracing (#1350)
+
+Thrown statement failures report their structured diagnostic code without exposing statement
+text in tracing. Offline and unconfirmed-commit exception detail is unprefixed; Diagnostics
+carries the existing model code. This adds no language syntax or diagnostic number.

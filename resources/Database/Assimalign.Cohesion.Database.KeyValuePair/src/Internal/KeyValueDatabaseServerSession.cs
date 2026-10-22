@@ -307,7 +307,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -436,7 +436,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         {
             // The database is offline (#1243): every command is refused, with the coded reason,
             // until it is reopened; the session stays ready to report it.
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)

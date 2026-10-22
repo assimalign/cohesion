@@ -403,7 +403,7 @@ public sealed class SqlWorkerResilienceTests
         // Assert: offline with the coded refusal naming the header write, nothing written after
         // the failure, and no retry storm: the slot write was tried once.
         offline.ShouldBeTrue();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Message.StartsWith("COHSQLT004", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHSQLT004" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
         StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
@@ -624,7 +624,8 @@ public sealed class SqlWorkerResilienceTests
         offline.ShouldBeTrue();
         failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
         refusal.Code.ShouldBe("COHSQLT004");
-        refusal.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        refusal.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        refusal.Message.ShouldStartWith("Database", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);

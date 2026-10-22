@@ -315,7 +315,7 @@ public sealed class BlobWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBB002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
         StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
@@ -626,7 +626,8 @@ public sealed class BlobWorkerResilienceTests
         offline.ShouldBeTrue();
         failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
         refusal.Code.ShouldBe("COHDBB002");
-        refusal.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        refusal.Diagnostics.ShouldContain(d => d.Code == "COHDBB002");
+        refusal.Message.ShouldStartWith("Database", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);

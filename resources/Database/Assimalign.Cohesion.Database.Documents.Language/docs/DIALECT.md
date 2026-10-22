@@ -192,3 +192,9 @@ and one range on the next path. Choice ranks prefix length, range, UNIQUE, then 
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests
 exercise both InMemory and TCP; the recovery fixture also executes IS MISSING under NativeAOT.
+
+## Structured failure tracing (#1350)
+
+Thrown statement failures report their structured diagnostic code without exposing statement
+text in tracing. Offline and unconfirmed-commit exception detail is unprefixed; Diagnostics
+carries the existing model code. This adds no language syntax or diagnostic number.

@@ -123,9 +123,10 @@ public sealed class SqlStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHSQLT004: Database 'app' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        unconfirmed.Message.ShouldStartWith("Database 'app' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Message.StartsWith("COHSQLT004", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHSQLT004" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         statementError.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
@@ -252,7 +253,8 @@ public sealed class SqlStorageOperationsTests
 
         // Assert
         unspent.ShouldBe(0);
-        ddl.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        ddl.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        ddl.Message.ShouldStartWith("Database", Case.Sensitive);
         StorageOfflineException.Find(ddl).ShouldNotBeNull().CommitRecordWritten.ShouldBeTrue();
         dataOfflineAtOnce.ShouldBeTrue();
         dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
@@ -374,7 +376,8 @@ public sealed class SqlStorageOperationsTests
         dropWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
         offline.Code.ShouldBe("COHSQLT004");
-        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        offline.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(1L);
         (await Scalar(observer, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
     }
@@ -506,7 +509,8 @@ public sealed class SqlStorageOperationsTests
         createWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
         offline.Code.ShouldBe("COHSQLT004");
-        offline.Message.ShouldStartWith("COHSQLT004: Database 'ddl' is offline", Case.Sensitive);
+        offline.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
         reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();
         next.ObjectId.ShouldBe(existing.ObjectId + 2);

@@ -175,3 +175,7 @@ The original `InsertDocument`, `ReadDocument`, `UpdateDocument`, and `DeleteDocu
 retained low-level, unstamped record helpers for existing consumers. They are not the engine's
 document write path and must not be mixed into engine-owned file sets. See [DESIGN.md](DESIGN.md)
 for the exact format, compatibility policy, and recovery order.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).

@@ -322,7 +322,7 @@ public sealed class GraphWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Message.StartsWith("COHDBG012", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBG012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
         StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
@@ -665,7 +665,8 @@ public sealed class GraphWorkerResilienceTests
         offline.ShouldBeTrue();
         failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
         refusal.Code.ShouldBe("COHDBG012");
-        refusal.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
+        refusal.Diagnostics.ShouldContain(d => d.Code == "COHDBG012");
+        refusal.Message.ShouldStartWith("Database", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);

@@ -974,7 +974,7 @@ or data files: the storage stopped writing (the storage's `StorageOfflineExcepti
 `COHDBS002`, is its inner exception), and the database refuses everything until
 `DatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
-the process. Its `Code` leads the message and names the model: `COHSQLT004`,
+the process. Its `Diagnostics` carry the model code (also exposed by the existing `Code` getter): `COHSQLT004`,
 `COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
 `Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error, and its
 message names what failed from the storage's typed `StorageOfflineException.Cause`
@@ -989,7 +989,7 @@ flush failed, `StorageOfflineException.CommitRecordWritten`) is never reported a
 because its work can survive the reopen; one that committed nothing is refused (#1272: SQL
 records each durable self-commit per statement, so the classification is exact).
 `DatabaseTransactionCommitUnconfirmedException` has two factories, and every unconfirmed commit
-in every model goes through one of them, so its message always leads with the model's code
+in every model goes through one of them, so its Diagnostics always carry the model's code
 (owner decision 24 of 2026-10-06, #1272): `Create(code, database, StorageOfflineException)` for
 an operation that met the offline storage ("… went offline while the operation was committing
 …"), and `Create(code, database, TransactionCommitUnconfirmedException)` for a transaction whose
@@ -1146,7 +1146,7 @@ forwards, so keywords scope out-of-process tools only.
 | 25 | `StatementStart` | Verbose | `Statements` | `database`, `sessionNumber`, `requestKind` (the request type's name, or `Text`) | `DatabaseExecutionSession<TRequest>.ExecuteAsync` and `DatabaseLanguageSession<TRequest>.ExecuteAsync`, outermost call only; KeyValuePair wire requests use the parsed verb request type |
 | 26 | `StatementStop` | Verbose | `Statements` | `database`, `sessionNumber`, `status` (`DatabaseResultStatus` name; `Error` or `Cancelled` for a core that threw), `affectedCount` (`-1` for a core that threw), `durationMilliseconds` | the same, only for a statement whose `StatementStart` was written (`System.Net.Http`'s `RequestStop` shape); events 27 and 28 are written either way |
 | 27 | `SlowStatement` | Warning | — | `engineName`, `model`, `database`, `sessionNumber`, `requestKind`, `status`, `durationMilliseconds`, `thresholdMilliseconds` | the same, when the statement ran at least `SlowStatementThresholdMs` |
-| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for an `Error` result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is an offline refusal's model code (`DatabaseOfflineException.Code`), empty otherwise; never the message, which can quote the statement; never for a cancellation |
+| 28 | `StatementFailed` | Error | — | `database`, `sessionNumber`, `requestKind`, `code`, `exceptionType`, `durationMilliseconds` | the same: for an `Error` result, `code` is its first error diagnostic's code (its first diagnostic's when it holds no error; empty when it holds none) and `exceptionType` is empty; for a core that threw, `exceptionType` is the exception's full type name and `code` is selected from `DatabaseException.Diagnostics` by the same first-error rule, empty when absent; never the message, which can quote the statement; never for a cancellation |
 | 29 | `TransactionBegun` | Verbose | `Transactions` | `database`, `sessionNumber`, `transactionId`, `isolationLevel` | `DatabaseSession.BeginTransactionAsync`, once the transaction is the session's |
 | 30 | `TransactionCommitted` | Verbose | `Transactions` | `transactionId`, `durationMilliseconds` (the commit's own) | `DatabaseTransaction.CommitAsync` |
 | 31 | `TransactionRolledBack` | Verbose | `Transactions` | `transactionId`, `cause` (`Rollback`, `Dispose`, `SessionClosed`) | `RollbackAsync`, `DisposeAsync` and the session's teardown, when a kernel rollback ran |
@@ -1299,3 +1299,23 @@ The root test project owns the stateless ModelArchitecture helper, linked into t
 The guard checks owner.ContainingAssembly against per-layer external allowlists seeded with git show from the retired satellite csprojs at a64426436. Storage permits Database.Storage, Transactions and Indexing; Catalog also permits the Database root and Types. The BCL allowance is the exact assembly-name set in the compiler's Microsoft.NETCore.App reference-pack inputs, never a System.* wildcard. Graph Storage additionally permits Types for index-key encoding, already in its old Indexing reference closure. Protocol assemblies remain disallowed in both constrained layers; the current Protocol imports in Documents Catalog resolve no used types. Current model symbol checks validate these limits; engine code is unrestricted. The seed Storage projects referenced shared Storage (all five), Transactions (Blob/Documents/Graph) and Indexing (Graph); Catalog referenced the root and model/shared Storage, plus Transactions (Blob/Documents/Graph), Types (Sql/KeyValuePair/Documents/Graph) and Indexing (Sql/KeyValuePair/Documents). The layer-wide sets preserve this kernel vocabulary without admitting the root's other transitive dependencies.
 
 Engine-owned strategies and catalog-aware persistence composition live under Internal/Engine/Storage. Every TransactionRecordSpace implementation and physical location-packing helper belongs to Storage, including nested adapters; the test enforces adapter and strategy placement. Resource accessors and assembly metadata are common infrastructure. Negative probes cover aliases, generic arguments, inheritance, member calls, a disallowed external assembly with a System namespace in both constrained layers, unrestricted engine usage, and misplaced adapters/strategies. This is test-only support and adds no model dependency to the shipped root assembly.
+
+## Structured failure-event codes (#1350)
+
+Thrown failures use the existing non-null `DatabaseException.Diagnostics` carrier. Statement
+failure event 28 applies the same selection as an Error result: the first Error diagnostic,
+otherwise the first diagnostic, otherwise an empty code. It writes the exception type and
+never reads Message to discover a code. Graph parse event 12 and KeyValuePair parse event 10
+use the same rule; cancellation remains outside these failure events. No payload field, event
+identifier or counter changes. PostgreSQL likewise keeps the code independently of detail
+text (`src/backend/utils/error/elog.c:875-884`, local reference clone); no code is copied.
+
+Offline refusals and both unconfirmed-commit factories populate the existing carrier with
+an Error diagnostic. Their Message is unprefixed detail from root resx resources, and their
+original inner exception survives. The existing `DatabaseOfflineException.Code` getter stays;
+no nullable Code property is added to DatabaseException and no public signature changes.
+Servers compose the legacy wire error prefix once and emit the existing negotiated diagnostic
+frame. There is no storage-format or protocol-version change. The model codes remain
+COHSQLT004, COHDBK002, COHDBD002, COHDBG012 and COHDBB002. SQL division by zero remains
+COHSQLE001 / SQLSTATE 22012; Graph syntax remains GQL0008. Error locations come from the
+existing carriers and are not synthesized by tracing.
