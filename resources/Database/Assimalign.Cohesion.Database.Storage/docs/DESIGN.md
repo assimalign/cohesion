@@ -411,15 +411,23 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
 - **Content changes only under a pin.** Readers and writers take pins; the pool takes
   no part in content access. The write-back rules below rest on that.
 
-- **Eviction is least-recently-used** over unpinned entries: pins and cache hits move a
-  page to the MRU end; capacity overflow evicts from the LRU end, skipping pinned
-  pages, and fails loudly (`StorageIOException`) when every resident page is pinned —
-  the pool never silently exceeds its memory budget. LRU (not clock/2Q) because the
-  pool is fully lock-serialized anyway, so the precise policy costs nothing extra and
-  is trivially testable.
-- **Buffers are reused**: evicted entries return their pinned 8 KiB buffers to a
-  recycle stack, so steady-state page churn performs zero allocations — fresh pages
-  are zeroed on reuse so recycled buffers never leak prior content.
+- **Eviction uses a clock (#1541).** Cached hits use concurrent lookup, atomically
+  acquire a frame-local pin, recheck the frame's binding and set its reference bit.
+  Unpins change only that frame's count. They do not move a shared list or enter the
+  mapping monitor in Release. A miss advances the clock over unpinned frames: its first
+  revolution clears reference bits; the second can claim an unpinned frame even if
+  concurrent readers keep setting its bit. Selection is bounded by twice the resident
+  count. An atomic zero-pin reservation excludes new pins before eviction; existing
+  pins always win and their buffers cannot be reused. All-pinned exhaustion still
+  throws `StorageIOException`. Clock replaces exact LRU because moving one global
+  list on every cached hit prevented independent readers from scaling.
+  PostgreSQL `src/backend/storage/buffer/freelist.c:238–311` supplies the clock/atomic
+  reservation precedent; Cohesion uses a pool-local hand under the mapping monitor,
+  without PostgreSQL's global atomic sweep/allocation counters. No code copied.
+- **Buffers and clock nodes are reused.** Each frame owns one pinned 8 KiB array and
+  one clock node. Eviction detaches the node and recycles the frame; fresh/overwrite
+  pages are zeroed before publication. Cold loads still allocate a small completion
+  record and a concurrent-map node. Cached pins allocate only their existing handle.
 - **Failed loads never poison the cache**: a page that fails checksum verification is
   not cached; its buffer goes straight back to the recycle stack and the exception
   propagates. The same holds for a page whose header claims an overflow area that does
@@ -427,37 +435,47 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   `AsBodySpan()` size their spans from that header, nothing writes overflow pages yet,
   and an unstamped page (checksum zero) is never verified, so the header alone would
   otherwise hand the B-tree a writable span past the buffer.
-- **Extension runs under the pool lock.** Allocating a page past the end of the data
-  stream grows the stream through `EnsureLength`, serializing grow-only length checks
-  with other allocations. The backing handle serializes the growth itself with page I/O,
-  including flush write-back outside the pool monitor (#1269). An in-memory stream copies its array
-  into a new one when it grows; a write-back that landed in the old array after its
-  region was copied was lost while the pool recorded the page clean, so a later eviction
-  dropped the change and the reload was stale or all zeros (#1157 review). The
-  `StorageStream` adapter over a plain `Stream` also routes `Length` and `SetLength`
-  through the gate that serializes its page reads and writes, so the stream is safe on
-  its own, not only under the pool.
-- **One lock.** All pool state is guarded by a single monitor. Page *content* access is
-  the caller's concern (a handle hands out a raw pointer); the transaction layer above
-  provides content-level isolation. Sharding the lock is a measured-need optimization,
-  not a default.
-- **Flush I/O leaves the monitor (#1269).** `FlushAll` snapshots dirty frame identities
-  under the monitor, then writes in 16-page bursts with a yield between them. One rented
-  page image is reused; each copy is made under the monitor and its frame holds an I/O
-  lease until the write completes. Pins and dirty marks still progress, while eviction
-  skips the leased frame or waits with the monitor released if it is the only candidate.
-  A miss rechecks its requested id after that wait, so two misses cannot replace each
-  other's pinned frame. Snapshot entries evicted in between are ignored by identity.
-  `FlushSome` uses the same path, copying only unpinned pages; `FlushPage` and the final
-  stream flush also leave the monitor. A flush/resize/disposal gate serializes those operations
-  before they take the monitor; a shrink never exposes a resident set above its capacity while
-  waiting for a frame's I/O. Disposal drains I/O before clearing frames or closing
-  streams. Blocked-handle rendezvous tests observe resize and disposal waiting on that
-  gate and verify frame residency before releasing I/O in both Debug and Release.
-  Every exception releases the frame lease and rented image in `finally`; lease waiters
-  are pulsed before the debug frame assertion can throw.
-  Foreground misses and evictions still perform their own I/O under the monitor; moving
-  those paths is #1541. No checkpoint completion-time target or spread checkpoint is added.
+- **Page I/O leaves mapping locks (#1541).** Concurrent lookup is separate from the
+  short monitor protecting admission, the clock, recycled frames and pending faults.
+  One per-page fault completion coalesces cold readers; its awaitable task is created
+  only when there is a waiter. The synchronous pin API waits internally and retries
+  lookup after completion. The original I/O/checksum exception is rethrown with its
+  identity intact. A new frame is published only after its read and validation finish.
+  A failed dirty-victim write leaves its old mapping and dirty bytes available; a failed
+  incoming read recycles its unpublished buffer. Resident plus reserved loading frames
+  never exceed Capacity. Independent cold pages can perform I/O concurrently.
+  Neo4j `community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnPageCursor.java:332–405`
+  is the binding-recheck/coalesced-fault precedent. PostgreSQL
+  `src/backend/storage/buffer/bufmgr.c:2460–2522,7370–7440` separates mapping ownership
+  from buffer I/O completion. No code copied.
+- **Per-page physical I/O ordering.** 128 pool-local monitor stripes serialize a page's
+  physical reads and writes outside the mapping monitor. Colliding page ids can share
+  an I/O stripe; cached hits use neither stripe nor stream. Write-back audits may read
+  their own prior physical image reentrantly. The WAL gate, audit, checksums, Length,
+  ReadPage, WritePage and device flush never run under the mapping monitor. The
+  existing backing handles continue to serialize their own memory-stream array access.
+- **Growth is separately serialized.** EnsureLength's extension gate protects the
+  grow-only Length/SetLength pair outside the mapping monitor. This prevents a late
+  smaller request from truncating a concurrent extension. The backing handle serializes
+  growth with its page I/O, so replacement of an in-memory array cannot lose a write
+  into the previous array (#1157). Cached pins keep progressing during growth.
+- **Flush and maintenance ownership.** FlushAll snapshots dirty identities under the
+  monitor, then uses one rented image in 16-page bursts, yielding between bursts.
+  FlushSome skips pinned candidates; FlushPage uses the same frame-I/O lease. Eviction
+  skips a leased frame, or waits with the monitor released if it is the only candidate.
+  A snapshot waits for an already reserved eviction to finish before deciding whether
+  its old mapping still needs writing. This preserves WAL-before-data and final device
+  flush ordering. Dirtying newer bytes during an older image's write still owes a write.
+  The outer flush gate serializes flushes, resize and disposal; ordinary misses never
+  take it, so independent misses can progress during a parked flush (#1269).
+  Resize/disposal close cold-I/O admission and drain existing reservations with the
+  monitor released. Shrink reserves every required unpinned victim before doing I/O
+  and publishes its smaller capacity only after eviction finishes. Cached pins on other
+  frames remain available throughout. Failure restores unprocessed victims and retains
+  the smallest capacity covering surviving residents. Disposal drains I/O before clearing
+  bookkeeping; outstanding handles still keep their pinned-heap arrays alive.
+  Every completion releases ownership and wakes waiters on success and failure. No
+  public async pin, format change, checkpoint time target or spread checkpoint is added.
 - **Write-back writes a private copy.** A pinned writer can change a page while the pool
   writes it back — `FlushAll` and `FlushPage` write pinned pages, and until #1157 the
   paced page writer did too. Write-back therefore copies the page first, stamps the
@@ -479,12 +497,12 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   an eviction, or the checkpoint (which runs with no transaction active).
 - **Invariants.** The structural check (`CheckInvariants`) verifies, under the lock,
   that every resident entry has a non-negative pin count, is not on the recycle stack,
-  and owns exactly one node of the LRU list keyed by its page; that the LRU list holds
+  and owns exactly one node of the clock list keyed by its page; that the clock list holds
   nothing else; and that recycled entries are unpinned and detached. It is compiled
   into every configuration. Debug builds also run it wherever the pool's structure
   changes — a pin miss (which may evict and recycle), an explicit eviction, a flush —
   and, on a pin hit, a `TryGet` hit or an unpin, which change one entry's pin count and
-  LRU position, check just that frame: resident under its page, owning its node of the
+  reference state, check just that frame: resident under its page, owning its node of the
   access list, not recycled, with a non-negative pin count (#1240). They add
   per-operation checks too: a handle never releases a pin on an entry that is no longer
   resident, a page is never unpinned more often than it was pinned, and a handle's page
@@ -508,6 +526,32 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   stream extension but before buffer initialization, and dirty marking runs last, so a
   refusing audit preserves a resident free page's bytes and dirty version.
 
+### Buffer-pool measurements (#1541)
+
+A package-free Release probe on Windows ARM64 / .NET 10.0.13 pins 128 cached pages,
+checks each id and endpoint bytes, hashes 512 payload bytes and disposes the handle.
+After warm-up, twelve interleaved samples execute 20,000 reads per client. Tiering and
+background GC are disabled on both sides. Median throughput changes from 3,089,367.951
+to 18,017,265.899 reads/s with three clients and from 2,260,095.482 to 37,148,082.221
+with eight. Eight clients exceed three in all twelve final samples. Allocations stay
+48 bytes/read; digests stay A4D0DC62FFDC04E0 and 83ED8A8D91A17500 respectively.
+A separate EventPipe attribution pass identifies the actual monitor addresses: the
+mapping monitor changes from 2,239 waits / 330.193 aggregate ms to zero waits;
+the flush gate has zero on both sides. These are combined three/eight-client passes,
+including thread warm-ups; overlapping aggregate waits are not elapsed time and CAS
+retries are not monitor waits. The host is shared: official full-engine profiling after the existing #1280 / F01.T01
+read-only commit optimization and quiet-host acceptance remain for the owner benchmark run. These figures are not rankings.
+
+The same executable also cycles 128 persisted pages through 64 frames, checking and
+hashing every payload. One warm-up and twelve 4,096-read samples show median cold-read
+cost 1,145.629883 -> 1,532.385254 ns/read and 96 -> 128 bytes/read; all twelve final
+time samples exceed the old median. Digest C24E798F959F1000 is unchanged. Frame arrays
+and clock nodes are reused; the additional cold allocation is the fault record and
+concurrent-map bookkeeping in place of a freshly allocated old LRU node. This reports
+the cold-path cost of scalable cached lookup and fault coordination without relaxing
+an allocation assertion. The probe verifies the loaded assembly hashes; an initial
+stale copied-assembly run was discarded before the final measurements.
+
 ### Capacity (#1254)
 
 The pool holds `Storage.DefaultBufferPoolCapacity` pages, 4,096 (32 MiB), unless the
@@ -527,8 +571,11 @@ third of the 4,096-page rate ("Measurements").
   what one PostgreSQL cluster does.
 - **What it costs.** Page buffers are allocated on first load and recycled, never preallocated,
   so a database pays for the pages it has touched, up to the capacity. At capacity the pool
-  holds 32 MiB of pinned-heap buffers plus about 160 bytes of bookkeeping per resident page
-  (entry, dictionary slot, LRU node: 0.6 MiB at 4,096 pages). The SQL and key-value engines open
+  holds 32 MiB of pinned-heap buffers plus frame metadata, concurrent-map nodes and one
+  reusable clock node per frame; the pool also owns 128 I/O stripes. Each concurrent dirty
+  eviction rents one private page image, and a flush reuses one image for its whole pass.
+  Pending loads reserve frames within the same capacity rather than allocating an
+  unbounded second buffer set. The SQL and key-value engines open
   a second, catalog file set per database whose pool stays at 128 pages (1 MiB): the catalog is
   small and hot. So an open database costs up to about 33 MiB (34 MiB for SQL and key-value) of
   pool memory, plus each file set's two retained journal buffers, each 64 KiB to 1 MiB
@@ -541,7 +588,7 @@ third of the 4,096-page rate ("Measurements").
   (`StreamFileHandle.SetLength`); before the #1254 review a `MemoryStream` kept it, so an
   in-memory database held up to twice the checkpoint size for its lifetime once its journal first
   reached it.
-- **Resizing.** Growing takes effect at once. Shrinking evicts least-recently-used unpinned
+- **Resizing.** Growing takes effect at once. Shrinking evicts clock-selected unpinned
   pages, writing dirty ones back through the write-ahead gate, until the resident set fits; if
   more pages than the new capacity are pinned, the resize throws `StorageIOException` and the
   pool keeps its capacity.
@@ -2382,7 +2429,7 @@ for #1157 failed on three further defects, each independent of the ALTER crash:
   the pool recorded the page clean, so a later eviction dropped the change and the
   reload was stale or all zeros. This was the in-memory engines' default path, and the
   SQL engine lost index entries for committed rows under a fast page writer. Extension
-  now only grows, through `EnsureLength` under the pool lock, and `StorageStream` routes
+  now only grows, through `EnsureLength` under its extension gate, and `StorageStream` routes
   `Length` and `SetLength` through its handle's gate (buffer-pool rules above). File
   handles were not affected by the array copy, but share the grow-only, locked path.
 
