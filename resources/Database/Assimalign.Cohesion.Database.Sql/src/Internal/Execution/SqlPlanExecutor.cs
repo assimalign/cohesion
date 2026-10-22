@@ -839,7 +839,9 @@ internal sealed partial class SqlPlanExecutor
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
-        return IndexKey.From(writer);
+        var key = IndexKey.From(writer);
+        IndexKeyBuilt?.Invoke(key);
+        return key;
     }
 
     /// <summary>

@@ -3744,12 +3744,19 @@ description + exported registrations), the engine binds them.
   storage order; its safe scalar diagnostic follows that key. PostgreSQL likewise checks key
   equality during sorted unique builds before the row-reference tiebreaker
   (`src/backend/utils/sort/tuplesortvariants.c:1655-1698`) and excludes dead tuples from the
-  uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`). Full-GC retained-heap
-  tests use a 4,096-row, 900-character table over a 1 MiB pool and require less than one quarter
-  of its decoded bytes. Samples inside the unique-validation cursor walk include its midpoint
-  and final key, before any retained keys can be released, for inline and deferred index and
-  constraint builds; minimum-of-three allocation comparisons bound duplicate detection's
-  overhead against an otherwise identical non-unique build for all paths.
+  uniqueness check (`src/backend/access/nbtree/nbtsort.c:440-443`). Retained-workspace tests use a 4,096-row,
+  900-character table over a 1 MiB pool and require less than one quarter of its decoded bytes
+  (1,843,200 bytes) in every round. Process-wide GC heap deltas cannot attribute runtime,
+  worker or shared-pool retention to the statement. Null-by-default internal observers instead
+  weakly track decoded row arrays, their wide strings and constructed/validated key arrays.
+  After a blocking compacting collection, the test charges surviving payloads, a conservative
+  four-pointer header allowance per object, and the entire configured pool. Observer bookkeeping
+  is test-owned. The six paths also retain an unrelated 8 MiB array after setup: it cannot affect
+  this attributed bound. Sampling covers the midpoint and last cursor key before workspace
+  release. Row-list and cursor-key-list mutants exceed the same bound; restoring streaming
+  passes. Physical journal/pre-image budgets remain guarded by storage tests. Release-only
+  minimum-of-three allocation comparisons independently reject full hex-key sets. The
+  observers allocate nothing while disabled; the stored-query allocation budget is unchanged.
 - **Write-path maintenance mirrors the row-version discipline exactly.** INSERT
   adds entries stamped with the writer's sequence; DELETE stamps entry deleters
   (tombstones — old snapshots keep seeing them); UPDATE tombstones the

@@ -87,6 +87,7 @@ internal sealed partial class SqlPlanExecutor
             values[ordinal] = defaults[ordinal] is { } bound ? DefaultValue(bound) : null;
         }
 
+        RowDecoded?.Invoke(values);
         return values;
     }
 

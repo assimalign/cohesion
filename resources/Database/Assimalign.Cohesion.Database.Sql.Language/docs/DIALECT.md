@@ -3521,3 +3521,9 @@ Unknown COLLATE names are syntactically valid identifiers and fail during bindin
 COHSQLE052 / 42704, including declarations with DEFAULT context. A missing collation in loaded
 persisted text retains COHSQLE058 / XX001. Culture-aware and user-defined collation creation
 remain unsupported. Quoted names use the ordinary delimited-identifier decoding.
+
+## DDL workspace verification (#1444)
+
+Constraint validation streams rows and unique-index validation walks adjacent live keys.
+The cross-platform regression guard attributes row/key retention, separately from unrelated
+managed-heap activity; this verification change adds no SQL syntax, error code or format version.

@@ -49,6 +49,9 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   offline with `COHSQLP004`, retaining intent for the next open. Inline failures retain compensation;
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
+- **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys
+  in a bounded cursor. The #1444 guard attributes surviving row/key workspace and charges the
+  full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
   projection, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
