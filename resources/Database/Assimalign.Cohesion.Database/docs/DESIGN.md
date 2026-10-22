@@ -1087,8 +1087,11 @@ Durability remains inside the storage gate: commit acknowledgement follows durab
 (Storage.cs:921), and the write-ahead gate runs before data writes (Storage.cs:1696–1700 at the
 pre-fix revision). At saturation a grouped committer waits its full group window, then self-flushes;
 capacity never acknowledges an undurable commit. _giveUpFaultPass retention and #1277's purge
-reporting remain intact. Shared helpers remain model-local, with no public type, shipped-assembly
-visibility grant, project-reference change or NativeAOT-specific runtime mechanism.
+reporting remain intact. Shared helpers remain model-local. The public surface grows by four members
+because the model engines live in other assemblies and cannot reach internals: `Storage.HasPendingCommits`
+and `Storage.DirtyPageCount` (the pump's idle due checks), and `DatabaseEngineWorker.ReportLaneDelay` and
+`ReportLaneDisposalWait` (protected, raising events 35 and 36). There is no new type or interface, no
+shipped-assembly visibility grant, no project-reference change and no NativeAOT-specific runtime mechanism.
 
 ## Diagnostics
 
