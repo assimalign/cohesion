@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Sql.Client;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>
@@ -37,7 +39,7 @@ public sealed class DatabaseClientHandshakeFailureTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var listener = new InMemoryConnectionListener();
         await using var client = CreateClient(listener);
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             for (int attempt = 0; attempt < 2; attempt++)
             {
@@ -74,7 +76,7 @@ public sealed class DatabaseClientHandshakeFailureTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var listener = new InMemoryConnectionListener();
         await using var client = CreateClient(listener);
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             for (int accepted = 0; accepted < 2; accepted++)
             {
@@ -182,7 +184,7 @@ public sealed class DatabaseClientHandshakeFailureTests
             1 => new ProtocolReadyMessage(ProtocolVersion.Current, ["unknown"]).Encode(),
             _ => new ProtocolReadyMessage(new ProtocolVersion(2, 99), []).Encode(),
         };
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             for (int accepted = 0; accepted < 2; accepted++)
             {

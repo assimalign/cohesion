@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 /// <summary>
@@ -44,7 +46,7 @@ public class TransactionCoordinatorRecoveryTests
             entered.Set();
             release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
         };
-        var checkpoint = Task.Run(coordinator.Checkpoint);
+        var checkpoint = DedicatedTestTask.Run(coordinator.Checkpoint);
         TransactionContext? late = null;
         int completed = 0;
         try
@@ -53,7 +55,7 @@ public class TransactionCoordinatorRecoveryTests
 
             // Act: reservation cannot take the physical checkpoint's transaction lock;
             // begin/commit/rollback cannot take its lifecycle gate, nor pins its pool lock.
-            await Task.Run(async () =>
+            await DedicatedTestTask.Run(async () =>
             {
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
@@ -165,7 +167,7 @@ public class TransactionCoordinatorRecoveryTests
                 entered.Set();
                 release.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
             };
-            var checkpoint = Task.Run(coordinator.Checkpoint);
+            var checkpoint = DedicatedTestTask.Run(coordinator.Checkpoint);
             TransactionContext? reader = null;
             Task<int>? applying = null;
             try

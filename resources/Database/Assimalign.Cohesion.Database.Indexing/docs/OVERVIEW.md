@@ -42,3 +42,7 @@ with statement snapshots, and `Sql.Catalog` persists the manager's registrations
 maintenance surfaces this consumer added — the stamp-preserving build path, the
 physical undo pair, the aborted-writer purge walk, and the snapshot cursor
 overload — are documented in [DESIGN.md](DESIGN.md).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

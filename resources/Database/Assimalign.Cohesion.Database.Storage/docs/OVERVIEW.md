@@ -91,3 +91,7 @@ kernel. Deleting a record releases its page transactionally once its last live
 slot disappears. `StorageJournal.ReadSequential` streams records with owned payloads;
 startup storage recovery uses an internal borrowed reader without retaining WAL payloads.
 `ReadAll` returns a materialized snapshot. See [DESIGN.md](DESIGN.md) for replay and reclamation.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

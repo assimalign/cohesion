@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 /// <summary>
@@ -100,7 +102,7 @@ public sealed class BTreeRollbackLatchTests
 
         // Act: the writer inserts a second version of every committed key, which splits leaves
         // across the whole tree, then rolls the transaction back physically.
-        var writer = Task.Run(async () =>
+        var writer = DedicatedTestTask.Run(async () =>
         {
             while (!stop.IsCancellationRequested && Volatile.Read(ref failure) is null)
             {
@@ -114,7 +116,7 @@ public sealed class BTreeRollbackLatchTests
                 Interlocked.Increment(ref rollbacks);
             }
         });
-        var readers = Enumerable.Range(0, 3).Select(readerIndex => Task.Run(async () =>
+        var readers = Enumerable.Range(0, 3).Select(readerIndex => DedicatedTestTask.Run(async () =>
         {
             bool reverse = readerIndex == 0;
             var expected = reverse ? committed.Reverse().ToArray() : committed;
@@ -177,7 +179,7 @@ public sealed class BTreeRollbackLatchTests
         index.Latch.EnterRead();
         try
         {
-            var rollback = Task.Run(transaction.Rollback);
+            var rollback = DedicatedTestTask.Run(transaction.Rollback);
             bool completed = SpinWait.SpinUntil(() => rollback.IsCompleted, TimeSpan.FromMilliseconds(500));
             return (RootBody(harness, index), completed, rollback);
         }

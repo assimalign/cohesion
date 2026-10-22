@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 public sealed class DatabaseClientTerminalErrorTests
@@ -38,7 +40,7 @@ public sealed class DatabaseClientTerminalErrorTests
             Family = StreamingClientTestHarness.Family,
             ConnectionFactory = listener.CreateFactory(),
         });
-        Task peer = Task.Run(async () =>
+        Task peer = DedicatedTestTask.Run(async () =>
         {
             await using var transport = await listener.AcceptAsync(timeout.Token);
             await using var channel = new ProtocolChannel(transport.AsStream(), StreamingClientTestHarness.Family, leaveOpen: true);

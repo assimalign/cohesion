@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Testing;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 [Collection(nameof(SqlClientEventSourceCollection))]
@@ -145,7 +147,7 @@ public sealed class SqlPredicateWireTests
         var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
         command.Parameters.Add("input", string.Concat(Enumerable.Repeat("เก", 512)));
         command.Parameters.Add("pattern", string.Concat(Enumerable.Repeat("%เก", 32)) + "ข");
-        var query = Task.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);
+        var query = DedicatedTestTask.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);
         try
         {
             await admission.Started.WaitAsync(timeout.Token);

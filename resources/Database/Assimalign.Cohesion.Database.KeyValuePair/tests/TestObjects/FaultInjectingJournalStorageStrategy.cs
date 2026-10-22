@@ -33,6 +33,11 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
     private static readonly AsyncLocal<Budget?> s_recordFailures = new();
     private static readonly AsyncLocal<Action?> _beforeCommitFlush = new();
 
+    internal JournalCounters JournalCounters(string databaseName, bool catalog = false)
+    {
+        lock (_sync) { return _storages[Key(databaseName, catalog)].Journal.Counters; }
+    }
+
     /// <summary>Gets or sets a callback on this flow before a durable journal flush (#1246).</summary>
     internal static Action? BeforeCommitFlush
     {
@@ -335,7 +340,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
 
     // Every write funnels through the array overload, so each journal frame is counted once: a
     // MemoryStream subclass's span overload would otherwise call back into the array overload.
-    private sealed class FaultInjectingStream : MemoryStream
+    private sealed class FaultInjectingStream : JournalTrackingStream
     {
         /// <summary>Gets or sets the length the last successful durable flush confirmed.</summary>
         public long ConfirmedLength { get; set; }

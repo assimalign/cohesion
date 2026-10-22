@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>
@@ -204,7 +206,7 @@ public sealed class DatabaseClientDialFailureTests
         });
         await using var client = CreateClient(factory, listener.EndPoint);
         var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task server = Task.Run(async () =>
+        Task server = DedicatedTestTask.Run(async () =>
         {
             await using IDuplexConnection accepted = await listener.AcceptAsync(ClientTestHarness.Timeout());
             Stream stream = accepted.AsStream();

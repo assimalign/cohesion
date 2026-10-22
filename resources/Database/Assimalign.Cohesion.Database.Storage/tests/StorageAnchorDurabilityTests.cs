@@ -121,7 +121,7 @@ public sealed class StorageAnchorDurabilityTests
         {
             // Flush holds no transaction lock: allocate and durably commit on another thread
             // after it shrinks the target chain, before any byte of the new slot can land.
-            (location, committedSequence) = Task.Run(() =>
+            (location, committedSequence) = DedicatedTestTask.Run(() =>
             {
                 using var transaction = storage.BeginTransaction();
                 var inserted = storage.Insert(transaction, owner: 9, Encoding.UTF8.GetBytes("concurrent commit"));

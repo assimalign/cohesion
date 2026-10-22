@@ -13,6 +13,8 @@ using Xunit.Abstractions;
 using Assimalign.Cohesion.Database.Client.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>Rental handles remain isolated after their pooled session changes owners.</summary>
@@ -176,7 +178,7 @@ public sealed class DatabaseConnectionLeaseTests
             });
             var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             bool delayExecution = (round & 1) == 0;
-            Task executing = Task.Run(async () =>
+            Task executing = DedicatedTestTask.Run(async () =>
             {
                 await start.Task.WaitAsync(timeout.Token);
                 if (delayExecution)
@@ -196,7 +198,7 @@ public sealed class DatabaseConnectionLeaseTests
                     Interlocked.Increment(ref cancelled);
                 }
             }, timeout.Token);
-            Task disposing = Task.Run(async () =>
+            Task disposing = DedicatedTestTask.Run(async () =>
             {
                 await start.Task.WaitAsync(timeout.Token);
                 if (!delayExecution)
@@ -205,7 +207,7 @@ public sealed class DatabaseConnectionLeaseTests
                 }
                 await original.DisposeAsync();
             }, timeout.Token);
-            Task cancelling = Task.Run(async () =>
+            Task cancelling = DedicatedTestTask.Run(async () =>
             {
                 await start.Task.WaitAsync(timeout.Token);
                 callerCancellation.Cancel();
@@ -217,7 +219,7 @@ public sealed class DatabaseConnectionLeaseTests
                 admitted++;
             }
             await using var next = await harness.Client.RentAsync(timeout.Token);
-            Task stale = Task.Run(async () =>
+            Task stale = DedicatedTestTask.Run(async () =>
             {
                 await original.DisposeAsync();
                 await original.AbortAsync();

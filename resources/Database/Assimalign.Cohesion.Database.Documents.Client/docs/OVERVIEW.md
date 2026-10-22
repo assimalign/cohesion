@@ -56,3 +56,7 @@ unfinished exchange invalidates it. Cancellation of a write does not establish w
 [API reference](Assembly/Assimalign.Cohesion.Database.Documents.Client/OVERVIEW.md) lists the
 concrete public surface. The [consumer sample](../samples/Assimalign.Cohesion.Database.Documents.AotSample/Program.cs)
 executes its checks against real in-memory and TCP servers after NativeAOT publishing.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

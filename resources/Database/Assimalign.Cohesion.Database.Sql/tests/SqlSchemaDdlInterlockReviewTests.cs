@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection("SQL namespace DDL interlock")]
@@ -83,7 +85,7 @@ public sealed class SqlSchemaDdlInterlockReviewTests
                         releaseDdl.Wait(timeout.Token);
                     }
                 };
-                pending = Task.Run(async () => await ddl.ExecuteAsync("CREATE SCHEMA other", cancellationToken: timeout.Token), timeout.Token);
+                pending = DedicatedTestTask.Run(async () => await ddl.ExecuteAsync("CREATE SCHEMA other", cancellationToken: timeout.Token), timeout.Token);
                 enteredDdl.Wait(timeout.Token);
             }
 

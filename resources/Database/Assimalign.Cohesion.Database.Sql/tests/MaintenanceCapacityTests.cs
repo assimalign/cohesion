@@ -174,7 +174,7 @@ public sealed class MaintenanceCapacityTests
             // Act: the disposal deadline is deliberately unbounded; only reporting is periodic.
             worker.RunIteration(CancellationToken.None);
             entered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-            disposal = Task.Run(async () => await engine.DisposeAsync());
+            disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
             var duration = Stopwatch.StartNew();
             while (events.Events.Count(item => item.EventId == 36) < 2 && duration.Elapsed < TimeSpan.FromSeconds(10))
             {

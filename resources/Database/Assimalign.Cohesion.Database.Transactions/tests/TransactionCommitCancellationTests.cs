@@ -8,6 +8,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 [Collection("Journal enrollment")]
@@ -144,7 +146,7 @@ public sealed class TransactionCommitCancellationTests
             early.Cancel();
             await Should.ThrowAsync<OperationCanceledException>(async () => await manager.CommitAsync(context, early.Token));
             cancellations++;
-            var commit = Task.Run(async () => await manager.CommitAsync(context, canceled.Token));
+            var commit = DedicatedTestTask.Run(async () => await manager.CommitAsync(context, canceled.Token));
             Task? disposal = null;
             try
             {
@@ -154,7 +156,7 @@ public sealed class TransactionCommitCancellationTests
                 disposal = manager.DisposeAsync().AsTask();
                 disposal.IsCompleted.ShouldBeFalse();
                 waitingDisposals++;
-                await Task.Run(canceled.Cancel, timeout.Token);
+                await DedicatedTestTask.Run(canceled.Cancel, timeout.Token);
                 canceled.IsCancellationRequested.ShouldBeTrue();
                 commit.IsCompleted.ShouldBeFalse();
                 disposal.IsCompleted.ShouldBeFalse();

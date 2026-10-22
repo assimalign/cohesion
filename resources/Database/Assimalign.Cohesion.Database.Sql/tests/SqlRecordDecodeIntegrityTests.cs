@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -295,7 +297,7 @@ public sealed class SqlRecordDecodeIntegrityTests
         string label = new('x', 900);
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
             int id = 0;

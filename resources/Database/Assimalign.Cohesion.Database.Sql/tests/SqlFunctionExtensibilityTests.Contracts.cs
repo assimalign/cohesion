@@ -11,6 +11,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -148,7 +150,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Act: bounded, so a regression fails here instead of hanging the run.
         var clock = Stopwatch.StartNew();
-        var rows = await Task.Run(() => RowsAsync(session, $"SELECT {nest} FROM t")).WaitAsync(TimeSpan.FromSeconds(60));
+        var rows = await DedicatedTestTask.Run(() => RowsAsync(session, $"SELECT {nest} FROM t")).WaitAsync(TimeSpan.FromSeconds(60));
         clock.Stop();
 
         // Assert

@@ -21,6 +21,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -95,7 +97,7 @@ public sealed class DatabaseEventSourceTests
                     {
                         binary = sameThread
                             ? engine.CreateDatabaseAsync("binary", CancellationToken.None).GetAwaiter().GetResult()
-                            : Task.Run(async () => await engine.CreateDatabaseAsync("binary", CancellationToken.None))
+                            : DedicatedTestTask.Run(async () => await engine.CreateDatabaseAsync("binary", CancellationToken.None))
                                 .WaitAsync(_wait).GetAwaiter().GetResult();
                     }
                     catch (Exception exception)

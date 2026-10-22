@@ -245,8 +245,10 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -257,20 +259,20 @@ public sealed class BlobStorageOperationsTests
         Random.Shared.NextBytes(payload);
 
         // Each writer overwrites its own blob, so the writers never conflict.
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
             var files = await session.GetContainerAsync("files");
-            while (!stop.IsCancellationRequested)
+            while (!stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size)
             {
                 await using var stream = await files.OpenWriteAsync($"writer-{writer}");
                 await stream.WriteAsync(payload);
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 

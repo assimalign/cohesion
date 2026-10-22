@@ -1022,7 +1022,7 @@ public class TransactionCoordinatorRollbackTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         using var stop = new CancellationTokenSource();
         long statements = 0;
-        var load = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
+        var load = Enumerable.Range(0, 4).Select(_ => DedicatedTestTask.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
             {

@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -317,7 +319,7 @@ public class DatabaseEngineWorkerTests
         var callers = new Task[4];
         for (int index = 0; index < callers.Length; index++)
         {
-            callers[index] = Task.Run(() =>
+            callers[index] = DedicatedTestTask.Run(() =>
             {
                 for (int pass = 0; pass < 25; pass++)
                 {

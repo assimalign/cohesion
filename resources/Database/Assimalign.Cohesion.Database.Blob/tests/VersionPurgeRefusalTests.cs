@@ -52,7 +52,7 @@ public sealed class VersionPurgeRefusalTests
                 holder.Pages.ShouldBeGreaterThan(0);
                 await transaction.RollbackAsync(token);
                 database.Coordinator.VersionStore.PendingAbortedPurges.ShouldNotBeEmpty();
-                await Task.Run(() =>
+                await DedicatedTestTask.Run(() =>
                 {
                     for (int pass = 0; pass < 12; pass++)
                     {
@@ -268,7 +268,7 @@ public sealed class VersionPurgeRefusalTests
 
             // Act: force real undo retries at 100, 300 and 700 ms, spanning only 600 ms.
             // The local worker has no pump; the kernel's system-clock due time cannot race it.
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 foreach (int milliseconds in new[] { 100, 200, 400 })
                 {

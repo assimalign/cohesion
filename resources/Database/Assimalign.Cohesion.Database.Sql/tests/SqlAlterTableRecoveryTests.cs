@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
@@ -139,8 +141,8 @@ public sealed class SqlAlterTableRecoveryTests
         }
 
         // Act: run at least one second and until both counters prove repeated publication.
-        var first = Task.Run(() => RenameAsync(one, "a", "aa"), timeout.Token);
-        var second = Task.Run(() => RenameAsync(two, "b", "bb"), timeout.Token);
+        var first = DedicatedTestTask.Run(() => RenameAsync(one, "a", "aa"), timeout.Token);
+        var second = DedicatedTestTask.Run(() => RenameAsync(two, "b", "bb"), timeout.Token);
         start.SetResult();
         int[] completed = await Task.WhenAll(first, second);
 
@@ -316,8 +318,8 @@ public sealed class SqlAlterTableRecoveryTests
         }
 
         // Act: minimum duration plus proved work and overlapping publications, with a ceiling.
-        var writer = Task.Run(RenameAsync, timeout.Token);
-        var reading = Task.Run(ReadAsync, timeout.Token);
+        var writer = DedicatedTestTask.Run(RenameAsync, timeout.Token);
+        var reading = DedicatedTestTask.Run(ReadAsync, timeout.Token);
         start.SetResult();
         await Task.WhenAll(writer, reading);
 

@@ -8,6 +8,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection("SQL namespace DDL interlock")]
@@ -58,7 +60,7 @@ public sealed class SqlSchemaDdlInterlockTests
                     release.Wait(timeout.Token);
                 }
             };
-            var pending = Task.Run(async () =>
+            var pending = DedicatedTestTask.Run(async () =>
             {
                 leadingFlow.Value = true;
                 return await first.ExecuteAsync(leading, cancellationToken: timeout.Token);

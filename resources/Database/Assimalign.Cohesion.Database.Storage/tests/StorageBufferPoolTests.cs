@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
@@ -269,7 +271,7 @@ public class StorageBufferPoolTests
         using var pool = new StorageBufferPool(8);
 
         // Act
-        var workers = Enumerable.Range(0, 8).Select(worker => Task.Run(() =>
+        var workers = Enumerable.Range(0, 8).Select(worker => DedicatedTestTask.Run(() =>
         {
             var random = new Random(worker * 7919);
             for (int i = 0; i < 500; i++)
@@ -302,7 +304,7 @@ public class StorageBufferPoolTests
         using var pool = new StorageBufferPool(4);
 
         // Act
-        var workers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+        var workers = Enumerable.Range(0, 4).Select(worker => DedicatedTestTask.Run(() =>
         {
             for (int i = 0; i < 100; i++)
             {

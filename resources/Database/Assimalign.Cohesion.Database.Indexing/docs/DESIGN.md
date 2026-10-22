@@ -769,7 +769,7 @@ ascending" holds at a 128-page pool and is still partial at the 4,096-page (32 M
 The issue's own measurements of the same baseline (#1194: 124 µs and 7.2 ms per
 delete; 76 ms, 442 ms and 4,526 ms per cascade) were taken on the same kind of
 build; the rows above vary with the machine's other load by up to 2×, which is why
-the timing guards compare ratios. The random-delete rows still grow with the run
+the former timing guards compared ratios (replaced by physical-work counters in #1285). The random-delete rows still grow with the run
 because the storage layer journaled an 8 KiB before-image the first time a
 transaction wrote a page (25–50 µs; since #1253 a pre-image in memory and a delta at commit), and
 random deletes in a longer run touch more distinct leaves; the block rows hold the leaves touched constant and show the
@@ -779,28 +779,21 @@ versions read oldest first (#1194's first commit, `f2f9a7f2`), the same versions
 deletes cost 27 / 37 / 139–141 / 289–371 µs, linear in V. The duplicate-run insert rows
 are the cost described under "Splits"; the hot-row row is the unique check's known
 limit (#1195). The 100,000-row chain has one entry per key, so #1194 does not
-change its asymptotics. The timing guards compare growth ratios, not absolute
-times, so CI speed and load cancel out:
+change its asymptotics. #1285 replaces the timing decisions with physical entry-directory reads:
 
-- `BTreeEntryTimingTests`, delete, erase and clear-deleter in a 40,000-entry run
-  against a 2,500-entry run of the same tree: allowed growth 4×; the baseline
-  measured 317–510×, the entry order 0.8–1.2×.
-- `BTreeEntryTimingTests`, delete and clear-deleter of 16 references with 2,048
-  versions each against 16 with 16 versions each, every newest version on its own
-  leaf: allowed growth 2.5×; the oldest-first walk measured 12.6–14.3×, the
-  newest-first lookup 0.87–1.21× (Release and Debug).
-- `SqlCascadeFanOutTests`, 16,000 children against 4,000: allowed growth 2×; the
-  baseline measured 10×. Each round times one 16,000-child cascade against four
-  4,000-child cascades back to back, so both blocks run about as long; one
-  4,000-child cascade against one of 16,000 measured up to 2.2× under load with the
-  walk linear. Load still swung a round's wall-clock cost two to four times, so the
-  blocks are timed in the process's CPU time (the timing collection runs alone in its
-  process), after an unmeasured warm-up round of both blocks: pinned to three cores
-  or beside another suite on them, the linear walk measured 0.77–1.27× (the wall
-  clock reached 2.42× once in 40 loaded runs) and the duplicate-run walk #1194
-  removed 2.58–3.58×, failing 20 runs of 20 (on the wall clock it passed 5 of 10
-  loaded runs).
+- `BTreeEntryTimingTests` retains its historical name, but compares physical reads for delete,
+  erase and clear-deleter in 40,000-entry and 2,500-entry runs of the same tree. Allowed growth
+  remains 4×. Delete and clear-deleter with 2,048 versus 16 versions retain the 2.5× work bound.
+- `SqlCascadeFanOutTests` compares four 4,000-child cascades with one 16,000-child cascade in
+  the same tree, retaining the 2× work bound. It also verifies the deleted children and the
+  surviving bystander. The restored Debug path performs 47.3359 versus 47.2959 reads per child,
+  growth 0.9992. The duplicate-run mutant performs 4,044.3091 versus 16,044.2848 reads
+  per child, growth 3.9671, and fails. No elapsed duration participates in any of these guards.
 
+`BTreeIndex.EntryAccessed` is an internal, null-by-default observer invoked on every entry-directory
+read, including sequential leaf walks. Tests isolate and restore it; the ordinary path has no
+counter and no process-wide atomic. This observes physical work rather than counting calls to
+an algorithm that a mutant could replace without increasing the count.
 ## Transactional binding
 
 `BTreeIndex` mutations take a `TransactionContext` — index entries are stamped and become visible under the same MVCC rules as the data they reference. There is no "non-transactional index write" surface; recovery replays index changes from the same WAL as data changes. Unique enforcement happens at insert against the *latest* state under the key lock (above); a competing in-flight writer of the same key is resolved by the lock manager, not the index.
@@ -953,3 +946,9 @@ strings, integers and booleans, which bind to the trim-safe `WriteEvent` overloa
 application receives its events only with `<EventSourceSupport>true</EventSourceSupport>`, and
 nothing depends on delivery. The assembly grants `InternalsVisibleTo` to its own test assembly
 only, for the event source's tests (`src/Properties/AssemblyInfo.cs`).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.

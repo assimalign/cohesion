@@ -992,7 +992,7 @@ public sealed class SqlWorkerResilienceTests
         Task? disposal = null;
         async Task InspectDisposalAsync()
         {
-            disposal = Task.Run(async () => await engine.DisposeAsync());
+            disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
             (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
             disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
         }
@@ -1013,7 +1013,7 @@ public sealed class SqlWorkerResilienceTests
             else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
             {
                 faults.StallJournalFlushes();
-                blockedWrite = Task.Run(() => InsertAsync(failing, 0, 1));
+                blockedWrite = DedicatedTestTask.Run(() => InsertAsync(failing, 0, 1));
                 var worker = (SqlWriteAheadFlushWorker)WorkerOf(engine, kind);
                 await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
                     () => faults.StalledJournalFlushes, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
@@ -1087,12 +1087,12 @@ public sealed class SqlWorkerResilienceTests
             {
                 // Act: hold the old lane after it acknowledged the first commit. The next
                 // registration's signal is consumed by a pass that finds the old lane running.
-                first = Task.Run(() => InsertAsync(database, rounds * 2, 1));
+                first = DedicatedTestTask.Run(() => InsertAsync(database, rounds * 2, 1));
                 entered.Wait(Timeout).ShouldBeTrue();
                 await first.WaitAsync(Timeout);
                 int before = passes.Count;
                 database.DataStorage.OnCommitPending = () => { onPending?.Invoke(); registered.Set(); };
-                second = Task.Run(() => InsertAsync(database, rounds * 2 + 1, 1));
+                second = DedicatedTestTask.Run(() => InsertAsync(database, rounds * 2 + 1, 1));
                 registered.Wait(Timeout).ShouldBeTrue("the later commit must be registered before releasing the old lane");
                 (await Eventually(() => passes.Skip(before).Any(pass => pass.Visits.Any(visit =>
                     visit.Database == Failing && !visit.Attempted && visit.Reason == DatabaseWorkerPass.VisitReason.Running)))).ShouldBeTrue();

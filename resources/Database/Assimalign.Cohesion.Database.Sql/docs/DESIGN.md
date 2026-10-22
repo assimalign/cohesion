@@ -3848,9 +3848,9 @@ description + exported registrations), the engine binds them.
   then the writer, so tombstoning a row version's entries and the logical undo of
   a ROLLBACK find each entry in one descent however long its key's run. An
   `ON DELETE CASCADE` over one parent's children is linear in the child count
-  (16,000 children: 6.2 s before, 0.43 s after; `SqlCascadeFanOutTests` guards the
-  growth ratio, timing four 4,000-child cascades against one of 16,000 in the
-  process's CPU time, so another process's load cannot stretch one block alone).
+  (`SqlCascadeFanOutTests` compares physical B-tree entry-directory reads per child for
+  four 4,000-child cascades and one 16,000-child cascade in the same tree, below 2× growth;
+  it also checks that the bystander survives). The former process-CPU ratio is removed (#1285).
   The UNIQUE check still reads its key's dead versions until a live one, so a row
   updated thousands of times under a UNIQUE index slows linearly per update until
   dead versions are pruned (#1195). Measurements and
@@ -7292,3 +7292,9 @@ writer supplies the legacy error prefix once; negotiated peers also receive the 
 structured diagnostics. No public signature, on-disk format, protocol version, event schema
 or counter changes. See the root DESIGN, structured failure-event codes, for selection and
 its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.

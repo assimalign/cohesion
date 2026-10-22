@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
@@ -153,7 +155,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
             var elapsed = Stopwatch.StartNew();
 
             // Act: the #1157 reproducer — three writers and one ALTER session.
-            var writers = Enumerable.Range(1, writerCount).Select(writer => Task.Run(async () =>
+            var writers = Enumerable.Range(1, writerCount).Select(writer => DedicatedTestTask.Run(async () =>
             {
                 var random = new Random(HashCode.Combine(seed, writer));
                 await using var session = await database.CreateSessionAsync();
@@ -179,7 +181,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                 }
             }));
 
-            var alter = Task.Run(async () =>
+            var alter = DedicatedTestTask.Run(async () =>
             {
                 try
                 {

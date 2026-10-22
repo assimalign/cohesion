@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -90,7 +92,7 @@ public class DatabaseInstanceTests
 
         // Act
         var second = database.DisposeAsync().AsTask();
-        var blocking = Task.Run(database.Dispose);
+        var blocking = DedicatedTestTask.Run(database.Dispose);
         bool secondWaited = !await CompletesWithin(second, TimeSpan.FromMilliseconds(200));
         bool blockingWaited = !await CompletesWithin(blocking, TimeSpan.FromMilliseconds(50));
         gate.SetResult();

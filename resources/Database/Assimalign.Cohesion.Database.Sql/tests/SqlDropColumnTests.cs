@@ -12,6 +12,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -153,7 +155,7 @@ public sealed class SqlDropColumnTests : IDisposable
 
             using var stop = new CancellationTokenSource();
             int started = 0;
-            var tasks = Enumerable.Range(0, readers).Select(reader => Task.Run(async () =>
+            var tasks = Enumerable.Range(0, readers).Select(reader => DedicatedTestTask.Run(async () =>
             {
                 await using var session = await database.CreateSessionAsync();
                 int query = 0;

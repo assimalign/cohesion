@@ -3533,3 +3533,7 @@ managed-heap activity; this verification change adds no SQL syntax, error code o
 Thrown statement failures report their structured diagnostic code without exposing statement
 text in tracing. Offline and unconfirmed-commit exception detail is unprefixed; Diagnostics
 carries the existing model code. This adds no language syntax or diagnostic number.
+
+### Cascade work guard (#1285)
+
+ON DELETE CASCADE keeps its existing results and transaction semantics. Its fan-out regression guard now compares physical B-tree entry-directory reads for four 4,000-child cascades against one 16,000-child cascade in the same tree, with less than 2× work per child. It verifies the surviving bystander and uses no duration to decide correctness. No SQL syntax, diagnostic or format changes accompany the test change.

@@ -1108,7 +1108,7 @@ public sealed class KeyValueWorkerResilienceTests
         Task? disposal = null;
         async Task InspectDisposalAsync()
         {
-            disposal = Task.Run(async () => await engine.DisposeAsync());
+            disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
             (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
             disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
         }
@@ -1129,7 +1129,7 @@ public sealed class KeyValueWorkerResilienceTests
             else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
             {
                 faults.StallJournalFlushes();
-                blockedWrite = Task.Run(() => PutAsync(failing, 0, 1));
+                blockedWrite = DedicatedTestTask.Run(() => PutAsync(failing, 0, 1));
                 var worker = (KeyValueWriteAheadFlushWorker)WorkerOf(engine, kind);
                 await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
                     () => faults.StalledJournalFlushes, id => PutAsync(healthy, id, 1), InspectDisposalAsync);

@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -56,13 +58,13 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         for (int writer = 0; writer < 2; writer++)
         {
             int seed = writer + 1;
-            tasks.Add(Task.Run(() => race.WriteFailingAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.WriteFailingAsync(database, seed)));
         }
 
         for (int reader = 0; reader < 4; reader++)
         {
             int seed = reader + 101;
-            tasks.Add(Task.Run(() => race.ReadSeededAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.ReadSeededAsync(database, seed)));
         }
 
         await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
@@ -92,17 +94,17 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         var race = new Race(stop, batchRows: 10);
 
         // Act
-        var tasks = new List<Task> { Task.Run(() => race.CommitRecentAsync(database)) };
+        var tasks = new List<Task> { DedicatedTestTask.Run(() => race.CommitRecentAsync(database)) };
         for (int writer = 0; writer < 2; writer++)
         {
             int seed = writer + 1;
-            tasks.Add(Task.Run(() => race.WriteFailingAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.WriteFailingAsync(database, seed)));
         }
 
         for (int reader = 0; reader < 4; reader++)
         {
             int seed = reader + 101;
-            tasks.Add(Task.Run(() => race.ReadRecentAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.ReadRecentAsync(database, seed)));
         }
 
         await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Commits >= 20 && race.Reads >= 50);

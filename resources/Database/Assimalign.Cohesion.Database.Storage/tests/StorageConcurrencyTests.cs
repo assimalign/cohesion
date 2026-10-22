@@ -12,6 +12,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
@@ -52,14 +54,14 @@ public sealed class StorageConcurrencyTests
             {
                 // Act
                 using var stop = new CancellationTokenSource();
-                var writers = Enumerable.Range(0, writerCount).Select(writer => Task.Run(() =>
+                var writers = Enumerable.Range(0, writerCount).Select(writer => DedicatedTestTask.Run(() =>
                     RunWriter(storage, writer, models, chainLocks[writer], new Random(HashCode.Combine(seed, phase, writer))))).ToArray();
 
                 var background = new List<Task>();
                 for (int reader = 0; reader < readerCount; reader++)
                 {
                     var random = new Random(HashCode.Combine(seed, phase, 100 + reader));
-                    background.Add(Task.Run(() =>
+                    background.Add(DedicatedTestTask.Run(() =>
                     {
                         while (!stop.IsCancellationRequested)
                         {
@@ -77,7 +79,7 @@ public sealed class StorageConcurrencyTests
                     }));
                 }
 
-                background.Add(Task.Run(() =>
+                background.Add(DedicatedTestTask.Run(() =>
                 {
                     int pass = 0;
                     while (!stop.IsCancellationRequested)
@@ -257,7 +259,7 @@ public sealed class StorageConcurrencyTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
         // Act
-        var inserters = Enumerable.Range(0, inserterCount).Select(inserter => Task.Run(() =>
+        var inserters = Enumerable.Range(0, inserterCount).Select(inserter => DedicatedTestTask.Run(() =>
         {
             var record = new byte[recordSize];
             for (int row = 1; storage.Data.Length < targetPages * (long)Page.Size && !deadline.IsCancellationRequested; row++)
@@ -274,7 +276,7 @@ public sealed class StorageConcurrencyTests
             Interlocked.Decrement(ref inserting);
         })).ToArray();
 
-        var updaters = Enumerable.Range(0, updaterCount).Select(updater => Task.Run(() =>
+        var updaters = Enumerable.Range(0, updaterCount).Select(updater => DedicatedTestTask.Run(() =>
         {
             var random = new Random(HashCode.Combine(seed, updater));
             var record = new byte[recordSize];
@@ -305,7 +307,7 @@ public sealed class StorageConcurrencyTests
             }
         })).ToArray();
 
-        var pageWriter = Task.Run(() =>
+        var pageWriter = DedicatedTestTask.Run(() =>
         {
             while (Volatile.Read(ref inserting) > 0)
             {

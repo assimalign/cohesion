@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Hosting.Health;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed partial class DatabaseHostingEventSourceTests
@@ -77,7 +79,7 @@ public sealed partial class DatabaseHostingEventSourceTests
                 var elapsed = Stopwatch.StartNew();
                 do
                 {
-                    await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+                    await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => DedicatedTestTask.Run(async () =>
                     {
                         (await application.Context.CheckAsync(timeout.Token)).Status.ShouldBe(HealthStatus.Degraded);
                         Interlocked.Increment(ref polls);

@@ -10,6 +10,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed partial class DocumentQueryTests
@@ -240,7 +242,7 @@ public sealed partial class DocumentQueryTests
         await PutAsync(collection, session, "one", "{}");
         var parameters = new Dictionary<string, object?> { ["input"] = new string('a', 10_000) };
         // Act
-        var rows = await Task.Run(() => RowsAsync(session, "SELECT @input LIKE '%a%a%a%a%a%a%a%a%b' FROM items", parameters))
+        var rows = await DedicatedTestTask.Run(() => RowsAsync(session, "SELECT @input LIKE '%a%a%a%a%a%a%a%a%b' FROM items", parameters))
             .WaitAsync(TimeSpan.FromSeconds(5));
         // Assert
         rows.Single().GetValue(0).ShouldBe(false);

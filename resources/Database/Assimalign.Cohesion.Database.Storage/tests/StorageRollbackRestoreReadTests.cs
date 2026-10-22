@@ -49,7 +49,7 @@ public sealed class StorageRollbackRestoreReadTests
         var committed = CommitRecords(storage);
         using var stop = new CancellationTokenSource();
         var race = new Race(stop);
-        var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
+        var writer = DedicatedTestTask.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
         // Act: two readers through TryReadRecord, one through the storages' direct ReadRecord.
         var readers = new Task[3];
@@ -57,7 +57,7 @@ public sealed class StorageRollbackRestoreReadTests
         {
             int seed = reader + 1;
             bool direct = reader == readers.Length - 1;
-            readers[reader] = Task.Run(() => race.Run(() =>
+            readers[reader] = DedicatedTestTask.Run(() => race.Run(() =>
             {
                 var random = new Random(seed);
                 while (race.Running)
@@ -102,13 +102,13 @@ public sealed class StorageRollbackRestoreReadTests
         var committed = CommitRecords(storage);
         using var stop = new CancellationTokenSource();
         var race = new Race(stop);
-        var writer = Task.Run(() => race.RollBackInserts(storage, committed[0].PageId));
+        var writer = DedicatedTestTask.Run(() => race.RollBackInserts(storage, committed[0].PageId));
 
         // Act
         var readers = new Task[2];
         for (int reader = 0; reader < readers.Length; reader++)
         {
-            readers[reader] = Task.Run(() => race.Run(() =>
+            readers[reader] = DedicatedTestTask.Run(() => race.Run(() =>
             {
                 while (race.Running)
                 {
@@ -230,7 +230,7 @@ public sealed class StorageRollbackRestoreReadTests
         try
         {
             page.Clear();
-            var task = Task.Run(read);
+            var task = DedicatedTestTask.Run(read);
             bool completed = SpinWait.SpinUntil(() => task.IsCompleted, TimeSpan.FromMilliseconds(200));
             whole.CopyTo(page);
             return (completed, task);

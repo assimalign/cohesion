@@ -64,6 +64,10 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </remarks>
 public sealed class BTreeIndex
 {
+    // Optional test observer of physical entry-directory reads. The ordinary path neither
+    // counts work nor performs a process-wide atomic operation (#1285, #1194).
+    internal static Action? EntryAccessed { get; set; }
+
     /// <summary>
     /// The maximum encoded key length accepted by a B+Tree, in bytes (1,024).
     /// </summary>

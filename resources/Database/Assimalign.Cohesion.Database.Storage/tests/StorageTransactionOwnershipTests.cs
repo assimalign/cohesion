@@ -116,7 +116,7 @@ public sealed class StorageTransactionOwnershipTests
         var elapsed = Stopwatch.StartNew();
 
         // Act
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {

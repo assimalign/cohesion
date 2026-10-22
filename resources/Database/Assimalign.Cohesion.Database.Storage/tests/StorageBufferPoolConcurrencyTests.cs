@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.FileSystem;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
@@ -59,7 +61,7 @@ public sealed class StorageBufferPoolConcurrencyTests
         {
             // Act: writers, readers, an evicter and a paced page writer run together.
             using var stop = new CancellationTokenSource();
-            var writers = Enumerable.Range(0, writerCount).Select(writer => Task.Run(() =>
+            var writers = Enumerable.Range(0, writerCount).Select(writer => DedicatedTestTask.Run(() =>
             {
                 var random = new Random(HashCode.Combine(seed, phase, writer));
                 for (int i = 0; i < operationsPerPhase; i++)
@@ -76,7 +78,7 @@ public sealed class StorageBufferPoolConcurrencyTests
             for (int reader = 0; reader < readerCount; reader++)
             {
                 int readerSeed = HashCode.Combine(seed, phase, 100 + reader);
-                background.Add(Task.Run(() =>
+                background.Add(DedicatedTestTask.Run(() =>
                 {
                     var random = new Random(readerSeed);
                     while (!stop.IsCancellationRequested)
@@ -88,7 +90,7 @@ public sealed class StorageBufferPoolConcurrencyTests
                 }));
             }
 
-            background.Add(Task.Run(() =>
+            background.Add(DedicatedTestTask.Run(() =>
             {
                 var random = new Random(HashCode.Combine(seed, phase, 200));
                 while (!stop.IsCancellationRequested)

@@ -157,11 +157,11 @@ public sealed class StorageCommitDurabilitySettingTests
             releaseFlush.Wait(TimeSpan.FromSeconds(30));
         };
 
-        var checkpoint = Task.Run(() => storage.Checkpoint());
+        var checkpoint = DedicatedTestTask.Run(() => storage.Checkpoint());
         flushEntered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
 
         // Act: the change starts while the checkpoint holds its lock.
-        var change = Task.Run(() => storage.CommitDurability = StorageCommitDurability.Grouped);
+        var change = DedicatedTestTask.Run(() => storage.CommitDurability = StorageCommitDurability.Grouped);
         var first = await Task.WhenAny(change, Task.Delay(TimeSpan.FromMilliseconds(500)));
         bool changedDuringCheckpoint = first == change;
         releaseFlush.Set();

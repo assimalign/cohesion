@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(nameof(SqlWorkerResilienceTests))]
@@ -45,7 +47,7 @@ public sealed class ProvisionalFlushLaneTests
         var worker = engine.Workers.OfType<SqlWriteAheadFlushWorker>().Single();
         var passes = new ConcurrentQueue<DatabaseWorkerPass>();
         worker.PassCompleted = passes.Enqueue;
-        var create = Task.Run(async () => await engine.CreateDatabaseAsync("constructing"));
+        var create = DedicatedTestTask.Run(async () => await engine.CreateDatabaseAsync("constructing"));
         Task first = Task.CompletedTask;
         Task second = Task.CompletedTask;
         int publishedAttempts = 0;
@@ -70,7 +72,7 @@ public sealed class ProvisionalFlushLaneTests
             }
 
             // Act: first flush acknowledged its commit, but its method has not returned.
-            first = Task.Run(CommitEmpty);
+            first = DedicatedTestTask.Run(CommitEmpty);
             flushEntered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             await first.WaitAsync(TimeSpan.FromSeconds(30));
             if (publish)
@@ -82,7 +84,7 @@ public sealed class ProvisionalFlushLaneTests
             var pending = storage.OnCommitPending;
             storage.OnCommitPending = () => { pending?.Invoke(); registered.Set(); };
             int before = passes.Count;
-            second = Task.Run(CommitEmpty);
+            second = DedicatedTestTask.Run(CommitEmpty);
             registered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             string expectedVisit = publish ? "constructing" : "constructing (provisional)";
             var duration = Stopwatch.StartNew();

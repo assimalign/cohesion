@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 using Assimalign.Cohesion.Database.Storage.Units;
@@ -136,7 +138,7 @@ public class StorageStreamTests
         var lastStamp = new long[finalPages];
 
         // Act
-        var extender = Task.Run(() =>
+        var extender = DedicatedTestTask.Run(() =>
         {
             for (long page = initialPages; page < finalPages; page++)
             {
@@ -147,7 +149,7 @@ public class StorageStreamTests
             Volatile.Write(ref extended, 1);
         });
 
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var random = new Random(seed);
             var buffer = new byte[Page.Size];

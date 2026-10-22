@@ -198,7 +198,10 @@ internal readonly ref struct BTreeNode
     }
 
     private ushort GetEntryOffset(int index)
-        => BinaryPrimitives.ReadUInt16LittleEndian(_body[(directoryOffset + DirectorySlotSize * index)..]);
+    {
+        BTreeIndex.EntryAccessed?.Invoke();
+        return BinaryPrimitives.ReadUInt16LittleEndian(_body[(directoryOffset + DirectorySlotSize * index)..]);
+    }
 
     private ushort GetLengthField(int offset)
         => BinaryPrimitives.ReadUInt16LittleEndian(_body[offset..]);

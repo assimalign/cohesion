@@ -117,3 +117,7 @@ Thrown statement failures report the first error diagnostic's code, or the first
 when none is an error. Events never recover codes from exception messages. Offline and
 unconfirmed-commit exceptions now carry structured model diagnostics and unprefixed detail;
 legacy wire error text keeps its single code prefix. See DESIGN, structured failure-event codes.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

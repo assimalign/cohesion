@@ -1069,7 +1069,7 @@ public sealed class GraphWorkerResilienceTests
         Task? disposal = null;
         async Task InspectDisposalAsync()
         {
-            disposal = Task.Run(async () => await engine.DisposeAsync());
+            disposal = DedicatedTestTask.Run(async () => await engine.DisposeAsync());
             (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
             disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
         }
@@ -1090,7 +1090,7 @@ public sealed class GraphWorkerResilienceTests
             else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
             {
                 faults.StallJournalFlushes();
-                blockedWrite = Task.Run(() => InsertAsync(failing, 0, 1));
+                blockedWrite = DedicatedTestTask.Run(() => InsertAsync(failing, 0, 1));
                 var worker = (GraphWriteAheadFlushWorker)WorkerOf(engine, kind);
                 await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
                     () => faults.StalledJournalFlushes, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
@@ -1130,7 +1130,7 @@ public sealed class GraphWorkerResilienceTests
         var faults = strategy.Faults(Failing);
         var worker = (GraphWriteAheadFlushWorker)WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
         using var stop = new CancellationTokenSource();
-        var wakes = Task.Run(async () =>
+        var wakes = DedicatedTestTask.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
             {
@@ -1139,7 +1139,7 @@ public sealed class GraphWorkerResilienceTests
             }
         });
         faults.StallJournalFlushes();
-        var blocked = Task.Run(() => InsertAsync(failing, 0, 1));
+        var blocked = DedicatedTestTask.Run(() => InsertAsync(failing, 0, 1));
         try
         {
             // Act/Assert: the helper's continuation must wait for its positive-work counter,

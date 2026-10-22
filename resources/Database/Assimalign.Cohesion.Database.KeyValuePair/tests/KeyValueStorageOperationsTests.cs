@@ -370,25 +370,27 @@ public sealed class KeyValueStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         var (engine, database) = await CreateAsync(options =>
         {
+            options.StorageStrategy = strategy;
             options.CheckpointJournalSize = size;
             options.CheckpointInterval = TimeSpan.FromHours(1);
         });
         await using var _ = engine;
         using var stop = new CancellationTokenSource();
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size; i++)
             {
                 await database.PutAsync(session, Bytes($"{writer}-{i}"), Bytes(new string('x', 3000)));
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 

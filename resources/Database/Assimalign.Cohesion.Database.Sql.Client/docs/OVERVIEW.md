@@ -85,3 +85,7 @@ in one exchange (-1 for SELECT, n for DML). ExecuteAsync returns only n and disc
 returned rows; ExecuteScalarAsync retrieves the first cell, including a generated identity.
 
 See `docs/DESIGN.md` for the design decisions behind the surface.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

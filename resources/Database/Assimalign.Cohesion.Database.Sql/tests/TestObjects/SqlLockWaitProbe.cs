@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 /// <summary>
@@ -142,7 +144,7 @@ internal sealed class SqlLockWaitProbe
         var probe = new SqlLockWaitProbe(database, name, parents, explicitOnly, deleters + childWriters);
         using var listener = new Listener(probe);
         using var stop = new CancellationTokenSource();
-        var workers = probe._workers.Select(worker => Task.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
+        var workers = probe._workers.Select(worker => DedicatedTestTask.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
 
         // The purge and the watchdog have threads of their own: on a small runner the workers hold
         // the pool's few threads, and a pooled loop could wait out the whole run.

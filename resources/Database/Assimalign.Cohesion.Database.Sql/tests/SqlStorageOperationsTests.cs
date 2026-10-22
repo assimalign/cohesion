@@ -539,8 +539,10 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
         await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -579,18 +581,18 @@ public sealed class SqlStorageOperationsTests
 
         using var stop = new CancellationTokenSource();
         string payload = new('x', 6000);
-        var writers = Enumerable.Range(0, 2).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 2).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await written.CreateSessionAsync();
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(written.Name.ToString()).Written < 40 * size; i++)
             {
                 await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{payload}')");
             }
         })).ToArray();
 
-        // Act: sample the written database's journal until many sizes went through it, counting
+        // Act: observe exact stream counters until forty sizes went through the journal, counting
         // the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => written.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(written.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
         bool heldThroughout = !statement.IsCompleted;
@@ -765,8 +767,10 @@ public sealed class SqlStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalSqlStorageStrategy();
         await using var engine = SqlDatabaseEngine.Create("sql-engine", new SqlDatabaseEngineOptions
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -779,19 +783,19 @@ public sealed class SqlStorageOperationsTests
         using var stop = new CancellationTokenSource();
         string payload = new('x', 6000);
         long inserted = 0;
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size; i++)
             {
                 await session.ExecuteAsync($"INSERT INTO t (id, payload) VALUES ({writer * 10_000_000 + i}, '{payload}')");
                 Interlocked.Increment(ref inserted);
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
         await Task.WhenAll(writers).WaitAsync(Timeout);
 

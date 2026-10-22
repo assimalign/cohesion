@@ -241,7 +241,7 @@ public sealed class StorageRecordReclamationTests
         Delete(storage, stale);
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {
@@ -333,7 +333,7 @@ public sealed class StorageRecordReclamationTests
         byte[] payload = new byte[900];
         using var stop = new CancellationTokenSource();
         long cycles = 0;
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var live = new List<(PageId PageId, int SlotIndex)>();
             while (!stop.IsCancellationRequested)

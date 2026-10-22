@@ -1,5 +1,5 @@
 using System;
-using System.Diagnostics;
+using System.Threading;
 using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
@@ -12,34 +12,16 @@ using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 /// <summary>
-/// Timing guards for #1194's acceptance: an operation that targets one entry of a key
-/// descends to it, so its cost does not grow with the length of the key's run. Each
-/// guard compares the cost per operation inside a 40,000-entry run with the cost inside
-/// a 2,500-entry run of the same tree — a growth ratio, not an absolute time, so CPU
-/// speed, build configuration and load cancel out. A walk of the run, as before #1194,
-/// grows with the run: sixteen times the run, about sixteen times the cost. A descent
-/// costs the same in both runs: they share the tree, its height and its cached pages.
-/// The guard allows four. A second guard does the same for the versions of one entry
-/// reference that a reused record slot leaves under a key: delete and clear-deleter
-/// read them newest first, so 2,048 versions cost what 16 do.
+/// Physical-work guards for #1194: entry lookups descend directly regardless of duplicate
+/// run length, and newest-version lookups avoid walking old versions. Counters observe every
+/// entry-directory read; neither elapsed time nor scheduling decides the assertion (#1285).
 /// </summary>
-/// <remarks>
-/// Entry references are in insertion order, and every round targets a contiguous
-/// block of 400 references from the middle of each run — the block a walk from the
-/// run's start reaches only after half the run — in shuffled order. A block spans the
-/// same few leaves in either run, so the per-page cost of a transaction's first write
-/// to a page (the storage layer's before-image) is the same for both, and each round
-/// rolls back, so every round starts from the same tree. The two runs are measured in
-/// alternation, and each takes the fastest of five rounds, which discards rounds a
-/// collection or a busy machine slowed down.
-/// </remarks>
 [Collection(TimingCollection.Name)]
 public class BTreeEntryTimingTests
 {
     private const int shortRun = 2_500;
     private const int longRun = 40_000;
     private const int block = 400;
-    private const int rounds = 5;
     private const double allowedGrowth = 4.0;
     private const int fewVersions = 16;
     private const int manyVersions = 2_048;
@@ -89,23 +71,20 @@ public class BTreeEntryTimingTests
         var small = new Run(harness, index, operation, shortKey, 0, shortRun, writer, deleter);
         var large = new Run(harness, index, operation, longKey, shortRun, longRun, writer, deleter);
 
-        // Warm up both paths (JIT, page cache) and check the operation does its work.
+        // Verify the operation before comparing physical work.
         await small.MeasureAsync(verify: true);
         await large.MeasureAsync(verify: true);
 
         // Act
-        double smallest = double.MaxValue;
-        double largest = double.MaxValue;
-        for (int round = 0; round < rounds; round++)
-        {
-            smallest = Math.Min(smallest, await small.MeasureAsync(verify: false));
-            largest = Math.Min(largest, await large.MeasureAsync(verify: false));
-        }
+        double smallest = await small.MeasureAsync(verify: false);
+        double largest = await large.MeasureAsync(verify: false);
 
         // Assert
+        smallest.ShouldBeGreaterThan(0);
+        largest.ShouldBeGreaterThan(0);
         double growth = largest / smallest;
         growth.ShouldBeLessThan(allowedGrowth,
-            $"{operation}: {smallest:F2} us per operation in the {shortRun:N0}-entry run, {largest:F2} us in the {longRun:N0}-entry run");
+            $"{operation}: {smallest:F2} directory reads per operation in the {shortRun:N0}-entry run, {largest:F2} reads in the {longRun:N0}-entry run");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Entry order: delete and clear-deleter of a reference with 2,048 versions cost what they cost with 16 (#1194)")]
@@ -151,20 +130,25 @@ public class BTreeEntryTimingTests
         await many.MeasureAsync(verify: true);
 
         // Act
-        double smallest = double.MaxValue;
-        double largest = double.MaxValue;
-        for (int round = 0; round < rounds; round++)
-        {
-            smallest = Math.Min(smallest, await few.MeasureAsync(verify: false));
-            largest = Math.Min(largest, await many.MeasureAsync(verify: false));
-        }
+        double smallest = await few.MeasureAsync(verify: false);
+        double largest = await many.MeasureAsync(verify: false);
 
         // Assert
+        smallest.ShouldBeGreaterThan(0);
+        largest.ShouldBeGreaterThan(0);
         double growth = largest / smallest;
         growth.ShouldBeLessThan(allowedVersionGrowth,
-            $"{operation}: {smallest:F2} us per operation with {fewVersions} versions per reference, {largest:F2} us with {manyVersions:N0}");
+            $"{operation}: {smallest:F2} directory reads per operation with {fewVersions} versions per reference, {largest:F2} reads with {manyVersions:N0}");
     }
 
+    private sealed class EntryReadCounter : IDisposable
+    {
+        private long _reads;
+        internal EntryReadCounter() { BTreeIndex.EntryAccessed = () => Interlocked.Increment(ref _reads); }
+        internal long Count => Interlocked.Read(ref _reads);
+        internal void Reset() => Interlocked.Exchange(ref _reads, 0);
+        public void Dispose() => BTreeIndex.EntryAccessed = null;
+    }
     private static async Task<TransactionSequence> CommittedAsync(IndexTestHarness harness)
     {
         var context = await harness.BeginAsync();
@@ -225,22 +209,22 @@ public class BTreeEntryTimingTests
 
         /// <summary>
         /// Runs the operation on every target inside a transaction that then rolls back,
-        /// and returns the microseconds per operation.
+        /// and returns the physical entry-directory reads per operation.
         /// </summary>
         internal async Task<double> MeasureAsync(bool verify)
         {
-            long start;
-            double elapsed;
+            using var counter = new EntryReadCounter();
+            double reads;
 
             if (_operation == Operation.Delete)
             {
                 var transaction = await _harness.BeginAsync();
-                start = Stopwatch.GetTimestamp();
+                counter.Reset();
                 foreach (ulong reference in _targets)
                 {
                     await _index.DeleteAsync(transaction, _key, reference);
                 }
-                elapsed = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+                reads = counter.Count;
 
                 if (verify)
                 {
@@ -252,12 +236,12 @@ public class BTreeEntryTimingTests
             else
             {
                 using var bracket = _harness.Storage.BeginTransaction();
-                start = Stopwatch.GetTimestamp();
+                counter.Reset();
                 foreach (ulong reference in _targets)
                 {
                     await _index.ClearDeleterAsync(bracket, _key, reference, _deleter);
                 }
-                elapsed = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+                reads = counter.Count;
 
                 if (verify)
                 {
@@ -269,7 +253,7 @@ public class BTreeEntryTimingTests
                 bracket.Rollback();
             }
 
-            return elapsed / targets;
+            return reads / targets;
         }
 
         private async Task<int> CountVisibleAsync(TransactionContext reader)
@@ -317,22 +301,22 @@ public class BTreeEntryTimingTests
 
         /// <summary>
         /// Runs the operation over the block inside a transaction that then rolls back,
-        /// and returns the microseconds per operation.
+        /// and returns the physical entry-directory reads per operation.
         /// </summary>
         internal async Task<double> MeasureAsync(bool verify)
         {
-            long start;
-            double elapsed;
+            using var counter = new EntryReadCounter();
+            double reads;
 
             if (_operation == Operation.Delete)
             {
                 var transaction = await _harness.BeginAsync();
-                start = Stopwatch.GetTimestamp();
+                counter.Reset();
                 foreach (ulong reference in _targets)
                 {
                     await _index.DeleteAsync(transaction, _key, reference);
                 }
-                elapsed = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+                reads = counter.Count;
 
                 if (verify)
                 {
@@ -344,7 +328,7 @@ public class BTreeEntryTimingTests
             else
             {
                 using var bracket = _harness.Storage.BeginTransaction();
-                start = Stopwatch.GetTimestamp();
+                counter.Reset();
                 foreach (ulong reference in _targets)
                 {
                     if (_operation == Operation.Erase)
@@ -356,7 +340,7 @@ public class BTreeEntryTimingTests
                         await _index.ClearDeleterAsync(bracket, _key, reference, _deleter);
                     }
                 }
-                elapsed = Stopwatch.GetElapsedTime(start).TotalMicroseconds;
+                reads = counter.Count;
 
                 if (verify)
                 {
@@ -368,7 +352,7 @@ public class BTreeEntryTimingTests
                 bracket.Rollback();
             }
 
-            return elapsed / block;
+            return reads / block;
         }
 
         private async Task<int> CountVisibleAsync(TransactionContext reader)

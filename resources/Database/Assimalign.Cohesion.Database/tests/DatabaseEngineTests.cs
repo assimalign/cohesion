@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -478,7 +480,7 @@ public class DatabaseEngineTests
         await database.Closing.WaitAsync(_timeout);
 
         // Act: the leaf's drop core closes under its lock, so it runs off the test's thread.
-        var drop = Task.Run(async () => await engine.DropDatabaseAsync("appdb"));
+        var drop = DedicatedTestTask.Run(async () => await engine.DropDatabaseAsync("appdb"));
         bool dropWaited = !await CompletesWithin(drop, TimeSpan.FromMilliseconds(200));
         gate.SetResult();
         await drop.WaitAsync(_timeout);
