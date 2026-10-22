@@ -445,24 +445,17 @@ public sealed class CheckpointPassObservationTests
                 {
                     ambient.Value = 42 + job;
                     object key = new();
-                    DatabaseWorkerLanes<int>.Outcome outcome = default;
-                    bool completed = false;
-                    // Act: the second job must reuse the one admitted runner. Capacity can be
-                    // briefly occupied between result publication and the runner parking.
-                    while (!completed && duration.Elapsed < TimeSpan.FromSeconds(30))
+                    // Act: result publication and parking are one transition.
+                    bool completed = lanes.Run(key, () =>
                     {
-                        completed = lanes.Run(key, () =>
-                        {
-                            int inherited = ambient.Value;
-                            ambient.Value = 99;
-                            return inherited;
-                        }, signal, TimeSpan.FromSeconds(1), CancellationToken.None, out outcome);
-                        if (!completed)
-                        {
-                            lanes.WaitForIdle(TimeSpan.FromSeconds(30)).ShouldBeTrue();
-                            completed = lanes.Collect(key, out outcome) == DatabaseWorkerLanes<int>.LaneState.Ended;
-                            if (!completed) { Thread.Yield(); }
-                        }
+                        int inherited = ambient.Value;
+                        ambient.Value = 99;
+                        return inherited;
+                    }, signal, TimeSpan.FromSeconds(1), CancellationToken.None, out var outcome);
+                    if (!completed)
+                    {
+                        lanes.WaitForIdle(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+                        completed = lanes.Collect(key, out outcome) == DatabaseWorkerLanes<int>.LaneState.Ended;
                     }
                     // Assert: neither caller state nor the previous job's state leaked in.
                     completed.ShouldBeTrue();

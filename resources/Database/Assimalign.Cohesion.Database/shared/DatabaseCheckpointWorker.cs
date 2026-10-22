@@ -95,6 +95,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
     internal const int JournalSizeLimitFailures = 2;
 
     private readonly long _journalSizeLimit;
+    private TDatabase? _lastServed;
     /// <summary>
     /// Initializes a new instance of the <see cref="DatabaseCheckpointWorker{TDatabase}"/> class,
     /// named <c>{engineName}/checkpoint</c>, of kind <see cref="DatabaseEngineWorkerKind.Checkpoint"/>.
@@ -171,9 +172,12 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
 
     protected sealed override void RunLanePass(CancellationToken cancellationToken, DatabaseWorkerPass? pass)
     {
-        foreach (var database in GetDatabases())
+        var databases = GetDatabases();
+        int start = databases.Length == 0 ? 0 : (Array.IndexOf(databases, _lastServed) + 1) % databases.Length;
+        for (int offset = 0; offset < databases.Length; offset++)
         {
             if (cancellationToken.IsCancellationRequested) { break; }
+            var database = databases[(start + offset) % databases.Length];
             Visit(database, Interval, PollWait, cancellationToken, pass?.Add(GetName(database)));
         }
     }
@@ -242,6 +246,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
             if (!RunCheckpoint(database, interval, wait, cancellationToken, out outcome, visit))
             {
                 if (visit is not null && visit.Reason != DatabaseWorkerPass.VisitReason.Capacity) { visit.Reason = DatabaseWorkerPass.VisitReason.Running; }
+                if (!Lanes.HasLane(database)) { ReportCapacity(name); }
                 // Left running on its lane; a later pass collects it.
                 if (!unfinishedReported)
                 {
@@ -262,11 +267,15 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker
     // allocated on entry even for an idle database or an unobserved pass.
     private bool RunCheckpoint(TDatabase database, TimeSpan interval, TimeSpan wait, CancellationToken cancellationToken,
         out DatabaseWorkerLanes<bool>.Outcome outcome, DatabaseWorkerPass.Visit? visit)
-        => Lanes.Run(database, () =>
+    {
+        bool ended = Lanes.Run(database, () =>
         {
             BeforeCheckpoint?.Invoke(database);
             return Checkpoint(database, interval, cancellationToken);
-        }, CheckpointNeededSignal, wait, cancellationToken, out outcome, visit);
+        }, CheckpointNeededSignal, wait, cancellationToken, out outcome, visit, GetName(database));
+        if (ended || Lanes.HasLane(database)) { _lastServed = database; }
+        return ended;
+    }
 
     private void Settle(TDatabase database, string name, DatabaseWorkerLanes<bool>.Outcome outcome, CancellationToken cancellationToken, ref bool unfinishedReported, DatabaseWorkerPass.Visit? visit)
     {

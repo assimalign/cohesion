@@ -920,22 +920,22 @@ public sealed class GraphWorkerResilienceTests
 
         // Act: the first full pass fails on one database.
         clock.Advance(options.MaintenanceInterval);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
 
         // A pass before the backoff has passed does not run it again, and keeps the failure.
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
 
         // The backoff passes: the full pass runs again for the failing database alone, and fails.
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
 
         // The fault clears; the next retry, a backoff later, completes.
         Volatile.Write(ref fail, false);
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
 
         // Assert
         afterTheFailure.ShouldBe((1, 1, true));
@@ -1111,6 +1111,50 @@ public sealed class GraphWorkerResilienceTests
         }
         // Assert: released work drains, and no database was failed or taken offline by a stall.
         (await Eventually(() => faults.StalledPageWrites == 0 && faults.StalledJournalFlushes == 0 && faults.StalledPurges == 0)).ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Isolation samples: a slow healthy producer and extra WAL wakes still require positive work")]
+    public async Task Run_OneDatabaseStallsWithSlowHealthyProducer_ShouldWaitForRealWorkSamples()
+    {
+        // Arrange: unrelated registrations can keep a WAL pump visiting an idle database
+        // while its producer is scheduled slowly under load. No-op visits are not I/O samples.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(1);
+        await using var engine = GraphDatabaseEngine.Create("slow-producer", options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var faults = strategy.Faults(Failing);
+        var worker = (GraphWriteAheadFlushWorker)WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        using var stop = new CancellationTokenSource();
+        var wakes = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                healthy.DataStorage.OnCommitPending?.Invoke();
+                await Task.Delay(5);
+            }
+        });
+        faults.StallJournalFlushes();
+        var blocked = Task.Run(() => InsertAsync(failing, 0, 1));
+        try
+        {
+            // Act/Assert: the helper's continuation must wait for its positive-work counter,
+            // retaining the existing ceiling, timing budgets and final counter assertions.
+            await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                () => faults.StalledJournalFlushes, async id =>
+                {
+                    await Task.Delay(100);
+                    await InsertAsync(healthy, id, 1);
+                });
+        }
+        finally
+        {
+            stop.Cancel(); faults.Clear();
+            await Task.WhenAll(wakes, blocked).WaitAsync(Timeout);
+        }
         engine.OfflineDatabases.ShouldBeEmpty();
     }
 

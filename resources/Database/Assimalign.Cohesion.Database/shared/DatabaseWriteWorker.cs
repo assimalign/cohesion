@@ -13,6 +13,9 @@ internal abstract class DatabaseWriteWorker<TDatabase> : DatabaseMaintenanceWork
         : base(name, kind, interval) { }
 
     protected abstract DatabaseWriteResult RunDatabase(TDatabase database, CancellationToken cancellationToken);
+    protected override bool RepeatAfterCollection => Kind == DatabaseEngineWorkerKind.PageWriteBack;
+    protected override bool IsUnfinished(TDatabase database)
+        => Kind == DatabaseEngineWorkerKind.PageWriteBack && IsDue(database);
     protected sealed override Func<DatabaseWriteResult> CreateWork(TDatabase database, CancellationToken cancellationToken)
         => () => RunDatabase(database, cancellationToken);
 

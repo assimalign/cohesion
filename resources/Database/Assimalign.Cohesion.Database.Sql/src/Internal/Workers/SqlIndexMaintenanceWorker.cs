@@ -34,6 +34,7 @@ internal sealed class SqlIndexMaintenanceWorker : DatabaseWriteWorker<SqlDatabas
     protected override string GetName(SqlDatabase database) => database.Name;
     protected override bool IsClosed(SqlDatabase database) => database.IsClosed;
     protected override bool IsOffline(SqlDatabase database) => database.IsOffline;
+    protected override bool IsDue(SqlDatabase database) => false;
     protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(SqlDatabase database, CancellationToken cancellationToken)

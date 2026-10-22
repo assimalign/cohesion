@@ -39,6 +39,7 @@ internal sealed class SqlPageWriteBackWorker : DatabaseWriteWorker<SqlDatabase>
     protected override string GetName(SqlDatabase database) => database.Name;
     protected override bool IsClosed(SqlDatabase database) => database.IsClosed;
     protected override bool IsOffline(SqlDatabase database) => database.IsOffline;
+    protected override bool IsDue(SqlDatabase database) => database.DataStorage.DirtyPageCount > 0 || database.CatalogStorage.DirtyPageCount > 0;
     protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(SqlDatabase database, CancellationToken cancellationToken)

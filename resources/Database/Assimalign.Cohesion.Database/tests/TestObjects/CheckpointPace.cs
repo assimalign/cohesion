@@ -81,7 +81,8 @@ internal static class CheckpointPace
                     && visit.Reason == DatabaseWorkerPass.VisitReason.BackingOff)) < 3
                 || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled) < minimumSamples
                 || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled && pass.PumpElapsed.HasValue) < minimumSamples
-                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples)
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0)) < minimumSamples)
                 && watch.Elapsed < TimeSpan.FromSeconds(30));
         }
         finally
@@ -109,6 +110,9 @@ internal static class CheckpointPace
             {
                 visit.GiveUpRequested.ShouldBeFalse(context);
                 visit.Offline.ShouldBeFalse(context);
+                // Bound the observed request independently of the production constant:
+                // a quick device must not hide a quarter-second blocking request.
+                visit.LaneWaitRequested.ShouldBeLessThanOrEqualTo(TimeSpan.FromMilliseconds(5) * visit.LaneWaits, context);
             }
             var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
             healthy.Backoff.ShouldBe(TimeSpan.Zero, context);
@@ -143,6 +147,8 @@ internal static class CheckpointPace
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Due is { IsDue: true }))
             .ShouldBeGreaterThanOrEqualTo(4);
         completedBatches.ShouldBeGreaterThanOrEqualTo(4);
+        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0))
+            .ShouldBeGreaterThanOrEqualTo(minimumSamples, "exercise actual lane wait requests");
         var signaled = recorded.Where(pass => pass.TriggerMeasured && pass.TriggerSignaled).ToArray();
         VerifyDurations(signaled.Select(pass => pass.TriggerElapsed), laneBudget, "measured Set wake");
         VerifyDurations(signaled.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value),
@@ -179,6 +185,10 @@ internal static class CheckpointPace
                     && visit.Reason == DatabaseWorkerPass.VisitReason.Running)) < minimumSamples
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName
                     && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed)) < minimumSamples
+                || (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance
+                    && passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
+                        && visit.Reason == DatabaseWorkerPass.VisitReason.Running)
+                        && pass.Visits.Any(visit => visit.Database == healthyName && visit.WorkUnits > 0)) < 4)
                 || passes.Count(pass => pass.TriggerMeasured && pass.PumpElapsed.HasValue) < minimumSamples)
                 && duration.Elapsed < TimeSpan.FromSeconds(30));
 
@@ -196,7 +206,11 @@ internal static class CheckpointPace
                 pass.PumpBackoff.ShouldBe(TimeSpan.Zero);
                 var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
                 healthy.Backoff.ShouldBe(TimeSpan.Zero);
-                (healthy.Attempted || healthy.Collected || healthy.Reason == DatabaseWorkerPass.VisitReason.Running).ShouldBeTrue();
+                if (healthy.Reason == DatabaseWorkerPass.VisitReason.NotDue)
+                {
+                    healthy.WorkDue.ShouldBe(false, "the pump must provide its due decision for an idle visit");
+                }
+                else { (healthy.Attempted || healthy.Collected || healthy.Reason == DatabaseWorkerPass.VisitReason.Running).ShouldBeTrue(); }
             }
             if (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance)
             {

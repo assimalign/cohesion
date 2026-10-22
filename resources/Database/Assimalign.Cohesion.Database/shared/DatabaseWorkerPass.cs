@@ -52,6 +52,7 @@ internal sealed class DatabaseWorkerPass
 
         internal string Database { get; }
         internal VisitReason Reason { get; set; } = VisitReason.Interrupted;
+        internal bool? WorkDue { get; set; }
         internal bool Attempted { get; set; }
         internal bool Collected { get; set; }
         internal int WorkUnits { get; set; }

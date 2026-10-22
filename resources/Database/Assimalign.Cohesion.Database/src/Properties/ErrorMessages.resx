@@ -7,4 +7,5 @@
   <data name="StorageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt. {2} Restore the database from a verified backup.</value></data>
   <data name="StoragePageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt on page {1}. {2} Restore the database from a verified backup.</value></data>
   <data name="ObjectOwnedBySchema" xml:space="preserve"><value>Object '{0}' is owned by schema '{1}' and cannot be changed by {2}. Alter the schema and redeploy it.</value></data>
+  <data name="MaintenanceLaneDelayed" xml:space="preserve"><value>Database '{0}' maintenance worker '{1}' ({2}) is delayed by {3}; the admission cap is 64 and the hard thread ceiling is 128 (running for {4}).</value></data>
 </root>

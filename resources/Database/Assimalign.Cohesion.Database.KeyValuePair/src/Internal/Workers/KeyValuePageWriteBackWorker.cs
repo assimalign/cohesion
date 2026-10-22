@@ -40,6 +40,7 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseWriteWorker<KeyValue
     protected override string GetName(KeyValueDatabase database) => database.Name;
     protected override bool IsClosed(KeyValueDatabase database) => database.IsClosed;
     protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
+    protected override bool IsDue(KeyValueDatabase database) => database.DataStorage.DirtyPageCount > 0 || database.CatalogStorage.DirtyPageCount > 0;
     protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(KeyValueDatabase database, CancellationToken cancellationToken)

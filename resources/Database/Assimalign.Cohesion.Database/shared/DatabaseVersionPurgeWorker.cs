@@ -10,6 +10,11 @@ using Assimalign.Cohesion.Database.Transactions;
 // Deviates from namespace-matches-assembly: model-local linked source.
 namespace Assimalign.Cohesion.Database;
 
+// #1226: a refused undo retains writer locks, so its coordinator owns a short doubling
+// retry schedule independent of the maintenance interval. Owner decision 42 keeps a failed
+// full pass recorded until a full pass succeeds; an undo-only visit cannot settle that work.
+// Owner decision 46 retries a failed full pass after FailureBackoff for that database alone,
+// on the engine clock, so give-up timing is independent of the full maintenance interval.
 // Retry/refusal state belongs exclusively to the pump. A lane returns facts about the work it
 // attempted; settlement updates the state only after Collect transferred ownership back.
 internal abstract class DatabaseVersionPurgeWorker<TDatabase> : DatabaseMaintenanceWorker<TDatabase, DatabasePurgeResult>
@@ -69,10 +74,12 @@ internal abstract class DatabaseVersionPurgeWorker<TDatabase> : DatabaseMaintena
 
     protected sealed override void PreparePass(TDatabase[] databases)
     {
-        foreach (var gone in _states.Keys.Where(database => !IsOpen(database) || IsOffline(database)).ToArray())
+        List<TDatabase>? gone = null;
+        foreach (var database in _states.Keys)
         {
-            _states.Remove(gone);
+            if (!IsOpen(database) || IsOffline(database)) { (gone ??= []).Add(database); }
         }
+        if (gone is not null) { foreach (var database in gone) { _states.Remove(database); } }
         long now = _clock.GetTimestamp();
         bool full = _clock.GetElapsedTime(Volatile.Read(ref _lastFullPass), now) >= Interval;
         if (full)
@@ -86,6 +93,19 @@ internal abstract class DatabaseVersionPurgeWorker<TDatabase> : DatabaseMaintena
             // A full pass that becomes due while its prior lane runs stays owed after collection.
             if (full) { state.OwedEpoch = _epoch; }
         }
+    }
+
+    protected sealed override bool IsUnfinished(TDatabase database)
+        => _states[database].RetryAt.HasValue || _states[database].Refusal is not null
+            || GetCoordinator(database).NextDeferredUndoRetry is not null;
+
+    protected sealed override bool IsDue(TDatabase database)
+    {
+        var state = _states[database];
+        return BeforeDeferredUndoRetry is not null || state.OwedEpoch > state.AttemptedEpoch
+            || (state.RetryAt is { } retry && _clock.GetTimestamp() >= retry)
+            || GetCoordinator(database).NextDeferredUndoRetry is { } undo && undo <= TimeSpan.Zero
+            || ReclamationReady && HasReclamation(database);
     }
 
     protected sealed override Func<DatabasePurgeResult> CreateWork(TDatabase database, CancellationToken cancellationToken)

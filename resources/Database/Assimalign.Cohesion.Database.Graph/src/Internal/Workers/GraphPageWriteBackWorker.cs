@@ -48,6 +48,7 @@ internal sealed class GraphPageWriteBackWorker : DatabaseWriteWorker<GraphDataba
     protected override string GetName(GraphDatabase database) => database.Name;
     protected override bool IsClosed(GraphDatabase database) => database.IsClosed;
     protected override bool IsOffline(GraphDatabase database) => database.IsOffline;
+    protected override bool IsDue(GraphDatabase database) => database.DataStorage.DirtyPageCount > 0;
     protected override bool IsOpen(GraphDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(GraphDatabase database, CancellationToken cancellationToken)

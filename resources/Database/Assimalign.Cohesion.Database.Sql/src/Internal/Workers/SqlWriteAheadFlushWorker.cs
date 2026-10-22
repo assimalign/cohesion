@@ -46,6 +46,10 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
 
     protected override ManualResetEventSlim LaneSignal => _commitPending;
     protected override bool RepeatAfterCollection => true;
+    // Publication cannot change a data file set's lane identity. A provisional catalog
+    // flush is collected before the published database may flush that catalog as well.
+    protected override object GetLaneKey(SqlDatabase database) => database.DataStorage;
+    protected override bool HasConcurrentWork(SqlDatabase database) => Lanes.IsRunning(database.CatalogStorage);
 
     protected override SqlDatabase[] GetDatabases()
     {
@@ -56,6 +60,7 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
     protected override string GetName(SqlDatabase database) => database.Name;
     protected override bool IsClosed(SqlDatabase database) => database.IsClosed;
     protected override bool IsOffline(SqlDatabase database) => database.IsOffline;
+    protected override bool IsDue(SqlDatabase database) => database.DataStorage.HasPendingCommits || database.CatalogStorage.HasPendingCommits;
     protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(SqlDatabase database, CancellationToken cancellationToken)
@@ -71,6 +76,7 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
         _published.Clear();
         foreach (var database in databases)
         {
+            Lanes.Collect(database.CatalogStorage, out _);
             _published.Add(database.DataStorage);
             _published.Add(database.CatalogStorage);
         }
@@ -96,11 +102,14 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
                 // Construction may have registered another commit after the prior flush.
                 // The signal was reset before this pass; flush that registration on this visit.
             }
-            if (visit is not null) { visit.Attempted = true; }
-            bool ended = Lanes.Run(storage, () =>
+            if (!storage.HasPendingCommits)
             {
-                return new DatabaseWriteResult { Units = storage.FlushPendingCommits() ? 1 : 0 };
-            }, LaneSignal, LaneTimeout, cancellationToken, out var outcome, visit);
+                if (visit is not null && !visit.Collected) { visit.Reason = DatabaseWorkerPass.VisitReason.NotDue; }
+                continue;
+            }
+            if (visit is not null) { visit.Attempted = true; }
+            bool ended = RunProvisional(storage, cancellationToken, out var outcome, visit);
+            if (!ended && !Lanes.HasLane(storage)) { ReportCapacity(storage.Name); }
             // Construction receives its own failure. No published database exists to back off.
             if (visit is not null && visit.Reason != DatabaseWorkerPass.VisitReason.Capacity)
             {
@@ -110,4 +119,9 @@ internal sealed class SqlWriteAheadFlushWorker : DatabaseWriteWorker<SqlDatabase
             }
         }
     }
+    // Keep the closure off the snapshot walk, including published and idle provisional sets.
+    private bool RunProvisional(SqlStorage storage, CancellationToken cancellationToken,
+        out DatabaseWorkerLanes<DatabaseWriteResult>.Outcome outcome, DatabaseWorkerPass.Visit? visit)
+        => Lanes.Run(storage, () => new DatabaseWriteResult { Units = storage.FlushPendingCommits() ? 1 : 0 },
+            LaneSignal, LaneTimeout, cancellationToken, out outcome, visit, storage.Name);
 }

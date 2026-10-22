@@ -3,11 +3,36 @@
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
-time on worker-owned dedicated lanes. SQL and Key-Value index-maintenance stubs use the same
-dispatch path, ready for their eventual compaction bodies. A stalled page write, journal fsync
-or apply gate leaves other databases' passes running. Each worker caps its lane threads at 64;
-work beyond the cap is deferred without starting a thread. Idle threads retire after 30 seconds.
-The cap is per engine and worker kind, with no process-wide scheduling atomic.
+time on worker-owned dedicated lanes, with no process-wide scheduling atomic. Idle runners
+retire after 30 seconds.
+
+Admission is round-robin, starting after the last database admitted, including after a
+collected WAL flush rechecks late commits. The working cap is 64 non-stuck operations per
+engine and worker kind. An operation releases its admission slot after four worker intervals,
+clamped to 1–4 seconds (the checkpoint poll is at most one second). It retains its lane and
+storage ownership until I/O returns. A hard ceiling of 128 dedicated threads (twice the cap),
+including parked and stuck runners, bounds replacement cost. Capacity deferral and each newly
+stuck lane report observational failures and root event 35, naming the database and worker kind;
+these reports never take a database offline or replace an unresolved operational fault.
+Warnings repeat at most once per second per database. At the hard ceiling progress waits for a
+runner to return, with an explicit health signal rather than silent loss of maintenance.
+
+Idle visits check pending grouped commits, the constant-time dirty-page count, deferred undo,
+and owed full purge passes on the pump. They allocate nothing and dispatch no lane. SQL/Key-Value
+index stubs dispatch only through their internal test hook until a real maintenance body exists.
+A detached write-back completion wakes collection without advancing other databases' interval;
+the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
+share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
+lane identity; a published database waits for an outstanding provisional catalog flush before
+flushing that catalog itself. The provisional collection path also rechecks later registrations.
+
+Disposal continues joining every lane before storage closes. Root event 36 names each database
+and worker kind still running, once per second while disposal waits. **Open owner question:
+bounded disposal** would need retained storage ownership for abandoned I/O; no timeout abandons
+I/O or closes its storage. The defaults (64 slots, 128 threads, 30-second idle retirement and the
+1–4-second stuck threshold) need owner review against expected database counts and device latency.
+
 
 A collected WAL flush rechecks later commit registrations before the group window; provisional
 SQL/Key-Value file sets do the same, preventing a reset signal from leaving construction to self-help.
@@ -27,7 +52,8 @@ and 75-percent share under the budget. They do not credit committer self-help or
 checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
 are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
 preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
-No public API or assembly boundary changed.
+No public type, visibility grant, project reference or storage format changed. Storage exposes
+its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
 
 ## Result diagnostics (#1264)
 

@@ -58,6 +58,7 @@ internal sealed class BlobWriteAheadFlushWorker : DatabaseWriteWorker<BlobDataba
     protected override string GetName(BlobDatabase database) => database.Name;
     protected override bool IsClosed(BlobDatabase database) => database.IsClosed;
     protected override bool IsOffline(BlobDatabase database) => database.IsOffline;
+    protected override bool IsDue(BlobDatabase database) => database.DataStorage.HasPendingCommits;
     protected override bool IsOpen(BlobDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(BlobDatabase database, CancellationToken cancellationToken)

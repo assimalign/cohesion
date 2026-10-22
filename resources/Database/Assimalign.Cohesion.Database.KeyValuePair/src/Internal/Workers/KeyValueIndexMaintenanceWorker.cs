@@ -36,6 +36,7 @@ internal sealed class KeyValueIndexMaintenanceWorker : DatabaseWriteWorker<KeyVa
     protected override string GetName(KeyValueDatabase database) => database.Name;
     protected override bool IsClosed(KeyValueDatabase database) => database.IsClosed;
     protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
+    protected override bool IsDue(KeyValueDatabase database) => false;
     protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(KeyValueDatabase database, CancellationToken cancellationToken)

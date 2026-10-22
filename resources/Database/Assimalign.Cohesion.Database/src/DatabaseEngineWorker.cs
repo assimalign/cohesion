@@ -144,6 +144,8 @@ namespace Assimalign.Cohesion.Database;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseEngineWorker
 {
+    private static readonly string _laneDelayMessage = ErrorMessages.MaintenanceLaneDelayed;
+
     // The worker's lifetime: free until an engine claims it at attach, then owned by that engine,
     // and released once, by the owning engine (ReleaseAsync) or, for a worker no engine owns, by
     // the engine base's protected release (ReleaseUnownedAsync).
@@ -407,6 +409,44 @@ public abstract class DatabaseEngineWorker
             return true;
         }
     }
+
+    /// <summary>Reports a stuck or capacity-deferred maintenance lane without refusing service.</summary>
+    /// <param name="database">The database whose maintenance cannot proceed.</param>
+    /// <param name="reason">The scheduling obstruction.</param>
+    /// <param name="elapsed">How long the operation has run.</param>
+    protected void ReportLaneDelay(string database, string reason, TimeSpan elapsed)
+    {
+        bool operational;
+        lock (_sync)
+        {
+            operational = _databases.TryGetValue(database, out var record) && record.OperationalFault is not null;
+            if (record is not null && record.LaneReportedAt is { } last
+                && Stopwatch.GetElapsedTime(last) < FailureBackoff)
+            {
+                record.VisitedPass = record.UnfinishedPass = _pass;
+                return;
+            }
+        }
+        // An observation must not replace an unresolved operational fault or reset its retry.
+        if (operational) { ReportUnfinished(database); }
+        else
+        {
+            ReportFailure(database, new TimeoutException(string.Format(CultureInfo.CurrentCulture,
+                _laneDelayMessage, database, Name, Kind, reason, elapsed)),
+                TimeSpan.Zero, countsTowardOffline: false);
+        }
+        lock (_sync)
+        {
+            if (_databases.TryGetValue(database, out var record)) { record.LaneReportedAt = Stopwatch.GetTimestamp(); }
+        }
+        DatabaseEventSource.Log.WorkerLaneDelayed(this, database, reason, elapsed);
+    }
+
+    /// <summary>Reports active I/O that engine disposal is still joining before storage closes.</summary>
+    /// <param name="database">The database whose lane is still running.</param>
+    /// <param name="elapsed">How long disposal has waited.</param>
+    protected void ReportLaneDisposalWait(string database, TimeSpan elapsed)
+        => DatabaseEventSource.Log.WorkerLaneDisposalWaiting(this, database, elapsed);
 
     /// <summary>
     /// Records a failure of <paramref name="database"/> the current pass caught and moved past:
@@ -1086,6 +1126,7 @@ public abstract class DatabaseEngineWorker
         public long VisitedPass;
         public long FailedPass;
         public long UnfinishedPass;
+        public long? LaneReportedAt;
 
         public DatabaseFailure(TimeProvider clock)
         {

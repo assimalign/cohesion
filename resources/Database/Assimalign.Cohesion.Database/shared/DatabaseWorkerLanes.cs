@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database;
 
 // One database's work per lane, with typed outcomes collected by a later pump pass. Dedicated
 // threads isolate blocked I/O from other databases and the application thread pool. Each worker
-// owns at most MaximumLanes threads, including idle runners; excess work is deferred, never queued
+// admits MaximumLanes non-stuck operations under a hard ceiling of twice that many threads; excess work is deferred, never queued
 // behind an indefinitely blocked device. Idle runners retire after IdleTimeout.
 // Disposal joins active and parked runners before the owning engine closes any storage.
 internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
@@ -26,6 +26,12 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     private readonly string _threadName;
     private readonly int _maximumLanes;
     private readonly TimeSpan _idleTimeout;
+    private readonly TimeSpan _stuckThreshold;
+    private readonly int _hardCeiling;
+    private int _stuckRunning;
+    internal Action<string, TimeSpan>? Stuck { get; set; }
+    internal Action<string, TimeSpan>? DisposalWaiting { get; set; }
+    internal TimeSpan DisposalReportInterval { get; set; } = TimeSpan.FromSeconds(1);
     internal Action? BeforeStart { get; set; }
 
     // Lock order: worker pass gate -> this monitor. Release this monitor before work
@@ -44,13 +50,17 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// Initializes a new instance of the <see cref="DatabaseWorkerLanes{TResult}"/> class.
     /// </summary>
     /// <param name="threadName">The name of the lane threads.</param>
-    /// <param name="maximumLanes">The worker-local dedicated thread cap.</param>
+    /// <param name="maximumLanes">The normal admission cap; the hard thread ceiling is twice this.</param>
     /// <param name="idleTimeout">The idle retirement deadline; null uses the default.</param>
-    public DatabaseWorkerLanes(string threadName, int maximumLanes = MaximumLanes, TimeSpan? idleTimeout = null)
+    /// <param name="stuckThreshold">The running time after which an operation releases its admission slot.</param>
+    public DatabaseWorkerLanes(string threadName, int maximumLanes = MaximumLanes, TimeSpan? idleTimeout = null, TimeSpan? stuckThreshold = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumLanes, 1);
         _threadName = threadName;
         _maximumLanes = maximumLanes;
+        _hardCeiling = checked(maximumLanes * 2);
+        _stuckThreshold = stuckThreshold ?? TimeSpan.FromSeconds(4);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_stuckThreshold, TimeSpan.Zero);
         _idleTimeout = idleTimeout ?? IdleTimeout;
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_idleTimeout, TimeSpan.Zero);
     }
@@ -83,9 +93,24 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// </summary>
     public void BeginPass()
     {
+        List<(string Name, TimeSpan Elapsed)>? stuck = null;
         lock (_sync)
         {
             _pass++;
+            foreach (var lane in _lanes.Values)
+            {
+                if (lane.Ended || lane.Stuck) { continue; }
+                var elapsed = Stopwatch.GetElapsedTime(lane.Started);
+                if (elapsed < _stuckThreshold) { continue; }
+                lane.Stuck = true;
+                _stuckRunning++;
+                (stuck ??= []).Add((lane.Name, elapsed));
+            }
+        }
+        // Reporting and listeners run outside the lane monitor, on the pump only.
+        if (stuck is not null)
+        {
+            foreach (var item in stuck) { Stuck?.Invoke(item.Name, item.Elapsed); }
         }
     }
 
@@ -159,20 +184,21 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// <param name="visit">The optional pass observation to receive wait requests and elapsed time.</param>
     /// <returns>True when the work ended; false when it was left running on its lane.</returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signaled; the work goes on alone.</exception>
-    public bool Run(object database, Func<TResult> work, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseWorkerPass.Visit? visit = null)
+    public bool Run(object database, Func<TResult> work, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseWorkerPass.Visit? visit = null, string? databaseName = null)
     {
         long visitStarted = visit is null ? 0 : Stopwatch.GetTimestamp();
-        var lane = new Lane(work, signal, cancellationToken);
+        Lane lane;
         bool start = false;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_idle.Count == 0 && _runners >= _maximumLanes)
+            if (IsSaturatedLocked)
             {
                 if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Capacity; visit.Attempted = false; }
                 outcome = default;
                 return false;
             }
+            lane = new Lane(work, signal, cancellationToken, databaseName ?? database.ToString()!);
             lane.Pass = _pass;
             _lanes.Add(database, lane);
             _running++;
@@ -247,24 +273,56 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// </remarks>
     public void Dispose()
     {
-        lock (_sync)
+        long started = Stopwatch.GetTimestamp();
+        long lastReported = started;
+        lock (_sync) { _disposed = true; Monitor.PulseAll(_sync); }
+        while (true)
         {
-            _disposed = true;
-            Monitor.PulseAll(_sync);
-            while (_runners > 0)
+            List<string>? waiting = null;
+            lock (_sync)
             {
-                Monitor.Wait(_sync);
+                if (_runners == 0) { _idle.Clear(); return; }
+                Monitor.Wait(_sync, DisposalReportInterval);
+                if (_runners == 0) { _idle.Clear(); return; }
+                if (Stopwatch.GetElapsedTime(lastReported) >= DisposalReportInterval)
+                {
+                    lastReported = Stopwatch.GetTimestamp();
+                    foreach (var lane in _lanes.Values)
+                    {
+                        if (!lane.Ended) { (waiting ??= []).Add(lane.Name); }
+                    }
+                }
             }
-            _idle.Clear();
+            if (waiting is not null)
+            {
+                foreach (string database in waiting) { DisposalWaiting?.Invoke(database, Stopwatch.GetElapsedTime(started)); }
+            }
         }
     }
 
     internal int RunnerCount { get { lock (_sync) { return _runners; } } }
 
-    internal bool IsSaturated
+    private bool IsSaturatedLocked => _running - _stuckRunning >= _maximumLanes
+        || (_idle.Count == 0 && _runners >= _hardCeiling);
+
+    internal bool IsSaturated { get { lock (_sync) { return IsSaturatedLocked; } } }
+
+    internal TimeSpan LimitWait(TimeSpan timeout)
     {
-        get { lock (_sync) { return _idle.Count == 0 && _runners >= _maximumLanes; } }
+        lock (_sync)
+        {
+            foreach (var lane in _lanes.Values)
+            {
+                if (lane.Ended || lane.Stuck) { continue; }
+                var remaining = _stuckThreshold - Stopwatch.GetElapsedTime(lane.Started);
+                if (remaining <= TimeSpan.Zero) { return TimeSpan.Zero; }
+                if (remaining < timeout) { timeout = remaining; }
+            }
+            return timeout;
+        }
     }
+
+    internal bool HasLane(object database) { lock (_sync) { return _lanes.ContainsKey(database); } }
 
     internal bool IsRunning(object database)
     {
@@ -326,7 +384,7 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
             Lane? next = lane;
             while (next is not null)
             {
-                Execute(next);
+                Execute(next, runner);
                 next = Park(runner);
             }
         }
@@ -340,7 +398,7 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
         }
     }
 
-    private void Execute(Lane lane)
+    private void Execute(Lane lane, Runner runner)
     {
         Exception? failure = null;
         try
@@ -361,6 +419,10 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
             lane.Ended = true;
             detached = lane.Detached;
             _running--;
+            if (lane.Stuck) { _stuckRunning--; }
+            // Publish availability with Ended. A collecting pass can reuse this runner immediately.
+            runner.Next = null;
+            if (!_disposed) { _idle.Add(runner); }
             Monitor.PulseAll(_sync);
         }
 
@@ -382,13 +444,6 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     {
         lock (_sync)
         {
-            runner.Next = null;
-            if (_disposed)
-            {
-                return null;
-            }
-
-            _idle.Add(runner);
             long parked = Stopwatch.GetTimestamp();
             while (runner.Next is null)
             {
@@ -408,13 +463,18 @@ internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
     /// <summary>One work on a lane.</summary>
     private sealed class Lane
     {
-        public Lane(Func<TResult> work, ManualResetEventSlim signal, CancellationToken cancellationToken)
+        public Lane(Func<TResult> work, ManualResetEventSlim signal, CancellationToken cancellationToken, string name)
         {
             Work = work;
+            Name = name;
+            Started = Stopwatch.GetTimestamp();
             Signal = signal;
             CancellationToken = cancellationToken;
         }
 
+        public string Name { get; }
+        public long Started { get; }
+        public bool Stuck { get; set; }
         public Func<TResult> Work { get; }
 
         public TResult Result { get; private set; } = default!;

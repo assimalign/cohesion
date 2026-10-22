@@ -48,6 +48,7 @@ internal sealed class DocumentPageWriteBackWorker : DatabaseWriteWorker<Document
     protected override string GetName(DocumentDatabase database) => database.Name;
     protected override bool IsClosed(DocumentDatabase database) => database.IsClosed;
     protected override bool IsOffline(DocumentDatabase database) => database.IsOffline;
+    protected override bool IsDue(DocumentDatabase database) => database.DataStorage.DirtyPageCount > 0;
     protected override bool IsOpen(DocumentDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(DocumentDatabase database, CancellationToken cancellationToken)

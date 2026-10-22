@@ -17,13 +17,26 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
     protected DatabaseLaneWorker(string name, DatabaseEngineWorkerKind kind, TimeSpan interval)
         : base(name, kind, interval)
     {
-        Lanes = new DatabaseWorkerLanes<TResult>(name + " lane");
+        // Four polling/maintenance intervals, bounded to [1 s, 4 s]. A slow device keeps
+        // ownership of its I/O but releases admission capacity after this deadline.
+        var threshold = TimeSpan.FromSeconds(Math.Clamp(interval.TotalSeconds * 4, 1, 4));
+        Lanes = new DatabaseWorkerLanes<TResult>(name + " lane", stuckThreshold: threshold);
+        Lanes.Stuck = (database, elapsed) => ReportLaneDelay(database, "stuck", elapsed);
+        Lanes.DisposalWaiting = ReportLaneDisposalWait;
     }
 
+    private int _triggerThread;
+    private long _nextWriteBack;
+    protected bool CompletionOnly { get; private set; }
+
     protected virtual ManualResetEventSlim LaneSignal => _wake;
-    protected virtual TimeSpan TriggerTimeout => Interval;
+    protected virtual TimeSpan TriggerTimeout => Kind != DatabaseEngineWorkerKind.PageWriteBack || _nextWriteBack == 0
+        ? Interval : TimeSpan.FromSeconds(Math.Max(0, (_nextWriteBack - Stopwatch.GetTimestamp()) / (double)Stopwatch.Frequency));
     protected virtual TimeSpan LaneTimeout => DatabaseWorkerLanes<TResult>.WaitSlice;
     protected abstract void RunLanePass(CancellationToken cancellationToken, DatabaseWorkerPass? pass);
+
+    protected void ReportCapacity(string database)
+        => ReportLaneDelay(database, "capacity", TimeSpan.Zero);
 
     internal bool WaitForLanes(TimeSpan timeout) => Lanes.WaitForIdle(timeout);
 
@@ -80,10 +93,11 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
     {
         long started = Stopwatch.GetTimestamp();
         bool signaled = false;
-        var timeout = TriggerTimeout;
+        var timeout = Lanes.LimitWait(TriggerTimeout);
         try
         {
             signaled = LaneSignal.Wait(timeout, cancellationToken);
+            _triggerThread = Environment.CurrentManagedThreadId;
         }
         catch (OperationCanceledException)
         {
@@ -108,6 +122,14 @@ internal abstract class DatabaseLaneWorker<TResult> : DatabaseEngineWorker
     /// <inheritdoc />
     protected sealed override void RunIterationCore(CancellationToken cancellationToken)
     {
+        bool fromPump = _triggerThread == Environment.CurrentManagedThreadId;
+        long now = Stopwatch.GetTimestamp();
+        CompletionOnly = Kind == DatabaseEngineWorkerKind.PageWriteBack && fromPump
+            && _nextWriteBack != 0 && now < _nextWriteBack;
+        if (fromPump && Kind == DatabaseEngineWorkerKind.PageWriteBack && !CompletionOnly)
+        {
+            _nextWriteBack = now + (long)(Interval.TotalSeconds * Stopwatch.Frequency);
+        }
         var observer = PassCompleted;
         long started = observer is null ? 0 : Stopwatch.GetTimestamp();
         // Waits belong to their pump thread. A concurrent explicit RunIteration must not consume

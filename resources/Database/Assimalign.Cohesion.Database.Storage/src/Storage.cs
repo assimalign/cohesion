@@ -1667,6 +1667,18 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>Gets whether a grouped committer is waiting for journal durability.</summary>
+    /// <remarks>A scheduling hint only; a commit can register immediately after this read.</remarks>
+    public bool HasPendingCommits => !_disposed && _journal is not null && RequiresDurableFlush
+        && !IsOffline && _groupCommitGate.HasPendingCommits;
+
+    /// <summary>Gets the number of dirty resident pages, including pinned pages.</summary>
+    /// <remarks>
+    /// This constant-time scheduling hint performs no I/O. A concurrent change can dirty a page
+    /// after the read; the next paced pass observes it. A write of an older image leaves it dirty.
+    /// </remarks>
+    public int DirtyPageCount => _disposed ? 0 : _bufferPool?.DirtyPageCount ?? 0;
+
     /// <summary>
     /// Performs one group-commit flush pass on behalf of a write-ahead flush worker:
     /// makes the journal durable up to the highest commit currently waiting on the

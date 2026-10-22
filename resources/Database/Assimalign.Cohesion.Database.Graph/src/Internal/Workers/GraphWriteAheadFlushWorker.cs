@@ -58,6 +58,7 @@ internal sealed class GraphWriteAheadFlushWorker : DatabaseWriteWorker<GraphData
     protected override string GetName(GraphDatabase database) => database.Name;
     protected override bool IsClosed(GraphDatabase database) => database.IsClosed;
     protected override bool IsOffline(GraphDatabase database) => database.IsOffline;
+    protected override bool IsDue(GraphDatabase database) => database.DataStorage.HasPendingCommits;
     protected override bool IsOpen(GraphDatabase database) => _engine.IsOpen(database);
 
     protected override DatabaseWriteResult RunDatabase(GraphDatabase database, CancellationToken cancellationToken)
