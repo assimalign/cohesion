@@ -2659,3 +2659,31 @@ they share stays in every build for tests to call.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Invalid signed page identities (found during #1365)
+
+PageId remains a signed value type because callers also carry absent-reference sentinels.
+The free-space map's allocation domain is nonnegative: IsAllocated,
+TryGetAllocationGeneration and IsAllocationCurrent return false for a negative identity.
+Free rejects it through the existing StorageIOException path for a page never allocated,
+before changing the queue, free set or generation table. Previously Free(-1) queued -1 and
+made the next Allocate return -1; both -1 and Int64.MinValue also read as allocated.
+Clamping to zero would target a different page, and silently ignoring a bad free would hide
+an invalid caller operation, so both alternatives are rejected. Valid page identities retain
+the same allocator, generation and locking behavior. No new message/code, public signature,
+format or version is introduced.
+
+PostgreSQL's page-number domain likewise separates valid identities and its invalid sentinel
+(src/include/storage/block.h:19-34, :67-72): unsigned block numbers run from zero through
+0xFFFFFFFE and 0xFFFFFFFF is invalid. Cohesion keeps its signed PageId and checks the bound
+where allocation is classified or changed. No reference-engine code was copied.
+
+Release on Windows ARM64, .NET 10.0.13 / SDK 10.0.401, tiering disabled: a temporary probe
+checks one valid allocated page 1,000,000 times per sample, one warmup and twelve samples per
+predicate/build. Result validation and CSV output are outside the interval. Median ns/check:
+IsAllocated 8.32465 → 8.41235; TryGetAllocationGeneration 9.15915 → 9.17735;
+IsAllocationCurrent 9.12515 → 10.18595. Three, five and zero of the twelve new samples,
+respectively, are at or below their base median. Every measured round allocates zero bytes.
+These are descriptive guard costs, without a timing assertion or a throughput claim.
+The temporary probe/project inclusion is restored after each run. The three regression
+cases check negative sentinels and the next real allocation; no test reads source text.

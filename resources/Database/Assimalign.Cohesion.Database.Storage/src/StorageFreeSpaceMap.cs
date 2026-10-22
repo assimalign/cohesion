@@ -111,7 +111,7 @@ public sealed class StorageFreeSpaceMap
 
         lock (_sync)
         {
-            if (id >= _nextPageId)
+            if (id < 0 || id >= _nextPageId)
             {
                 throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
             }
@@ -141,7 +141,7 @@ public sealed class StorageFreeSpaceMap
 
         lock (_sync)
         {
-            return id < _nextPageId && !_freeSet.Contains(id);
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id);
         }
     }
 
@@ -152,7 +152,7 @@ public sealed class StorageFreeSpaceMap
         lock (_sync)
         {
             generation = _freeGenerations.GetValueOrDefault(id);
-            return id < _nextPageId && !_freeSet.Contains(id);
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id);
         }
     }
 
@@ -165,7 +165,7 @@ public sealed class StorageFreeSpaceMap
         long id = (long)pageId;
         lock (_sync)
         {
-            return id < _nextPageId && !_freeSet.Contains(id)
+            return id >= 0 && id < _nextPageId && !_freeSet.Contains(id)
                 && _freeGenerations.GetValueOrDefault(id) == generation;
         }
     }

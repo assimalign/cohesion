@@ -95,3 +95,11 @@ startup storage recovery uses an internal borrowed reader without retaining WAL 
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Signed page-identity validation
+
+Negative PageId sentinels are never allocated pages. The free map returns false for their
+allocation checks and refuses an attempted free without changing allocator state. This closes
+the negative-free/next-negative-allocation defect found during #1365, without changing valid
+page allocation, public signatures or storage format 4. DESIGN records the reproduction and
+measured check cost.
