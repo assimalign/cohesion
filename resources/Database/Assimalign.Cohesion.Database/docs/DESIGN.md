@@ -190,7 +190,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   or engine to its public `DisposeAsync`, with no type test left.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, each through its release hook: the
-  checkpointer ends the work it left on its lanes), then the leaf closes its databases
+  lane workers join the work they left running), then the leaf closes its databases
   (`DisposeAsyncCore`). Every step runs whatever an earlier one threw, and the failures are
   reported together in one `AggregateException`.
 - **A worker belongs to one engine and is released once, by its owner** (plan row 7, landed with
@@ -501,7 +501,7 @@ ordinary storage transaction contention is retried as busy.
   database's journal truncation for as long (a hung data-file fsync in one database left
   the other with no checkpoint at all in five seconds of writes). The engines' checkpointer
   is now one shared copy, `shared/DatabaseCheckpointWorker.cs`, that runs each database's
-  checkpoint on a lane (`shared/DatabaseCheckpointLanes.cs`): a dedicated lane thread,
+  checkpoint on a lane (`shared/DatabaseWorkerLanes.cs`): a dedicated lane thread,
   at most one checkpoint per database at a time. The pass waits for the lane while no
   other database needs the worker, so a checkpoint that ends is settled by the pass that
   started it, as before. Once another database's journal reaches its size (the engine's
@@ -513,9 +513,15 @@ ordinary storage transaction contention is retried as busy.
   (`community/kernel/src/main/java/org/neo4j/kernel/database/Database.java:1155-1157`,
   `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84`),
   and PostgreSQL from one checkpointer per cluster and WAL
-  (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
-  workers still visit their databases on their own thread (follow-up).
-- **Checkpoint pass observations (#1284).**
+  (`src/backend/postmaster/checkpointer.c:5`). Page write-back, WAL flush, purge and the SQL/Key-Value index stubs now use these
+  same typed lanes (#1279), capped at 64 dedicated runners per engine and worker kind.
+  Excess work is deferred; idle runners retire after 30 seconds. The worker pump alone
+  collects and settles outcomes. Provisional SQL/Key-Value file sets also flush on lanes.
+  Purge retry/refusal state is pump-owned and full passes becoming due during a running
+  lane remain owed and wake the pump promptly after collection. Collected WAL flushes recheck
+  later registrations in that pass, including provisional file sets, before the group window.
+  Disposal waits for active and parked runners before storage close.
+- **Lane-worker pass observations (#1284, #1279).**
   The opt-in internal record describes visits, after lane cleanup and before the root's
   `SettlePass` failure settlement. `PassThrew` means non-cancellation pass work threw; a database
   failure is recorded on its visit. Typed visit reasons distinguish interruption from cancellation. Due evidence retains
@@ -525,7 +531,7 @@ ordinary storage transaction contention is retried as busy.
   lane outcome are explicit; a statement's checkpoint header write is not worker progress.
   Give-up requests and the database's sampled offline state are separate, because taking a
   database offline is queued. `_giveUpFaultPass` and its settlement policy are unchanged.
-  #1277's observational purge refusals belong to the purge worker, not this checkpoint record.
+  #1277's observational purge refusals remain the purge worker's reporting policy; observations do not change it.
 
   Pump backoff is nullable: absent means the root delay hook was not attached. The test-only
   linked adapter uses `UnsafeAccessor`, with no test-to-test reference or new visibility grant.
@@ -553,10 +559,17 @@ ordinary storage transaction contention is retried as busy.
   The lane delegate is created only for due work; an unobserved idle visit allocates nothing.
   Observer callbacks run outside lane/failure monitors; callback exceptions are retained for the
   test to assert and cannot fail a pass or kill the pump. Cancellation keeps the same break path
-  with or without observation. The visit type and publication currently belong to the checkpoint
-  worker; #1279 should move the common pass identity, trigger/delay accounting, database outcome
-  and lane wait fields to a lane-neutral internal record when write-back, group-commit and purge
-  adopt lanes, retaining checkpoint due-state evidence as checkpoint-specific data.
+  with or without observation. DatabaseLaneWorker now owns publication and trigger/delay accounting for all lane workers;
+  DatabaseWorkerPass carries the common identity, typed database outcome and lane wait evidence
+  (#1279). Checkpoint due-state evidence remains optional checkpoint-specific data. Hung-work
+  tests require at least 12 healthy worker completions while the other database stays held;
+  median and 75-percent share judge waits, and slowdown mutants verify the evidence. There
+  are no per-pass process-wide atomics. The root failure base, including _giveUpFaultPass,
+  is unchanged; purge refusals retain their observation-only reporting. Lane threads start
+  without caller ExecutionContext and restore their clean context after each job, preventing an
+  apply-gate reentrancy flag or other AsyncLocal state from crossing databases. Detached outcomes carry
+  the originating pass cancellation state, so a later collecting pass cannot report cancellation
+  as a new operational failure.
 - **Collecting a deferred checkpoint rechecks due work in the same pass (#1283).** A lane
   that ended without finishing no longer consumes a size wake and leaves the due journal until
   the next poll: after settling it, the worker checks the backoff and due state, and attempts at

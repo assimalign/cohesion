@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -14,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// host mapping built on it — is stable: when index compaction lands, the throttled
 /// maintenance body fills in here without changing the seam or any host.
 /// </remarks>
-internal sealed class SqlIndexMaintenanceWorker : DatabaseEngineWorker
+internal sealed class SqlIndexMaintenanceWorker : DatabaseWriteWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
 
@@ -24,9 +27,19 @@ internal sealed class SqlIndexMaintenanceWorker : DatabaseEngineWorker
         _engine = engine;
     }
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override SqlDatabase[] GetDatabases()
     {
-        // Stub: the index layer has no compaction to drive yet.
+        return _engine.GetInstanceSnapshot();
+    }
+    protected override string GetName(SqlDatabase database) => database.Name;
+    protected override bool IsClosed(SqlDatabase database) => database.IsClosed;
+    protected override bool IsOffline(SqlDatabase database) => database.IsOffline;
+    protected override bool IsOpen(SqlDatabase database) => _engine.IsOpen(database);
+
+    protected override DatabaseWriteResult RunDatabase(SqlDatabase database, CancellationToken cancellationToken)
+    {
+        DatabaseWriteResult failures = default;
+        // The index layer has no compaction yet; its future body already has database isolation.
+        return failures;
     }
 }

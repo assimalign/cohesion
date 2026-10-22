@@ -8,11 +8,11 @@ namespace Assimalign.Cohesion.Database;
 
 // An opt-in observation, owned by the pump until publication. It retains names, never database
 // instances, and no history in the worker. A consumer chooses how many completed passes to keep.
-internal sealed class DatabaseCheckpointPass
+internal sealed class DatabaseWorkerPass
 {
     private readonly List<Visit> _visits = [];
 
-    internal DatabaseCheckpointPass(long number, TimeSpan? pumpBackoff, TimeSpan? pumpElapsed, TimeSpan triggerTimeout, TimeSpan triggerElapsed, bool triggerSignaled, bool triggerMeasured)
+    internal DatabaseWorkerPass(long number, TimeSpan? pumpBackoff, TimeSpan? pumpElapsed, TimeSpan triggerTimeout, TimeSpan triggerElapsed, bool triggerSignaled, bool triggerMeasured)
     {
         Number = number;
         PumpBackoff = pumpBackoff;
@@ -32,6 +32,7 @@ internal sealed class DatabaseCheckpointPass
     internal TimeSpan TriggerElapsed { get; }
     internal bool TriggerSignaled { get; }
     internal bool TriggerMeasured { get; }
+    internal TimeSpan Elapsed { get; set; }
     internal bool Cancelled { get; set; }
     internal bool PassThrew { get; set; }
     internal IReadOnlyList<Visit> Visits { get; }
@@ -53,6 +54,7 @@ internal sealed class DatabaseCheckpointPass
         internal VisitReason Reason { get; set; } = VisitReason.Interrupted;
         internal bool Attempted { get; set; }
         internal bool Collected { get; set; }
+        internal int WorkUnits { get; set; }
         internal bool GiveUpRequested { get; set; }
         internal bool Offline { get; set; }
         internal DueState? Due { get; set; }
@@ -70,6 +72,7 @@ internal sealed class DatabaseCheckpointPass
     {
         Interrupted,
         Running,
+        Capacity,
         Offline,
         BackingOff,
         NotDue,

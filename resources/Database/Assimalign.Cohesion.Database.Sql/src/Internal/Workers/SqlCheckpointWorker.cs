@@ -60,14 +60,14 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
     /// <c>StorageTransactionException</c>, which <see cref="IsOpen"/> does not cover, and a failure
     /// recorded for the database would never end.
     /// </remarks>
-    protected override bool IsCheckpointDue(SqlDatabase database, TimeSpan interval, DatabaseCheckpointPass.Visit? visit)
+    protected override bool IsCheckpointDue(SqlDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
     {
         bool closed = database.IsClosed;
         bool dataDue = !closed && database.DataStorage.IsCheckpointDue(interval);
         bool catalogDue = !closed && !dataDue && database.CatalogStorage.IsCheckpointDue(interval);
         if (visit is not null)
         {
-            visit.Due = new DatabaseCheckpointPass.DueState(closed, dataDue, catalogDue,
+            visit.Due = new DatabaseWorkerPass.DueState(closed, dataDue, catalogDue,
                 database.DataStorage.JournalLength, database.DataStorage.CheckpointJournalSize, database.CatalogStorage.JournalLength, database.CatalogStorage.CheckpointJournalSize);
         }
         return dataDue || catalogDue;

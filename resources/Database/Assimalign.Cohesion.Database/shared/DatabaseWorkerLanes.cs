@@ -7,96 +7,76 @@ using System.Threading;
 // from the Database root's shared source into each model assembly.
 namespace Assimalign.Cohesion.Database;
 
-/// <summary>
-/// The lanes an engine's checkpoint worker runs its databases' checkpoints on: each checkpoint runs
-/// on a dedicated lane thread, at most one per database at a time, so a checkpoint that hangs or
-/// crawls in its device holds back its own database only.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The worker hands a database's checkpoint to a lane and waits for it while nothing else needs
-/// the worker, so a checkpoint that ends is settled by the pass that started it, as before the
-/// lanes. The worker stops waiting when the engine's checkpoint signal is set (another database's
-/// journal reached its size), when its poll timeout passes (a database due by time may be
-/// waiting), or when the pass is cancelled. The checkpoint then goes on alone on its lane, the
-/// passes that follow leave its database out until it ends, and the pass that finds it ended
-/// collects its outcome. A checkpoint that ends after the worker left it sets the checkpoint signal,
-/// so that pass comes at once.
-/// </para>
-/// <para>
-/// One worker thread visiting the databases in turn let a single database's device stall every
-/// other database's checkpoint for as long as it took to answer, or to fail. Neo4j gives each
-/// database its own checkpoint job, which reschedules itself only once its run ended, so a slow
-/// database never delays another's
-/// (<c>community/kernel/src/main/java/org/neo4j/kernel/database/Database.java:1155-1157</c>,
-/// <c>community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84</c>);
-/// PostgreSQL runs one checkpointer per cluster, each with its own WAL
-/// (<c>src/backend/postmaster/checkpointer.c:5</c>), which is what a database with its own journal
-/// is here.
-/// </para>
-/// <para>
-/// Lane threads are dedicated rather than the shared thread pool: a checkpoint blocks in durable
-/// flushes, and the pool's queue must not delay it behind application work, as nothing delayed the
-/// worker's own dedicated thread. A lane thread parks between checkpoints and ends after
-/// <see cref="IdleTimeout"/> without one. There are as many as there are checkpoints running at
-/// once, which is one unless the worker left a checkpoint running. Only an
-/// <see cref="OutOfMemoryException"/> escapes a lane thread, which ends the process.
-/// </para>
-/// </remarks>
-internal sealed class DatabaseCheckpointLanes : IDisposable
+// One database's work per lane, with typed outcomes collected by a later pump pass. Dedicated
+// threads isolate blocked I/O from other databases and the application thread pool. Each worker
+// owns at most MaximumLanes threads, including idle runners; excess work is deferred, never queued
+// behind an indefinitely blocked device. Idle runners retire after IdleTimeout.
+// Disposal joins active and parked runners before the owning engine closes any storage.
+internal sealed class DatabaseWorkerLanes<TResult> : IDisposable
 {
-    /// <summary>How long a lane thread stays parked without a checkpoint before it ends.</summary>
+    /// <summary>How long a lane thread stays parked without a work before it ends.</summary>
     internal static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long the worker waits on a checkpoint before it looks again whether another database
-    /// needs it, and the least it waits before it leaves a checkpoint for one.
+    /// How long the worker waits on a work before it looks again whether another database
+    /// needs it, and the least it waits before it leaves a work for one.
     /// </summary>
     internal static readonly TimeSpan WaitSlice = TimeSpan.FromMilliseconds(5);
 
     private readonly string _threadName;
+    private readonly int _maximumLanes;
+    private readonly TimeSpan _idleTimeout;
+    internal Action? BeforeStart { get; set; }
 
-    // Lock order: worker pass gate -> this monitor. Release this monitor before checkpoint
+    // Lock order: worker pass gate -> this monitor. Release this monitor before work
     // model/apply/storage locks, failure reporting, signal callbacks or pass publication.
     // A lane publishes its outcome under this monitor, then sets the signal after releasing it.
     private readonly object _sync = new();
     private readonly Dictionary<object, Lane> _lanes = new(ReferenceEqualityComparer.Instance);
     private readonly List<Runner> _idle = [];
     private int _running;
+    private int _runners;
+    internal const int MaximumLanes = 64;
     private long _pass;
     private bool _disposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DatabaseCheckpointLanes"/> class.
+    /// Initializes a new instance of the <see cref="DatabaseWorkerLanes{TResult}"/> class.
     /// </summary>
     /// <param name="threadName">The name of the lane threads.</param>
-    public DatabaseCheckpointLanes(string threadName)
+    /// <param name="maximumLanes">The worker-local dedicated thread cap.</param>
+    /// <param name="idleTimeout">The idle retirement deadline; null uses the default.</param>
+    public DatabaseWorkerLanes(string threadName, int maximumLanes = MaximumLanes, TimeSpan? idleTimeout = null)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumLanes, 1);
         _threadName = threadName;
+        _maximumLanes = maximumLanes;
+        _idleTimeout = idleTimeout ?? IdleTimeout;
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_idleTimeout, TimeSpan.Zero);
     }
 
     /// <summary>
-    /// Where a database's checkpoint stands on the lanes.
+    /// Where a database's work stands on the lanes.
     /// </summary>
     internal enum LaneState
     {
-        /// <summary>No checkpoint of the database is on a lane.</summary>
+        /// <summary>No work of the database is on a lane.</summary>
         Idle,
 
-        /// <summary>A checkpoint the worker left runs on the database's lane.</summary>
+        /// <summary>A work the worker left runs on the database's lane.</summary>
         Running,
 
-        /// <summary>A checkpoint the worker left ended; its outcome was collected.</summary>
+        /// <summary>A work the worker left ended; its outcome was collected.</summary>
         Ended,
     }
 
     /// <summary>
-    /// How a checkpoint on a lane ended: finished, left to a later pass (<see cref="Finished"/>
-    /// false, no failure: a statement took it over), or failed.
+    /// The typed result of one database's work, or its failure.
     /// </summary>
-    /// <param name="Finished">True when the checkpoint finished.</param>
-    /// <param name="Failure">The exception the checkpoint threw, or null.</param>
-    internal readonly record struct Outcome(bool Finished, Exception? Failure);
+    /// <param name="Result">The result, meaningful when Failure is null.</param>
+    /// <param name="Failure">The exception the work threw, or null.</param>
+    /// <param name="CancellationRequested">Whether the originating pass token was cancelled.</param>
+    internal readonly record struct Outcome(TResult Result, Exception? Failure, bool CancellationRequested = false);
 
     /// <summary>
     /// Begins a pass of the worker: the lanes the pass collects or starts are the ones it visited.
@@ -110,7 +90,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     }
 
     /// <summary>
-    /// Ends a pass of the worker: forgets the ended checkpoints of databases the pass did not visit,
+    /// Ends a pass of the worker: forgets the ended works of databases the pass did not visit,
     /// since a database that was dropped or closed is visited no more.
     /// </summary>
     public void EndPass()
@@ -137,12 +117,12 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     }
 
     /// <summary>
-    /// Collects the checkpoint the worker left on <paramref name="database"/>'s lane: reports whether
+    /// Collects the work the worker left on <paramref name="database"/>'s lane: reports whether
     /// one still runs, or hands back how it ended and forgets it.
     /// </summary>
     /// <param name="database">The database.</param>
-    /// <param name="outcome">How the checkpoint ended, when it did.</param>
-    /// <returns>Where the database's checkpoint stands.</returns>
+    /// <param name="outcome">How the work ended, when it did.</param>
+    /// <returns>Where the database's work stands.</returns>
     public LaneState Collect(object database, out Outcome outcome)
     {
         outcome = default;
@@ -166,27 +146,33 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="checkpoint"/> for <paramref name="database"/> on a lane, and waits for it
+    /// Runs <paramref name="work"/> for <paramref name="database"/> on a lane, and waits for it
     /// until it ends, <paramref name="signal"/> is set after <see cref="WaitSlice"/>,
     /// <paramref name="timeout"/> passes, or <paramref name="cancellationToken"/> is signaled.
     /// </summary>
-    /// <param name="database">The database; it has no checkpoint on a lane.</param>
-    /// <param name="checkpoint">The checkpoint: returns true when it finished, false when a statement took it over.</param>
-    /// <param name="signal">The engine's checkpoint signal: set when another database needs the worker; a checkpoint left running sets it when it ends.</param>
+    /// <param name="database">The database; it has no work on a lane.</param>
+    /// <param name="work">The work returning a model-local result.</param>
+    /// <param name="signal">The engine's work signal: set when another database needs the worker; a work left running sets it when it ends.</param>
     /// <param name="timeout">The longest the worker waits.</param>
-    /// <param name="cancellationToken">Cancels the wait; the checkpoint goes on.</param>
-    /// <param name="outcome">How the checkpoint ended, when it did.</param>
+    /// <param name="cancellationToken">Cancels the wait; the work goes on.</param>
+    /// <param name="outcome">How the work ended, when it did.</param>
     /// <param name="visit">The optional pass observation to receive wait requests and elapsed time.</param>
-    /// <returns>True when the checkpoint ended; false when it was left running on its lane.</returns>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signaled; the checkpoint goes on alone.</exception>
-    public bool Run(object database, Func<bool> checkpoint, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseCheckpointPass.Visit? visit = null)
+    /// <returns>True when the work ended; false when it was left running on its lane.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signaled; the work goes on alone.</exception>
+    public bool Run(object database, Func<TResult> work, ManualResetEventSlim signal, TimeSpan timeout, CancellationToken cancellationToken, out Outcome outcome, DatabaseWorkerPass.Visit? visit = null)
     {
         long visitStarted = visit is null ? 0 : Stopwatch.GetTimestamp();
-        var lane = new Lane(checkpoint, signal);
+        var lane = new Lane(work, signal, cancellationToken);
         bool start = false;
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_idle.Count == 0 && _runners >= _maximumLanes)
+            {
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Capacity; visit.Attempted = false; }
+                outcome = default;
+                return false;
+            }
             lane.Pass = _pass;
             _lanes.Add(database, lane);
             _running++;
@@ -199,6 +185,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
             }
             else
             {
+                _runners++;
                 start = true;
             }
         }
@@ -240,7 +227,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
 
     // The caller holds _sync. Keep the requested delay and the blocking operation together,
     // including early wakeups: elapsed time and the number of requests are separate signals.
-    private void WaitForLane(TimeSpan timeout, DatabaseCheckpointPass.Visit? visit)
+    private void WaitForLane(TimeSpan timeout, DatabaseWorkerPass.Visit? visit)
     {
         if (visit is not null)
         {
@@ -251,11 +238,11 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     }
 
     /// <summary>
-    /// Stops the lanes: waits for every checkpoint still running, the ones the worker left
+    /// Stops the lanes: waits for every work still running, the ones the worker left
     /// included, so none outlives the engine's storages, and ends the lane threads.
     /// </summary>
     /// <remarks>
-    /// A checkpoint whose device never answers holds this as long, as it held the worker's own
+    /// A work whose device never answers holds this as long, as it held the worker's own
     /// thread, and with it the engine's disposal, before the lanes.
     /// </remarks>
     public void Dispose()
@@ -264,11 +251,24 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         {
             _disposed = true;
             Monitor.PulseAll(_sync);
-            while (_running > 0)
+            while (_runners > 0)
             {
                 Monitor.Wait(_sync);
             }
+            _idle.Clear();
         }
+    }
+
+    internal int RunnerCount { get { lock (_sync) { return _runners; } } }
+
+    internal bool IsSaturated
+    {
+        get { lock (_sync) { return _idle.Count == 0 && _runners >= _maximumLanes; } }
+    }
+
+    internal bool IsRunning(object database)
+    {
+        lock (_sync) { return _lanes.TryGetValue(database, out var lane) && !lane.Ended; }
     }
 
     // Test-only completion wait: does not collect outcomes or alter the worker's schedule.
@@ -291,8 +291,11 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
     {
         try
         {
-            var thread = new Thread(() => RunLanes(new Runner(), lane)) { IsBackground = true, Name = _threadName };
-            thread.Start();
+            BeforeStart?.Invoke();
+            // An explicit pass may run inside a statement. A lane must never inherit its
+            // apply-gate reentrancy flag, security principal or other caller AsyncLocal state.
+            if (ExecutionContext.IsFlowSuppressed()) { StartThread(lane); }
+            else { using (ExecutionContext.SuppressFlow()) { StartThread(lane); } }
         }
         catch
         {
@@ -300,6 +303,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
             {
                 _lanes.Remove(database);
                 _running--;
+                _runners--;
                 Monitor.PulseAll(_sync);
             }
 
@@ -307,25 +311,43 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         }
     }
 
-    // A lane thread: runs the checkpoint it was started with, then whatever the worker hands it
+    private void StartThread(Lane lane)
+    {
+        var thread = new Thread(() => RunLanes(new Runner(), lane)) { IsBackground = true, Name = _threadName };
+        thread.Start();
+    }
+
+    // A lane thread: runs the work it was started with, then whatever the worker hands it
     // while it is parked, until it parks for IdleTimeout or the lanes are disposed.
     private void RunLanes(Runner runner, Lane lane)
     {
-        Lane? next = lane;
-        while (next is not null)
+        try
         {
-            Execute(next);
-            next = Park(runner);
+            Lane? next = lane;
+            while (next is not null)
+            {
+                Execute(next);
+                next = Park(runner);
+            }
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _runners--;
+                Monitor.PulseAll(_sync);
+            }
         }
     }
 
     private void Execute(Lane lane)
     {
-        bool finished = false;
         Exception? failure = null;
         try
         {
-            finished = lane.Checkpoint();
+            // Restore the clean runner context after each job as well: a callback's ambient
+            // state must not escape to another database when this dedicated runner is reused.
+            ExecutionContext.Run(ExecutionContext.Capture()!, static state => ((Lane)state!).Run(), lane);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -335,7 +357,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         bool detached;
         lock (_sync)
         {
-            lane.Outcome = new Outcome(finished, failure);
+            lane.Outcome = new Outcome(lane.Result, failure, lane.CancellationToken.IsCancellationRequested);
             lane.Ended = true;
             detached = lane.Detached;
             _running--;
@@ -346,7 +368,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         {
             try
             {
-                // The worker left this checkpoint: the next pass collects it at once.
+                // The worker left this work: the next pass collects it at once.
                 lane.Signal.Set();
             }
             catch (ObjectDisposedException)
@@ -367,32 +389,41 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
             }
 
             _idle.Add(runner);
+            long parked = Stopwatch.GetTimestamp();
             while (runner.Next is null)
             {
-                bool pulsed = !_disposed && Monitor.Wait(_sync, IdleTimeout);
-                if (runner.Next is null && (!pulsed || _disposed))
+                var remaining = _idleTimeout - Stopwatch.GetElapsedTime(parked);
+                if (_disposed || remaining <= TimeSpan.Zero)
                 {
                     _idle.Remove(runner);
                     return null;
                 }
+                Monitor.Wait(_sync, remaining);
             }
 
             return runner.Next;
         }
     }
 
-    /// <summary>One checkpoint on a lane.</summary>
+    /// <summary>One work on a lane.</summary>
     private sealed class Lane
     {
-        public Lane(Func<bool> checkpoint, ManualResetEventSlim signal)
+        public Lane(Func<TResult> work, ManualResetEventSlim signal, CancellationToken cancellationToken)
         {
-            Checkpoint = checkpoint;
+            Work = work;
             Signal = signal;
+            CancellationToken = cancellationToken;
         }
 
-        public Func<bool> Checkpoint { get; }
+        public Func<TResult> Work { get; }
+
+        public TResult Result { get; private set; } = default!;
+
+        public void Run() => Result = Work();
 
         public ManualResetEventSlim Signal { get; }
+
+        public CancellationToken CancellationToken { get; }
 
         // Guarded by the lanes' lock.
         public Outcome Outcome { get; set; }
@@ -404,7 +435,7 @@ internal sealed class DatabaseCheckpointLanes : IDisposable
         public long Pass { get; set; }
     }
 
-    /// <summary>A lane thread's parking slot: the checkpoint the worker handed it, if any.</summary>
+    /// <summary>A lane thread's parking slot: the work the worker handed it, if any.</summary>
     private sealed class Runner
     {
         // Guarded by the lanes' lock.

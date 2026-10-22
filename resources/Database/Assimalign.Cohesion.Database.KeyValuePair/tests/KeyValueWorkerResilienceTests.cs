@@ -348,7 +348,7 @@ public sealed class KeyValueWorkerResilienceTests
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name + " lane");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBK002");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
@@ -1083,6 +1083,82 @@ public sealed class KeyValueWorkerResilienceTests
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
         Should.Throw<ArgumentOutOfRangeException>(() => KeyValueDatabaseEngine.Create("keyvalue-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(KeyValueDatabaseEngineOptions.JournalSizeLimit));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Workers: one stalled database leaves healthy lane passes at full pace")]
+    [InlineData(DatabaseEngineWorkerKind.PageWriteBack)]
+    [InlineData(DatabaseEngineWorkerKind.WriteAheadFlush)]
+    [InlineData(DatabaseEngineWorkerKind.VersionPurge)]
+    [InlineData(DatabaseEngineWorkerKind.IndexMaintenance)]
+    public async Task Run_OneDatabaseStalls_ShouldKeepOtherDatabasesAtFullPace(DatabaseEngineWorkerKind kind)
+    {
+        // Arrange: only the chosen worker has a short cadence. Checkpoints cannot supply progress.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.PageWriteBackInterval = kind == DatabaseEngineWorkerKind.PageWriteBack ? TimeSpan.FromMilliseconds(20) : TimeSpan.FromHours(1);
+        options.MaintenanceInterval = TimeSpan.FromMilliseconds(20);
+        options.Durability = kind == DatabaseEngineWorkerKind.WriteAheadFlush ? StorageCommitDurability.Grouped : StorageCommitDurability.Synchronous;
+        options.GroupCommitWindow = TimeSpan.FromMilliseconds(20);
+        await using var engine = KeyValueDatabaseEngine.Create("isolated-lanes", options);
+        var failing = await engine.CreateDatabaseAsync(Failing);
+        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var faults = strategy.Faults(Failing);
+        Task blockedWrite = Task.CompletedTask;
+        Task? disposal = null;
+        async Task InspectDisposalAsync()
+        {
+            disposal = Task.Run(async () => await engine.DisposeAsync());
+            (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
+            disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
+        }
+        long written = strategy.Faults(Healthy).PageWrites;
+        try
+        {
+            // Act: page writes and journal fsyncs stall inside DeviceFaults. Purge/index use
+            // the dispatch hook, modeling an unbounded apply/storage latch without a new API.
+            if (kind == DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                faults.StallPageWrites();
+                await PutAsync(failing, 0, 1);
+                var worker = (KeyValuePageWriteBackWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPageWrites, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+                strategy.Faults(Healthy).PageWrites.ShouldBeGreaterThan(written);
+            }
+            else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
+            {
+                faults.StallJournalFlushes();
+                blockedWrite = Task.Run(() => PutAsync(failing, 0, 1));
+                var worker = (KeyValueWriteAheadFlushWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledJournalFlushes, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+            else if (kind == DatabaseEngineWorkerKind.VersionPurge)
+            {
+                faults.StallPurges();
+                var worker = (KeyValueVersionPurgeWorker)WorkerOf(engine, kind);
+                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPurges, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+            else
+            {
+                faults.StallPurges();
+                var worker = (KeyValueIndexMaintenanceWorker)WorkerOf(engine, kind);
+                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPurges, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+        }
+        finally
+        {
+            faults.Clear();
+            await blockedWrite.WaitAsync(Timeout);
+            if (disposal is not null) { await disposal.WaitAsync(Timeout); }
+        }
+        // Assert: released work drains, and no database was failed or taken offline by a stall.
+        (await Eventually(() => faults.StalledPageWrites == 0 && faults.StalledJournalFlushes == 0 && faults.StalledPurges == 0)).ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBeEmpty();
     }
 
     // Journal size used to exercise checkpoint lanes and failure retries.

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
-
-using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.KeyValuePair.Storage;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
 /// The engine-owned write-ahead-log group-commit flusher: woken when a grouped
@@ -30,119 +30,84 @@ using Assimalign.Cohesion.Database.Storage;
 /// so is a database its holder closed, whose close flushes both file sets.
 /// </para>
 /// </remarks>
-internal sealed class KeyValueWriteAheadFlushWorker : DatabaseEngineWorker
+internal sealed class KeyValueWriteAheadFlushWorker : DatabaseWriteWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
     private readonly ManualResetEventSlim _commitPending;
+    private KeyValueStorage[] _storages = [];
+    private readonly HashSet<KeyValueStorage> _published = [];
 
     internal KeyValueWriteAheadFlushWorker(KeyValueDatabaseEngine engine, ManualResetEventSlim commitPending)
-        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush,
-            engine.EngineOptions.Durability == StorageCommitDurability.Grouped
-                ? engine.EngineOptions.GroupCommitWindow
-                : TimeSpan.FromSeconds(1))
+        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush, engine.EngineOptions.Durability == StorageCommitDurability.Grouped
+                ? engine.EngineOptions.GroupCommitWindow : TimeSpan.FromSeconds(1))
     {
         _engine = engine;
         _commitPending = commitPending;
     }
 
-    /// <inheritdoc />
-    protected override void WaitForTrigger(CancellationToken cancellationToken)
+    protected override ManualResetEventSlim LaneSignal => _commitPending;
+    protected override bool RepeatAfterCollection => true;
+
+    protected override KeyValueDatabase[] GetDatabases()
     {
-        try
-        {
-            _commitPending.Wait(Interval, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // The pump is stopping; Run observes the token and exits.
-        }
+        // Publication order is storage -> instance. Never take the engine lock on a lane.
+        _storages = _engine.GetStorageSnapshot();
+        return _engine.GetInstanceSnapshot();
+    }
+    protected override string GetName(KeyValueDatabase database) => database.Name;
+    protected override bool IsClosed(KeyValueDatabase database) => database.IsClosed;
+    protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
+    protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
+
+    protected override DatabaseWriteResult RunDatabase(KeyValueDatabase database, CancellationToken cancellationToken)
+    {
+        DatabaseWriteResult failures = default;
+        TryWrite(() => database.DataStorage.FlushPendingCommits() ? 1 : 0, ref failures);
+        TryWrite(() => database.CatalogStorage.FlushPendingCommits() ? 1 : 0, ref failures);
+        return failures;
     }
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override void PreparePass(KeyValueDatabase[] databases)
     {
-        // Reset before flushing: a commit that registers mid-pass sets the signal
-        // again and is picked up by the next pass instead of being lost.
-        _commitPending.Reset();
-
-        // Take the storage snapshot before the instance snapshot: publication writes them in
-        // that order. Never take the engine lock while flushing: create/open holds it while
-        // waiting for the storage durability gate, which this worker must be able to release.
-        var storages = _engine.GetStorageSnapshot();
-        var databases = _engine.GetInstanceSnapshot();
-        var published = new HashSet<KeyValueStorage>();
+        _published.Clear();
         foreach (var database in databases)
         {
-            published.Add(database.DataStorage);
-            published.Add(database.CatalogStorage);
-        }
-
-        foreach (KeyValueDatabase database in databases)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            // An offline database flushes nothing (#1243): its waiting committers were released
-            // when it went offline, and each gets the refusal from its own flush. Nor does a
-            // database its holder closed: its close flushes its file sets, and the engine keeps the
-            // closed instance registered only until the close ends.
-            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
-            {
-                continue;
-            }
-
-            FlushPending(database, database.DataStorage);
-            FlushPending(database, database.CatalogStorage);
-        }
-
-        foreach (var storage in storages)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            if (published.Contains(storage) || storage.IsOffline)
-            {
-                continue;
-            }
-
-            try
-            {
-                storage.FlushPendingCommits();
-            }
-            catch (ObjectDisposedException)
-            {
-                // A failed create/open disposed a storage from this older snapshot.
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // The constructing commit receives its own flush failure. There is no
-                // published database to report or back off; keep serving the other file sets.
-            }
+            _published.Add(database.DataStorage);
+            _published.Add(database.CatalogStorage);
         }
     }
 
-    private void FlushPending(KeyValueDatabase database, KeyValueStorage storage)
+    protected override void FinishPass(CancellationToken cancellationToken, DatabaseWorkerPass? pass)
     {
-        try
+        foreach (var storage in _storages)
         {
-            storage.FlushPendingCommits();
-        }
-        catch (ObjectDisposedException) when (!_engine.IsOpen(database))
-        {
-            // The snapshot can race a database drop; a disposed storage has no
-            // committers left to serve.
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // The committers waiting on this file set self-help within their window; the next
-            // pass flushes it again. An offline database's refusal is not the worker's failure.
-            if (!database.IsOffline)
+            if (cancellationToken.IsCancellationRequested) { break; }
+            if (_published.Contains(storage) || storage.IsOffline) { continue; }
+            var visit = pass?.Add(storage.Name + " (provisional)");
+            var state = Lanes.Collect(storage, out var collected);
+            if (state == DatabaseWorkerLanes<DatabaseWriteResult>.LaneState.Running)
             {
-                ReportFailure(database.Name, exception);
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Running; }
+                continue;
+            }
+            if (state == DatabaseWorkerLanes<DatabaseWriteResult>.LaneState.Ended)
+            {
+                if (visit is not null) { visit.Collected = true; visit.WorkUnits = collected.Result.Units; visit.Reason = collected.Failure is null ? DatabaseWorkerPass.VisitReason.Completed : DatabaseWorkerPass.VisitReason.Failed; }
+                if (collected.Failure is not null || storage.IsOffline) { continue; }
+                // Construction may have registered another commit after the prior flush.
+                // The signal was reset before this pass; flush that registration on this visit.
+            }
+            if (visit is not null) { visit.Attempted = true; }
+            bool ended = Lanes.Run(storage, () =>
+            {
+                return new DatabaseWriteResult { Units = storage.FlushPendingCommits() ? 1 : 0 };
+            }, LaneSignal, LaneTimeout, cancellationToken, out var outcome, visit);
+            // Construction receives its own failure. No published database exists to back off.
+            if (visit is not null && visit.Reason != DatabaseWorkerPass.VisitReason.Capacity)
+            {
+                visit.Reason = !ended ? DatabaseWorkerPass.VisitReason.Running
+                    : outcome.Failure is null ? DatabaseWorkerPass.VisitReason.Completed : DatabaseWorkerPass.VisitReason.Failed;
+                if (ended) { visit.WorkUnits += outcome.Result.Units; }
             }
         }
     }

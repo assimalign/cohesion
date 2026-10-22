@@ -1,5 +1,34 @@
 # Documents engine design
 
+## Worker lane isolation (#1279)
+
+Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
+time on worker-owned dedicated lanes. SQL and Key-Value index-maintenance stubs use the same
+dispatch path, ready for their eventual compaction bodies. A stalled page write, journal fsync
+or apply gate leaves other databases' passes running. Each worker caps its lane threads at 64;
+work beyond the cap is deferred without starting a thread. Idle threads retire after 30 seconds.
+The cap is per engine and worker kind, with no process-wide scheduling atomic.
+
+A collected WAL flush rechecks later commit registrations before the group window; provisional
+SQL/Key-Value file sets do the same, preventing a reset signal from leaving construction to self-help.
+Only the pump collects outcomes and calls the root failure/reporting methods, preserving per-database
+backoff, give-up fault retention and observational purge refusals. Purge retry and refusal state
+is pump-owned; lanes return full-pass, undo and reclamation facts. A full pass becoming due while
+an earlier lane runs remains owed and wakes the pump after collection. SQL/Key-Value provisional flushes also use lanes, keeping a
+stalled constructor from holding back published databases. Engine disposal joins all lane runners
+before closing storages. Lock order is the root pass gate, then the lane monitor; no lane monitor
+spans model/apply/storage locks, failure reporting or observer callbacks.
+
+The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
+page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
+worker completions while the other database is still held, and judge measured waits by median
+and 75-percent share under the budget. They do not credit committer self-help or a statement's
+checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
+are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
+preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+No public API or assembly boundary changed.
+
 ## Result diagnostics (#1264)
 
 Document command and query results return a non-null Diagnostics collection, empty when

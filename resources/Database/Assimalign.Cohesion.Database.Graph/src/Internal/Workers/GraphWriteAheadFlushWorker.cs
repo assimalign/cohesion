@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 using Assimalign.Cohesion.Database.Storage;
@@ -34,75 +35,35 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// as in the other models.
 /// </para>
 /// </remarks>
-internal sealed class GraphWriteAheadFlushWorker : DatabaseEngineWorker
+internal sealed class GraphWriteAheadFlushWorker : DatabaseWriteWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
     private readonly ManualResetEventSlim _commitPending;
 
     internal GraphWriteAheadFlushWorker(GraphDatabaseEngine engine, ManualResetEventSlim commitPending)
-        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush,
-            engine.EngineOptions.Durability == StorageCommitDurability.Grouped
-                ? engine.EngineOptions.GroupCommitWindow
-                : TimeSpan.FromSeconds(1))
+        : base(engine.Name + "/wal-flush", DatabaseEngineWorkerKind.WriteAheadFlush, engine.EngineOptions.Durability == StorageCommitDurability.Grouped
+                ? engine.EngineOptions.GroupCommitWindow : TimeSpan.FromSeconds(1))
     {
         _engine = engine;
         _commitPending = commitPending;
     }
 
-    /// <inheritdoc />
-    protected override void WaitForTrigger(CancellationToken cancellationToken)
+    protected override ManualResetEventSlim LaneSignal => _commitPending;
+    protected override bool RepeatAfterCollection => true;
+
+    protected override GraphDatabase[] GetDatabases()
     {
-        try
-        {
-            _commitPending.Wait(Interval, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // The pump is stopping; Run observes the token and exits.
-        }
+        return _engine.GetInstanceSnapshot();
     }
+    protected override string GetName(GraphDatabase database) => database.Name;
+    protected override bool IsClosed(GraphDatabase database) => database.IsClosed;
+    protected override bool IsOffline(GraphDatabase database) => database.IsOffline;
+    protected override bool IsOpen(GraphDatabase database) => _engine.IsOpen(database);
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override DatabaseWriteResult RunDatabase(GraphDatabase database, CancellationToken cancellationToken)
     {
-        // Reset before flushing: a commit that registers mid-pass sets the signal
-        // again and is picked up by the next pass instead of being lost.
-        _commitPending.Reset();
-
-        foreach (GraphDatabase database in _engine.GetInstanceSnapshot())
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            // An offline database flushes nothing (#1243): its waiting committers were released
-            // when it went offline, and each gets the refusal from its own flush. Nor does a
-            // database its holder closed: the engine keeps it registered until its close ends, then
-            // forgets it, and its disposed storage has no committers left to serve.
-            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
-            {
-                continue;
-            }
-
-            try
-            {
-                database.DataStorage.FlushPendingCommits();
-            }
-            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
-            {
-                // The snapshot can race a database drop; a disposed storage has no
-                // committers left to serve.
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // The committers waiting on this database self-help within their window; the next
-                // pass flushes it again. An offline database's refusal is not the worker's failure.
-                if (!database.IsOffline)
-                {
-                    ReportFailure(database.Name, exception);
-                }
-            }
-        }
+        DatabaseWriteResult failures = default;
+        TryWrite(() => database.DataStorage.FlushPendingCommits() ? 1 : 0, ref failures);
+        return failures;
     }
 }

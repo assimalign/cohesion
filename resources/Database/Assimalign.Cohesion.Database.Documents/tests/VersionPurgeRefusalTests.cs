@@ -55,11 +55,11 @@ public sealed class VersionPurgeRefusalTests
                     for (int pass = 0; pass < 12; pass++)
                     {
                         clock.Advance(TimeSpan.FromHours(1));
-                        worker.RunIteration(token);
+                        CheckpointPace.RunSettled(worker, token);
                         Interlocked.Increment(ref refusedPasses);
                         if (pass == 1)
                         {
-                            for (int idle = 0; idle < 3; idle++) { worker.RunIteration(token); }
+                            for (int idle = 0; idle < 3; idle++) { CheckpointPace.RunSettled(worker, token); }
                             worker.FailureCount.ShouldBe(failuresBefore + episodes);
                         }
                     }
@@ -70,12 +70,12 @@ public sealed class VersionPurgeRefusalTests
                 engine.HasFailingWorker(healthy.Name).ShouldBeFalse();
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
-                worker.RunIteration(canceled.Token).ShouldBeTrue();
+                CheckpointPace.RunSettled(worker, canceled.Token).ShouldBeTrue();
                 worker.Fault.ShouldBeOfType<StorageTransactionException>();
                 database.IsOffline.ShouldBeFalse();
             }
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(token);
+            CheckpointPace.RunSettled(worker, token);
             database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
             worker.Fault.ShouldBeNull();
             engine.State.ShouldBe(EngineState.Running);
@@ -118,7 +118,7 @@ public sealed class VersionPurgeRefusalTests
         {
             if (walProgress) { database.DataStorage.WriteAheadJournal.AppendOperation(0, new byte[1]); }
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(CancellationToken.None);
+            CheckpointPace.RunSettled(worker, CancellationToken.None);
         }
 
         // Assert
@@ -129,7 +129,7 @@ public sealed class VersionPurgeRefusalTests
         else { worker.Fault.ShouldBeNull(); }
         worker.BeforeFullPass = null;
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         worker.Fault.ShouldBeNull();
         engine.OfflineDatabases.ShouldBeEmpty();
     }
@@ -162,7 +162,7 @@ public sealed class VersionPurgeRefusalTests
             await PutAsync(session, 0, token);
             for (int pass = 0; pass < 3; pass++)
             {
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
                 worker.WaitForCheckpoints(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             }
 
@@ -204,7 +204,7 @@ public sealed class VersionPurgeRefusalTests
         for (int pass = 0; pass < 3; pass++)
         {
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(CancellationToken.None).ShouldBeTrue();
+            CheckpointPace.RunSettled(worker, CancellationToken.None).ShouldBeTrue();
         }
 
         // Assert
@@ -232,12 +232,12 @@ public sealed class VersionPurgeRefusalTests
 
         // Act
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         attempts.ShouldBe(1);
         clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
 
         // Assert
         attempts.ShouldBe(2);
@@ -256,6 +256,7 @@ public sealed class VersionPurgeRefusalTests
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
         var worker = new DocumentVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         worker.BeforeDeferredUndoRetry = current => current.Coordinator.RunVersionPurgePass(token);
         await using var transaction = await session.BeginTransactionAsync(cancellationToken: token);
         await PutAsync(session, 0, token);
@@ -270,11 +271,11 @@ public sealed class VersionPurgeRefusalTests
                 foreach (int milliseconds in new[] { 100, 200, 400 })
                 {
                     clock.Advance(TimeSpan.FromMilliseconds(milliseconds));
-                    worker.RunIteration(token);
+                    CheckpointPace.RunSettled(worker, token);
                 }
                 worker.FailureCount.ShouldBe(0);
                 clock.Advance(TimeSpan.FromMilliseconds(800));
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
             }, token);
 
             // Assert
@@ -282,7 +283,7 @@ public sealed class VersionPurgeRefusalTests
             engine.HasFailingWorker(database.Name).ShouldBeFalse();
         }
         clock.Advance(TimeSpan.FromSeconds(2));
-        worker.RunIteration(token);
+        CheckpointPace.RunSettled(worker, token);
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Purge: unrelated committed page writes cannot suppress a blocked committed tombstone")]
@@ -328,7 +329,7 @@ public sealed class VersionPurgeRefusalTests
                 }
                 database.DataStorage.WriteAheadJournal.LastLsn.ShouldBeGreaterThan(beforeTraffic);
                 clock.Advance(TimeSpan.FromHours(1));
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
             }
 
             // Assert: the same page and owning bracket are one bounded refusal episode.
@@ -340,7 +341,7 @@ public sealed class VersionPurgeRefusalTests
             blocker.Rollback();
         }
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(token);
+        CheckpointPace.RunSettled(worker, token);
         worker.Fault.ShouldBeNull();
         database.Coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
     }

@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
@@ -16,7 +19,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// compaction lands, the throttled maintenance body fills in here without
 /// changing the seam.
 /// </remarks>
-internal sealed class KeyValueIndexMaintenanceWorker : DatabaseEngineWorker
+internal sealed class KeyValueIndexMaintenanceWorker : DatabaseWriteWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
 
@@ -26,9 +29,19 @@ internal sealed class KeyValueIndexMaintenanceWorker : DatabaseEngineWorker
         _engine = engine;
     }
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override KeyValueDatabase[] GetDatabases()
     {
-        // Stub: the index layer has no compaction to drive yet.
+        return _engine.GetInstanceSnapshot();
+    }
+    protected override string GetName(KeyValueDatabase database) => database.Name;
+    protected override bool IsClosed(KeyValueDatabase database) => database.IsClosed;
+    protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
+    protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
+
+    protected override DatabaseWriteResult RunDatabase(KeyValueDatabase database, CancellationToken cancellationToken)
+    {
+        DatabaseWriteResult failures = default;
+        // The index layer has no compaction yet; its future body already has database isolation.
+        return failures;
     }
 }

@@ -55,11 +55,11 @@ public sealed class VersionPurgeRefusalTests
                     for (int pass = 0; pass < 12; pass++)
                     {
                         clock.Advance(TimeSpan.FromHours(1));
-                        worker.RunIteration(token);
+                        CheckpointPace.RunSettled(worker, token);
                         Interlocked.Increment(ref refusedPasses);
                         if (pass == 1)
                         {
-                            for (int idle = 0; idle < 3; idle++) { worker.RunIteration(token); }
+                            for (int idle = 0; idle < 3; idle++) { CheckpointPace.RunSettled(worker, token); }
                             worker.FailureCount.ShouldBe(failuresBefore + episodes);
                         }
                     }
@@ -70,12 +70,12 @@ public sealed class VersionPurgeRefusalTests
                 engine.HasFailingWorker(healthy.Name).ShouldBeFalse();
                 using var canceled = new CancellationTokenSource();
                 canceled.Cancel();
-                worker.RunIteration(canceled.Token).ShouldBeTrue();
+                CheckpointPace.RunSettled(worker, canceled.Token).ShouldBeTrue();
                 worker.Fault.ShouldBeOfType<StorageTransactionException>();
                 database.IsOffline.ShouldBeFalse();
             }
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(token);
+            CheckpointPace.RunSettled(worker, token);
             database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
             worker.Fault.ShouldBeNull();
             engine.State.ShouldBe(EngineState.Running);
@@ -118,7 +118,7 @@ public sealed class VersionPurgeRefusalTests
         {
             if (walProgress) { database.DataStorage.WriteAheadJournal.AppendOperation(0, new byte[1]); }
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(CancellationToken.None);
+            CheckpointPace.RunSettled(worker, CancellationToken.None);
         }
 
         // Assert
@@ -129,7 +129,7 @@ public sealed class VersionPurgeRefusalTests
         else { worker.Fault.ShouldBeNull(); }
         worker.BeforeFullPass = null;
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         worker.Fault.ShouldBeNull();
         engine.OfflineDatabases.ShouldBeEmpty();
     }
@@ -162,7 +162,7 @@ public sealed class VersionPurgeRefusalTests
             await PutAsync(session, 0, token);
             for (int pass = 0; pass < 3; pass++)
             {
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
                 worker.WaitForCheckpoints(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             }
 
@@ -204,7 +204,7 @@ public sealed class VersionPurgeRefusalTests
         for (int pass = 0; pass < 3; pass++)
         {
             clock.Advance(TimeSpan.FromHours(1));
-            worker.RunIteration(CancellationToken.None).ShouldBeTrue();
+            CheckpointPace.RunSettled(worker, CancellationToken.None).ShouldBeTrue();
         }
 
         // Assert
@@ -242,13 +242,13 @@ public sealed class VersionPurgeRefusalTests
             await session.ExecuteAsync("DROP TABLE items", cancellationToken: token);
             for (int pass = 0; pass < 3; pass++)
             {
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
                 clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
             }
             Volatile.Read(ref refused).ShouldBeGreaterThanOrEqualTo(3);
             worker.Fault.ShouldBeOfType<StorageTransactionException>();
             database.TableReclamation.BeforeBatch = null;
-            worker.RunIteration(token);
+            CheckpointPace.RunSettled(worker, token);
 
             // Assert: a successful bounded batch finishes the refused work without an hourly pass.
             database.TableReclamation.HasWork.ShouldBeFalse();
@@ -280,12 +280,12 @@ public sealed class VersionPurgeRefusalTests
 
         // Act
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         attempts.ShouldBe(1);
         clock.Advance(DatabaseEngineWorker.FailureBackoff / 2);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
 
         // Assert
         attempts.ShouldBe(2);
@@ -304,6 +304,7 @@ public sealed class VersionPurgeRefusalTests
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
         var worker = new SqlVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
         worker.BeforeDeferredUndoRetry = current => current.Coordinator.RunVersionPurgePass(token);
         await using var transaction = await session.BeginTransactionAsync(cancellationToken: token);
         await PutAsync(session, 0, token);
@@ -318,11 +319,11 @@ public sealed class VersionPurgeRefusalTests
                 foreach (int milliseconds in new[] { 100, 200, 400 })
                 {
                     clock.Advance(TimeSpan.FromMilliseconds(milliseconds));
-                    worker.RunIteration(token);
+                    CheckpointPace.RunSettled(worker, token);
                 }
                 worker.FailureCount.ShouldBe(0);
                 clock.Advance(TimeSpan.FromMilliseconds(800));
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
             }, token);
 
             // Assert
@@ -330,7 +331,7 @@ public sealed class VersionPurgeRefusalTests
             engine.HasFailingWorker(database.Name).ShouldBeFalse();
         }
         clock.Advance(TimeSpan.FromSeconds(2));
-        worker.RunIteration(token);
+        CheckpointPace.RunSettled(worker, token);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Purge: unrelated committed page writes cannot suppress a blocked committed tombstone")]
@@ -375,7 +376,7 @@ public sealed class VersionPurgeRefusalTests
                 }
                 database.DataStorage.WriteAheadJournal.LastLsn.ShouldBeGreaterThan(beforeTraffic);
                 clock.Advance(TimeSpan.FromHours(1));
-                worker.RunIteration(token);
+                CheckpointPace.RunSettled(worker, token);
             }
 
             // Assert: the same page and owning bracket are one bounded refusal episode.
@@ -387,9 +388,82 @@ public sealed class VersionPurgeRefusalTests
             blocker.Rollback();
         }
         clock.Advance(TimeSpan.FromHours(1));
-        worker.RunIteration(token);
+        CheckpointPace.RunSettled(worker, token);
         worker.Fault.ShouldBeNull();
         database.Coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Purge lanes: full work becoming due during a detached pass remains owed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunIteration_FullPassBecomesDueWhileLaneRuns_ShouldCollectThenRunTheOwedPass(bool failFirst)
+    {
+        // Arrange: run through the pending-epoch, detached failure and recovery races repeatedly.
+        var duration = System.Diagnostics.Stopwatch.StartNew();
+        int rounds = 0;
+        int detached = 0;
+        int failuresCollected = 0;
+        int fullPasses = 0;
+        do
+        {
+            var clock = new ManualTimeProvider();
+            await using var engine = CreateEngine(clock);
+            var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+            var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            int calls = 0;
+            int active = 0;
+            int overlap = 0;
+            worker.BeforeFullPass = _ =>
+            {
+                if (Interlocked.Increment(ref active) > 1) { Interlocked.Increment(ref overlap); }
+                try
+                {
+                    if (Interlocked.Increment(ref calls) == 1)
+                    {
+                        entered.Set();
+                        release.Wait();
+                        if (failFirst) { throw new System.IO.IOException("detached purge failed"); }
+                    }
+                }
+                finally { Interlocked.Decrement(ref active); }
+            };
+            try
+            {
+                // Act: the second interval becomes due before the first lane can finish.
+                clock.Advance(TimeSpan.FromHours(1));
+                worker.RunIteration(CancellationToken.None);
+                entered.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+                worker.WaitForLanes(TimeSpan.Zero).ShouldBeFalse();
+                detached++;
+                clock.Advance(TimeSpan.FromHours(1));
+                worker.RunIteration(CancellationToken.None);
+                calls.ShouldBe(1);
+                worker.FailureCount.ShouldBe(0, "a lane cannot report outside its collecting pass");
+            }
+            finally { release.Set(); }
+            var settled = System.Diagnostics.Stopwatch.StartNew();
+            while ((Volatile.Read(ref calls) < 2 || worker.Fault is not null)
+                && settled.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
+            worker.WaitForLanes(TimeSpan.FromSeconds(30)).ShouldBeTrue();
+
+            // Assert: the real pump collected and ran the owed purge, without another explicit
+            // iteration or clock advance. A missing wake would leave it asleep for an hour.
+            calls.ShouldBe(2);
+            overlap.ShouldBe(0);
+            worker.FailureCount.ShouldBe(failFirst ? 1 : 0);
+            worker.Fault.ShouldBeNull();
+            if (failFirst) { failuresCollected++; }
+            fullPasses += calls;
+            rounds++;
+        }
+        while ((duration.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 6)
+            && duration.Elapsed < TimeSpan.FromSeconds(30));
+        rounds.ShouldBeGreaterThanOrEqualTo(6);
+        detached.ShouldBe(rounds);
+        fullPasses.ShouldBe(rounds * 2);
+        failuresCollected.ShouldBe(failFirst ? rounds : 0);
     }
 
     private static SqlDatabaseEngine CreateEngine(ManualTimeProvider clock, bool checkpoint = false)
