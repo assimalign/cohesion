@@ -58,3 +58,7 @@ substrate stays independently consumable.
 ## Consumers
 
 Every model engine (`Sql`, `Documents`, `Graph`, `Blob`, `KeyValuePair`) composes a transaction manager; execution operators carry `TransactionContext` into storage, index, and catalog operations.
+
+The statement-mark/re-grant zero-allocation contract is verified in optimized Release tests
+with tiered compilation disabled. Functional mark and arbitration tests also run in Debug.
+See DESIGN, unwritten statement marks, for the platform-measurement regression after #1689.

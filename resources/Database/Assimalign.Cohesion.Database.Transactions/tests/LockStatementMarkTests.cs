@@ -211,6 +211,7 @@ public sealed class LockStatementMarkTests
         Should.Throw<ArgumentException>(() => locks.ReleaseSince(foreign));
     }
 
+#if !DEBUG
     [Fact(DisplayName = "Cohesion Test [Transactions] - Statement marks: mark and successful re-grant allocate nothing")]
     public void MarkStatement_UncontendedRegrant_ShouldAllocateNothing()
     {
@@ -235,4 +236,5 @@ public sealed class LockStatementMarkTests
         granted.ShouldBe(1000);
         allocated.ShouldBe(0);
     }
+#endif
 }

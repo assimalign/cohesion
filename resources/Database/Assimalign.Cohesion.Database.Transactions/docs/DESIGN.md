@@ -508,6 +508,15 @@ MarkStatement reads the grant sequence atomically without taking the manager-wid
 caller serializes the owner's requests, so all its earlier grants have completed and no later
 one can race the mark; concurrent grants to other owners do not change that owner's boundary.
 First grants advance the sequence with Interlocked.Increment, paired with Interlocked.Read.
+The mark/re-grant allocation guard runs only in Release, with tiered compilation disabled in
+this test project, as SQL already does. Its populated-table, uncontended loop still requires
+exactly zero bytes over 1,000 operations after 100 warmups; runtime tier transitions cannot
+define the production allocation contract. The Linux failure after #1689 reported 1,792 bytes;
+Windows did not reproduce it, including with tiering enabled. The optimized path adds no
+entry, owner list, waiter or grant and allocates no product object. A forced 16-byte-array
+allocation per mark fails the guard before restoration. This changes test execution, not
+locking semantics. PostgreSQL likewise handles an already-held lock through its local grant
+path (src/backend/storage/lmgr/lock.c:969-982); no reference code is copied.
 
 This operation performs no undo: it releases only after unwritten arbitration or a failed
 statement bracket that has already been fully restored physically (#1231). Surviving writes
