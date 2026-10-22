@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Caching.InMemory.Internal;
 internal sealed class MemoryCacheEntry : ICacheEntry
 {
     private readonly MemoryCache _cache;
-    private readonly List<IChangeToken> _expirationTokens = [];
-    private readonly List<PostEvictionCallbackRegistration> _postEvictionCallbacks = [];
+    private List<IChangeToken>? _expirationTokens;
+    private List<PostEvictionCallbackRegistration>? _postEvictionCallbacks;
     private int _committed;
 
     public MemoryCacheEntry(MemoryCache cache, object key)
@@ -41,9 +41,9 @@ internal sealed class MemoryCacheEntry : ICacheEntry
 
     public TimeSpan? SlidingExpiration { get; set; }
 
-    public IList<IChangeToken> ExpirationTokens => _expirationTokens;
+    public IList<IChangeToken> ExpirationTokens => _expirationTokens ??= [];
 
-    public IList<PostEvictionCallbackRegistration> PostEvictionCallbacks => _postEvictionCallbacks;
+    public IList<PostEvictionCallbackRegistration> PostEvictionCallbacks => _postEvictionCallbacks ??= [];
 
     public CacheEntryPriority Priority { get; set; } = CacheEntryPriority.Normal;
 
@@ -59,7 +59,9 @@ internal sealed class MemoryCacheEntry : ICacheEntry
         _cache.CommitEntry(this);
     }
 
-    internal IReadOnlyList<IChangeToken> Tokens => _expirationTokens;
+    internal IReadOnlyList<IChangeToken> Tokens => _expirationTokens is null ? Array.Empty<IChangeToken>() : _expirationTokens;
 
-    internal IReadOnlyList<PostEvictionCallbackRegistration> Callbacks => _postEvictionCallbacks;
+    internal IReadOnlyList<PostEvictionCallbackRegistration> Callbacks => _postEvictionCallbacks is null
+        ? Array.Empty<PostEvictionCallbackRegistration>()
+        : _postEvictionCallbacks;
 }

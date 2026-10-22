@@ -384,9 +384,10 @@ public sealed class HttpFormFeature : IHttpFormFeature
 
     private static string? TryGetContentTypeParameter(string contentType, string parameter)
     {
-        foreach (string segment in contentType.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        ReadOnlySpan<char> segments = contentType.AsSpan();
+        foreach (Range range in segments.Split(';'))
         {
-            if (TryGetParameter(segment, parameter, out string? value))
+            if (TryGetParameter(segments[range].Trim(), parameter, out string? value))
             {
                 return value;
             }
@@ -410,7 +411,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
             return false;
         }
 
-        string remainder = contentType[(idx + MultipartBoundaryParameter.Length)..].Trim();
+        ReadOnlySpan<char> remainder = contentType.AsSpan(idx + MultipartBoundaryParameter.Length).Trim();
         int semi = remainder.IndexOf(';');
         if (semi >= 0)
         {
@@ -423,7 +424,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
             remainder = remainder[1..^1];
         }
 
-        boundary = remainder;
+        boundary = remainder.ToString();
         return remainder.Length > 0;
     }
 
@@ -437,9 +438,10 @@ public sealed class HttpFormFeature : IHttpFormFeature
             return;
         }
 
-        foreach (string segment in value.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        ReadOnlySpan<char> segments = value.AsSpan();
+        foreach (Range range in segments.Split(';'))
         {
-            string trimmed = segment.Trim();
+            ReadOnlySpan<char> trimmed = segments[range].Trim();
 
             if (TryGetParameter(trimmed, "name", out string? n))
             {
@@ -452,7 +454,7 @@ public sealed class HttpFormFeature : IHttpFormFeature
         }
     }
 
-    private static bool TryGetParameter(string segment, string parameter, out string? value)
+    private static bool TryGetParameter(ReadOnlySpan<char> segment, string parameter, out string? value)
     {
         value = null;
 
@@ -463,13 +465,13 @@ public sealed class HttpFormFeature : IHttpFormFeature
             return false;
         }
 
-        string raw = segment[(parameter.Length + 1)..].Trim();
+        ReadOnlySpan<char> raw = segment[(parameter.Length + 1)..].Trim();
         if (raw.Length >= 2 && raw[0] == '"' && raw[^1] == '"')
         {
             raw = raw[1..^1];
         }
 
-        value = raw;
+        value = raw.ToString();
         return true;
     }
 }

@@ -142,10 +142,11 @@ public static class HttpContentNegotiationExtensions
         }
 
         string current = existing.Value;
-        foreach (string segment in current.Split(','))
+        ReadOnlySpan<char> tokens = current.AsSpan();
+        foreach (Range segment in tokens.Split(','))
         {
-            string token = segment.Trim();
-            if (token == "*" || string.Equals(token, "Accept", StringComparison.OrdinalIgnoreCase))
+            ReadOnlySpan<char> token = tokens[segment].Trim();
+            if (token.SequenceEqual("*") || token.Equals("Accept", StringComparison.OrdinalIgnoreCase))
             {
                 // Already varying by Accept (or by everything): leave the header as-is.
                 return;

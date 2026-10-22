@@ -35,7 +35,7 @@ public class ConnectionFeatureCollection : IConnectionFeatureCollection
 
         KeyValuePair<string, IConnectionFeature?>[] snapshot = Volatile.Read(ref _features);
         int index = Find(snapshot, name);
-        return index >= 0 ? snapshot[index].Value : _inner?.Get(name);
+        return index >= 0 ? snapshot[index].Value : _inner is null ? null : GetInnerFeature(_inner, name);
     }
 
     /// <inheritdoc />
@@ -132,6 +132,34 @@ public class ConnectionFeatureCollection : IConnectionFeatureCollection
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private static IConnectionFeature? GetInnerFeature(IConnectionFeatureCollection inner, string name)
+    {
+        while (true)
+        {
+            // Subclasses may reimplement named lookup; only bypass dispatch for the exact built-in type.
+            if (inner.GetType() != typeof(ConnectionFeatureCollection))
+            {
+                return inner.Get(name);
+            }
+
+            ConnectionFeatureCollection level = (ConnectionFeatureCollection)inner;
+            KeyValuePair<string, IConnectionFeature?>[] snapshot = Volatile.Read(ref level._features);
+            int index = Find(snapshot, name);
+            if (index >= 0)
+            {
+                return snapshot[index].Value;
+            }
+
+            IConnectionFeatureCollection? next = level._inner;
+            if (next is null)
+            {
+                return null;
+            }
+
+            inner = next;
+        }
+    }
 
     private void Publish(string name, IConnectionFeature? feature)
     {

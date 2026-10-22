@@ -1,17 +1,26 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
-internal sealed class MapperAction<TTarget, TSource> : MapperAction
+internal sealed class MapperAction<TTarget, TSource> : TypedMapperAction<TTarget, TSource>
 {
-    public MapperAction(Action<TTarget, TSource> configure) : base(context =>
+    private readonly Action<TTarget, TSource> _configure;
+
+    public MapperAction(Action<TTarget, TSource> configure)
+    {
+        _configure = configure;
+    }
+
+    public override void Invoke(IMapperContext context)
     {
         if (context.Target is TTarget target && context.Source is TSource source)
         {
-            configure.Invoke(target, source);
+            _configure.Invoke(target, source);
         }
-    })
-    { }
+    }
+
+    public override void Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        _configure.Invoke(target, source);
+    }
 }

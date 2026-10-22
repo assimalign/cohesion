@@ -1,4 +1,6 @@
 using System;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Linq.Expressions;
 using System.Diagnostics.CodeAnalysis;
 
@@ -11,7 +13,7 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * source generator) or derived from expression trees at run time (the fallback
  * path, which is not NativeAOT-safe and is annotated accordingly).
  */
-internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
+internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
 {
     private readonly Func<TSource, TSourceMember> _getter;
     private readonly Action<TTarget, TSourceMember> _setter;
@@ -35,34 +37,43 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
     {
         if (target.Body is not MemberExpression)
         {
-            throw new ArgumentException($"The target expression body: '{target}' must be a MemberExpression.");
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetExpressionMemberRequired, target));
         }
         // The target may be a member path (e.g. t => t.Info.FirstName); intermediate members are
         // created on demand by the compiled setter.
         if (MapperUtility.ExtractMemberPath(target) is not { Length: > 0 } path)
         {
-            throw new ArgumentException($"The target expression '{target}' must be a member access path on the parameter (e.g. 't => t.A.B').");
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetExpressionPathRequired, target));
         }
         // Check if the source type can be assigned to the target (leaf) type, if not throw an exception
         if (!typeof(TSourceMember).IsAssignableTo(typeof(TTargetMember)))
         {
-            throw new InvalidCastException($"The source expression '{source}' cannot be assigned to the target expression '{target}'.");
+            throw new InvalidCastException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.SourceExpressionTypeMismatch, source, target));
         }
 
         _getter = source.Compile();
         _setter = MapperUtility.CompilePathSetter<TTarget, TSourceMember>(path);
     }
 
-    public void Invoke(IMapperContext context)
+    public override void Invoke(IMapperContext context)
     {
         if (context.Source is not TSource source || context.Target is not TTarget target)
         {
             return;
         }
 
-        var sourceValue = GetSourceValue(source);
+        Invoke(target, GetSourceValue(source), context.IgnoreHandling);
+    }
 
-        switch (context.IgnoreHandling)
+    public override void Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        Invoke(target, GetSourceValue(source), execution.IgnoreHandling);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Invoke(TTarget target, TSourceMember sourceValue, MapperIgnoreHandling ignoreHandling)
+    {
+        switch (ignoreHandling)
         {
             // This will ALWAYS allow 'Null' and 'Default' values
             case MapperIgnoreHandling.Never:

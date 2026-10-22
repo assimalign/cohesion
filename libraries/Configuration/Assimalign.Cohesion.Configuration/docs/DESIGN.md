@@ -27,6 +27,17 @@ the empty-string hash instead of zero. Dictionaries and sets consequently treat 
 constructed-empty keys as one key, as equality already requires. Constructors, validation,
 and the public surface are unchanged.
 
+## Key construction and nullable comparisons
+
+Validating a key scans its span before formatting an exception message. A valid string-backed
+key retains its immutable input string; the span constructor copies its input once to own it.
+Delimiter rejection and the null-as-empty string-constructor behavior remain unchanged.
+Exception messages for this path and the key JSON converter live in `Properties/ErrorMessages.resx`.
+
+Nullable comparison operators compare the underlying keys directly, without boxing. Equality
+and inequality are complements, including one-null operands and default versus empty keys
+(#1679). This corrects results from earlier builds while preserving every public signature.
+
 ## Layout Example
 
 ```text

@@ -53,7 +53,7 @@ internal sealed class EmptyValidationRule<TValue> : ValidationRuleBase<TValue>
         return member switch
         {
             null => true,
-            string stringValue when string.IsNullOrWhiteSpace(stringValue) => true, // May not need this since string is IEnumerable
+            string stringValue => string.IsNullOrWhiteSpace(stringValue),
             ICollection collection when collection.Count == 0 => true,
             Array array when array.Length == 0 => true,
             IEnumerable enumerable when !enumerable.Cast<object>().Any() => true,

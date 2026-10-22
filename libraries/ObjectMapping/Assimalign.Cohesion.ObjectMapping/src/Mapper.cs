@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+
+using Assimalign.Cohesion.ObjectMapping.Internal;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
@@ -31,6 +34,31 @@ public sealed class Mapper : IMapper
     /// </summary>
     public IReadOnlyList<IMapperProfile> Profiles => _options.Profiles;
 
+    internal TTarget MapTyped<TTarget, TSource>(TTarget target, TSource source)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(source);
+        List<IMapperProfile> profiles = _options.Profiles;
+        var execution = new MapperExecution(target, source, profiles, _options.IgnoreHandling, _options.CollectionHandling);
+        for (int i = 0; i < profiles.Count; i++)
+        {
+            IMapperProfile profile = profiles[i];
+            if (profile.IsMatch(typeof(TTarget), typeof(TSource)))
+            {
+                if (profile is IMapperProfileExecutor<TTarget, TSource> typed)
+                {
+                    typed.Invoke(target, source, ref execution);
+                }
+                else
+                {
+                    execution.Invoke(profile);
+                }
+            }
+        }
+
+        return target;
+    }
+
     /// <inheritdoc />
     public object Map(object target, object source, Type targetType, Type sourceType)
     {
@@ -41,31 +69,24 @@ public sealed class Mapper : IMapper
 
         if (!source.GetType().IsAssignableTo(sourceType))
         {
-            throw new ArgumentException($"The source object of type '{source.GetType().FullName}' is not assignable to the declared source type '{sourceType.FullName}'.", nameof(source));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingSourceTypeMismatch, source.GetType().FullName, sourceType.FullName), nameof(source));
         }
 
         if (!target.GetType().IsAssignableTo(targetType))
         {
-            throw new ArgumentException($"The target object of type '{target.GetType().FullName}' is not assignable to the declared target type '{targetType.FullName}'.", nameof(target));
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingTargetTypeMismatch, target.GetType().FullName, targetType.FullName), nameof(target));
         }
 
-        MapperContext context = new MapperContext(target, source)
-        {
-            Profiles = Profiles,
-            IgnoreHandling = _options.IgnoreHandling,
-            CollectionHandling = _options.CollectionHandling
-        };
+        List<IMapperProfile> profiles = _options.Profiles;
+        var execution = new MapperExecution(target, source, profiles, _options.IgnoreHandling, _options.CollectionHandling);
 
-        for (int i = 0; i < Profiles.Count; i++)
+        for (int i = 0; i < profiles.Count; i++)
         {
-            IMapperProfile profile = Profiles[i];
+            IMapperProfile profile = profiles[i];
 
             if (profile.IsMatch(targetType, sourceType))
             {
-                foreach (IMapperAction action in profile.MapActions)
-                {
-                    action.Invoke(context);
-                }
+                execution.Invoke(profile);
             }
         }
 

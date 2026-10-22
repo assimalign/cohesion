@@ -164,6 +164,11 @@ forward compatibility per RFC 6891 §4.
 
 ### Internal wire helpers
 
+Name serialization reuses a bounded 63-byte stack buffer for literal label encoding. Compression
+hits do not encode a label that will be replaced by a pointer. Multi-label suffix keys use a span
+join followed by the existing invariant lowercasing; case preservation, non-ASCII replacement,
+14-bit offset checks and the suffix-table comparer are unchanged (#1693).
+
 `Internal/DnsWireReader` and `Internal/DnsWireWriter` are
 <see langword="ref struct"/> wrappers over a `ReadOnlySpan<byte>` /
 `Span<byte>` that centralize bounds-checking and big-endian

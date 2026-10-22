@@ -6,7 +6,8 @@ The mapper favors **explicit profile configuration** over convention-heavy magic
 A profile records an ordered list of mapping *actions* ahead of time, and at run
 time the mapper simply replays the actions that match the source/target pair
 against a mapping context. There is no global static state and no ambient
-configuration — a mapper is an immutable, reusable object built from options.
+configuration — a mapper is a reusable object built from options. The implementation retains the
+supplied options and profile/action lists; callers must not mutate them concurrently with mapping.
 
 Two layers make up the public surface:
 
@@ -31,8 +32,20 @@ Two layers make up the public surface:
 | `MapperProfile<TTarget, TSource>` | Base class for a source→target mapping; `Configure` declares actions. |
 | `MapperProfileDescriptor<TTarget, TSource>` | Fluent surface (`MapMember`, `MapMemberTypes`, `MapMemberEnumerables`, `MapAction`, `MapAll*`). |
 | `IMapperAction` | A single recorded mapping step (`Invoke(context)`). |
-| `IMapperContext` / `MapperContext` | Per-invocation state: source, target, profiles, handling flags. |
+| `IMapperContext` / `MapperContext` | Public invocation context for custom profiles/actions: source, target, profiles, handling flags. |
+| Internal executors / `MapperExecution` | Typed built-in dispatch with local state and a lazy public context. |
 | `MapperException` | Area-scoped exception root (e.g. unknown mapper name). |
+
+```mermaid
+flowchart TD
+    Call[Public mapping call] --> Mapper[Built-in Mapper]
+    Call --> CustomMapper[Custom IMapper: primitive dispatch]
+    Mapper --> State[Local MapperExecution]
+    State --> Profiles[Matching profiles in declaration order]
+    Profiles --> Typed[Internal typed actions]
+    Profiles --> Context[Lazy MapperContext]
+    Context --> Custom[Custom profiles and context actions]
+```
 
 ### The mapping actions (`Internal/Actions`)
 
@@ -57,11 +70,13 @@ Two layers make up the public surface:
    base constructor so it is assigned *before* the virtual `Configure` runs. (This
    ordering matters — calling a virtual that reads a not-yet-assigned derived field
    from a base constructor was a defect that has been corrected.)
-2. **Build** — `MapperBuilder.Build()` snapshots options into an immutable `Mapper`.
+2. **Build** — `MapperBuilder.Build()` retains its configured options in a `Mapper`.
    It is one-shot and throws `InvalidOperationException` if called twice.
-3. **Map** — `Mapper.Map` validates arguments, builds a `MapperContext`, and replays
-   every profile whose `(targetType, sourceType)` matches. Mappers are thread-safe
-   to *use* once built (no mutable state on the map path).
+3. **Map** — `Mapper.Map` validates arguments, snapshots the handling flags into
+   invocation-local state, and replays every profile whose `(targetType, sourceType)` matches.
+   Built-in reference-type profiles execute through internal typed actions. A public `MapperContext`
+   is created lazily if a custom action/profile needs it. Mappers are thread-safe to *use* once built
+   when callers leave their configuration unchanged; invocation state is never shared or pooled.
 
 ## Null / default and collection handling
 
@@ -91,11 +106,33 @@ Two layers make up the public surface:
 
 ## Performance posture
 
+The eager sequence extension reserves the source count when it implements `ICollection<TSource>`.
+Unknown-count enumerables retain normal list growth and are enumerated once. Mapping still runs
+before the method returns and produces independent targets in source order (#1691).
+
+Built-in execution avoids a heap context and boxed action-list enumerator for ordinary reference-type
+mappings (#1700). Generic mapping helpers use a typed internal dispatch for the sealed `Mapper` and
+create targets with `new TTarget()`; custom `IMapper` implementations still receive the public primitive
+call and control the returned result. Runtime-Type mapping retains assignability validation.
+
+Custom context actions across matching profiles share one real `MapperContext` per invocation. Nested
+objects and collection elements receive independent contexts when needed; retaining one after mapping
+is safe. Derived profiles that reimplement `IMapperProfile.MapActions`, publicly replaced action-list
+entries, callback changes to the profile list, and List's concurrent-action-mutation checks remain
+observable. Value-type profiles use the context path so callbacks can still mutate boxed values.
+
+Enumerable-member execution snapshots matching profiles before source enumeration, reserves capacity
+for counted sources, and uses concrete List/array enumeration when available. Collection merge order,
+null handling, fallback conversion, and the supplied final setter remain unchanged. On the built-in
+reference-type path, typed custom callbacks avoid a closure and public context.
+
 The scalar hot path (`MapMember`) avoids reflection entirely by compiling both the
-getter and the setter once at profile-configuration time. Complex- and
-enumerable-member writes (configured once per object/collection, not per scalar)
-use `PropertyInfo`/`FieldInfo` reflection for simplicity; these are not the hot
-path. Profiles are configured once and replayed many times.
+getter and the setter once at profile-configuration time or accepting generated delegates.
+Complex-member writes also use a compiled/supplied setter. Enumerable-member writes use a
+supplied conversion-aware setter on the generated/delegate path; the expression fallback uses
+`PropertyInfo`/`FieldInfo` for its final assignment. Profiles are configured once and replayed many times.
+Member-based execution still invokes individual getters/setters; these changes do not turn a profile
+into one generated whole-object assignment method or remove caller-supplied `ToList()` copies.
 
 ## AOT posture
 

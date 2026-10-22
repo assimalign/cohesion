@@ -71,6 +71,13 @@ own features first and then inner features whose names are neither replaced nor 
 inner feature of the requested type. Exact built-in collections are scanned without allocating;
 custom collections and subclasses retain their own enumeration semantics.
 
+Named lookup keeps the local-slot check in the small public entry point, then walks exact built-in
+inner collections iteratively. This removes repeated interface dispatch and name validation at each
+built-in level and keeps stack usage independent of built-in layer depth. It stops at a custom
+collection or subclass and calls that object's interface `Get(name)`; a subclass's private base
+snapshot is not a substitute for its named lookup implementation. Tombstones still stop traversal,
+and every level reads its current immutable snapshot. No result cache or invalidation state is added.
+
 Collections serialize mutations and publish immutable arrays. Named and typed reads require no
 lock, and an enumerator retains the local snapshot it started with. Concurrent changes never
 invalidate a reader; a traversal across independently changing layers is not one atomic snapshot.

@@ -58,6 +58,11 @@ and authentication use. Three consequences follow:
 
 ## Parser design
 
+Content-Type and Content-Disposition parameter scanning uses spans and materializes only the
+returned parameter value. Token matching, trimming, quotes, first charset/last disposition
+occurrence precedence and multipart boundary behavior are preserved (#1696). This does not
+change the form reader's existing percent-decoding semantics.
+
 Both parsers are **incremental streaming readers** — the whole body is
 never buffered in memory just to parse it.
 

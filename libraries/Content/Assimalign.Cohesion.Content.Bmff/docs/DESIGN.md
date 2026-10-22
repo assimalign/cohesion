@@ -102,6 +102,12 @@ when invoked by SaveAsync. Calls on a reader, writer, document, model or shared 
 
 ### Document and ownership
 
+Write-plan prefix materialization uses an exact buffer and a bounded stream over that buffer,
+removing expandable-stream growth and the final `ToArray` copy. Zero-length prefixes share the
+empty array. Every internal prefix writer still runs and must consume its declared size, including
+the zero-length path; unsupported-prefix errors and synchronous profile contracts remain intact
+(#1695, within the #1549 performance work).
+
 BmffDocument.Boxes is mutable and ordered. Load captures Source and borrows it by default.
 leaveOpen: false transfers source disposal to the document, including on a failed load.
 A newly constructed document has no source. The root IContentReader<BmffDocument> and

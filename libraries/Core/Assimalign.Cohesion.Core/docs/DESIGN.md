@@ -230,6 +230,12 @@ tokens allocates nothing.
 
 ## `Glob` brace groups match the whole input
 
+The parse cache stores an internal `Glob.GlobPattern`, nested in `Glob`, containing the immutable
+tokens, minimum input length and whether it consumes variable-length input. Matching reuses those values instead of
+walking every token before each candidate. This moves the length precheck from O(tokens) to
+O(1) per match. One metadata object is retained per cached pattern; a cached parse still allocates
+only one `Glob` of the same size. Token matching and brace-group semantics are unchanged.
+
 Three defects in brace groups, recorded in #1507, are fixed together:
 
 - **A match could stop one character short.** The end-of-input checks in `Glob.IsMatch` and

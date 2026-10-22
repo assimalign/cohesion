@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
@@ -21,12 +22,18 @@ public static partial class MapperExtensions
         /// <exception cref="MapperException">Thrown when the mapping result is not a <typeparamref name="TTarget"/>.</exception>
         public TTarget Map<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TTarget, TSource>(TSource source) where TTarget : new()
         {
-            if (mapper.Map(source!, typeof(TTarget), typeof(TSource)) is TTarget instance)
+            TTarget target = new TTarget();
+            if (mapper is Mapper builtIn && !typeof(TTarget).IsValueType)
+            {
+                return builtIn.MapTyped(target, source);
+            }
+
+            if (mapper.Map(target!, source!, typeof(TTarget), typeof(TSource)) is TTarget instance)
             {
                 return instance;
             }
 
-            throw new MapperException($"The mapping result could not be assigned to type '{typeof(TTarget)}'.");
+            throw new MapperException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingResultTypeMismatch, typeof(TTarget)));
         }
 
         /// <summary>
@@ -40,12 +47,17 @@ public static partial class MapperExtensions
         /// <exception cref="MapperException">Thrown when the mapping result is not a <typeparamref name="TTarget"/>.</exception>
         public TTarget Map<TTarget, TSource>(TTarget target, TSource source)
         {
+            if (mapper is Mapper builtIn && !typeof(TTarget).IsValueType)
+            {
+                return builtIn.MapTyped(target, source);
+            }
+
             if (mapper.Map(target!, source!, typeof(TTarget), typeof(TSource)) is TTarget instance)
             {
                 return instance;
             }
 
-            throw new MapperException($"The mapping result could not be assigned to type '{typeof(TTarget)}'.");
+            throw new MapperException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.MappingResultTypeMismatch, typeof(TTarget)));
         }
 
         /// <summary>
@@ -90,7 +102,9 @@ public static partial class MapperExtensions
         /// <returns>The mapped target sequence.</returns>
         public IEnumerable<TTarget> Map<TTarget, TSource>(IEnumerable<TSource> sources) where TTarget : class, new()
         {
-            var targets = new List<TTarget>();
+            var targets = sources is ICollection<TSource> counted
+                ? new List<TTarget>(counted.Count)
+                : new List<TTarget>();
 
             foreach (var source in sources)
             {

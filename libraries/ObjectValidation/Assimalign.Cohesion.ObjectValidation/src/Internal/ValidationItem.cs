@@ -40,7 +40,8 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 
             if (rule.TryValidate(value, out var ruleContext))
             {
-                foreach (var error in ruleContext.Errors)
+                var errors = ruleContext is ValidationContext<TValue> builtIn ? builtIn.GetErrors() : ruleContext.Errors;
+                foreach (var error in errors)
                 {
                     context.AddFailure(error);
                     failed = true;

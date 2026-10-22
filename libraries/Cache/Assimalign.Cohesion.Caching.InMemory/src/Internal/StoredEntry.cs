@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Caching.InMemory.Internal;
 /// </remarks>
 internal sealed class StoredEntry : IDisposable
 {
-    private readonly List<PostEvictionCallbackRegistration> _callbacks;
+    private readonly PostEvictionCallbackRegistration[] _callbacks;
     private readonly IDisposable[] _tokenSubscriptions;
     private long _lastAccessedTicks;
     private int _evicted;
@@ -37,7 +37,18 @@ internal sealed class StoredEntry : IDisposable
         Priority = priority;
         Size = size;
         CommittedAt = committedAt;
-        _callbacks = new List<PostEvictionCallbackRegistration>(callbacks);
+        if (callbacks.Count == 0)
+        {
+            _callbacks = Array.Empty<PostEvictionCallbackRegistration>();
+        }
+        else
+        {
+            _callbacks = new PostEvictionCallbackRegistration[callbacks.Count];
+            for (int i = 0; i < callbacks.Count; i++)
+            {
+                _callbacks[i] = callbacks[i];
+            }
+        }
         _tokenSubscriptions = tokenSubscriptions;
         _lastAccessedTicks = committedAt.UtcTicks;
     }
@@ -102,7 +113,7 @@ internal sealed class StoredEntry : IDisposable
             }
         }
 
-        for (int i = 0; i < _callbacks.Count; i++)
+        for (int i = 0; i < _callbacks.Length; i++)
         {
             var registration = _callbacks[i];
 

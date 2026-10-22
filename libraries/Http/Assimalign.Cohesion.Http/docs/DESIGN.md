@@ -634,6 +634,47 @@ is no floating-point drift when comparing `q=0.7` against `q=0.700` — and keep
 RFC 9110 §12.4.2 grammar (at most three fractional digits, range 0–1) enforceable in
 `TryParse` without rounding heuristics.
 
+### Small parameter storage and rendering
+
+The parameter parser keeps its first valid parameter in a local value. A single
+parameter allocates only its final one-element array; a second valid parameter
+promotes storage to the existing temporary list, seeded with the first value.
+Malformed segments do not force list creation. All valid occurrences, including
+repeated names, retain their original order and values. The public parameter list
+shape, lookup behavior and specificity score are unchanged.
+
+Rendering a nonempty type without parameters concatenates type, slash and subtype
+directly into its result string. Parameterized types retain the existing builder
+and quoted-string escaping; default values still render as empty text. No cached
+rendering, extra struct field, retained parser state or public member is added.
+
+### Equality with repeated parameter names (#1687)
+
+Owner decision (2026-10-21): equality ignores ordering between distinct parameter
+names, but preserves the sequence of values within each repeated name. Name and
+value comparisons retain their existing case-insensitive behavior. Thus
+`x=a; y=c; x=b` equals `y=c; x=a; x=b`, while `x=b; x=a; y=c` differs. This keeps
+identity consistent with the existing first-occurrence parameter lookup and
+retains every parsed occurrence. Hashing remains unchanged; equal values still
+share a hash, and unrelated parameter sets may collide.
+
+The previous first-match-only equality could reject identical repeated-name
+values and produce asymmetric results. Matching now consumes each name's next
+unmatched occurrence. Equal parameter sequences return directly. Otherwise a
+bitmap uses at most 512 stack bytes through 4,096 parameters, and a heap bitmap
+above that bound. The larger-input path retains the same matching algorithm;
+it does not trade extra scans for reduced allocation. Worst-case time stays
+O(n²), as in the previous unordered-name search, while identical sequences
+compare in O(n). A copied value sharing its parameter array returns immediately;
+one or two parameters use direct value comparisons. The bitmap matcher is a
+separate private method, keeping stack allocation out of these small paths.
+
+**Behavior correction:** repeated-name values now obey reflexivity, symmetry
+and transitivity under the owner-approved policy. Public signatures, parameter
+storage, parsing tolerance, lookup and the existing unique-name semantics are
+unchanged. Tests cover dictionary/hash-set use and both bitmap word and stack
+boundaries; NativeAOT requires no reflection or runtime-generated code.
+
 ### Constructor and parser agreement (#1477)
 
 `HttpMediaTypeParameter`, `HttpForwardedParameter`, `HttpCacheControlExtension`,
@@ -667,6 +708,16 @@ comma-separated segment — a bad token, a missing `type/subtype`, or an unparse
 — rather than throwing, so one broken entry never discards the whole header. The
 returned lists are ordered by client preference: descending quality, and for equal
 quality the more specific candidate first (specificity breaks q ties).
+
+Media lists with at most eight valid entries and token lists with at most sixteen
+use stable insertion sorting on the result array, avoiding LINQ ordering objects
+and auxiliary key/index arrays on ordinary short headers. Equal-ranked entries
+retain their original order; explicit tokens
+still precede wildcards at equal quality. Longer lists retain the stable LINQ sort,
+so a client cannot turn an unbounded header into quadratic sorting work. The lower
+media bound avoids excessive moves of the larger media-range values. Each bound
+applies after malformed entries are skipped. Parsing, result array shape and public
+contracts are unchanged; no parsed-header cache or retained request state is added.
 
 The preference-ordered list is a convenience, not the negotiation result. The
 authoritative algorithm lives in `HttpContentNegotiation`: for each server

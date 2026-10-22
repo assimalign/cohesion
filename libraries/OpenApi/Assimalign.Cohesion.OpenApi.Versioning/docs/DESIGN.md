@@ -22,6 +22,10 @@ than duplicating the logic.
 
 ## What the transformer actually does
 
+The common single-token JSON Pointer append concatenates the parent, separator and escaped
+token directly. Multi-token appends retain the builder; RFC 6901 escaping and diagnostic text
+are unchanged (#1697). The transform still deep-copies the source and reports version fit.
+
 1. **Deep copy** the input via a serialization round-trip at the **superset line** (`ToJson(V3_2)` →
    `Parse`), so the input is never mutated and no construct is gated away by the writer. Copying at the
    source line would be lossy on an upgrade — a 3.1-only construct carried on a 3.0-declared document
