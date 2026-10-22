@@ -30,6 +30,11 @@ internal sealed class StorageGroupCommitGate
     // (or confirms, for an LSN that was already durable).
     private bool _abandoned;
 
+    internal bool HasPendingCommits
+    {
+        get { lock (_syncRoot) { return !_abandoned && _requestedLsn > _durableLsn; } }
+    }
+
     /// <summary>
     /// Invoked (outside the gate lock) when a committer registers a new pending
     /// commit, so an engine-level flush worker can be woken. Set by the owning

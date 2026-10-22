@@ -52,6 +52,19 @@ internal sealed class DeviceFaults
     private int _stalledJournalWrites;
     private int _stalledJournalFlushes;
     private int _activeJournalFlushes;
+    private readonly ManualResetEventSlim _pageWriteGate = new(initialState: true);
+    private readonly ManualResetEventSlim _purgeGate = new(initialState: true);
+    private int _stalledPageWrites;
+    private int _stalledPurges;
+
+    internal int StalledPageWrites => Volatile.Read(ref _stalledPageWrites);
+    internal int StalledPurges => Volatile.Read(ref _stalledPurges);
+    internal void StallPageWrites() => _pageWriteGate.Reset();
+    internal void ReleasePageWrites() => _pageWriteGate.Set();
+    internal void StallPurges() => _purgeGate.Reset();
+    internal void ReleasePurges() => _purgeGate.Set();
+    // Bound to the dispatcher's internal hook, so an apply-gate stall needs no shipped API.
+    internal void BeforePurge() => WaitForDevice(_purgeGate, ref _stalledPurges);
 
     /// <summary>Gets the number of journal fsync calls currently on the device, stalled calls included.</summary>
     internal int ActiveJournalFlushes => Volatile.Read(ref _activeJournalFlushes);
@@ -231,6 +244,8 @@ internal sealed class DeviceFaults
         ReleaseDataFlushes();
         ReleaseJournalWrites();
         ReleaseJournalFlushes();
+        ReleasePageWrites();
+        ReleasePurges();
     }
 
     /// <summary>
@@ -273,6 +288,7 @@ internal sealed class DeviceFaults
 
     private void BeforeWrite(long offset)
     {
+        if (offset >= Page.Size) { WaitForDevice(_pageWriteGate, ref _stalledPageWrites); }
         if (offset < Page.Size)
         {
             if (FailHeaderWrites)

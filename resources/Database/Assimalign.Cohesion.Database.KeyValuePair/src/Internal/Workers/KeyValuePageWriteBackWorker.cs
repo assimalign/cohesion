@@ -1,9 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
+using Assimalign.Cohesion.Database.Storage;
 
-using Assimalign.Cohesion.Database.KeyValuePair.Storage;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 /// <summary>
 /// The engine-owned dirty-page writer: paced write-back of buffered pages between
@@ -22,7 +23,7 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 /// An offline database is skipped, and so is a database its holder closed, whose close flushes
 /// both file sets.
 /// </remarks>
-internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
+internal sealed class KeyValuePageWriteBackWorker : DatabaseWriteWorker<KeyValueDatabase>
 {
     private readonly KeyValueDatabaseEngine _engine;
 
@@ -32,50 +33,22 @@ internal sealed class KeyValuePageWriteBackWorker : DatabaseEngineWorker
         _engine = engine;
     }
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override KeyValueDatabase[] GetDatabases()
     {
-        int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
-
-        foreach (KeyValueDatabase database in _engine.GetInstanceSnapshot())
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            // Nothing of an offline database is written (#1243): neither file set, whichever
-            // went offline. Each storage also refuses on its own. Nor is anything of a database
-            // its holder closed: its close flushes its file sets, and the engine keeps the closed
-            // instance registered only until the close ends.
-            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
-            {
-                continue;
-            }
-
-            WriteBack(database, database.DataStorage, batchSize);
-            WriteBack(database, database.CatalogStorage, batchSize);
-        }
+        return _engine.GetInstanceSnapshot();
     }
+    protected override string GetName(KeyValueDatabase database) => database.Name;
+    protected override bool IsClosed(KeyValueDatabase database) => database.IsClosed;
+    protected override bool IsOffline(KeyValueDatabase database) => database.IsOffline;
+    protected override bool IsDue(KeyValueDatabase database) => database.DataStorage.DirtyPageCount > 0 || database.CatalogStorage.DirtyPageCount > 0;
+    protected override bool IsOpen(KeyValueDatabase database) => _engine.IsOpen(database);
 
-    private void WriteBack(KeyValueDatabase database, KeyValueStorage storage, int batchSize)
+    protected override DatabaseWriteResult RunDatabase(KeyValueDatabase database, CancellationToken cancellationToken)
     {
-        try
-        {
-            storage.WriteBackDirtyPages(batchSize);
-        }
-        catch (ObjectDisposedException) when (!_engine.IsOpen(database))
-        {
-            // The snapshot can race a database drop; nothing to write back.
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // The pages stay dirty and a later pass writes them; an offline database's refusal
-            // is not the worker's failure (the engine lists the database offline).
-            if (!database.IsOffline)
-            {
-                ReportFailure(database.Name, exception);
-            }
-        }
+        DatabaseWriteResult failures = default;
+        int batch = _engine.EngineOptions.PageWriteBackBatchSize;
+        TryWrite(() => database.DataStorage.WriteBackDirtyPages(batch), ref failures);
+        TryWrite(() => database.CatalogStorage.WriteBackDirtyPages(batch), ref failures);
+        return failures;
     }
 }

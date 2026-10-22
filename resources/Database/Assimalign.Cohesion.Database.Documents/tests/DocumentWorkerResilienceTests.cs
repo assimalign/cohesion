@@ -263,7 +263,7 @@ public sealed class DocumentWorkerResilienceTests
 
         // The root engine base names each pump thread for its worker (concrete-types plan §6.4,
         // engine composition), where the model named it "{engine}/{kind}" ("document-engine/WriteAheadFlush").
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name + " lane");
         worker.Name.ShouldBe(engine.Name + "/wal-flush");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHDBD002");
@@ -916,22 +916,22 @@ public sealed class DocumentWorkerResilienceTests
 
         // Act: the first full pass fails on one database.
         clock.Advance(options.MaintenanceInterval);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
 
         // A pass before the backoff has passed does not run it again, and keeps the failure.
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
 
         // The backoff passes: the full pass runs again for the failing database alone, and fails.
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
 
         // The fault clears; the next retry, a backoff later, completes.
         Volatile.Write(ref fail, false);
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
 
         // Assert
         afterTheFailure.ShouldBe((1, 1, true));
@@ -1041,6 +1041,73 @@ public sealed class DocumentWorkerResilienceTests
             .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.JournalSizeLimit));
         Should.Throw<ArgumentOutOfRangeException>(() => DocumentDatabaseEngine.Create("document-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(DocumentDatabaseEngineOptions.JournalSizeLimit));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Workers: one stalled database leaves healthy lane passes at full pace")]
+    [InlineData(DatabaseEngineWorkerKind.PageWriteBack)]
+    [InlineData(DatabaseEngineWorkerKind.WriteAheadFlush)]
+    [InlineData(DatabaseEngineWorkerKind.VersionPurge)]
+    public async Task Run_OneDatabaseStalls_ShouldKeepOtherDatabasesAtFullPace(DatabaseEngineWorkerKind kind)
+    {
+        // Arrange: only the chosen worker has a short cadence. Checkpoints cannot supply progress.
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.PageWriteBackInterval = kind == DatabaseEngineWorkerKind.PageWriteBack ? TimeSpan.FromMilliseconds(20) : TimeSpan.FromHours(1);
+        options.MaintenanceInterval = TimeSpan.FromMilliseconds(20);
+        options.Durability = kind == DatabaseEngineWorkerKind.WriteAheadFlush ? StorageCommitDurability.Grouped : StorageCommitDurability.Synchronous;
+        options.GroupCommitWindow = TimeSpan.FromMilliseconds(20);
+        await using var engine = DocumentDatabaseEngine.Create("isolated-lanes", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var faults = strategy.Faults(Failing);
+        Task blockedWrite = Task.CompletedTask;
+        Task? disposal = null;
+        async Task InspectDisposalAsync()
+        {
+            disposal = Task.Run(async () => await engine.DisposeAsync());
+            (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
+            disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
+        }
+        long written = strategy.Faults(Healthy).PageWrites;
+        try
+        {
+            // Act: page writes and journal fsyncs stall inside DeviceFaults. Purge/index use
+            // the dispatch hook, modeling an unbounded apply/storage latch without a new API.
+            if (kind == DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                faults.StallPageWrites();
+                await PutAsync(failing, 0, 1);
+                var worker = (DocumentPageWriteBackWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPageWrites, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+                strategy.Faults(Healthy).PageWrites.ShouldBeGreaterThan(written);
+            }
+            else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
+            {
+                faults.StallJournalFlushes();
+                blockedWrite = Task.Run(() => PutAsync(failing, 0, 1));
+                var worker = (DocumentWriteAheadFlushWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledJournalFlushes, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+            else if (kind == DatabaseEngineWorkerKind.VersionPurge)
+            {
+                faults.StallPurges();
+                var worker = (DocumentVersionPurgeWorker)WorkerOf(engine, kind);
+                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPurges, id => PutAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+        }
+        finally
+        {
+            faults.Clear();
+            await blockedWrite.WaitAsync(Timeout);
+            if (disposal is not null) { await disposal.WaitAsync(Timeout); }
+        }
+        // Assert: released work drains, and no database was failed or taken offline by a stall.
+        (await Eventually(() => faults.StalledPageWrites == 0 && faults.StalledJournalFlushes == 0 && faults.StalledPurges == 0)).ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBeEmpty();
     }
 
     // Journal size used to exercise checkpoint lanes and failure retries.

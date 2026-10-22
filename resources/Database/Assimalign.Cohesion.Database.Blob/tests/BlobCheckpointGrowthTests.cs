@@ -327,7 +327,7 @@ public sealed class BlobCheckpointGrowthTests
         protected override bool IsOffline(object database) => false;
         protected override bool IsOpen(object database) => true;
         protected override long GetJournalLength(object database) => journalSize;
-        protected override bool IsCheckpointDue(object database, TimeSpan interval, DatabaseCheckpointPass.Visit? visit)
+        protected override bool IsCheckpointDue(object database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
         {
             if (visit is not null) { visit.Due = new(false, Due, false, journalSize, journalSize); }
             Interlocked.Increment(ref _dueChecks);

@@ -1,5 +1,63 @@
 # Graph engine design
 
+## Worker lane isolation (#1279)
+
+Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
+time on worker-owned dedicated lanes, with no process-wide scheduling atomic. Idle runners
+retire after 30 seconds.
+
+Admission is round-robin, starting after the last database admitted, including after a
+collected WAL flush rechecks late commits. The working cap is 64 non-stuck operations per
+engine and worker kind. An operation releases its admission slot after four worker intervals,
+clamped to 1–4 seconds (the checkpoint poll is at most one second). It retains its lane and
+storage ownership until I/O returns. A hard ceiling of 128 dedicated threads (twice the cap),
+including parked and stuck runners, bounds replacement cost. Capacity deferral and each newly
+stuck lane report observational failures and root event 35, naming the database and worker kind;
+these reports never take a database offline or replace an unresolved operational fault.
+Warnings repeat at most once per second per database. At the hard ceiling progress waits for a
+runner to return, with an explicit health signal rather than silent loss of maintenance.
+
+Idle visits check pending grouped commits, the constant-time dirty-page count, deferred undo,
+and owed full purge passes on the pump. They allocate nothing and dispatch no lane. SQL/Key-Value
+index stubs dispatch only through their internal test hook until a real maintenance body exists.
+A detached write-back completion wakes collection without advancing other databases' interval;
+the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
+share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
+lane identity; a published database waits for an outstanding provisional catalog flush before
+flushing that catalog itself. The provisional collection path also rechecks later registrations.
+
+Disposal continues joining every lane before storage closes. Root event 36 names each database
+and worker kind still running, once per second while disposal waits. **Open owner question:
+bounded disposal** would need retained storage ownership for abandoned I/O; no timeout abandons
+I/O or closes its storage. The defaults (64 slots, 128 threads, 30-second idle retirement and the
+1–4-second stuck threshold) need owner review against expected database counts and device latency.
+
+
+A collected WAL flush rechecks later commit registrations before the group window; provisional
+SQL/Key-Value file sets do the same, preventing a reset signal from leaving construction to self-help.
+Only the pump collects outcomes and calls the root failure/reporting methods, preserving per-database
+backoff, give-up fault retention and observational purge refusals. Purge retry and refusal state
+is pump-owned; lanes return full-pass, undo and reclamation facts. A full pass becoming due while
+an earlier lane runs remains owed and wakes the pump after collection. SQL/Key-Value provisional flushes also use lanes, keeping a
+stalled constructor from holding back published databases. Engine disposal joins all lane runners
+before closing storages. Lock order is the root pass gate, then the lane monitor; no lane monitor
+spans model/apply/storage locks, failure reporting or observer callbacks.
+
+The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
+page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
+worker completions while the other database is still held, and judge measured waits by median
+and 75-percent share under the budget. They do not credit committer self-help or a statement's
+checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
+are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
+preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+The isolation loop waits for positive-work samples as well as completed visits and timing
+samples, with its existing ceiling and final assertions. A slow healthy producer with extra
+WAL wakes covers the early no-op exit under concurrent engine load.
+No public type, visibility grant, project reference or storage format changed. Storage exposes
+its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
+
 ## Runtime child-root diagnostics (#1247, #1364)
 
 An autocommit statement whose commit succeeded reports success even if releasing its

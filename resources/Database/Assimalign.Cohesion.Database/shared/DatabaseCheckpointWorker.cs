@@ -1,8 +1,6 @@
 using System;
-using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Threading;
-using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
 
@@ -31,7 +29,7 @@ namespace Assimalign.Cohesion.Database;
 /// </para>
 /// <para>
 /// <b>Each database's checkpoint runs on a lane of its own.</b> The pass hands a due database's
-/// checkpoint to <see cref="DatabaseCheckpointLanes"/> and waits for it while no other database
+/// checkpoint to <see cref="DatabaseWorkerLanes{TResult}"/> and waits for it while no other database
 /// needs the worker, so a checkpoint that ends is settled in the pass that started it. A checkpoint
 /// that hangs or crawls in its device is left to run alone once another database's journal reaches
 /// its size, or the poll interval passes: the passes that follow leave its database out until it
@@ -80,7 +78,7 @@ namespace Assimalign.Cohesion.Database;
 /// (#1283) never takes a database offline by itself, however long its journal grows.
 /// </para>
 /// </remarks>
-internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWorker
+internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseLaneWorker<bool>
     where TDatabase : class
 {
     /// <summary>
@@ -96,48 +94,8 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// </summary>
     internal const int JournalSizeLimitFailures = 2;
 
-    private readonly DatabaseCheckpointLanes _lanes;
     private readonly long _journalSizeLimit;
-    private long _observedPass;
-    private ThreadLocal<PumpWait>? _pumpWait;
-    private Action<DatabaseCheckpointPass>? _passCompleted;
-    private Exception? _observerFailure;
-
-    internal bool PumpBackoffObserved { get; set; }
-    internal Exception? PassObserverFailure => Volatile.Read(ref _observerFailure);
-
-    // Opt-in: no records or retained history without a listener. Called after lane cleanup,
-    // outside lane/failure locks. This describes visits, before root failure settlement.
-    // Listeners must not re-enter the worker. Callback failures are isolated and retained.
-    internal Action<DatabaseCheckpointPass>? PassCompleted
-    {
-        get => Volatile.Read(ref _passCompleted);
-        set
-        {
-            if (value is not null && _pumpWait is null)
-            {
-                var waits = new ThreadLocal<PumpWait>(static () => new PumpWait());
-                if (Interlocked.CompareExchange(ref _pumpWait, waits, null) is not null) { waits.Dispose(); }
-            }
-            Volatile.Write(ref _passCompleted, value);
-        }
-    }
-
-    internal void RecordPumpBackoff(TimeSpan duration)
-    {
-        if (PassCompleted is not null) { _pumpWait!.Value!.Backoff += duration; }
-    }
-
-    internal void RecordTriggerElapsed(TimeSpan duration)
-    {
-        if (PassCompleted is not null)
-        {
-            var wait = _pumpWait!.Value!;
-            wait.Elapsed = duration;
-            wait.Measured = true;
-        }
-    }
-
+    private TDatabase? _lastServed;
     /// <summary>
     /// Initializes a new instance of the <see cref="DatabaseCheckpointWorker{TDatabase}"/> class,
     /// named <c>{engineName}/checkpoint</c>, of kind <see cref="DatabaseEngineWorkerKind.Checkpoint"/>.
@@ -152,7 +110,6 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     protected DatabaseCheckpointWorker(string engineName, TimeSpan interval, long journalSizeLimit)
         : base(engineName + "/checkpoint", DatabaseEngineWorkerKind.Checkpoint, interval)
     {
-        _lanes = new DatabaseCheckpointLanes(engineName + "/" + DatabaseEngineWorkerKind.Checkpoint + " lane");
         _journalSizeLimit = journalSizeLimit;
     }
 
@@ -161,25 +118,14 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// </summary>
     protected abstract ManualResetEventSlim CheckpointNeededSignal { get; }
 
-    /// <summary>
-    /// Stops the worker's lanes once the engine stopped its pump: waits for every checkpoint still
-    /// running, so none outlives the engine's storages. The worker base's release hook, which the
-    /// owning engine runs once (concrete-types plan, row 7); it was the worker's
-    /// <see cref="IDisposable.Dispose"/> until the engines' disposable type tests went.
-    /// </summary>
-    /// <returns>A completed task, once every lane ended.</returns>
-    protected override ValueTask DisposeAsyncCore()
-    {
-        _lanes.Dispose();
-        _pumpWait?.Dispose();
-        return ValueTask.CompletedTask;
-    }
+    protected override ManualResetEventSlim LaneSignal => CheckpointNeededSignal;
+    protected override TimeSpan TriggerTimeout => PollWait;
 
     // Test-only hook on the type that dispatches the checkpoint to its lane.
     internal Action<TDatabase>? BeforeCheckpoint { get; set; }
 
     // Deterministic tests wait for lane completion before running the collecting pass.
-    internal bool WaitForCheckpoints(TimeSpan timeout) => _lanes.WaitForIdle(timeout);
+    internal bool WaitForCheckpoints(TimeSpan timeout) => Lanes.WaitForIdle(timeout);
 
     /// <summary>Gets the engine's open databases.</summary>
     /// <returns>The snapshot of the engine's open databases.</returns>
@@ -213,7 +159,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// <param name="interval">The time backstop.</param>
     /// <param name="visit">Optional observation receiving the due predicate's inputs.</param>
     /// <returns>True when a checkpoint is due.</returns>
-    protected abstract bool IsCheckpointDue(TDatabase database, TimeSpan interval, DatabaseCheckpointPass.Visit? visit);
+    protected abstract bool IsCheckpointDue(TDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit);
 
     /// <summary>
     /// Checkpoints a database's due storages, on a lane thread.
@@ -224,121 +170,27 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// <returns>True when the checkpoint finished; false when a statement holding the apply gate took it over.</returns>
     protected abstract bool Checkpoint(TDatabase database, TimeSpan interval, CancellationToken cancellationToken);
 
-    /// <inheritdoc />
-    protected sealed override void WaitForTrigger(CancellationToken cancellationToken)
+    protected sealed override void RunLanePass(CancellationToken cancellationToken, DatabaseWorkerPass? pass)
     {
-        long started = Stopwatch.GetTimestamp();
-        bool signaled = false;
-        var timeout = PollWait;
-        try
+        var databases = GetDatabases();
+        int start = databases.Length == 0 ? 0 : (Array.IndexOf(databases, _lastServed) + 1) % databases.Length;
+        for (int offset = 0; offset < databases.Length; offset++)
         {
-            signaled = CheckpointNeededSignal.Wait(timeout, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // The pump is stopping; Run observes the token and exits.
-        }
-        catch (ObjectDisposedException)
-        {
-            // The engine is closing.
-        }
-        finally
-        {
-            var observation = PassCompleted is null ? null : _pumpWait!.Value;
-            if (observation is not null)
-            {
-                observation.Timeout = timeout;
-                observation.Elapsed = Stopwatch.GetElapsedTime(started);
-                observation.Signaled = signaled;
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    protected sealed override void RunIterationCore(CancellationToken cancellationToken)
-    {
-        var interval = Interval;
-        var wait = PollWait;
-
-        var observer = PassCompleted;
-        // Waits belong to their pump thread. A concurrent explicit RunIteration must not consume
-        // the pump's pending wait or race a TimeSpan write. The base serializes pass publication;
-        // lane threads never touch the record. Release occurs only after the pump has joined.
-        var pumpWait = observer is null ? null : _pumpWait!.Value;
-        var pass = observer is null ? null : new DatabaseCheckpointPass(++_observedPass,
-            PumpBackoffObserved ? pumpWait!.Backoff : null,
-            pumpWait!.PassEnded == 0 ? null : Stopwatch.GetElapsedTime(pumpWait.PassEnded),
-            pumpWait.Timeout, pumpWait.Elapsed, pumpWait.Signaled, pumpWait.Measured);
-        pumpWait?.Reset();
-        bool lanesBegun = false;
-        try
-        {
-            // Reset before the pass: requests arriving mid-pass set it again.
-            CheckpointNeededSignal.Reset();
-            _lanes.BeginPass();
-            lanesBegun = true;
-            foreach (var database in GetDatabases())
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                Visit(database, interval, wait, cancellationToken, pass?.Add(GetName(database)));
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            if (pass is not null) { pass.PassThrew = true; }
-            throw;
-        }
-        finally
-        {
-            if (lanesBegun) { _lanes.EndPass(); }
-            if (pass is not null)
-            {
-                pass.Cancelled = cancellationToken.IsCancellationRequested;
-                try { observer!(pass); }
-                catch (Exception exception) when (exception is not OutOfMemoryException)
-                {
-                    // Test observers cannot change a pass's outcome or terminate its pump.
-                    Volatile.Write(ref _observerFailure, exception);
-                }
-                pumpWait!.PassEnded = Stopwatch.GetTimestamp();
-            }
+            if (cancellationToken.IsCancellationRequested) { break; }
+            var database = databases[(start + offset) % databases.Length];
+            Visit(database, Interval, PollWait, cancellationToken, pass?.Add(GetName(database)));
         }
     }
 
     private TimeSpan PollWait => Interval < PollInterval ? Interval : PollInterval;
 
-    private sealed class PumpWait
-    {
-        internal TimeSpan Backoff;
-        internal TimeSpan Timeout;
-        internal TimeSpan Elapsed;
-        internal bool Signaled;
-        internal bool Measured;
-        internal long PassEnded;
-
-        internal void Reset()
-        {
-            Backoff = Timeout = Elapsed = TimeSpan.Zero;
-            Signaled = false;
-            Measured = false;
-        }
-    }
-
-    private void Visit(TDatabase database, TimeSpan interval, TimeSpan wait, CancellationToken cancellationToken, DatabaseCheckpointPass.Visit? visit)
+    private void Visit(TDatabase database, TimeSpan interval, TimeSpan wait, CancellationToken cancellationToken, DatabaseWorkerPass.Visit? visit)
     {
         string name = GetName(database);
-        var state = _lanes.Collect(database, out var ended);
-        if (state == DatabaseCheckpointLanes.LaneState.Running)
+        var state = Lanes.Collect(database, out var ended);
+        if (state == DatabaseWorkerLanes<bool>.LaneState.Running)
         {
-            if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Running; }
+            if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Running; }
             // Its checkpoint still runs on its lane: the database waits for it, and a failure
             // recorded for it stays until a checkpoint finishes. An offline one is not begun.
             bool offline = IsOffline(database);
@@ -355,13 +207,13 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
         // recorded for it ends. A database whose failure is backing off waits its turn.
         if (IsOffline(database))
         {
-            if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Offline; visit.Offline = true; }
+            if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Offline; visit.Offline = true; }
             return;
         }
 
         bool begun = BeginDatabase(name);
         bool unfinishedReported = false;
-        if (state == DatabaseCheckpointLanes.LaneState.Ended)
+        if (state == DatabaseWorkerLanes<bool>.LaneState.Ended)
         {
             if (visit is not null) { visit.Collected = true; }
             // A checkpoint an earlier pass left running ended: settled as that pass would have.
@@ -376,16 +228,16 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
 
         if (!begun)
         {
-            if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.BackingOff; visit.Backoff = FailureBackoff; }
+            if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.BackingOff; visit.Backoff = FailureBackoff; }
             return;
         }
 
-        DatabaseCheckpointLanes.Outcome outcome;
+        DatabaseWorkerLanes<bool>.Outcome outcome;
         try
         {
             if (!IsCheckpointDue(database, interval, visit))
             {
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.NotDue; }
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.NotDue; }
                 return;
             }
 
@@ -393,7 +245,8 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
             if (visit is not null) { visit.Attempted = true; }
             if (!RunCheckpoint(database, interval, wait, cancellationToken, out outcome, visit))
             {
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Running; }
+                if (visit is not null && visit.Reason != DatabaseWorkerPass.VisitReason.Capacity) { visit.Reason = DatabaseWorkerPass.VisitReason.Running; }
+                if (!Lanes.HasLane(database)) { ReportCapacity(name); }
                 // Left running on its lane; a later pass collects it.
                 if (!unfinishedReported)
                 {
@@ -404,7 +257,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            outcome = new DatabaseCheckpointLanes.Outcome(false, exception);
+            outcome = new DatabaseWorkerLanes<bool>.Outcome(false, exception);
         }
 
         Settle(database, name, outcome, cancellationToken, ref unfinishedReported, visit);
@@ -413,43 +266,48 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     // Keep the captured lane delegate on the due-work path. A closure in Visit would be
     // allocated on entry even for an idle database or an unobserved pass.
     private bool RunCheckpoint(TDatabase database, TimeSpan interval, TimeSpan wait, CancellationToken cancellationToken,
-        out DatabaseCheckpointLanes.Outcome outcome, DatabaseCheckpointPass.Visit? visit)
-        => _lanes.Run(database, () =>
+        out DatabaseWorkerLanes<bool>.Outcome outcome, DatabaseWorkerPass.Visit? visit)
+    {
+        bool ended = Lanes.Run(database, () =>
         {
             BeforeCheckpoint?.Invoke(database);
             return Checkpoint(database, interval, cancellationToken);
-        }, CheckpointNeededSignal, wait, cancellationToken, out outcome, visit);
+        }, CheckpointNeededSignal, wait, cancellationToken, out outcome, visit, GetName(database));
+        if (ended || Lanes.HasLane(database)) { _lastServed = database; }
+        return ended;
+    }
 
-    private void Settle(TDatabase database, string name, DatabaseCheckpointLanes.Outcome outcome, CancellationToken cancellationToken, ref bool unfinishedReported, DatabaseCheckpointPass.Visit? visit)
+    private void Settle(TDatabase database, string name, DatabaseWorkerLanes<bool>.Outcome outcome, CancellationToken cancellationToken, ref bool unfinishedReported, DatabaseWorkerPass.Visit? visit)
     {
         switch (outcome.Failure)
         {
-            case null when outcome.Finished:
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Completed; }
+            case null when outcome.Result:
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Completed; }
                 return;
 
             case null:
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Deferred; }
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Deferred; }
                 // Deferred to the statement holding the apply gate, which runs it as it ends.
                 break;
 
             case StorageTransactionException { Code: not StorageTransactionErrorCode.ForeignStorage }:
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Busy; }
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Busy; }
                 // A transaction is active on this storage; retry on the next pass.
                 break;
 
             case ObjectDisposedException when !IsOpen(database):
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Closed; }
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Closed; }
                 // The snapshot can race a database drop; nothing left to checkpoint.
                 return;
 
-            case OperationCanceledException when cancellationToken.IsCancellationRequested:
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Cancelled; }
-                ExceptionDispatchInfo.Throw(outcome.Failure);
+            case OperationCanceledException when cancellationToken.IsCancellationRequested || outcome.CancellationRequested:
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Cancelled; }
+                ReportUnfinished(name);
+                if (cancellationToken.IsCancellationRequested) { ExceptionDispatchInfo.Throw(outcome.Failure); }
                 return;
 
             default:
-                if (visit is not null) { visit.Reason = DatabaseCheckpointPass.VisitReason.Failed; }
+                if (visit is not null) { visit.Reason = DatabaseWorkerPass.VisitReason.Failed; }
                 // A failure that took the database offline (#1243, #1252, #1268) is reported through
                 // the engine's offline list, and the next pass skips the database; any other is
                 // this pass's failure, and a later pass retries the checkpoint. Reporting it takes
@@ -484,7 +342,7 @@ internal abstract class DatabaseCheckpointWorker<TDatabase> : DatabaseEngineWork
     /// when one of its journals has reached the engine's journal size limit (owner decision 25): its
     /// checkpoints keep failing, so nothing truncates the journal.
     /// </summary>
-    private void GiveUpOnJournal(TDatabase database, string name, int failures, Exception failure, DatabaseCheckpointPass.Visit? visit)
+    private void GiveUpOnJournal(TDatabase database, string name, int failures, Exception failure, DatabaseWorkerPass.Visit? visit)
     {
         if (IsOffline(database))
         {

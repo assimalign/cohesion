@@ -190,7 +190,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   or engine to its public `DisposeAsync`, with no type test left.
 - **Engine disposal has one order:** the servers (last attached first), then every worker pump is
   stopped and joined, then the workers (last attached first, each through its release hook: the
-  checkpointer ends the work it left on its lanes), then the leaf closes its databases
+  lane workers join the work they left running), then the leaf closes its databases
   (`DisposeAsyncCore`). Every step runs whatever an earlier one threw, and the failures are
   reported together in one `AggregateException`.
 - **A worker belongs to one engine and is released once, by its owner** (plan row 7, landed with
@@ -501,7 +501,7 @@ ordinary storage transaction contention is retried as busy.
   database's journal truncation for as long (a hung data-file fsync in one database left
   the other with no checkpoint at all in five seconds of writes). The engines' checkpointer
   is now one shared copy, `shared/DatabaseCheckpointWorker.cs`, that runs each database's
-  checkpoint on a lane (`shared/DatabaseCheckpointLanes.cs`): a dedicated lane thread,
+  checkpoint on a lane (`shared/DatabaseWorkerLanes.cs`): a dedicated lane thread,
   at most one checkpoint per database at a time. The pass waits for the lane while no
   other database needs the worker, so a checkpoint that ends is settled by the pass that
   started it, as before. Once another database's journal reaches its size (the engine's
@@ -513,9 +513,16 @@ ordinary storage transaction contention is retried as busy.
   (`community/kernel/src/main/java/org/neo4j/kernel/database/Database.java:1155-1157`,
   `community/kernel/src/main/java/org/neo4j/wal/checkpoint/CheckPointScheduler.java:51-84`),
   and PostgreSQL from one checkpointer per cluster and WAL
-  (`src/backend/postmaster/checkpointer.c:5`). The page write-back, flush and purge
-  workers still visit their databases on their own thread (follow-up).
-- **Checkpoint pass observations (#1284).**
+  (`src/backend/postmaster/checkpointer.c:5`). Page write-back, WAL flush, purge and the SQL/Key-Value index stubs now use these
+  same typed lanes (#1279), admitting 64 non-stuck operations per engine and worker kind
+  under a hard ceiling of 128 dedicated threads. Excess work reports an observational failure;
+  idle runners retire after 30 seconds. The worker pump alone
+  collects and settles outcomes. Provisional SQL/Key-Value file sets also flush on lanes.
+  Purge retry/refusal state is pump-owned and full passes becoming due during a running
+  lane remain owed and wake the pump promptly after collection. Collected WAL flushes recheck
+  later registrations in that pass, including provisional file sets, before the group window.
+  Disposal waits for active and parked runners before storage close.
+- **Lane-worker pass observations (#1284, #1279).**
   The opt-in internal record describes visits, after lane cleanup and before the root's
   `SettlePass` failure settlement. `PassThrew` means non-cancellation pass work threw; a database
   failure is recorded on its visit. Typed visit reasons distinguish interruption from cancellation. Due evidence retains
@@ -525,7 +532,7 @@ ordinary storage transaction contention is retried as busy.
   lane outcome are explicit; a statement's checkpoint header write is not worker progress.
   Give-up requests and the database's sampled offline state are separate, because taking a
   database offline is queued. `_giveUpFaultPass` and its settlement policy are unchanged.
-  #1277's observational purge refusals belong to the purge worker, not this checkpoint record.
+  #1277's observational purge refusals remain the purge worker's reporting policy; observations do not change it.
 
   Pump backoff is nullable: absent means the root delay hook was not attached. The test-only
   linked adapter uses `UnsafeAccessor`, with no test-to-test reference or new visibility grant.
@@ -553,10 +560,17 @@ ordinary storage transaction contention is retried as busy.
   The lane delegate is created only for due work; an unobserved idle visit allocates nothing.
   Observer callbacks run outside lane/failure monitors; callback exceptions are retained for the
   test to assert and cannot fail a pass or kill the pump. Cancellation keeps the same break path
-  with or without observation. The visit type and publication currently belong to the checkpoint
-  worker; #1279 should move the common pass identity, trigger/delay accounting, database outcome
-  and lane wait fields to a lane-neutral internal record when write-back, group-commit and purge
-  adopt lanes, retaining checkpoint due-state evidence as checkpoint-specific data.
+  with or without observation. DatabaseLaneWorker now owns publication and trigger/delay accounting for all lane workers;
+  DatabaseWorkerPass carries the common identity, typed database outcome and lane wait evidence
+  (#1279). Checkpoint due-state evidence remains optional checkpoint-specific data. Hung-work
+  tests require at least 12 healthy worker completions while the other database stays held;
+  median and 75-percent share judge waits, and slowdown mutants verify the evidence. There
+  are no per-pass process-wide atomics. The root failure ordering and _giveUpFaultPass retention
+  are unchanged; purge refusals retain their observation-only reporting. Lane threads start
+  without caller ExecutionContext and restore their clean context after each job, preventing an
+  apply-gate reentrancy flag or other AsyncLocal state from crossing databases. Detached outcomes carry
+  the originating pass cancellation state, so a later collecting pass cannot report cancellation
+  as a new operational failure.
 - **Collecting a deferred checkpoint rechecks due work in the same pass (#1283).** A lane
   that ended without finishing no longer consumes a size wake and leaves the due journal until
   the next poll: after settling it, the worker checks the backoff and due state, and attempts at
@@ -1021,6 +1035,61 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
   `DatabaseSession` base; sessions must never commit implicitly on dispose).
 - Transactions: disposing an uncommitted transaction rolls it back.
 
+## Maintenance admission and thread cost (#1279)
+
+Admission is round-robin, starting after the last database admitted, including after a
+collected WAL flush rechecks late commits. The working cap is 64 non-stuck operations per
+engine and worker kind. An operation releases its admission slot after four worker intervals,
+clamped to 1–4 seconds (the checkpoint poll is at most one second). It retains its lane and
+storage ownership until I/O returns. A hard ceiling of 128 dedicated threads (twice the cap),
+including parked and stuck runners, bounds replacement cost. Capacity deferral and each newly
+stuck lane report observational failures and root event 35, naming the database and worker kind;
+these reports never take a database offline or replace an unresolved operational fault.
+Warnings repeat at most once per second per database. At the hard ceiling progress waits for a
+runner to return, with an explicit health signal rather than silent loss of maintenance.
+
+Idle visits check pending grouped commits, the constant-time dirty-page count, deferred undo,
+and owed full purge passes on the pump. They allocate nothing and dispatch no lane. SQL/Key-Value
+index stubs dispatch only through their internal test hook until a real maintenance body exists.
+A detached write-back completion wakes collection without advancing other databases' interval;
+the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
+share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
+lane identity; a published database waits for an outstanding provisional catalog flush before
+flushing that catalog itself. The provisional collection path also rechecks later registrations.
+
+Disposal continues joining every lane before storage closes. Root event 36 names each database
+and worker kind still running, once per second while disposal waits. **Open owner question:
+bounded disposal** would need retained storage ownership for abandoned I/O; no timeout abandons
+I/O or closes its storage. The defaults (64 slots, 128 threads, 30-second idle retirement and the
+1–4-second stuck threshold) need owner review against expected database counts and device latency.
+
+Fast devices generally reuse about one runner per active kind. Slow devices need min(N, 64)
+runners per kind before recovery, so 1/10/100 databases use up to 1/10/64 runners for each kind.
+The original capped implementation dispatched all 22 built-in lane kinds (five each for
+SQL/Key-Value, four each for Documents/Graph/Blob), so 100 slow databases could use 1,408 dedicated
+threads, plus pumps. Skipping the two empty index stubs leaves 20 active production kinds:
+1,280 runners before replacement, with a hard budget of 2,560. Implementing both index bodies
+would restore the 22-kind budgets of 1,408 and 2,816 respectively. Operations arriving more often
+than the 30-second retirement timeout keep their runners alive. These are OS threads, not
+thread-pool jobs; stack reservations and scheduling cost are material. The cap limits the uncapped checkpointer's former thread growth while the recovery
+budget keeps the 70-hung/30-healthy case progressing. Review the defaults before deployment.
+
+PostgreSQL instead has one cluster checkpointer (src/backend/postmaster/checkpointer.c:5),
+a configured general-worker slot array (bgworker.c:186,203), and separate configured autovacuum
+slots (autovacuum.c:125). Its launcher recycles a stuck *starting* worker slot with a WARNING
+(autovacuum.c:715–727) and schedules databases by adl_next_worker (autovacuum.c:758–775).
+Here the scheduling principles apply to running I/O without canceling that I/O; no reference
+implementation code is copied. Idle checks and interval pacing follow the purpose of PostgreSQL's
+walwriter hibernation (walwriter.c:72–81,258–260) and bgwriter pacing (bgwriter.c:298–301).
+
+Durability remains inside the storage gate: commit acknowledgement follows durability
+(Storage.cs:921), and the write-ahead gate runs before data writes (Storage.cs:1696–1700 at the
+pre-fix revision). At saturation a grouped committer waits its full group window, then self-flushes;
+capacity never acknowledges an undurable commit. _giveUpFaultPass retention and #1277's purge
+reporting remain intact. Shared helpers remain model-local, with no public type, shipped-assembly
+visibility grant, project-reference change or NativeAOT-specific runtime mechanism.
+
 ## Diagnostics
 
 The root raises its own events through one internal event source, named for the assembly:
@@ -1081,6 +1150,8 @@ forwards, so keywords scope out-of-process tools only.
 | 32 | `TransactionAborted` | Verbose | `Transactions` | `transactionId`, `exceptionType` (the cause's; not its message, which can quote the statement) | `AbortAsync`, for the failure that aborted the transaction (the statement's own failure is event 28) |
 | 33 | `TransactionCommitFailed` | Error | — | `transactionId`, `exceptionType` (never the message: a commit is an operation, and the model's refusal of an aborted transaction's commit repeats the operation's message) | `CommitAsync`: an offline refusal, a refused or aborted commit, a kernel commit that threw; never for a cancellation before the commit started |
 | 34 | `EngineDisposeFailed` | Error | — | `engineName`, `model`, `failureCount`, `exceptionType`, `exceptionMessage` (the first failure collected) | `DatabaseEngine.DisposeAsync`, before event 7 |
+| 35 | `WorkerLaneDelayed` | Warning | — | `workerName`, `workerKind`, `database`, `reason`, `elapsedSeconds` | Stuck admission slot or capacity deferral; at most once per second per database |
+| 36 | `WorkerLaneDisposalWaiting` | Warning | — | `workerName`, `workerKind`, `database`, `elapsedSeconds` | Once per second for each running lane while disposal joins it |
 
 `consecutiveFailures` counts failed passes of that database since owner decision 25: a pass that
 reports several failures of one database (one per file set) counts once, and the count is what
