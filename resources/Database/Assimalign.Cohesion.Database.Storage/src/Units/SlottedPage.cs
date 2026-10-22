@@ -354,6 +354,18 @@ public readonly unsafe struct SlottedPage
     /// </remarks>
     /// <exception cref="StorageCorruptionException">The page header or a live slot describes bytes outside the page's data area, or two live records overlap.</exception>
     public void Compact()
+        => TryCompact(0, -1);
+
+    // Storage calls these only with physical page ownership and a D1 mutable epoch.
+    internal bool TryCompactForInsert(int recordSize) => TryCompact(recordSize + sizeof(PageSlot), -1);
+
+    internal bool TryCompactForUpdate(int index, int recordSize)
+    {
+        _ = GetSlotPtr(index);
+        return TryCompact(recordSize, index);
+    }
+
+    private bool TryCompact(int requiredSpace, int omittedSlot)
     {
         var header = (Page.Header*)_pointer;
         int slotCount = header->SlotCount;
@@ -386,6 +398,7 @@ public readonly unsafe struct SlottedPage
         order.Sort();
 
         int previousEnd = BodyOffset;
+        int usedBytes = 0;
         foreach (int key in order)
         {
             var slot = SlotAt(key & 0xFFFF);
@@ -396,12 +409,29 @@ public readonly unsafe struct SlottedPage
             }
 
             previousEnd = slot->Offset + slot->Length;
+            usedBytes += slot->Length;
+        }
+
+        int omittedLength = omittedSlot < 0 ? 0 : SlotAt(omittedSlot)->Length;
+        if (requiredSpace > SlotDirectoryStart(slotCount) - BodyOffset - usedBytes + omittedLength)
+        {
+            return false;
+        }
+
+        // Validate the target too before retiring it: omitting it during validation
+        // could hide an overlap with a neighbour and turn corruption into data loss.
+        if (omittedSlot >= 0)
+        {
+            var omitted = SlotAt(omittedSlot);
+            PublishEntry(omitted, omitted->Offset, 0);
         }
 
         int writeOffset = BodyOffset;
         foreach (int key in order)
         {
-            var slot = SlotAt(key & 0xFFFF);
+            int index = key & 0xFFFF;
+            if (index == omittedSlot) { continue; }
+            var slot = SlotAt(index);
 
             if (slot->Offset != writeOffset)
             {
@@ -418,6 +448,7 @@ public readonly unsafe struct SlottedPage
         }
 
         header->FreeDataEnd = (ushort)writeOffset;
+        return true;
     }
 
     /// <summary>

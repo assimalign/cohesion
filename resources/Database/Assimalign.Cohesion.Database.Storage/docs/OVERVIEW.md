@@ -113,7 +113,18 @@ own changes while other threads wait. Completion ends the mutable lifetime even 
 outlives its transaction, and its eventual disposal cannot release a later writer. Rollback
 still builds a private image before the short live-page copy. The 64-bit frame sequence and
 reserved allocation identities are memory-only: storage format 4, public signatures, error
-codes and the wire protocol do not change. Compaction activation remains #1161's ordered work.
+codes and the wire protocol do not change.
+
+## Automatic record-page compaction (#1161)
+
+An insert compacts its current write page before allocating another page when dead bytes
+can satisfy the request. A growing update packs around the replaced record when that
+replacement fits in the page's aggregate capacity. Repeated grow/shrink cycles retain
+their page and slot references. Compaction validates the whole plan before mutation,
+preserves borrowed input, and retains deleted slot identities. Existing physical writer
+ownership and D1's mutable frame scope protect the rewrite; readers retry and WAL covers
+both committed and aborted layouts, including torn stolen writes. Older partly empty
+pages are revisited by #1288's subsequent free-byte map. Formats and public APIs are unchanged.
 
 
 ## Confirmed decode failures (#1372)

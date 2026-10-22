@@ -1804,18 +1804,40 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         else
         {
             handle = currentHandle;
-            slotted = new SlottedPage(handle.Page);
+            try
+            {
+                slotted = new SlottedPage(handle.Page);
 
-            if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != ownerId || !slotted.CanFit(data.Length))
+                bool suitable = handle.Page.Type == PageType.Data && handle.Page.OwnerId == ownerId;
+                if (suitable && !slotted.CanFit(data.Length))
+                {
+                    // A caller may supply bytes borrowed from this same page. Preserve them
+                    // before compaction can move a different record across their old address.
+                    if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
+                    suitable = slotted.TryCompactForInsert(data.Length);
+                    if (suitable)
+                    {
+                        handle.MarkDirty();
+                        RecordPageCompacted?.Invoke(handle.Id);
+                    }
+                }
+                if (!suitable)
+                {
+                    handle.Dispose();
+                    handle = AllocateDataPage(owner, ownerId, out slotted);
+                }
+            }
+            catch
             {
                 handle.Dispose();
-                handle = AllocateDataPage(owner, ownerId, out slotted);
+                throw;
             }
         }
 
         using (handle)
         {
             int slotIndex = slotted.InsertSlot(data);
+            // A flusher may already have cleaned the intermediate compacted image.
             handle.MarkDirty();
             return (handle.Id, slotIndex);
         }
@@ -2076,7 +2098,17 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
+        if (data.Length > slotted.FreeSpace && data.Length > slotted.GetSlotLength(slotIndex))
+        {
+            if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
+            if (slotted.TryCompactForUpdate(slotIndex, data.Length))
+            {
+                handle.MarkDirty();
+                RecordPageCompacted?.Invoke(pageId);
+            }
+        }
         slotted.UpdateSlot(slotIndex, data);
+        // Publish dirtiness after the replacement even if compaction was marked earlier.
         handle.MarkDirty();
     }
 
@@ -3073,6 +3105,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     // Test rendezvous after the pin, before the allocation is revalidated and locked.
     // No map or pool monitor is held; a handler may complete a different bracket.
     internal Action<PageId>? PagePinnedForWrite;
+
+    // Cold-path test rendezvous while the compacted page still has its D1 mutable scope.
+    internal Action<PageId>? RecordPageCompacted;
 
     private bool TryTouchPage(StorageTransaction transaction, PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle, long? learnedGeneration = null)
     {

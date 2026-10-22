@@ -601,14 +601,48 @@ instead of dereferencing it:
   within milliseconds on the same host. The acquire loads cost about 1 ns per slot read
   (in-process A/B against the plain loads on ARM64, median of five runs), well under the noise
   of a table scan. This is publication order only: it does not latch a page against its writer.
-- **Relocation needs the whole record.** An update that outgrows its slot appends the
-  record at the free-data end and leaves the old bytes as dead space, so it requires
-  the record's full length in free space and leaves the page untouched when it does
-  not fit (the caller relocates to another page — the catalogs' delete-and-insert).
+- **Raw relocation needs the whole record.** `SlottedPage.UpdateSlot` appends an
+  outgrown record at the free-data end, requiring its whole length rather than just
+  its growth. `Storage.UpdateRecord` first tries compaction when that append would
+  fail. It validates every live slot, including the replacement target, and checks
+  packed capacity before changing bytes. If the replacement fits, it retires the old
+  target, packs the other records and publishes the replacement at the same slot.
+  An insufficient packed capacity leaves the body and directory unchanged.
 - **`Compact` moves records in offset order.** A relocated record can sit above a
   record with a higher slot index; compacting in slot order overwrote it. Overlapping
-  records are corruption and fail before any byte moves. Nothing calls `Compact` yet:
-  dead space from relocations is not reclaimed in place (see the #1157 follow-up below).
+  records are corruption and fail before any byte moves. `Storage.InsertRecord`
+  tries this on its current write page before allocating another page when contiguous
+  space is insufficient. Deleted slot identities are retained; new inserts append a
+  directory entry. Reusing older partly empty pages remains #1288.
+- **Automatic compaction uses the D1 mutable scope (#1161).** Physical transaction
+  ownership excludes competing writers, and the frame's writer scope advances its
+  sequence before packing and closes after the replacement or insertion is published.
+  Unlatched readers copy and confirm through that scope, so none can accept an image
+  taken during the rewrite. This is the existing equivalent exclusion mechanism;
+  compaction does not add a second page latch or make raw `SlottedPage` writers safe
+  without their caller's synchronization. Borrowed input overlapping the page is
+  copied before any move. Rejected plans release their pin and mutable scope.
+  First-touch journaling precedes these changes, and the existing dirty-page WAL
+  barrier covers the entire packed layout, including stolen writes before commit.
+  Flushes may persist an intermediate rewrite image; recovery repairs it from WAL
+  on both abort and commit. A dedicated test forces this before replacement publication.
+  No format, public signature, diagnostic code or wire change is needed.
+
+  PostgreSQL's `PageRepairFragmentation` requires exclusive cleanup access and checks
+  geometry and total live bytes before packing (`src/backend/storage/page/bufpage.c:694–707`,
+  `:735–751`, `:777–803`). RavenDB tries aggregate capacity before defragmenting
+  (`src/Voron/Data/BTrees/TreePage.cs:536–577`). These informed the exclusion and
+  preflight checks; no code was copied. Unlike PostgreSQL's trailing line-pointer
+  truncation, Cohesion preserves every slot identity for stored record references.
+  Neo4j likewise marks a page dirty after write access so a concurrent flush cannot
+  leave later changes clean (`community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnWritePageCursor.java:57–64`);
+  its read cursor validates the stamp before accepting a read (`MuninnReadPageCursor.java:115–126`).
+  The final insertion/update dirty mark remains after the compaction dirty mark for
+  this reason, including when an intermediate image was flushed.
+  `StorageCompactionTests` covers repeated grow/shrink, deleted space, aliases,
+  corrupt and insufficient plans, all three unlatched reader paths, committed and
+  aborted recovery with or without eviction, and whole or torn power loss at every
+  write of the compaction/flush/commit sequence.
 - **Clears span the buffer, not the header.** Freeing and allocating a page clear a
   fixed `Page.Size` (or body) span; `Page.AsSpan()` honors the reserved overflow size in
   the header, and a header is page content that a corrupt page controls. The pool refuses
@@ -2314,17 +2348,16 @@ succeeded. Every one of these cases crashes the test host with the old `UpdateSl
 within seconds, as do the deterministic `ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT`
 loops.
 
-**Open follow-ups.** Dead space left by relocations and deletes is not reclaimed in
-place: `Compact` is correct now, but compacting moves other records, and scans read
-pages under a pin without a latch, so in-place compaction waits for page latches.
-Under heavy ALTER churn a catalog page fills with dead record images, the record moves
-to another page, and the dead space stays until its page holds no live record.
+**Follow-up resolution (#1161).** Dead bytes are now reclaimed by storage's automatic
+compaction under D1's writer exclusion and read confirmation (record layer above).
+Catalogs retain their fallback relocation when the packed replacement cannot fit.
+Revisiting older partly empty pages remains #1288.
 (The SQL index seek and the version store used to read any `StorageException` from a record
 read as reclamation, `StorageCorruptionException` included; #1342 closed that with
 `Storage.TryReadRecord`, "Reading a record through a reference" above.)
 Overflow pages themselves remain unimplemented. Their reserved body length is checked
 by both span accessors and the pool (#1162, "The page model"); caller memory follows the
-same throw-on-invalid-geometry rule. Compaction and multi-page overflow need their own work items.
+same throw-on-invalid-geometry rule. Multi-page overflow remains separate work.
 
 ## Measurements (#1251, 2026-10-04)
 
