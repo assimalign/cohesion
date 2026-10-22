@@ -2425,6 +2425,25 @@ pages/slots and reused locations are treated as stale directory entries. The all
 page-type, owner and slot checks are `Storage.TryReadRecord` with owner 2, the storage's
 shared reclamation check (#1342), which the store made inline before.
 
+Cached-reference validation first checks that a present record has one of the three graph
+kinds and a nonzero identity (defect found during #1372). Unknown kinds and identity zero are
+corruption, reported with page and slot through `StorageCorruptionException` (`COHDBS003`);
+they cannot silently remove the cached reference as though the slot held a valid replacement.
+A well-formed different identity still invalidates the old reference. The two damaged-header
+tests returned absence before the fix and now report damage; repairing the bytes restores the
+same cached lookup. A separate valid-replacement control still returns absence.
+
+Neo4j likewise checks decode errors after its cursor retry and before verifying record use:
+`community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785-792`,
+`:861-865`, and `record/RecordLoad.java:31-40`, `:155-175`. No code copied. Graph format 4 and
+all public signatures remain unchanged. Release .NET 10.0.13 / SDK 10.0.401 Windows ARM64,
+tiering disabled, one warmup then twelve 50,000-lookup samples over one committed node and a
+fixed snapshot: median `FindNode` cost moved from 755.043 to 766.44 ns (+11.397); none of the
+twelve after samples was at or below the before median. Median allocation remained 960 bytes
+per lookup; the first after sample contained one extra unattributed 24-byte allocation over
+the whole sample, and the other eleven were unchanged. This is a descriptive measurement,
+never a timing assertion. Normal fixed-header checks allocate nothing.
+
 #### Storage: Secondary indexes
 
 The label-postings B+Tree is registered under UInt64.MaxValue - 1, name `graph`. Its fixed

@@ -104,6 +104,9 @@
   <data name="RecordTruncated" xml:space="preserve">
     <value>Truncated graph record.</value>
   </data>
+  <data name="RecordHeaderInvalid" xml:space="preserve">
+    <value>Malformed graph record at page {0}, slot {1}: kind {2}, identity {3}.</value>
+  </data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>

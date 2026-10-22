@@ -168,3 +168,10 @@ The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded
 unique inserts also prune their key's history while reusing a single descent. Old snapshot
 views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
 change. The callback follows the current manager after catalog/store reattachment.
+
+## Cached record integrity
+
+A present graph record with an unknown kind or zero identity fails as corruption with its
+page and slot; it cannot become an absent node through cached-reference cleanup. A valid
+replacement identity still invalidates the old reference. This fixes the defect found during
+#1372 without changing graph format 4, public signatures or diagnostic code COHDBS003.

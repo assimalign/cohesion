@@ -472,8 +472,15 @@ public sealed partial class GraphStore
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out bytes)) { return false; }
         GraphRecordCodec.EnsureFormat(bytes.Span);
         if (bytes.Length < 34) { throw new StorageCorruptionException(ErrorMessages.RecordTruncated); }
-        return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && bytes.Span[16] == kind &&
-            BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8)) == id;
+        byte storedKind = bytes.Span[16];
+        ulong storedId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8));
+        if (storedKind is < 1 or > 3 || storedId == 0)
+        {
+            throw new StorageCorruptionException(reference.PageId, string.Format(
+                System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecordHeaderInvalid,
+                (long)reference.PageId, reference.SlotIndex, storedKind, storedId));
+        }
+        return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && storedKind == kind && storedId == id;
     }
 
     private void Sweep(ref VersionChain versions, byte kind, ulong id)
