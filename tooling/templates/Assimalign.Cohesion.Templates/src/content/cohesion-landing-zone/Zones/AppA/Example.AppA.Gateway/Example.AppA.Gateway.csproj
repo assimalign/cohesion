@@ -18,6 +18,8 @@
     <!-- InProcess needs a compile-time entry anchor for each composable member, including transitive members. -->
     <CohesionResourceReference Include="..\Example.AppA.Database\Example.AppA.Database.csproj" />
     <CohesionResourceReference Include="..\Example.AppA.SecretStore\Example.AppA.SecretStore.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="Configuration\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

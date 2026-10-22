@@ -6,8 +6,12 @@
 		<Compile Remove="Delegates\**" />
 		<Compile Remove="Internal\ScheduleTaskScheduler.cs" />
 		<Compile Remove="Internal\SoftSchedulerNotifyDebounce.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<EmbeddedResource Remove="Delegates\**" />
 		<EmbeddedResource Remove="Extensions\**" />
+	</ItemGroup>
+	<ItemGroup>
 		<None Remove="Delegates\**" />
 	</ItemGroup>
 	<ItemGroup>

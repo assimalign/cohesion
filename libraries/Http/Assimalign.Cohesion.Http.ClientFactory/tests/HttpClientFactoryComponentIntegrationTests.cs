@@ -73,4 +73,74 @@ public class HttpClientFactoryComponentIntegrationTests
         // Assert — Create is the strongest public disposal signal exposed by the factory.
         Should.Throw<ObjectDisposedException>(() => factory.Create("test"));
     }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ClientFactory] - AddHttpClientFactory: provider callback resolves dependencies at first resolve and retains singleton disposal")]
+    public void AddHttpClientFactory_WithServiceProvider_ShouldConfigureOnFirstResolve()
+    {
+        // Arrange
+        var builder = new ServiceProviderBuilder();
+        var expectedBaseAddress = new Uri("https://example.test/provider/");
+        int configureCalls = 0;
+        IServiceProvider? callbackProvider = null;
+
+        // Act
+        builder.AddHttpClientFactory((services, clients) =>
+        {
+            configureCalls++;
+            callbackProvider = services;
+            Uri address = services.GetRequiredService<Uri>();
+            clients.AddClient("CohesionDocs", options => options.BaseAddress = address);
+        }).ShouldBeSameAs(builder);
+        IServiceProvider provider = builder.AddSingleton(expectedBaseAddress).Build();
+        IHttpClientFactory factory;
+        try
+        {
+            // Assert
+            configureCalls.ShouldBe(0);
+            factory = provider.GetRequiredService<IHttpClientFactory>();
+            callbackProvider.ShouldBeSameAs(provider.GetRequiredService<IServiceProvider>());
+            configureCalls.ShouldBe(1);
+            provider.GetRequiredService<IHttpClientFactory>().ShouldBeSameAs(factory);
+            configureCalls.ShouldBe(1);
+            using HttpClient client = factory.Create("CohesionDocs");
+            client.BaseAddress.ShouldBe(expectedBaseAddress);
+        }
+        finally
+        {
+            ((IDisposable)provider).Dispose();
+        }
+        Should.Throw<ObjectDisposedException>(() => factory.Create("CohesionDocs"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ClientFactory] - AddHttpClientFactory: provider callback validates the builder at resolve")]
+    public void AddHttpClientFactory_WithServiceProviderAndNoClients_ShouldThrowOnResolve()
+    {
+        // Arrange
+        var builder = new ServiceProviderBuilder();
+
+        // Act
+        IServiceProvider provider = builder.AddHttpClientFactory((services, clients) => { }).Build();
+        try
+        {
+            // Assert
+            Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<IHttpClientFactory>());
+        }
+        finally
+        {
+            ((IDisposable)provider).Dispose();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.ClientFactory] - AddHttpClientFactory: typed null provider callback fails before registration")]
+    public void AddHttpClientFactory_WithNullServiceProviderCallback_ShouldThrowAtRegistration()
+    {
+        // Arrange
+        var builder = new ServiceProviderBuilder();
+        Action<IServiceProvider, HttpClientFactoryBuilder> configure = null!;
+
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => builder.AddHttpClientFactory(configure))
+            .ParamName.ShouldBe("configure");
+        builder.Container.Count.ShouldBe(0);
+    }
 }

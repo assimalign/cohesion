@@ -8,6 +8,8 @@
 	<ItemGroup>
 		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
@@ -25,6 +27,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />
+	</ItemGroup>
+	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

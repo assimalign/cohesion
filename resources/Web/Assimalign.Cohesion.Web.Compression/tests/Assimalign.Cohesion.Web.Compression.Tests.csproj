@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
@@ -12,6 +14,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

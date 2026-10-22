@@ -9,7 +9,7 @@
   <ItemGroup>
     <!-- ModelSnapshot (descriptor materialization) and EndpointLocation (wire-exact
          endpoint validation), compiled in as stateless statics. -->
-    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
-    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" Module="Materialization" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" Module="Endpoints" />
   </ItemGroup>
 </Project>

@@ -10,6 +10,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="System.Threading.RateLimiting" />
 	</ItemGroup>
 </Project>

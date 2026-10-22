@@ -8,6 +8,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="System.Management.Automation" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<Target Name="WriteManifest" AfterTargets="Build">

@@ -14,6 +14,24 @@ Examples below document the intended public shape; some members still throw NotI
 - Exception and system extension helpers centralize small cross-cutting behaviors.
 - The library is dependency-light by design so other Core packages can reference it safely.
 
+## Component integration callbacks
+
+`ComponentIntegrationAttribute` and its catalog are internal source in Core's
+`shared/ComponentIntegration` module. Core's runtime assembly does not compile or publicly expose
+these types. A contributing project opts in with
+`<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />`, obtaining
+an assembly-local internal copy without a DI reference. The root source generator recognizes those
+copies from assembly metadata, including when the consumer has no visible attribute type.
+
+Schema version 2 replaces open target/member strings with the closed `ComponentIntegrationTarget`
+and `ComponentIntegrationMethod` enums. Each declaration selects a `ComponentIntegrationTemplate`:
+`Factory`, `Builder`, `BuilderWithServiceProvider`, or `Custom`. The two builder signatures require
+separate declarations. Bare and untyped-null calls retain eager construction; provider callbacks
+construct inside the target's producer. `Custom` accepts a signature and complete body with documented
+placeholders. This intentionally removes the old public Core attribute API; every repository
+contributor opts into the new shared contract. See the
+[generator design](../../../../analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md).
+
 ## Generated value-type conformance
 
 Core's tests compile `CohesionValueType` fixtures for every supported runtime type and exercise

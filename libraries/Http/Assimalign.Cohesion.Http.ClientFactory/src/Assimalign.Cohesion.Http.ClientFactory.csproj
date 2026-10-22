@@ -8,4 +8,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

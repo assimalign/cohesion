@@ -7,12 +7,14 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
-		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
@@ -34,6 +36,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Integration" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Serialization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi.Validation" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- Activate the endpoint-binding generator so typed endpoints carry their descriptions. -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
 	</ItemGroup>

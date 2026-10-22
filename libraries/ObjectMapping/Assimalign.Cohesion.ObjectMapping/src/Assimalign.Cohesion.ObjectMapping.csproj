@@ -8,6 +8,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
+	<ItemGroup>
 		<!--
 			MapperProfileGenerator emits TryConfigureGenerated overrides for
 			class-based MapperProfile<T,S> subclasses. The build wires it as a

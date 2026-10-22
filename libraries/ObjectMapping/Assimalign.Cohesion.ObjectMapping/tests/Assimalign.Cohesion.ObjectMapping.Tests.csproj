@@ -15,6 +15,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- Run the object-mapping generator over this project's test profiles (analyzer
 		     references do not flow transitively through the library ProjectReference). -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ObjectMapping" />

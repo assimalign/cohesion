@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionPackageReference Include="ThirdParty.ApplicationModel" Version="$(CohesionVersion)" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionResourceReference Include="..\ThirdPartyResource\ThirdPartyResource.csproj" />
   </ItemGroup>
 </Project>

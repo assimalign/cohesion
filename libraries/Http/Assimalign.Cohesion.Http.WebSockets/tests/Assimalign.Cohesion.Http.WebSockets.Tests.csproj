@@ -13,6 +13,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

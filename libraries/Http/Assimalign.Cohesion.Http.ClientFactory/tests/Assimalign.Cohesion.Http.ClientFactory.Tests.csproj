@@ -7,7 +7,11 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.ClientFactory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

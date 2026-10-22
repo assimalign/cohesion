@@ -13,9 +13,13 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="wireguard" Public="true" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Cross-application store sources (a `platform-secretstore:<key>` mount read by the networking application) are not
          supported yet; they are a documented follow-up. Until then the keys are a parameter of the networking gateway. -->
     <CohesionMount Include="keys" Kind="Secret" Source="parameter:networking-vpn-keys" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionResourceReference Include="..\..\Platform\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
   </ItemGroup>
 </Project>

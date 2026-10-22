@@ -7,11 +7,11 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
   </ItemGroup>
   <ItemGroup>
-    <!-- ModelSnapshot from the IdentityModel root; shared\EndpointLocation.cs is this
+    <!-- ModelSnapshot from the IdentityModel root; shared\Endpoints\EndpointLocation.cs is this
          project's own shared source, linked into the protocol branches that validate
          endpoint locations. Both are stateless statics - no instance crosses an
          assembly boundary. -->
-    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
-    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" Module="Materialization" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" Module="Endpoints" />
   </ItemGroup>
 </Project>

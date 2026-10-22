@@ -2,10 +2,14 @@
 
 The root source-generator project serves contracts owned by `libraries/Core`, following owner
 decision 59 of 2026-10-13. It provides `ComponentIntegrationGenerator`, which reads Core's
-`ComponentIntegrationAttribute` declarations and emits registration verbs when a consuming
+internal `shared/ComponentIntegration` declarations and emits registration verbs when a consuming
 compilation references the named composition seam.
 
 Core packages include this analyzer, and the App targeting pack carries it for SDK consumers.
+Contributing projects opt into the attribute and its closed enums with
+`<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />`.
+Each declaration selects one template; ordinary/provider builder callbacks have separate declarations.
+Custom declarations supply a parameter list and complete C# block with documented placeholders.
 In-repository projects that call generated verbs reference it with:
 
 ```xml

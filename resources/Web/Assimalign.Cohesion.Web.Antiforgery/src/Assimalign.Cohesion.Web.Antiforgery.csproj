@@ -14,4 +14,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

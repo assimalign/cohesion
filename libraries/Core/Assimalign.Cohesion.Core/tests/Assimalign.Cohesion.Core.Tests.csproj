@@ -11,6 +11,8 @@
 		<CohesionPackageReference Include="NUlid" />
 		<CohesionPackageReference Include="Shouldly"/>
 		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<!-- Build tasks are outside the name-only library/resource project index. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Build.Tasks" ProjectPath="$(CohesionRepositoryDirectory)build\Tasks\Assimalign.Cohesion.Build.Tasks.csproj" />

@@ -23,11 +23,11 @@
 	</ItemGroup>
 
     <!--
-        Shared Source By Project Name Only.
+        Shared source by project name and required module.
 
-            <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+            <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" Module="Materialization" />
 
-        Compiles every *.cs under THAT project's shared\ folder into THIS project. The
+        Compiles every *.cs under THAT project's shared\Module\ folder into THIS project. The
         item goes in the CONSUMING csproj - never in a Directory.Build.targets - so a
         reader of the csproj can see which source the assembly is built from without
         hunting up the directory tree.
@@ -41,8 +41,8 @@
             |   tests\
             |   docs\
 
-        The folder - not the file - is the unit: naming a project links everything under
-        its shared\ tree. A project that wants its OWN shared\ folder compiled in names
+        The module folder is the unit: sibling modules are never included implicitly.
+        A project that wants its OWN shared\ module compiled in names
         itself; shared\ sits outside the csproj's src\ directory, so nothing about it is
         implicit.
 
@@ -61,7 +61,7 @@
         <_CohesionSharedSourceProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
         <_CohesionSharedSourceProject Update="@(_CohesionSharedSourceProject)"
                                       ProjectId="%(_CohesionSharedSourceProject.Filename)"
-                                      SharedDirectory="$([System.IO.Path]::GetFullPath('%(_CohesionSharedSourceProject.RelativeDir)..\shared'))\" />
+                                      SharedDirectory="$([MSBuild]::NormalizeDirectory('%(_CohesionSharedSourceProject.RelativeDir)', '..', 'shared'))" />
 
         <CohesionSharedSource Update="@(_CohesionSharedSourceProject->'%(ProjectId)')"
                               SharedDirectory="%(_CohesionSharedSourceProject.SharedDirectory)" />
@@ -86,17 +86,31 @@
             BeforeTargets="CoreCompile"
             Condition="'@(CohesionSharedSource)' != ''">
         <Error Condition="'%(CohesionSharedSource.SharedDirectory)' == ''"
+               Code="COHSHR001"
                Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' does not name a project under libraries\ or resources\. Use the project's file name without '.csproj', exactly as CohesionProjectReference does." />
 
         <Error Condition="'%(CohesionSharedSource.SharedDirectory)' != '' AND !Exists('%(CohesionSharedSource.SharedDirectory)')"
+               Code="COHSHR002"
                Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' has no shared\ folder. Expected '%(CohesionSharedSource.SharedDirectory)'. Shared source lives in a shared\ folder beside the project's src\ - see .claude/rules/general-rules.md." />
 
+        <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('%(CohesionSharedSource.Module)', '^[A-Za-z_][A-Za-z0-9_.-]*$'))"
+               Code="COHSHR003"
+               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' requires Module naming one subfolder of shared\ (letters, digits, underscore, dot and hyphen; start with a letter or underscore). Paths, traversal and wildcards are not modules." />
+        <Error Condition="!Exists('%(CohesionSharedSource.SharedDirectory)%(CohesionSharedSource.Module)')"
+               Code="COHSHR004"
+               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' has no module '%(CohesionSharedSource.Module)'. Expected '%(CohesionSharedSource.SharedDirectory)%(CohesionSharedSource.Module)'." />
         <ItemGroup>
-            <_CohesionSharedSourceFile Include="%(CohesionSharedSource.SharedDirectory)**\*.cs" />
+            <_CohesionSharedSourceFile Include="%(CohesionSharedSource.SharedDirectory)%(CohesionSharedSource.Module)\**\*.cs"
+                                      SharedModule="%(CohesionSharedSource.Module)" />
         </ItemGroup>
+        <RemoveDuplicates Inputs="@(_CohesionSharedSourceFile)">
+            <Output TaskParameter="Filtered" ItemName="_CohesionSharedSourceUniqueFile" />
+        </RemoveDuplicates>
         <ItemGroup>
-            <Compile Include="@(_CohesionSharedSourceFile)"
-                     Link="shared\%(_CohesionSharedSourceFile.RecursiveDir)%(_CohesionSharedSourceFile.Filename)%(_CohesionSharedSourceFile.Extension)" />
+            <Compile Include="@(_CohesionSharedSourceUniqueFile)" Exclude="@(Compile)"
+                     Link="shared\%(_CohesionSharedSourceUniqueFile.SharedModule)\%(_CohesionSharedSourceUniqueFile.RecursiveDir)%(_CohesionSharedSourceUniqueFile.Filename)%(_CohesionSharedSourceUniqueFile.Extension)" />
+            <_CohesionSharedSourceFile Remove="@(_CohesionSharedSourceFile)" />
+            <_CohesionSharedSourceUniqueFile Remove="@(_CohesionSharedSourceUniqueFile)" />
         </ItemGroup>
     </Target>
 </Project>

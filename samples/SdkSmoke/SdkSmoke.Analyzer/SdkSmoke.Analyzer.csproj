@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <FrameworkReference Include="Assimalign.Cohesion.App" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionPackageReference Include="Assimalign.Cohesion.ObjectMapping" Version="$(CohesionVersion)" />
   </ItemGroup>
 </Project>
