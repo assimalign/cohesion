@@ -313,6 +313,10 @@ legacy wire error text keeps its existing code prefix. See DESIGN, structured fa
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
+Exact-pass purge-refusal tests own an unpumped worker independently of the engine's live
+workers. Their original counts stay strict; production pump behavior is covered separately.
+This removes the extra-callback race found during #1365 without changing engine scheduling.
+
 ## Index history reclamation (#1195)
 
 The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;

@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Fixed-pass worker tests (found during #1365)
+
+`VersionPurgeRefusalTests.RunIteration_RefusalKind_ShouldDistinguishForeignStorageFromProgress`
+owns a separate `SqlVersionPurgeWorker` through `CheckpointPace.Own`. Its exact pass and
+failure counts are driven only by the test. Using an engine-owned worker allowed its live
+pump to invoke the same callback beside explicit iterations: a full Debug run observed
+thirteen callbacks for twelve requested passes. A fixture assertion excludes registered
+workers; no assertion or production scheduling behavior is relaxed. Real-pump refusal and
+owed-pass coverage remains in the other cases. This follows the existing short-refusal
+fixture in the same class and closes a test-hygiene gap related to #1285. No engine behavior
+was copied from another database, and no language, protocol, format or error-code change applies.
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a

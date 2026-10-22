@@ -102,7 +102,10 @@ public sealed class VersionPurgeRefusalTests
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
-        var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
+        var worker = new SqlVersionPurgeWorker(engine);
+        await using var lifetime = CheckpointPace.Own(worker);
+        engine.Workers.ShouldNotContain(worker,
+            "a fixed-pass test must own its driver independently of the engine's live pump");
         int owner = 0;
         worker.BeforeFullPass = _ =>
         {
