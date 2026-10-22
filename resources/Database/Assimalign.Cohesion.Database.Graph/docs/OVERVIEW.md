@@ -161,3 +161,10 @@ legacy wire error text keeps its existing code prefix. See DESIGN, structured fa
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Index history reclamation (#1195)
+
+The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;
+unique inserts also prune their key's history while reusing a single descent. Old snapshot
+views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
+change. The callback follows the current manager after catalog/store reattachment.

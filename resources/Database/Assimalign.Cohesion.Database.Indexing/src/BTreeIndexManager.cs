@@ -38,6 +38,11 @@ public sealed class BTreeIndexManager
     private readonly BTreeIndexManagerOptions _options;
     private readonly Dictionary<(ulong ObjectId, string Name), BTreeIndex> _indexes = new();
     private readonly object _sync = new();
+    private readonly object _pruneSync = new();
+    private readonly List<BTreeIndex> _maintenanceIndexes = [];
+    private readonly Dictionary<BTreeIndex, int> _maintenancePositions = new();
+    private int _pruneIndex;
+    internal const int PrunePageBudget = 64;
 
     private BTreeIndexManager(BTreeIndexManagerOptions options)
     {
@@ -58,9 +63,10 @@ public sealed class BTreeIndexManager
                     options.LockManager,
                     registration.ObjectId,
                     registration.Definition,
-                    registration.RootPageId);
+                    registration.RootPageId, options.PruneBound);
             }
         }
+        foreach (var index in _indexes.Values) { AddMaintenanceIndex(index); }
     }
 
     /// <summary>
@@ -149,8 +155,9 @@ public sealed class BTreeIndexManager
 
             long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction, objectId);
             index = new BTreeIndex(
-                _options.Storage, _options.TransactionSource, _options.LockManager, objectId, definition, rootPageId);
+                _options.Storage, _options.TransactionSource, _options.LockManager, objectId, definition, rootPageId, _options.PruneBound);
             _indexes[key] = index;
+            AddMaintenanceIndex(index);
         }
 
         IndexEventSource.Log.IndexCreated(_options.Storage, objectId, definition);
@@ -173,10 +180,16 @@ public sealed class BTreeIndexManager
 
         lock (_sync)
         {
-            if (!_indexes.Remove((objectId, name)))
+            if (!_indexes.Remove((objectId, name), out var removed))
             {
                 throw new IndexException($"No index named '{name}' exists on object {objectId}.");
             }
+            int position = _maintenancePositions[removed];
+            var last = _maintenanceIndexes[^1];
+            _maintenanceIndexes[position] = last;
+            _maintenancePositions[last] = position;
+            _maintenanceIndexes.RemoveAt(_maintenanceIndexes.Count - 1);
+            _maintenancePositions.Remove(removed);
         }
 
         IndexEventSource.Log.IndexDropped(_options.Storage, objectId, name);
@@ -268,6 +281,58 @@ public sealed class BTreeIndexManager
         }
 
         return new ValueTask<long>(purged);
+    }
+
+    /// <summary>Physically removes committed tombstones below a proven safe snapshot horizon.</summary>
+    /// <param name="pruneBound">A safe snapshot horizon, including pinned snapshot minima; the oldest active sequence alone is insufficient.</param>
+    /// <param name="cancellationToken">Cancels between entries and pages; a failed page batch rolls back.</param>
+    /// <returns>The number of entries removed.</returns>
+    /// <remarks>
+    /// Processes at most 64 leaf pages across all trees per call, resuming on the next call.
+    /// Each modified page has its own committed storage bracket and a bounded write-latch hold.
+    /// Call under the owning coordinator's apply gate, or otherwise serialize catalog changes.
+    /// Empty leaves and their valid separator bounds remain allocated.
+    /// </remarks>
+    public ValueTask<long> PruneAsync(TransactionSequence pruneBound, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_pruneSync)
+        {
+            int count;
+            lock (_sync) { count = _maintenanceIndexes.Count; }
+            long removed = 0;
+            int completed = 0;
+            for (int page = 0; page < PrunePageBudget && completed < count; page++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                BTreeIndex index;
+                lock (_sync)
+                {
+                    if (_maintenanceIndexes.Count == 0) { break; }
+                    _pruneIndex %= _maintenanceIndexes.Count;
+                    index = _maintenanceIndexes[_pruneIndex];
+                }
+                var result = index.PruneLeaf(pruneBound, cancellationToken);
+                removed += result.Removed;
+                if (result.Completed)
+                {
+                    lock (_sync)
+                    {
+                        _pruneIndex = _maintenanceIndexes.Count == 0 ? 0 : (_pruneIndex + 1) % _maintenanceIndexes.Count;
+                    }
+                    completed++;
+                }
+            }
+            return new ValueTask<long>(removed);
+        }
+    }
+
+    // Called only during composition or under the directory lock. Creating/dropping one index
+    // must not copy the whole directory; large catalogs otherwise pay quadratic allocation.
+    private void AddMaintenanceIndex(BTreeIndex index)
+    {
+        _maintenancePositions.Add(index, _maintenanceIndexes.Count);
+        _maintenanceIndexes.Add(index);
     }
 
     /// <summary>

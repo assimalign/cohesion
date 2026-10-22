@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -71,7 +73,11 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await coordinator.RollbackAsync(blocker, CancellationToken.None);
         var rows = await ReadRowsAsync(await pending);
         int openAfter = coordinator.GetOpenContexts().Count;
+        int retainedRecordsBefore = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesBefore = await PhysicalEntriesAsync(database);
         long prunedAfterTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
+        int retainedRecordsAfter = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesAfter = await PhysicalEntriesAsync(database);
         var refreshed = await RowsAsync(readerSession, Join);
         await reader.CommitAsync(TestTimeout.Token());
 
@@ -82,7 +88,13 @@ public sealed class SqlReadCommittedSnapshotPinTests
         prunedWhileWaiting.ShouldBe(0);
         openWhileWaiting.ShouldBe(openBefore + 1);
         openAfter.ShouldBe(openBefore - 2);
-        prunedAfterTheStatement.ShouldBe(1);
+        // #1195 adds the dead index entry to the total only when the index exists.
+        // Observe record and physical-index reclamation independently as well.
+        retainedRecordsBefore.ShouldBe(1);
+        retainedRecordsAfter.ShouldBe(0);
+        physicalEntriesBefore.ShouldBe(indexed ? 3 : 0);
+        physicalEntriesAfter.ShouldBe(indexed ? 2 : 0);
+        prunedAfterTheStatement.ShouldBe(indexed ? 2 : 1);
         refreshed.ShouldBe(["1,1", "3,3"]);
     }
 
@@ -257,6 +269,27 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await setup.ExecuteAsync("INSERT INTO b (id) VALUES (1), (2), (3)", cancellationToken: TestTimeout.Token());
         return database;
     }
+
+    private static async Task<long> PhysicalEntriesAsync(SqlDatabase database)
+    {
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        try
+        {
+            long examined = 0;
+            foreach (var registration in database.IndexManager.ExportRegistrations())
+            {
+                database.IndexManager.TryGetIndex(registration.ObjectId, registration.Definition.Name, out var index).ShouldBeTrue();
+                await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+                while (await cursor.MoveNextAsync(TestTimeout.Token())) { }
+                examined += EntriesExamined(cursor);
+            }
+            return examined;
+        }
+        finally { await database.Coordinator.RollbackAsync(reader, CancellationToken.None); }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EntriesExamined")]
+    private static extern long EntriesExamined(BTreeCursor cursor);
 
     private static ulong TableId(SqlDatabase database, string name)
     {

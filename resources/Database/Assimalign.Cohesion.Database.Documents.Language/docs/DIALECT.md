@@ -198,3 +198,10 @@ exercise both InMemory and TCP; the recovery fixture also executes IS MISSING un
 Thrown statement failures report their structured diagnostic code without exposing statement
 text in tracing. Offline and unconfirmed-commit exception detail is unprefixed; Diagnostics
 carries the existing model code. This adds no language syntax or diagnostic number.
+
+## Safe index-history reclamation (#1195)
+
+Background and unique-insert B-tree pruning preserve the statement's snapshot and all existing
+language results. The shared coordinator supplies the safe horizon; ending the oldest reader
+allows later maintenance to remove its dead physical index versions. This changes no syntax,
+diagnostic code, wire contract or on-disk format.

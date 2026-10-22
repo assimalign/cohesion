@@ -200,7 +200,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   byte-identical (`KeyValueEngineLifecycleTests`).
   With entries ordered by location, a PUT's tombstone of the key's previous
   version descends to it instead of walking the key's dead versions; the unique
-  check still reads them until version pruning (#1195).
+  insert prunes safely dead entries during its single cached descent (#1195, #1239).
 - **Writes are two-phase, key-grain.** Phase one: acquire the key's Exclusive
   lock (`LockResource.Entry(keySpace, IndexKey.Hash())` — the same identity the
   B+Tree's unique enforcement locks internally, so its in-gate re-acquisition is
@@ -577,10 +577,10 @@ changed — a backstop, since the B+Tree keeps its root page fixed through split
 #1159),
 **version purge — live** (the KV MVCC binding is real from the first cut, so the
 purge duty is real: aborted-undo retries + reclamation below the minimum
-snapshot floor), and the index-maintenance **stub** (the index layer has no
-compaction yet — the stub matters more here than in SQL, since every delete
-accrues a tombstone in the primary structure; the seam is kept stable for the
-compaction feature). Cadence knobs live on `KeyValueDatabaseEngineOptions`.
+snapshot floor, followed by bounded B-tree dead-entry pruning under the apply
+gate since #1195), and the separate index-maintenance inventory/test-hook seam
+for future empty-page reclamation. It does not repeat the coordinator's prune.
+Cadence knobs live on `KeyValueDatabaseEngineOptions`.
 
 The checkpointer and the purge worker follow the SQL engine's (#1254, #1226; Sql DESIGN.md,
 "Engine-owned background workers"): a file set is checkpointed when its journal reaches
@@ -978,7 +978,7 @@ snapshot-based safe prune bound as the extracted copies.
 - Named key spaces (multiple ordered key spaces per database) — the catalog
   reserves the concept; the engine currently owns one implicit key space.
 - Multi-key atomic batches, `Serializable` isolation, secondary value indexes,
-  index compaction (the stub worker's future body).
+  empty-leaf reclamation and index merges. Safe dead entries are pruned (#1195).
 
 ## Database scope conformance (A5)
 
@@ -1514,3 +1514,21 @@ its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Shared B-tree pruning (#1195, #1239)
+
+This model supplies the coordinator's safe `PruneBound` to its B-tree manager and binds
+the current manager to the coordinator's version-purge pass. Record reclamation and a bounded
+index batch therefore share the existing worker schedule; index pruning runs under the apply
+gate, at most 64 leaf pages per pass, with one leaf's tree write latch held at a time.
+Catalog/store manager replacement is observed by the callback. Unique insertion prunes safely
+dead versions during its single cached descent, while pinned snapshots retain their visible
+history. Exact horizon equality retains the entry. Cancellation rolls back the unfinished page
+and retries it on a later pass. Empty leaves and their separator fences remain allocated.
+
+The independent index-maintenance worker inventory remains stable; it does not schedule this
+prune a second time. No language syntax, diagnostic code, wire bytes, model/storage/index format
+or transaction semantics change. The shared Indexing DESIGN records PostgreSQL references,
+split-path invariants, deterministic mutants and before/after measurements. Root integration
+tests exercise this model's real coordinator and current index manager, including catalog/store
+reattachment for Documents and Graph.

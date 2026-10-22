@@ -1325,3 +1325,12 @@ existing carriers and are not synthesized by tracing.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Cross-model index-purge conformance (#1195)
+
+The root integration suite proves SQL, KeyValuePair, Documents and Graph compose the shared
+coordinator's bounded index-prune callback against real storage. Documents and Graph tests
+reattach their index managers before the pass, covering replacement after DDL rollback.
+The coordinator owns the horizon/apply gate; models supply their current manager without new
+interfaces, model-specific vacuum loops or root access to index-page internals. Blob has no
+B-tree manager. Indexing DESIGN owns the physical rollback decision #1393 and pruning details.

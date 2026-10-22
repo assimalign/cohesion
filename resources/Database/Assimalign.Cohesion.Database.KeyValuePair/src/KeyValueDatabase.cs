@@ -52,6 +52,11 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </remarks>
 public sealed class KeyValueDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexManager.PruneAsync(bound, cancellationToken);
+
+
     private readonly KeyValueDatabaseEngine _engine;
     private readonly KeyValueStorage _storage;
     private readonly KeyValueStorage _catalogStorage;
@@ -79,7 +84,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
         }
 
         _catalog = catalog ?? KeyValueCatalog.Open(catalogStorage);
-        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
+        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage),
+            PruneIndexesAsync);
 
         // A wait for a lock of the database ends when it goes offline (#1268 review): an offline
         // database undoes nothing, so a writer that holds a lock keeps it until the reopen, and a
@@ -127,6 +133,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             {
                 Storage = storage,
                 TransactionSource = ResolveStatementBracket,
+                PruneBound = () => _coordinator.PruneBound,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             });

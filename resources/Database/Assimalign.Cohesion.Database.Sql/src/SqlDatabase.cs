@@ -53,6 +53,11 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </remarks>
 public sealed class SqlDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexManager.PruneAsync(bound, cancellationToken);
+
+
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;
     private readonly SqlCatalog _catalog;
@@ -158,7 +163,8 @@ public sealed class SqlDatabase : DatabaseInstance
             throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception.Diagnostics, exception);
         }
 
-        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage))
+        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage),
+            PruneIndexesAsync)
         {
             // A deferred undo is retried on its own backoff, from about 100 ms up to the
             // maintenance interval, and the purge worker wakes for it (#1226).
@@ -192,6 +198,7 @@ public sealed class SqlDatabase : DatabaseInstance
             {
                 Storage = storage,
                 TransactionSource = ResolveStatementBracket,
+                PruneBound = () => _coordinator.PruneBound,
                 LockManager = _coordinator.LockManager,
                 ExistingIndexes = _catalog.GetIndexRegistrations(),
             });

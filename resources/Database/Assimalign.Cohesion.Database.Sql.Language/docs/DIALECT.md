@@ -3537,3 +3537,10 @@ carries the existing model code. This adds no language syntax or diagnostic numb
 ### Cascade work guard (#1285)
 
 ON DELETE CASCADE keeps its existing results and transaction semantics. Its fan-out regression guard now compares physical B-tree entry-directory reads for four 4,000-child cascades against one 16,000-child cascade in the same tree, with less than 2× work per child. It verifies the surviving bystander and uses no duration to decide correctness. No SQL syntax, diagnostic or format changes accompany the test change.
+
+## Safe index-history reclamation (#1195)
+
+Background and unique-insert B-tree pruning preserve the statement's snapshot and all existing
+language results. The shared coordinator supplies the safe horizon; ending the oldest reader
+allows later maintenance to remove its dead physical index versions. This changes no syntax,
+diagnostic code, wire contract or on-disk format.

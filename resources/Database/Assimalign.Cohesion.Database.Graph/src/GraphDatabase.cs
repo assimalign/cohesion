@@ -43,6 +43,11 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// </remarks>
 public sealed partial class GraphDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => Store.PruneIndexesAsync(bound, cancellationToken);
+
+
     private readonly GraphDatabaseEngine _engine;
 
     // Per-database fault seam for the cleanup after a statement's commit.
@@ -54,7 +59,8 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         _engine = engine;
         DataStorage = storage;
-        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records,
+            PruneIndexesAsync);
 
         // A wait for the database writer lock ends when the database goes offline (#1268 review):
         // an offline database undoes nothing, so the writer that holds the lock keeps it until the

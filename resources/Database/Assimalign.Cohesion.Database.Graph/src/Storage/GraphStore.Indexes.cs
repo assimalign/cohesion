@@ -212,6 +212,9 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
     }
 
+    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexes.PruneAsync(bound, cancellationToken);
+
     private void OpenIndexes()
     {
         _registrations.Clear();
@@ -225,6 +228,7 @@ public sealed partial class GraphStore
         {
             Storage = _storage,
             TransactionSource = ResolveStatementBracket,
+            PruneBound = () => _coordinator.PruneBound,
             ExistingIndexes = registrations
         });
         // Labeled records require their persisted postings; never silently reopen a graph

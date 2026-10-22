@@ -46,3 +46,13 @@ overload — are documented in [DESIGN.md](DESIGN.md).
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Dead-version maintenance (#1195, #1239)
+
+`BTreeIndexManager.PruneAsync(bound, token)` removes safe committed tombstones in batches of
+at most 64 leaf pages, preserving old snapshots and resuming after cancellation or its budget.
+The owning coordinator calls it under the apply gate. Unique inserts use the optional
+`BTreeIndexManagerOptions.PruneBound` provider to prune their key's history while reusing one
+descent and insertion position through splits. Read cursors stay read-only. Empty-leaf reclamation
+and merges remain deferred; B-tree format 2 is unchanged. Physical page rollback remains the
+approved #1393 design; [DESIGN.md](DESIGN.md) records the alternatives and measurements.

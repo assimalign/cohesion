@@ -66,3 +66,11 @@ See DESIGN, unwritten statement marks, for the platform-measurement regression a
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Shared index purge (#1195)
+
+The coordinator overload accepting `Func<TransactionSequence, CancellationToken, ValueTask<long>>`
+runs a bounded index batch under the apply gate after record pruning. Its public `PruneBound`
+also supplies safe opportunistic unique-insert pruning. SQL, KeyValuePair, Documents and Graph
+bind their current managers; the existing purge count/event includes reclaimed index entries.
+The original constructor and physical statement rollback remain supported.

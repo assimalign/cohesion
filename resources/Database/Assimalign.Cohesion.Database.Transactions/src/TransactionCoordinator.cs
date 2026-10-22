@@ -62,6 +62,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly Func<TransactionSequence, CancellationToken, ValueTask<long>>? _indexPruner;
 
     // True in the async flow of a statement apply that holds the apply gate, which is not
     // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
@@ -94,16 +95,35 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     {
     }
 
+    /// <summary>Creates the composition with index maintenance run under its apply gate.</summary>
+    /// <param name="storage">The storage owning physical brackets and sequence allocation.</param>
+    /// <param name="journal">The same storage's journal.</param>
+    /// <param name="records">The model's stamped record access.</param>
+    /// <param name="indexPruner">Prunes a bounded index batch below the supplied safe horizon.</param>
+    /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
+        Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)
+        : this(storage, journal, records, TimeProvider.System, indexPruner ?? throw new ArgumentNullException(nameof(indexPruner)))
+    {
+    }
+
     /// <summary>
     /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
     /// </summary>
     internal TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records, TimeProvider time)
+        : this(storage, journal, records, time, null)
+    {
+    }
+
+    private TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records, TimeProvider time,
+        Func<TransactionSequence, CancellationToken, ValueTask<long>>? indexPruner)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
         _journal = journal;
+        _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
         // factory class name inside this scope.
@@ -863,7 +883,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
-    /// aborted writer whose undo previously failed, then prunes versions below
+    /// aborted writer whose undo previously failed, then prunes record and index versions below
     /// the safe bound — the minimum snapshot floor of every active transaction
     /// (a long-running snapshot pins its view), or the next sequence when idle.
     /// </summary>
@@ -871,7 +891,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// Cancels the pass between writers and prune batches; a rolled-back writer's
     /// undo, once started, runs to completion.
     /// </param>
-    /// <returns>The number of versions physically reclaimed or undone.</returns>
+    /// <returns>The number of record versions and index entries physically reclaimed or undone.</returns>
     /// <remarks>
     /// A rollback whose undo failed ended its transaction but left the writer in
     /// flight, holding its locks. The pass retries that undo through the manager,
@@ -929,8 +949,36 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        total += _versionStore.PruneAsync(GetSafePruneBound(), cancellationToken)
-            .AsTask().GetAwaiter().GetResult();
+        var bound = GetSafePruneBound();
+        try
+        {
+            total += _versionStore.PruneAsync(bound, cancellationToken).AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        {
+            // A damaged record page must not prevent independent index reclamation.
+            deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (_indexPruner is not null)
+        {
+            try
+            {
+                _applyGate.Wait(cancellationToken);
+                try
+                {
+                    var pending = _indexPruner(bound, cancellationToken);
+                    total += pending.IsCompletedSuccessfully ? pending.Result : pending.AsTask().GetAwaiter().GetResult();
+                }
+                finally { _applyGate.Release(); }
+            }
+            catch (Exception exception) when (exception is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+                && !cancellationToken.IsCancellationRequested)
+            {
+                deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
 
         if (timed)
         {
@@ -940,6 +988,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         deferredFailure?.Throw();
         return total;
     }
+
+    /// <summary>Gets a conservative exclusive bound below which committed tombstones are no longer visible to any live or future snapshot.</summary>
+    /// <remarks>Includes snapshots still pinned by a statement whose manager transaction ended.</remarks>
+    public TransactionSequence PruneBound => GetSafePruneBound();
 
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
@@ -970,13 +1022,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             bound = _recoveredSequenceFloor;
         }
 
-        foreach (var context in GetOpenContexts())
+        lock (_sync)
         {
-            var minimum = context.Snapshot.Minimum;
-
-            if (minimum < bound)
+            foreach (var context in _openContexts.Values)
             {
-                bound = minimum;
+                var minimum = context.Snapshot.Minimum;
+                if (minimum < bound) { bound = minimum; }
             }
         }
 

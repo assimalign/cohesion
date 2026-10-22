@@ -67,6 +67,7 @@ public sealed class BTreeIndex
     // Optional test observer of physical entry-directory reads. The ordinary path neither
     // counts work nor performs a process-wide atomic operation (#1285, #1194).
     internal static Action? EntryAccessed { get; set; }
+    internal static Action? DescentStarted { get; set; }
 
     /// <summary>
     /// The maximum encoded key length accepted by a B+Tree, in bytes (1,024).
@@ -86,6 +87,8 @@ public sealed class BTreeIndex
     private readonly ulong _objectId;
     private readonly StoragePageLatch _latch;
     private readonly long _rootPageId;
+    private readonly Func<TransactionSequence>? _pruneBound;
+    private long _nextPruneLeaf = -1;
 
     internal BTreeIndex(
         Storage.Storage storage,
@@ -93,7 +96,8 @@ public sealed class BTreeIndex
         LockManager? lockManager,
         ulong objectId,
         IndexDefinition definition,
-        long rootPageId)
+        long rootPageId,
+        Func<TransactionSequence>? pruneBound = null)
     {
         _storage = storage;
         _transactionSource = transactionSource;
@@ -103,6 +107,7 @@ public sealed class BTreeIndex
         IsUnique = definition.IsUnique;
         _rootPageId = rootPageId;
         _latch = BTreeLatches.Get(storage, rootPageId);
+        _pruneBound = pruneBound;
     }
 
     /// <summary>
@@ -226,7 +231,9 @@ public sealed class BTreeIndex
                 cancellationToken).ConfigureAwait(false);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var storageTransaction = _transactionSource(transaction);
+        var pruneBound = IsUnique ? _pruneBound?.Invoke() ?? TransactionSequence.None : TransactionSequence.None;
 
         _latch.EnterWrite();
         try
@@ -237,12 +244,8 @@ public sealed class BTreeIndex
             // key lock held, any live entry (deleter stamp zero) is either
             // committed or our own: uncommitted others are excluded by the lock,
             // and aborted writers' entries were physically reverted by rollback.
-            if (IsUnique && HasLiveEntry(key.Encoded.Span))
-            {
-                throw new IndexUniqueViolationException(Name, key);
-            }
-
-            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value, 0);
+            InsertCore(storageTransaction, key.Encoded.Span, entryReference, transaction.Sequence.Value, 0,
+                IsUnique, pruneBound, cancellationToken);
         }
         finally
         {
@@ -540,6 +543,53 @@ public sealed class BTreeIndex
         return default;
     }
 
+    internal (long Removed, bool Completed) PruneLeaf(TransactionSequence bound, CancellationToken cancellationToken)
+    {
+        StorageTransaction? transaction = null;
+        long removed = 0;
+        long nextLeaf = -1;
+        try
+        {
+            _latch.EnterWrite();
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                long leafId = _nextPruneLeaf < 0 ? DescendToLeftmostLeaf() : _nextPruneLeaf;
+                using var handle = _storage.PageManager.GetPage((PageId)leafId);
+                var node = OpenNode(handle.Page.AsBodySpan(), leafId);
+                nextLeaf = node.NextLeaf;
+                StoragePageHandle? writable = null;
+                try
+                {
+                    for (int index = 0; index < node.EntryCount;)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ulong deleter = node.GetDeleter(index);
+                        if (deleter == 0 || deleter >= bound.Value) { index++; continue; }
+                        if (writable is null)
+                        {
+                            transaction = _storage.BeginTransaction();
+                            writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
+                            node = OpenNode(writable.Page.AsBodySpan(), leafId);
+                        }
+                        node.RemoveLeafEntry(index);
+                        removed++;
+                    }
+                    writable?.MarkDirty();
+                }
+                finally { writable?.Dispose(); }
+            }
+            finally { _latch.ExitWrite(); }
+
+            // Publish continuation only after the page batch commits. A failed/cancelled batch
+            // restores under the enlisted tree latch and retries the same leaf next time.
+            transaction?.Commit();
+            _nextPruneLeaf = nextLeaf;
+            return (removed, nextLeaf < 0);
+        }
+        finally { transaction?.Dispose(); }
+    }
+
     /// <summary>
     /// Walks every leaf once, physically removing entries written by any of the
     /// given writers and clearing tombstones they stamped — the open-time
@@ -761,6 +811,76 @@ public sealed class BTreeIndex
     /// </summary>
     private bool HasLiveEntry(ReadOnlySpan<byte> key) => TryFindEntry(BTreeSearchKey.AtKey(key), EntryMatch.Live, out _, out _);
 
+    private int CheckUniqueAndPrune(StorageTransaction transaction, in BTreeSearchKey position, long leafId,
+        TransactionSequence bound, CancellationToken cancellationToken)
+    {
+        var first = CheckUniqueLeaf(transaction, position, leafId, bound, cancellationToken, insertionLeaf: true);
+        long previous = first.Previous;
+        bool more = first.Left;
+        while (more && previous >= 0)
+        {
+            var current = CheckUniqueLeaf(transaction, position, previous, bound, cancellationToken, insertionLeaf: false);
+            previous = current.Previous;
+            more = current.Left;
+        }
+        long next = first.Next;
+        more = first.Right;
+        while (more && next >= 0)
+        {
+            var current = CheckUniqueLeaf(transaction, position, next, bound, cancellationToken, insertionLeaf: false);
+            next = current.Next;
+            more = current.Right;
+        }
+        return first.InsertAt;
+    }
+
+    private (int InsertAt, long Previous, long Next, bool Left, bool Right) CheckUniqueLeaf(StorageTransaction transaction,
+        in BTreeSearchKey position, long leafId, TransactionSequence bound, CancellationToken cancellationToken, bool insertionLeaf)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var handle = _storage.PageManager.GetPage((PageId)leafId);
+        var node = OpenNode(handle.Page.AsBodySpan(), leafId);
+        long previous = node.PrevLeaf;
+        long next = node.NextLeaf;
+        // Decide continuation from the original bounds, before pruning can empty a leaf.
+        bool left = node.EntryCount == 0 || node.GetKey(0).SequenceCompareTo(position.Key) >= 0;
+        bool right = node.EntryCount == 0 || node.GetKey(node.EntryCount - 1).SequenceCompareTo(position.Key) <= 0;
+        int at = insertionLeaf ? node.FindLowerBound(position) : node.FindLowerBound(BTreeSearchKey.AtKey(position.Key));
+        int first = at;
+        if (insertionLeaf)
+        {
+            while (first > 0 && node.GetKey(first - 1).SequenceEqual(position.Key))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                first--;
+            }
+        }
+        StoragePageHandle? writable = null;
+        try
+        {
+            for (int index = first; index < node.EntryCount && node.GetKey(index).SequenceEqual(position.Key);)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ulong deleter = node.GetDeleter(index);
+                if (deleter == 0) { throw new IndexUniqueViolationException(Name, new IndexKey(position.Key.ToArray())); }
+                if (deleter >= bound.Value) { index++; continue; }
+                if (writable is null)
+                {
+                    writable = _storage.OpenPageForWrite(transaction, (PageId)leafId, _latch);
+                    node = OpenNode(writable.Page.AsBodySpan(), leafId);
+                }
+                node.RemoveLeafEntry(index);
+                if (index < at) { at--; }
+            }
+        }
+        finally
+        {
+            writable?.MarkDirty();
+            writable?.Dispose();
+        }
+        return (at, previous, next, left, right);
+    }
+
     /// <summary>
     /// Finds the first entry at or after <paramref name="start"/> that still shares
     /// its prefix — the key, plus the entry reference and writer when
@@ -908,15 +1028,17 @@ public sealed class BTreeIndex
         return deleter == 0 || !snapshot.IsVisible(new TransactionSequence(deleter));
     }
 
-    private void InsertCore(StorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter)
+    private void InsertCore(StorageTransaction transaction, ReadOnlySpan<byte> key, ulong entryReference, ulong writer, ulong deleter,
+        bool unique = false, TransactionSequence pruneBound = default, CancellationToken cancellationToken = default)
     {
         var position = BTreeSearchKey.AtEntry(key, entryReference, writer);
         var path = new List<PathEntry>();
+        long leafId = Descend(position, path);
+        int? cachedAt = unique ? CheckUniqueAndPrune(transaction, position, leafId, pruneBound, cancellationToken) : null;
 
         while (true)
         {
-            path.Clear();
-            long leafId = Descend(position, path);
+            cancellationToken.ThrowIfCancellationRequested();
             bool fits;
             bool fitsAfterCompaction;
             int at;
@@ -930,7 +1052,8 @@ public sealed class BTreeIndex
                 // An equal entry would be in this leaf, at the insert position.
                 // PostgreSQL treats a duplicate heap TID the same way, as corruption
                 // (nbtsearch.c, _bt_binsrch_insert).
-                at = node.FindLowerBound(position);
+                at = cachedAt ?? node.FindLowerBound(position);
+                cachedAt = null;
                 if (at < node.EntryCount && node.CompareToEntry(position, at) == 0)
                 {
                     throw new IndexException(
@@ -964,8 +1087,7 @@ public sealed class BTreeIndex
                 return;
             }
 
-            SplitLeaf(transaction, path, leafId, at, key);
-            // Re-descend: the split changed the structure; the target leaf now has room.
+            leafId = SplitLeaf(transaction, path, leafId, at, position);
         }
     }
 
@@ -997,6 +1119,7 @@ public sealed class BTreeIndex
     /// </summary>
     private long Descend(in BTreeSearchKey key, List<PathEntry>? path)
     {
+        DescentStarted?.Invoke();
         long current = RootPageId;
 
         while (true)
@@ -1015,7 +1138,7 @@ public sealed class BTreeIndex
         }
     }
 
-    private void SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId, int at, ReadOnlySpan<byte> key)
+    private long SplitLeaf(StorageTransaction transaction, List<PathEntry> parentPath, long leafId, int at, in BTreeSearchKey position)
     {
         Separator separator;
         long siblingId;
@@ -1034,8 +1157,8 @@ public sealed class BTreeIndex
                 throw InvariantViolated(leafId, $"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
             }
 
-            bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(key)
-                && (leaf.NextLeaf < 0 || IsEndOfRun(parentPath, key));
+            bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(position.Key)
+                && (leaf.NextLeaf < 0 || IsEndOfRun(parentPath, position.Key));
             int mid = ChooseLeafSplit(leaf, at, endOfRun);
             separator = BTreeEntryOrder.BuildSeparator(leaf, mid - 1, mid);
             EnsureLeafSeparator(leaf, leafId, mid, separator);
@@ -1072,8 +1195,16 @@ public sealed class BTreeIndex
 
         IndexEventSource.Log.PageSplit(_storage, Name, leafId, leaf: true, count);
 
-        // The caller re-descends, so where a root leaf's lower half lands is moot here.
-        InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
+        long leftId = InsertIntoParent(transaction, parentPath, leafId, separator, siblingId);
+        int comparison = position.Key.SequenceCompareTo(separator.Key);
+        if (comparison == 0)
+        {
+            comparison = BTreeEntryOrder.CompareTiebreakers(position, separator.Tiebreaker, separator.EntryReference, separator.Writer);
+        }
+        if (comparison < 0) { return leftId; }
+        var parent = parentPath[^1];
+        parentPath[^1] = new PathEntry(parent.PageId, parent.Slot + 1);
+        return siblingId;
     }
 
     /// <summary>
@@ -1165,7 +1296,9 @@ public sealed class BTreeIndex
     {
         if (parentPath.Count == 0)
         {
-            return GrowRoot(transaction, separator, childId);
+            long leftId = GrowRoot(transaction, separator, childId);
+            parentPath.Add(new PathEntry(RootPageId, -1));
+            return leftId;
         }
 
         var (parentId, splitSlot) = parentPath[^1];
@@ -1197,6 +1330,15 @@ public sealed class BTreeIndex
 
         long target = position <= mid ? parentLeftId : parentSiblingId;
         int targetPosition = position <= mid ? position : position - mid - 1;
+
+        // SplitInternal leaves the repaired ancestry of the parent's lower half. Moving
+        // right changes only its last child slot; append the relocated parent/child slot.
+        if (position > mid)
+        {
+            var ancestor = parentPath[^1];
+            parentPath[^1] = new PathEntry(ancestor.PageId, ancestor.Slot + 1);
+        }
+        parentPath.Add(new PathEntry(target, targetPosition - 1));
 
         using var targetHandle = _storage.OpenPageForWrite(transaction, (PageId)target, _latch);
         var targetNode = OpenNode(targetHandle.Page.AsBodySpan(), target);
@@ -1314,7 +1456,10 @@ public sealed class BTreeIndex
 
         IndexEventSource.Log.PageSplit(_storage, Name, nodeId, leaf: false, count);
 
-        long leftId = InsertIntoParent(transaction, path.GetRange(0, path.Count - 1), nodeId, promoted, siblingId);
+        var ancestors = path.GetRange(0, path.Count - 1);
+        long leftId = InsertIntoParent(transaction, ancestors, nodeId, promoted, siblingId);
+        path.Clear();
+        path.AddRange(ancestors);
         return (mid, leftId, siblingId);
     }
 

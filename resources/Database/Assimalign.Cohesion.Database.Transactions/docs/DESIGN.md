@@ -1425,3 +1425,31 @@ The event source writes only strings, integers and doubles, which bind to the tr
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Index pruning in the version-purge pass (#1195)
+
+The existing three-argument coordinator constructor remains. The new overload is
+`TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
+Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)`. It retains the
+non-null callback for the database lifetime. `TransactionSequence PruneBound { get; }` exposes
+the existing conservative bound, including manager snapshot minima, the recovered floor and
+open coordinator contexts, for Indexing's opportunistic unique-insert walk. Computing it visits
+open contexts under the coordinator lock rather than allocating a context-array copy; the manager
+lock never waits for coordinator apply/log gates, preserving the existing lock order.
+
+`RunVersionPurgePass` first retries aborted undo and prunes records, then takes the apply gate
+and invokes the index callback with that same safe bound and cancellation token. A bounded
+Indexing callback visits at most 64 leaf pages. SQL, KeyValuePair, Documents and Graph all bind
+their current manager; catalog/store reattachment after a failed DDL does not leave a stale
+captured manager. Blob has no B-tree manager. Scheduling stays on the existing version-purge
+worker; no model owns a second vacuum or reaches into tree pages.
+
+The returned count and existing VersionPurgePass event's reclaimed total now include physical
+index entries. No new event/counter, interface or format is added. A recoverable record-prune
+failure still allows independent index work; the first deferred failure is rethrown unchanged
+after the pass. Cancellation, disposal and out-of-memory failures escape immediately. The apply
+gate is released for every callback outcome, including asynchronous ValueTask failure. Providers
+must perform only bounded index maintenance and must not request a checkpoint inside this gate.
+Tests prove gate exclusion, exact exception/cancellation identity, release after failure, old
+snapshot preservation and the four real model bindings. Existing statement rollback semantics
+are unchanged, as approved in #1393.

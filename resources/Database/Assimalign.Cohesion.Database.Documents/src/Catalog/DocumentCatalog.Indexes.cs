@@ -399,6 +399,9 @@ public sealed partial class DocumentCatalog
         }
     }
 
+    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexes.PruneAsync(bound, cancellationToken);
+
     private void OpenIndexes()
     {
         _registrations.Clear();
@@ -414,6 +417,7 @@ public sealed partial class DocumentCatalog
         {
             Storage = _storage,
             TransactionSource = ResolveStatementBracket,
+            PruneBound = () => _coordinator.PruneBound,
             ExistingIndexes = registrations
         });
     }

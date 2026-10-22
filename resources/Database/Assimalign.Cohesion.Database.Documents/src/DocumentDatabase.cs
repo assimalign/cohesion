@@ -49,6 +49,11 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// </remarks>
 public sealed class DocumentDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => Catalog.PruneIndexesAsync(bound, cancellationToken);
+
+
     private readonly DocumentDatabaseEngine _engine;
 
     // Test seam at the snapshot cleanup boundary, including operations without a pin.
@@ -59,7 +64,8 @@ public sealed class DocumentDatabase : DatabaseInstance
     {
         _engine = engine;
         DataStorage = storage;
-        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records,
+            PruneIndexesAsync);
 
         // A wait for the database writer lock ends when the database goes offline (#1268 review):
         // an offline database undoes nothing, so the writer that holds the lock keeps it until the

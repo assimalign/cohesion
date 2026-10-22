@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -72,7 +73,11 @@ public sealed class KeyValueReadCommittedSnapshotPinTests
         await coordinator.RollbackAsync(blocker, CancellationToken.None);
         var failure = await Should.ThrowAsync<Exception>(() => pending);
         int openAfter = coordinator.GetOpenContexts().Count;
+        int retainedRecordsBefore = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesBefore = await PhysicalEntriesAsync(database);
         long prunedAfterTheCommand = coordinator.RunVersionPurgePass(CancellationToken.None);
+        int retainedRecordsAfter = coordinator.VersionStore.TrackedVersionCount;
+        long physicalEntriesAfter = await PhysicalEntriesAsync(database);
         var refreshed = await database.GetAsync(readerSession, Bytes("k"), TestTimeout.Token());
         var stateAfter = reader.State;
         await reader.CommitAsync(TestTimeout.Token());
@@ -85,7 +90,13 @@ public sealed class KeyValueReadCommittedSnapshotPinTests
         prunedWhileWaiting.ShouldBe(0);
         openWhileWaiting.ShouldBe(openBefore + 1);
         openAfter.ShouldBe(openBefore - 2);
-        prunedAfterTheCommand.ShouldBe(1);
+        // #1195 includes the index entry in the pass total. Prove both independent
+        // reclamations, rather than merely relaxing the original record-only count.
+        retainedRecordsBefore.ShouldBe(1);
+        retainedRecordsAfter.ShouldBe(0);
+        physicalEntriesBefore.ShouldBe(2);
+        physicalEntriesAfter.ShouldBe(1);
+        prunedAfterTheCommand.ShouldBe(2);
         Text(refreshed.ShouldNotBeNull().Value).ShouldBe("v2");
         stateAfter.ShouldBe(TransactionState.Active);
     }
@@ -188,6 +199,23 @@ public sealed class KeyValueReadCommittedSnapshotPinTests
         counts.Reclaimed.ShouldBeGreaterThan(0, report);
         counts.Anomalies.ShouldBe(0, report);
     }
+
+    private static async Task<long> PhysicalEntriesAsync(KeyValueDatabase database)
+    {
+        database.IndexManager.TryGetIndex(KeyValueOperationExecutor.KeySpaceObjectId,
+            KeyValueOperationExecutor.PrimaryIndexName, out var index).ShouldBeTrue();
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, TestTimeout.Token());
+        try
+        {
+            await using var cursor = index.OpenCursor(reader, IndexKeyRange.All);
+            while (await cursor.MoveNextAsync(TestTimeout.Token())) { }
+            return EntriesExamined(cursor);
+        }
+        finally { await database.Coordinator.RollbackAsync(reader, CancellationToken.None); }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_EntriesExamined")]
+    private static extern long EntriesExamined(BTreeCursor cursor);
 
     private static LockResource KeyLock(string key)
         => LockResource.Entry(KeyValueOperationExecutor.KeySpaceObjectId, new IndexKey(Bytes(key)).Hash());
