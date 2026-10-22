@@ -67,7 +67,7 @@ public sealed partial class DocumentCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = DocumentCatalogCodec.Decode(unit.Data.Span);
+            var record = DocumentCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
@@ -97,12 +97,8 @@ public sealed partial class DocumentCatalog
             while (iterator.MoveNext())
             {
                 // Open decodes payloads after recovery; the fence needs only kind and version.
-                var header = iterator.Current.Data.Span;
-                if (header.Length < 18 || header[16] is not (1 or 2 or 4))
-                {
-                    throw new DocumentCatalogException(ErrorMessages.CatalogHeaderMalformed);
-                }
-                DocumentCatalogCodec.EnsureVersion(header[16], header[17]);
+                var unit = iterator.Current;
+                DocumentCatalogCodec.EnsureHeader(unit.Data.Span, unit.PageId, unit.SlotIndex);
             }
         }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
@@ -578,11 +574,11 @@ public sealed partial class DocumentCatalog
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
         if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
         {
-            throw new DocumentCatalogException("Truncated document catalog record.");
+            DocumentCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (writer != reference.Writer) { return null; }
-        var record = DocumentCatalogCodec.Decode(bytes.Span);
+        var record = DocumentCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         return matches(record) ? (record, deleter) : null;
     }
 

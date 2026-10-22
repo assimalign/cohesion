@@ -83,7 +83,7 @@
   <data name="DatabaseFilesUnrecoverable" xml:space="preserve"><value>Database '{0}' has missing or unrecoverable storage files. Preserve all files and restore the complete file set from backup. OpenDatabaseAsync requires the original journal and backup; replacing a missing sidecar could discard acknowledged commits or reopen a partially dropped database.</value></data>
   <data name="DatabaseOpenFailed" xml:space="preserve"><value>Database '{0}' could not be opened because a storage operation failed. Retry OpenDatabaseAsync after the condition is resolved. {1}</value></data>
 
-  <data name="RecordFormatUnsupported" xml:space="preserve"><value>COHDBG017: Unsupported graph record format. This engine requires format 4; recreate the database with this engine. No upgrade path is available.</value></data>
+  <data name="RecordFormatUnsupported" xml:space="preserve"><value>Unsupported graph record format. This engine requires format 4; recreate the database with this engine. No upgrade path is available.</value></data>
 
   <data name="LabelPostingInvalid" xml:space="preserve">
     <value>Invalid graph label posting key.</value>
@@ -105,9 +105,18 @@
     <value>Truncated graph record.</value>
   </data>
   <data name="RecordHeaderInvalid" xml:space="preserve">
-    <value>Malformed graph record at page {0}, slot {1}: kind {2}, identity {3}.</value>
+    <value>Malformed graph record: kind {0}, identity {1}.</value>
   </data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
+  <data name="RecordKindInvalid" xml:space="preserve"><value>Unknown graph record kind.</value></data>
+  <data name="RecordPayloadInvalid" xml:space="preserve"><value>Invalid graph record identity or trailing payload.</value></data>
+  <data name="RecordDecodeFailed" xml:space="preserve"><value>Invalid graph record: {0}</value></data>
+  <data name="RecordCountInvalid" xml:space="preserve"><value>Invalid graph property count.</value></data>
+  <data name="RecordScalarTagInvalid" xml:space="preserve"><value>Unknown graph property scalar tag.</value></data>
+  <data name="RecordScalarNotFinite" xml:space="preserve"><value>Graph numeric properties must be finite.</value></data>
+  <data name="RegistrationLengthInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration length.</value></data>
+  <data name="RegistrationHeaderInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration header.</value></data>
+  <data name="RegistrationIdentityInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration identity.</value></data>
 </root>

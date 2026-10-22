@@ -163,7 +163,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         if (record.Length < RecordVersionStamp.HeaderSize)
         {
-            return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
+            throw ShortRecord(pageId, slotIndex, record.Length);
         }
 
         var (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
@@ -387,7 +387,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
                 if (unit.Data.Length < RecordVersionStamp.HeaderSize)
                 {
-                    continue;
+                    throw ShortRecord(unit.PageId, unit.SlotIndex, unit.Data.Length);
                 }
 
                 var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
@@ -540,12 +540,16 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         if (record.Length < RecordVersionStamp.HeaderSize)
         {
-            return false;
+            throw ShortRecord(pageId, slotIndex, record.Length);
         }
 
         (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
         return true;
     }
+
+    private static StorageCorruptionException ShortRecord(PageId pageId, int slotIndex, int length)
+        => new(pageId, slotIndex, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.VersionRecordTooShort, length, RecordVersionStamp.HeaderSize));
 
     private enum LedgerEntryKind : byte
     {

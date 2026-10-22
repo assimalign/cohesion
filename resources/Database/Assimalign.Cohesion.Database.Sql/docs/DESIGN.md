@@ -5607,30 +5607,14 @@ type, because the codec read whatever type the tag named rather than the column'
 raises `ERRCODE_DATA_CORRUPTED` for a stored value that disagrees with its own header
 (`src/backend/access/heap/heaptoast.c:740-760`), as the
 Graph, Documents and Blob codecs here raise `StorageCorruptionException` for a malformed record.
-The read holds a pin, not a latch, so it can copy a slot while a writer reclaims it (the purge
-freeing and clearing it; a failed statement's bracket rollback restoring the page did too until
-#1371, below); that copy is torn, not damaged. `DecodeRow` therefore confirms a failed decode before it reports it
-(`DecodeConfirmed`): it reads the slot again with the same owner check, skips a slot reclaimed by
-then, and uses a re-read that decodes. A re-read that still does not decode is corrupt when its
-bytes equal the read before it, because damage is stable and a copy a writer tore is not; when
-they differ the slot is still changing and is read once more, up to two re-reads. Without the
-re-read, a scan racing a writer that reverts inserts and frees pages failed within two seconds on
-each of three runs, reading a cleared page as "Expected a Int64 component but found Null"
-(`SqlRecordDecodeIntegrityTests`); the code before #1362 reads such a copy the same way and fails
-the statement with that type error. The confirmation narrows the torn-copy window and does not
-close it: a writer descheduled half-way through rewriting the page (a free clearing the body, an
-in-place update) leaves the same torn bytes for every read. Closing it needs a
-read that confirms against the page write lock, which every bracket holds from its first touch of
-a page until it ends; the storage does not expose that check yet (a follow-up). PostgreSQL needs
-no second read because it reads a heap page under a share lock
-(`src/backend/access/heap/heapam.c:647`, `:1706`). A rollback applying a pre-image is no longer
-such a writer since #1371: the storage restores each page in one copy bracketed by a restore
-sequence that `TryReadRecord` and the scan confirm against and repeat after, so neither the
-decode nor the reclaimed-row skip before it sees a page half restored (`Database.Storage` DESIGN,
-"No reader sees a rollback's restore half done"). Before that, the skip was the worse half: a
-committed row on the page read as reclaimed and was dropped with no error, which no re-read
-reached ("Secondary indexes", above). The index read before the row read has no such window
-either: the rollback restores a tree's pages under the tree latch the seek's cursor holds.
+Storage now confirms every owned record copy against the D1 frame seqlock, covering
+forward writes, page clears, tombstones, compaction and rollback restores (#1365, #1372).
+The decode therefore reports a malformed confirmed copy immediately. The earlier speculative
+same-byte comparison and its extra reads are removed: a writer paused halfway through a page
+mutation cannot make that partial image eligible for decoding. A genuinely reclaimed slot is
+still absence at the storage read, before decoding. The original DatabaseTypeException remains
+attached to the location-bearing StorageCorruptionException.
+The index read before the row read remains protected by the tree cursor's latch.
 The slot directory the read walks had a torn read of its own, below the decode: on ARM64 a scan
 beside an insert could see the new slot count before the slot's entry and fail with "Slotted page
 N is malformed" on a healthy page, which no re-read of the record reaches. The slotted page now
@@ -7327,3 +7311,32 @@ or transaction semantics change. The shared Indexing DESIGN records PostgreSQL r
 split-path invariants, deterministic mutants and before/after measurements. Root integration
 tests exercise this model's real coordinator and current index manager, including catalog/store
 reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+All row decoding uses a storage-confirmed copy; a DatabaseTypeException is
+reported with page, slot, table and its original cause. Catalog Load adds that same physical
+context around decoder failures, retaining SqlCatalogException and its complete existing
+Diagnostics. Unit-iterator I/O remains outside the decoding catch. Format refusal details and
+codes are retained; no old-format reader is introduced.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Malformed persisted catalog records now carry storage corruption through the engine boundary,
+so OpenDatabaseAsync reports DatabaseCorruptionException with COHDBS003, page and slot instead
+of leaking a catalog/parser exception. Direct SqlCatalog.Open retains SqlCatalogException,
+including for malformed key components, with the original DatabaseTypeException underneath
+its location-bearing corruption cause. The existing marker probe still distinguishes genuine
+older/newer format refusals from a damaged marker-free/current-format catalog. Format tests
+require this common corruption classification, retained causes and unchanged files; the
+six superseded exception-type assertions are strengthened to this contract, not bypassed.

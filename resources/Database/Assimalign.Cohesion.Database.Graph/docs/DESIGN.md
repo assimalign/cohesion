@@ -1249,7 +1249,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage carries the code on StorageCorruptionException; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBG019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
@@ -2386,7 +2386,7 @@ records whose nonzero identities the caller reserves from the backing storage's 
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
 changes before first publication. Formats 1, 2 and 3 are refused before logical recovery scrub with COHDBG017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
-StorageCorruptionException carries the code in its message; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
+StorageCorruptionException retains the code in its internal format-refusal cause's Diagnostics; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
 The graph record and tree-registration version is 4; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
 Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
@@ -2616,3 +2616,41 @@ or transaction semantics change. The shared Indexing DESIGN records PostgreSQL r
 split-path invariants, deterministic mutants and before/after measurements. Root integration
 tests exercise this model's real coordinator and current index manager, including catalog/store
 reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+GraphStore open, format validation, cached identity reads and index/label/
+adjacency fetches pass the known page and slot into the record decoder. The decoder creates
+its corruption error with that location and preserves scalar/count/truncation parsing causes.
+Catalog open and cached metadata reads retain GraphCatalogException and its flags while
+attaching location-bearing corruption. Valid replacement identities remain stale references.
+The latest-state audit confirms mutation entry takes the transaction gate and writer lock
+before RefreshSnapshot: original ReadCommitted contexts refresh; caller-pinned statement views
+retain conflict detection (GraphStore.Mutations.cs and GraphStoreMutationTests).
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Physical B+Tree registrations are part of the same decode contract. Graph registration length,
+header, format and identity errors carry the record page and slot. Documents registration
+header/format/name/flags/root validation and truncated payloads retain DocumentCatalogException
+and their original cause with that context; storage iterator I/O runs outside the decoder catch.
+Both ordinary open and the pre-recovery format fence use these readers. Regression cases corrupt
+one committed registration, require its exact location, repair it, and successfully reopen.
+
+The unsupported-record-format refusal retains COHDBG017 in the existing Diagnostics carrier
+under the located StorageCorruptionException. The engine reads this structured identity instead
+of parsing a message prefix. The message is unprefixed, with page/slot context, and the unchanged
+engine diagnostic sequence remains COHDBS003, COHDBG018, COHDBG017. Earlier formats still fail
+before scrub writes any file. The original prefix-dependent implementation lost COHDBG017 after
+location was added (four full-suite failures); the revised format regression requires the same
+complete codes plus structured physical context and byte-identical files.

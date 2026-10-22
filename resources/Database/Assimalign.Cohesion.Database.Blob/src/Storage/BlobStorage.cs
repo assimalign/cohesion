@@ -171,7 +171,7 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
             cancellationToken.ThrowIfCancellationRequested();
             var (page, slot) = UnpackLocation(location);
             var bytes = ReadEntry(page, slot);
-            var chunk = BlobChunkCodec.Decode(bytes, remaining);
+            var chunk = BlobChunkCodec.Decode(bytes, remaining, page, slot);
             await coordinator.ApplyStatementAsync(context, bracket =>
             {
                 UpdateEntry(bracket, page, slot, RecordVersionStamp.WithDeleter(bytes.Span, context.Sequence));

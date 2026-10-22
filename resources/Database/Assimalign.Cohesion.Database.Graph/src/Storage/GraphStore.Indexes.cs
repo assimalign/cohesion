@@ -244,17 +244,17 @@ public sealed partial class GraphStore
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            if (unit.Data.Length != 34) { throw new StorageCorruptionException("Invalid graph B+Tree registration length."); }
+            if (unit.Data.Length != 34) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationLengthInvalid); }
             using var stream = new MemoryStream(unit.Data.ToArray(), false);
             using var reader = new BinaryReader(stream);
             if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 4)
             {
-                throw new StorageCorruptionException("Invalid graph B+Tree registration header.");
+                throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationHeaderInvalid);
             }
-            if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+            if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw GraphRecordCodec.UnsupportedFormat(unit.PageId, unit.SlotIndex); }
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
-            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
+            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
             registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(treeName), root), unit.PageId, unit.SlotIndex));
         }
         return registrations;

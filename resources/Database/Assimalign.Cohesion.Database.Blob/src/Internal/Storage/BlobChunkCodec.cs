@@ -24,22 +24,26 @@ internal static class BlobChunkCodec
         return record;
     }
 
-    internal static (ulong Next, ReadOnlyMemory<byte> Payload) Decode(ReadOnlyMemory<byte> bytes, long remaining)
+    internal static (ulong Next, ReadOnlyMemory<byte> Payload) Decode(ReadOnlyMemory<byte> bytes, long remaining, PageId? page = null, int slot = 0)
     {
         if (bytes.Length <= HeaderSize || bytes.Span[16] != 3 || bytes.Span[17] != 1)
         {
-            throw new StorageCorruptionException("Invalid blob chunk header.");
+            throw Corrupt(page, slot, ErrorMessages.ChunkHeaderInvalid);
         }
 
         int size = BinaryPrimitives.ReadUInt16LittleEndian(bytes.Span[18..]);
         ulong next = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span[20..]);
         if (size != bytes.Length - HeaderSize || size > PayloadSize || size > remaining || (size == remaining) != (next == 0))
         {
-            throw new StorageCorruptionException("Blob chunk length or next location disagrees with catalog length.");
+            throw Corrupt(page, slot, ErrorMessages.ChunkLengthInvalid);
         }
 
         return (next, bytes[HeaderSize..]);
     }
+
+    private static StorageCorruptionException Corrupt(PageId? page, int slot, string message)
+        => page is { } id ? new StorageCorruptionException(id, slot, message)
+            : new StorageCorruptionException(message);
 
     internal static void WriteNext(Span<byte> record, ulong next)
         => BinaryPrimitives.WriteUInt64LittleEndian(record[20..], next);

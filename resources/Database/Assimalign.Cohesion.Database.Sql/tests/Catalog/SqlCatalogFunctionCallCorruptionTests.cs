@@ -4,6 +4,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
@@ -63,10 +64,14 @@ public sealed class SqlCatalogFunctionCallCorruptionTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "truncated-function-run");
         var record = TableRecord(check).AppendInt32(1).AppendString("ABS(INT32)", Collation.Binary);
-        Insert(storage, record.ToArray());
+        var location = Insert(storage, record.ToArray());
 
         // Act / Assert
-        Should.Throw<DatabaseTypeException>(() => SqlCatalog.Open(storage));
+        var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+        var corruption = StorageCorruptionException.Find(failure).ShouldNotBeNull();
+        corruption.PageId.ShouldBe(location.PageId);
+        corruption.SlotIndex.ShouldBe(location.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
     }
 
     private static DatabaseKeyWriter TableRecord(bool check)
@@ -89,10 +94,11 @@ public sealed class SqlCatalogFunctionCallCorruptionTests
         return writer;
     }
 
-    private static void Insert(SqlStorage storage, byte[] record)
+    private static (PageId PageId, int SlotIndex) Insert(SqlStorage storage, byte[] record)
     {
         using var transaction = storage.BeginTransaction();
-        storage.InsertRow(transaction, record);
+        var location = storage.InsertRow(transaction, record);
         transaction.Commit();
+        return location;
     }
 }

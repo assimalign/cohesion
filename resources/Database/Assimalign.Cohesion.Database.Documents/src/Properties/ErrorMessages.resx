@@ -89,4 +89,10 @@
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
+  <data name="ChunkHeaderInvalid" xml:space="preserve"><value>Invalid document chunk header.</value></data>
+  <data name="ChunkLengthInvalid" xml:space="preserve"><value>Document chunk length or next location disagrees with catalog length.</value></data>
+  <data name="PhysicalRegistrationHeaderInvalid" xml:space="preserve"><value>Invalid physical index registration header.</value></data>
+  <data name="PhysicalRegistrationNameMissing" xml:space="preserve"><value>Missing physical index name.</value></data>
+  <data name="PhysicalRegistrationInvalid" xml:space="preserve"><value>Invalid physical index registration.</value></data>
+  <data name="CatalogFormatRefusalLocation" xml:space="preserve"><value>{2} (page {0}, slot {1})</value></data>
 </root>

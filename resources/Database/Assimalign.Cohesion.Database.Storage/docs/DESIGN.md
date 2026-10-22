@@ -2722,3 +2722,42 @@ respectively, are at or below their base median. Every measured round allocates 
 These are descriptive guard costs, without a timing assertion or a throughput claim.
 The temporary probe/project inclusion is restored after each run. The three regression
 cases check negative sentinels and the next real allocation; no test reads source text.
+
+## Confirmed record decoding (D1, #1372)
+
+The public overload
+`StorageCorruptionException(PageId pageId, int slotIndex, string message, Exception? inner = null)`
+and nullable `SlotIndex` property add structured record context. The existing nullable PageId,
+COHDBS003 code and page-only constructors retain their contracts. The resx context template
+contains no code prefix. This is an exception API change only; the frame sequence and file
+formats do not change.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+## Normal-read measurements for #1372
+
+Isolated Release Windows ARM64, .NET 10.0.13 / SDK 10.0.401, tiered compilation disabled.
+Each probe uses one warmup and twelve samples; times are descriptive, never test assertions.
+Graph FindNode over a fixed committed node/snapshot: 10,000 warmups, 50,000 calls/sample,
+median 782.227 -> 756.087 ns, 10/12 after samples at or below the old median; median allocation
+960 bytes in both. Version-store visible lookup over a 17-byte version: 10,000 warmups,
+200,000 calls/sample, 134.8895 -> 134.89325 ns, 6/12 at or below; 96 bytes in every sample.
+Stored ReadCommitted SQL SELECT: 1,000 warmups, 20,000 calls/sample, 5072.35 -> 5074.78 ns,
+6/12 at or below; median 4280 bytes in both. KeyValuePair ReadCommitted Get: 1,000 warmups,
+20,000 calls/sample, 2532.9375 -> 2521.2125 ns, 7/12 at or below; 3608 bytes throughout.
+Blob 64-byte chunk download: 10,000 warmups, 100,000 complete streams/sample,
+334.2315 -> 335.1565 ns, 4/12 at or below; 272 bytes throughout. Documents' same chunk method:
+333.332 -> 332.887 ns, 6/12 at or below; median 272 bytes in both. The changed success paths
+add no process-wide atomic or allocation. One-time sample bookkeeping is listed in the external
+summary; no budget or threshold is relaxed. Temporary Compile links/source substitutions restore
+in finally, and CSVs are outside the repository in Temp/wave11-1372-probes.

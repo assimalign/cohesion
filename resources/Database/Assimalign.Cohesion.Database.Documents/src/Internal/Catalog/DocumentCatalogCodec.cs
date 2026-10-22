@@ -51,6 +51,41 @@ internal static class DocumentCatalogCodec
         return stream.ToArray();
     }
 
+    internal static void EnsureHeader(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try
+        {
+            if (bytes.Length < 18 || bytes[16] is not (1 or 2 or 4))
+            {
+                throw new DocumentCatalogException(ErrorMessages.CatalogHeaderMalformed);
+            }
+            EnsureVersion(bytes[16], bytes[17]);
+        }
+        catch (DocumentCatalogException error) { throw At(page, slot, error); }
+    }
+
+    internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try { return Decode(bytes); }
+        catch (DocumentCatalogException error)
+        {
+            throw At(page, slot, error);
+        }
+    }
+
+    internal static DocumentCatalogException At(Assimalign.Cohesion.Database.Storage.PageId page, int slot, DocumentCatalogException error)
+    {
+        if (error.IsFormatRefusal)
+        {
+            return new DocumentCatalogException(error.Code, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.CatalogFormatRefusalLocation, (long)page, slot, error.Message), error)
+            { IsFormatRefusal = true, PageId = page, SlotIndex = slot };
+        }
+        var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
+        return new DocumentCatalogException(error.Code, corruption.Message, corruption)
+        { PageId = page, SlotIndex = slot };
+    }
+
     internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes)
     {
         try
@@ -126,7 +161,8 @@ internal static class DocumentCatalogCodec
         byte supported = (byte)(kind is 4 or 5 ? 2 : 1);
         if (version != supported)
         {
-            throw new DocumentCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported));
+            throw new DocumentCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatMismatch, kind, version, supported))
+            { IsFormatRefusal = true };
         }
     }
 

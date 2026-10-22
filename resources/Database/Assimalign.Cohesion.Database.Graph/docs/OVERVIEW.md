@@ -175,3 +175,12 @@ A present graph record with an unknown kind or zero identity fails as corruption
 page and slot; it cannot become an absent node through cached-reference cleanup. A valid
 replacement identity still invalidates the old reference. This fixes the defect found during
 #1372 without changing graph format 4, public signatures or diagnostic code COHDBS003.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.

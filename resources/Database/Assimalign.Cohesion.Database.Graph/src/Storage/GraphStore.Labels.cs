@@ -56,9 +56,9 @@ public sealed partial class GraphStore
         }
     }
 
-    private GraphRecord DecodeRead(ReadOnlyMemory<byte> bytes)
+    private GraphRecord DecodeRead(ReadOnlyMemory<byte> bytes, PageId page, int slot)
     {
-        var record = GraphRecordCodec.Decode(bytes);
+        var record = GraphRecordCodec.Decode(bytes, page, slot);
         if (record.Kind == 1) { Interlocked.Increment(ref _nodeRecordsDecoded); }
         return record;
     }

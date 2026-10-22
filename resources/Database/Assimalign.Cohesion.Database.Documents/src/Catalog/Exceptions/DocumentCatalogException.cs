@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Documents.Catalog;
 
@@ -9,11 +10,17 @@ public sealed class DocumentCatalogException : Exception
 {
     // User errors retain their identity across the engine boundary without parsing message text.
     internal string? Code { get; }
+    internal bool IsFormatRefusal { get; init; }
+    internal PageId? PageId { get; init; }
+    internal int? SlotIndex { get; init; }
 
     internal DocumentCatalogException(string code, string message) : base(message)
     {
         Code = code;
     }
+
+    internal DocumentCatalogException(string? code, string message, Exception innerException) : base(message, innerException)
+        => Code = code;
 
     /// <summary>Initializes a catalog error.</summary>
     /// <param name="message">The error description.</param>

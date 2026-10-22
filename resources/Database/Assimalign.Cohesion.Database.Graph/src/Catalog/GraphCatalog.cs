@@ -58,7 +58,7 @@ public sealed class GraphCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = GraphCatalogCodec.Decode(unit.Data.Span);
+            var record = GraphCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
@@ -516,7 +516,7 @@ public sealed class GraphCatalog
                 }
                 if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
                 {
-                    throw new GraphCatalogException("Truncated graph catalog record.");
+                    GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 }
                 var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                 if (writer != reference.Writer)
@@ -524,7 +524,7 @@ public sealed class GraphCatalog
                     RemoveStaleReference(key, versions, index);
                     continue;
                 }
-                var record = GraphCatalogCodec.Decode(bytes.Span);
+                var record = GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 if ((record.Kind, record.Parent, record.Name) != key || record.Id != reference.Id)
                 {
                     RemoveStaleReference(key, versions, index);

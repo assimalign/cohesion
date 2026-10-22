@@ -89,13 +89,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            // Graph.Storage uses the existing storage exception with a coded message, so the
-            // engine can retain its diagnostic without adding a cross-assembly exception type.
+            // The decoder's format diagnostic survives physical context without parsing text.
             const string formatCode = "COHDBG017";
-            if (exception.Message.StartsWith(formatCode + ": ", StringComparison.Ordinal))
+            if (exception.InnerException is GraphRecordFormatException { Diagnostics: [{ Code: formatCode }, ..] })
             {
                 string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
-                    name, exception.Message[(formatCode.Length + 2)..]);
+                    name, exception.Message);
                 throw new DatabaseException(message, [new Diagnostic
                 { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
             }

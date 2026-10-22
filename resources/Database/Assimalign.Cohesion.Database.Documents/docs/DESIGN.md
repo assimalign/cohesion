@@ -2398,3 +2398,38 @@ or transaction semantics change. The shared Indexing DESIGN records PostgreSQL r
 split-path invariants, deterministic mutants and before/after measurements. Root integration
 tests exercise this model's real coordinator and current index manager, including catalog/store
 reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+Catalog open, cached metadata reads and indexed metadata fetches use
+confirmed record copies and retain DocumentCatalogException and its existing code while
+attaching page/slot corruption context. Chunk downloads and tombstoning pass the chunk location
+into decoding. ReadCommitted operations keep a statement snapshot pin. Writes acquire the
+database writer lock and compare the addressed collection/document/index set with LatestSnapshot;
+this audit does not relax their conflict checks (DocumentCollection.cs, DocumentDatabase.cs,
+DocumentPlanExecutor.cs and DocumentIndexConcurrencyTests).
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Physical B+Tree registrations follow this contract on open and during the pre-recovery format
+fence. Their header/format/name/flags/root and truncated-payload errors retain
+DocumentCatalogException and the decoding cause, with page and slot. Iterator I/O is outside
+the decoder catch. Regression tests repair each damaged committed registration and reopen it.
+
+Recognized unsupported catalog versions retain the existing model format refusal rather than
+acquiring a corruption classification. An internal IsFormatRefusal marker survives contextual
+wrapping; its original message is followed by page/slot details, and the engine keeps COHDBD005.
+Malformed current-format bytes still carry located COHDBS003. The existing v1 index-format
+engine tests retain their original message prefix, coordinator-disposal and byte-identical-file
+assertions. Registration truncation retains its exact EndOfStreamException beneath the located
+corruption and catalog wrappers. No format reader, upgrader or public exception member is added.

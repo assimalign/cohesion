@@ -1679,3 +1679,29 @@ its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Confirmed record decoding (D1, #1372)
+
+Catalog open and cached metadata reads use confirmed copies and retain
+BlobCatalogException while attaching page/slot corruption context. Chunk downloads and
+tombstoning pass the chunk location into decoding. ReadCommitted streams retain their statement
+snapshot pin. Blob/container writes compare statement metadata with LatestSnapshot after the
+writer lock; this audit does not relax their conflict checks (BlobContainer.cs, BlobDatabase.cs
+and BlobReadCommittedTests).
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+Recognized unsupported blob catalog versions keep the existing model refusal COHDBB006 and
+terminal wire behavior. An internal format-refusal marker preserves that identity while the
+original message gains page/slot context. Malformed current-format metadata still carries
+located COHDBS003. No public type/member, format version or frame is added by this distinction.

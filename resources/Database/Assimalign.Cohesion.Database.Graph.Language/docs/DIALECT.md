@@ -439,3 +439,10 @@ Background and unique-insert B-tree pruning preserve the statement's snapshot an
 language results. The shared coordinator supplies the safe horizon; ending the oldest reader
 allows later maintenance to remove its dead physical index versions. This changes no syntax,
 diagnostic code, wire contract or on-disk format.
+
+
+## Storage decode failures (#1372)
+
+A malformed confirmed stored record fails execution with the existing corruption diagnostic
+and physical page/slot context. It is not a missing row, document or graph element. D1 confirms
+the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid data retains the same language results.

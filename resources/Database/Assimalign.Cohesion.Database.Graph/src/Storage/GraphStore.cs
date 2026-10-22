@@ -40,7 +40,7 @@ public sealed partial class GraphStore
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = GraphRecordCodec.Decode(unit.Data);
+            var record = GraphRecordCodec.Decode(unit.Data, unit.PageId, unit.SlotIndex);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             Add(record, GraphStorage.PackLocation(unit.PageId, unit.SlotIndex), writer, prune: false);
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
@@ -88,7 +88,11 @@ public sealed partial class GraphStore
     {
         ArgumentNullException.ThrowIfNull(storage);
         using var records = storage.GetUnitIterator(2);
-        while (records.MoveNext()) { GraphRecordCodec.EnsureFormat(records.Current.Data.Span); }
+        while (records.MoveNext())
+        {
+            var record = records.Current;
+            GraphRecordCodec.EnsureFormat(record.Data.Span, record.PageId, record.SlotIndex);
+        }
         BTreeIndexManager.EnsureFormat(storage, ReadRegistrations(storage).Select(entry => entry.Registration));
     }
 
@@ -441,7 +445,7 @@ public sealed partial class GraphStore
                 {
                     var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                     if (snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
-                    { return new Found(reference, DecodeRead(bytes)); }
+                    { return new Found(reference, DecodeRead(bytes, reference.PageId, reference.SlotIndex)); }
                     if (current is not null) { previous = current; }
                 }
                 else
@@ -470,15 +474,15 @@ public sealed partial class GraphStore
     private bool TryRead(Reference reference, byte kind, ulong id, out ReadOnlyMemory<byte> bytes)
     {
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 2, out bytes)) { return false; }
-        GraphRecordCodec.EnsureFormat(bytes.Span);
-        if (bytes.Length < 34) { throw new StorageCorruptionException(ErrorMessages.RecordTruncated); }
+        GraphRecordCodec.EnsureFormat(bytes.Span, reference.PageId, reference.SlotIndex);
+        if (bytes.Length < 34) { throw new StorageCorruptionException(reference.PageId, reference.SlotIndex, ErrorMessages.RecordTruncated); }
         byte storedKind = bytes.Span[16];
         ulong storedId = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(18, 8));
         if (storedKind is < 1 or > 3 || storedId == 0)
         {
-            throw new StorageCorruptionException(reference.PageId, string.Format(
+            throw new StorageCorruptionException(reference.PageId, reference.SlotIndex, string.Format(
                 System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecordHeaderInvalid,
-                (long)reference.PageId, reference.SlotIndex, storedKind, storedId));
+                storedKind, storedId));
         }
         return RecordVersionStamp.ReadStamps(bytes.Span).Writer == reference.Writer && storedKind == kind && storedId == id;
     }
@@ -517,15 +521,15 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         // A reclaimed location reads as a stale reference; CRC and I/O errors propagate (#1342).
         if (!_storage.TryReadRecord(page, slot, 2, out var bytes)) { return null; }
-        if (bytes.Length < 26) { throw new StorageCorruptionException("Truncated graph record."); }
+        if (bytes.Length < 26) { throw new StorageCorruptionException(page, slot, ErrorMessages.RecordTruncated); }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (!snapshot.IsVisible(writer) || (deleter != TransactionSequence.None && snapshot.IsVisible(deleter))) { return null; }
-        GraphRecordCodec.EnsureFormat(bytes.Span);
+        GraphRecordCodec.EnsureFormat(bytes.Span, page, slot);
         // Both already returned self-loops in its outgoing pass. Inspect the fixed source
         // field instead of retaining a set proportional to the outgoing degree or decoding twice.
         if (skipSourceId is { } source && bytes.Length >= 50 && bytes.Span[16] == 2 &&
             BinaryPrimitives.ReadUInt64LittleEndian(bytes.Span.Slice(34, 8)) == source) { return null; }
-        var record = DecodeRead(bytes);
+        var record = DecodeRead(bytes, page, slot);
         return new Found(new Reference(page, slot, writer, record.Revision), record);
     }
 

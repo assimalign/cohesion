@@ -18,10 +18,17 @@ internal static class GraphRecordCodec
 {
     // One graph format fence, shared by open and recovery; #1534 adds catalog label IDs.
     internal const byte FormatVersion = 4;
-    internal static void EnsureFormat(ReadOnlySpan<byte> bytes)
+    internal static void EnsureFormat(ReadOnlySpan<byte> bytes, PageId? page = null, int slot = 0)
     {
         if (bytes.Length < 18 || bytes[17] != FormatVersion)
-        { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+        { throw UnsupportedFormat(page, slot); }
+    }
+
+    internal static StorageCorruptionException UnsupportedFormat(PageId? page = null, int slot = 0)
+    {
+        string message = ErrorMessages.RecordFormatUnsupported;
+        var format = new GraphRecordFormatException(message);
+        return Corrupt(page, slot, message, format);
     }
 
     internal static byte[] Encode(GraphRecord record, TransactionSequence writer)
@@ -70,56 +77,60 @@ internal static class GraphRecordCodec
         return stream.ToArray();
     }
 
-    internal static GraphRecord Decode(ReadOnlyMemory<byte> bytes)
+    internal static GraphRecord Decode(ReadOnlyMemory<byte> bytes, PageId? page = null, int slot = 0)
     {
-        EnsureFormat(bytes.Span);
+        EnsureFormat(bytes.Span, page, slot);
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), false);
             using var input = new BinaryReader(stream, new UTF8Encoding(false, true));
             input.ReadUInt64(); input.ReadUInt64();
             byte kind = input.ReadByte();
-            if (input.ReadByte() != FormatVersion) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+            if (input.ReadByte() != FormatVersion) { throw UnsupportedFormat(page, slot); }
             ulong id = input.ReadUInt64();
             ulong revision = input.ReadUInt64();
             GraphRecord record;
             switch (kind)
             {
                 case 1:
-                    int count = Count(input);
+                    int count = Count(input, page, slot);
                     var labels = new string[count];
                     var labelIds = new Guid[count];
                     for (int i = 0; i < count; i++)
                     {
                         labels[i] = input.ReadString();
                         labelIds[i] = new Guid(input.ReadBytes(16));
-                        if (labelIds[i] == Guid.Empty) { throw new StorageCorruptionException(ErrorMessages.LabelIdInvalid); }
+                        if (labelIds[i] == Guid.Empty) { throw Corrupt(page, slot, ErrorMessages.LabelIdInvalid); }
                     }
-                    record = new GraphRecord(kind, id, new StoredGraphNode(id, Array.AsReadOnly(labels), Properties(input)), LabelIds: labelIds);
+                    record = new GraphRecord(kind, id, new StoredGraphNode(id, Array.AsReadOnly(labels), Properties(input, page, slot)), LabelIds: labelIds);
                     break;
                 case 2:
                     ulong source = input.ReadUInt64(), target = input.ReadUInt64();
                     var typeId = new Guid(input.ReadBytes(16));
-                    if (typeId == Guid.Empty) { throw new StorageCorruptionException(ErrorMessages.RelationshipTypeIdInvalid); }
+                    if (typeId == Guid.Empty) { throw Corrupt(page, slot, ErrorMessages.RelationshipTypeIdInvalid); }
                     record = new GraphRecord(kind, id, Relationship: new StoredGraphRelationship(id,
-                        source, target, input.ReadString(), Properties(input)), TypeId: typeId);
+                        source, target, input.ReadString(), Properties(input, page, slot)), TypeId: typeId);
                     break;
                 case 3: record = new GraphRecord(kind, id, Label: input.ReadString(), PropertyKey: input.ReadString()); break;
-                default: throw new StorageCorruptionException("Unknown graph record kind.");
+                default: throw Corrupt(page, slot, ErrorMessages.RecordKindInvalid);
             }
-            if (id == 0 || stream.Position != stream.Length) { throw new StorageCorruptionException("Invalid graph record identity or trailing payload."); }
+            if (id == 0 || stream.Position != stream.Length) { throw Corrupt(page, slot, ErrorMessages.RecordPayloadInvalid); }
             return record with { Revision = revision };
         }
         catch (Exception error) when (error is EndOfStreamException or DecoderFallbackException or FormatException or ArgumentException or OverflowException)
         {
-            throw new StorageCorruptionException($"Invalid graph record: {error.Message}");
+            throw Corrupt(page, slot, string.Format(CultureInfo.CurrentCulture, ErrorMessages.RecordDecodeFailed, error.Message), error);
         }
     }
 
-    private static int Count(BinaryReader input)
+    private static StorageCorruptionException Corrupt(PageId? page, int slot, string message, Exception? inner = null)
+        => page is { } id ? new StorageCorruptionException(id, slot, message, inner)
+            : new StorageCorruptionException(message);
+
+    private static int Count(BinaryReader input, PageId? page, int slot)
     {
         int count = input.ReadInt32();
-        if (count < 0 || count > SlottedPage.MaxRecordSize) { throw new StorageCorruptionException("Invalid graph property count."); }
+        if (count < 0 || count > SlottedPage.MaxRecordSize) { throw Corrupt(page, slot, ErrorMessages.RecordCountInvalid); }
         return count;
     }
 
@@ -151,9 +162,9 @@ internal static class GraphRecordCodec
         }
     }
 
-    private static IReadOnlyDictionary<string, object?> Properties(BinaryReader input)
+    private static IReadOnlyDictionary<string, object?> Properties(BinaryReader input, PageId? page, int slot)
     {
-        int count = Count(input);
+        int count = Count(input, page, slot);
         var properties = new Dictionary<string, object?>(StringComparer.Ordinal);
         for (int i = 0; i < count; i++)
         {
@@ -163,11 +174,11 @@ internal static class GraphRecordCodec
                 0 => null, 1 => input.ReadBoolean(), 2 => input.ReadString(), 3 => input.ReadSByte(), 4 => input.ReadByte(),
                 5 => input.ReadInt16(), 6 => input.ReadUInt16(), 7 => input.ReadInt32(), 8 => input.ReadUInt32(),
                 9 => input.ReadInt64(), 10 => input.ReadUInt64(), 11 => input.ReadDecimal(), 12 => input.ReadDouble(), 13 => input.ReadSingle(),
-                _ => throw new StorageCorruptionException("Unknown graph property scalar tag.")
+                _ => throw Corrupt(page, slot, ErrorMessages.RecordScalarTagInvalid)
             };
             if (value is double number && !double.IsFinite(number) || value is float single && !float.IsFinite(single))
             {
-                throw new StorageCorruptionException("Graph numeric properties must be finite.");
+                throw Corrupt(page, slot, ErrorMessages.RecordScalarNotFinite);
             }
             properties.Add(key, value);
         }

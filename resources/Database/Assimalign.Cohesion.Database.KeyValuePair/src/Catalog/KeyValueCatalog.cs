@@ -186,23 +186,32 @@ public sealed class KeyValueCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var reader = new DatabaseKeyReader(unit.Data.Span);
-            int kind = reader.ReadInt32();
-
-            switch (kind)
+            try
             {
-                case indexRegistrationsKind:
-                    _registrations = DecodeRegistrations(ref reader);
-                    _registrationsLocation = (unit.PageId, unit.SlotIndex);
-                    break;
+                var reader = new DatabaseKeyReader(unit.Data.Span);
+                int kind = reader.ReadInt32();
 
-                case entrySpaceFormatKind:
-                    _entrySpaceFormatVersion = reader.ReadInt32();
-                    _formatLocation = (unit.PageId, unit.SlotIndex);
-                    break;
+                switch (kind)
+                {
+                    case indexRegistrationsKind:
+                        _registrations = DecodeRegistrations(ref reader);
+                        _registrationsLocation = (unit.PageId, unit.SlotIndex);
+                        break;
 
-                default:
-                    throw new KeyValueCatalogException($"Malformed catalog record of kind {kind}.");
+                    case entrySpaceFormatKind:
+                        _entrySpaceFormatVersion = reader.ReadInt32();
+                        _formatLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    default:
+                        throw new KeyValueCatalogException($"Malformed catalog record of kind {kind}.");
+                }
+            }
+            catch (Exception error) when (error is KeyValueCatalogException or DatabaseTypeException
+                or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException)
+            {
+                var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
+                throw new KeyValueCatalogException(corruption.Message, corruption);
             }
         }
     }

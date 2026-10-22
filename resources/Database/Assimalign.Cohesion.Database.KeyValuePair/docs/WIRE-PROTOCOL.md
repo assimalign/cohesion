@@ -112,3 +112,10 @@ ProtocolMessageTests additionally fixes these payload bytes.
 ## Negotiation and coded errors (#1105)
 
 All endpoints negotiate 2.1 through Startup capabilities and a Ready agreement. Key-Value advertises no capabilities and neither sends nor accepts Diagnostics. A negotiated 2.0 session sends empty Ready. ParseFailure and ExecutionFailure retain u16 category + string text, now CODE: message for every command refusal. COMMANDS.md lists COHKV001–019; engine-carried codes take precedence over COHKV019.
+
+
+## Record decode context (#1372)
+
+Confirmed record decoding errors keep the existing execution-failure frame and corruption code.
+Their message identifies the page and slot; the in-process nullable SlotIndex is not a new wire
+field. Existing diagnostic negotiation, protocol version and session lifetime are unchanged.

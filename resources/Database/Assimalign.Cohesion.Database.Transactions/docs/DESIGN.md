@@ -986,9 +986,11 @@ zero means no deletion. A nonzero deleter is a tombstone, not physical removal.
 Visibility is exactly `snapshot.IsVisible(writer) && (deleter == None ||
 !snapshot.IsVisible(deleter))`. Setting or clearing a deleter produces a copy of
 the same length and changes only bytes 8–15, so stamp changes cannot relocate a
-record. Short records (less than 16 bytes) are ignored by store visibility,
-undo, and recovery scans as before; the low-level helpers require a complete
-prefix. Payload interpretation and legacy format upgrades remain engine policy.
+record. A present record shorter than the 16-byte stamp prefix is corruption (#1372),
+not an absent version: visibility, logical undo, pruning and recovery scrub report
+StorageCorruptionException with page and slot. Failed undo/prune work remains tracked for retry
+after repair. Exactly 16 bytes is a valid empty payload. Payload interpretation remains engine
+policy; existing format fences refuse earlier formats without a legacy reader or upgrade.
 B+Tree entries retain their own physical layout and existing stamp implementation.
 
 ### Recovery and checkpoint interlock
@@ -1453,3 +1455,22 @@ must perform only bounded index maintenance and must not request a checkpoint in
 Tests prove gate exclusion, exact exception/cancellation identity, release after failure, old
 snapshot preservation and the four real model bindings. Existing statement rollback semantics
 are unchanged, as approved in #1393.
+
+## Confirmed record decoding (D1, #1372)
+
+The record-space version store rejects a present record shorter than
+RecordVersionStamp.HeaderSize in visibility, undo/pruning stamp reads and recovery scrub.
+Reclaimed locations remain absent; short present records cannot silently settle ledger work.
+The shared StorageCorruptionException carries the physical page, slot and existing COHDBS003.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.

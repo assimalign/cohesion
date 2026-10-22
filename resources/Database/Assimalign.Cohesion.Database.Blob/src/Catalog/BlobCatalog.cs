@@ -67,7 +67,7 @@ public sealed partial class BlobCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = BlobCatalogCodec.Decode(unit.Data.Span);
+            var record = BlobCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
@@ -532,11 +532,11 @@ public sealed partial class BlobCatalog
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
         if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
         {
-            throw new BlobCatalogException("Truncated blob catalog record.");
+            BlobCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (writer != reference.Writer) { return null; }
-        var record = BlobCatalogCodec.Decode(bytes.Span);
+        var record = BlobCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         return matches(record) ? (record, deleter) : null;
     }
 

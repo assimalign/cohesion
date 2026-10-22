@@ -29,4 +29,5 @@
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; commands are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
+  <data name="StoredEntryDecodeFailed" xml:space="preserve"><value>Key-value entry does not decode: {0}</value></data>
 </root>

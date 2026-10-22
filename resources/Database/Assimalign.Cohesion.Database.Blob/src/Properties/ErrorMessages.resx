@@ -13,4 +13,8 @@
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; operations are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
   <data name="OperationTransactionInactive" xml:space="preserve"><value>The blob operation's transaction is no longer active.</value></data>
+  <data name="ChunkHeaderInvalid" xml:space="preserve"><value>Invalid blob chunk header.</value></data>
+  <data name="ChunkLengthInvalid" xml:space="preserve"><value>Blob chunk length or next location disagrees with catalog length.</value></data>
+  <data name="CatalogFormatRefusalLocation" xml:space="preserve"><value>{2} (page {0}, slot {1})</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Unsupported blob catalog format version {0}.</value></data>
 </root>

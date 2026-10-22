@@ -189,3 +189,10 @@ Offline refusals and unconfirmed commits now supply the model code through the e
 exception Diagnostics carrier. Negotiated diagnostics use the existing frame and capability;
 legacy handshake and error text keeps a single code prefix. The wire version and framing are
 unchanged. Exception detail is unprefixed in process, and original causes remain attached.
+
+
+## Record decode context (#1372)
+
+Confirmed record decoding errors keep the existing execution-failure frame and corruption code.
+Their message identifies the page and slot; the in-process nullable SlotIndex is not a new wire
+field. Existing diagnostic negotiation, protocol version and session lifetime are unchanged.

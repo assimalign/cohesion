@@ -4,6 +4,9 @@
     <value>A lock wait exceeded the configured lock timeout.</value>
   </data>
   <data name="LockStatementMarkInvalid" xml:space="preserve"><value>The statement mark must have been created by this lock manager.</value></data>
+  <data name="VersionRecordTooShort" xml:space="preserve">
+    <value>Versioned record contains {0} bytes; at least {1} are required for its stamps.</value>
+  </data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
 </root>

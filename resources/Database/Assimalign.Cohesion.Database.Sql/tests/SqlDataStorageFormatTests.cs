@@ -229,7 +229,13 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Act / Assert
         await using var engine = CreateEngine();
-        await Should.ThrowAsync<SqlCatalogException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+        var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+        refusal.Code.ShouldBe("COHDBS003");
+        refusal.PageId.ShouldNotBeNull();
+        var corruption = StorageCorruptionException.Find(refusal).ShouldNotBeNull();
+        corruption.PageId.ShouldBe(refusal.PageId);
+        corruption.SlotIndex.ShouldNotBeNull();
+        corruption.InnerException.ShouldBeOfType<SqlCatalogException>();
         AssertUnchanged(before);
     }
 
@@ -243,10 +249,16 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Act
         await using var engine = CreateEngine();
-        var refusal = await Should.ThrowAsync<SqlCatalogException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
+        var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
 
         // Assert: catalog corruption is not reported as another engine's format.
         refusal.Message.ShouldContain("Unsupported catalog counter format");
+        refusal.Code.ShouldBe("COHDBS003");
+        refusal.PageId.ShouldNotBeNull();
+        var corruption = StorageCorruptionException.Find(refusal).ShouldNotBeNull();
+        corruption.PageId.ShouldBe(refusal.PageId);
+        corruption.SlotIndex.ShouldNotBeNull();
+        corruption.InnerException.ShouldBeOfType<SqlCatalogException>();
         engine.TryGetDatabase(TestDatabase, out _).ShouldBeFalse();
         AssertUnchanged(before);
     }

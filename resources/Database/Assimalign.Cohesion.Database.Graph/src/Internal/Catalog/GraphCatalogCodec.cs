@@ -49,6 +49,16 @@ internal static class GraphCatalogCodec
         return stream.ToArray();
     }
 
+    internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try { return Decode(bytes); }
+        catch (GraphCatalogException error)
+        {
+            var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
+            throw new GraphCatalogException(corruption.Message, corruption) { IsConflict = error.IsConflict, IsCallerError = error.IsCallerError };
+        }
+    }
+
     internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes)
     {
         try

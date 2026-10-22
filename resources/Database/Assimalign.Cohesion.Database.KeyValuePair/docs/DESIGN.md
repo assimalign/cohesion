@@ -930,17 +930,12 @@ raise on a malformed record; before, the key read as missing. Get, Exists, Scan 
 resolution a Put or Delete starts with all fetch through the same read, so each fails this way
 (#1362). `KeyValueRecordCodec.Decode` throws `DatabaseTypeException` for a record too short for its
 stamps, a malformed or truncated key or value component, and bytes past the value; it has no
-`false` result a caller could read as an absent key. The read holds a pin, not a latch, so it can
-copy a slot while a writer reclaims it (the purge freeing and clearing it; a failed command's
-bracket rollback restoring the page did too until #1371, when the storage read began confirming
-itself against the restore), and that copy is torn rather than damaged: a failed decode is
-confirmed by reading the slot again, with the same owner check, before it is reported. A slot
-reclaimed by then reads as absence, and a re-read that decodes is the entry. A re-read that still
-does not decode is corrupt when its bytes equal the read before it, because damage is stable;
-when they differ the slot is read once more, up to two re-reads. The confirmation narrows the
-torn-copy window and does not close it: a writer descheduled half-way through rewriting the page
-leaves the same torn bytes for every read (the SQL DESIGN's "Error model" measures the race and
-names the follow-up that would close it).
+`false` result a caller could read as an absent key.
+Storage now confirms the owned copy against every forward write and rollback restore using
+the D1 frame seqlock (#1365, #1372). A malformed confirmed copy fails immediately, retaining
+the original DatabaseTypeException and its page/slot context. The earlier same-byte comparison
+and speculative extra reads are removed. A genuinely reclaimed slot is still absence at the
+storage read, before decoding.
 The latest-version check under the key lock makes the same split: a reclaimed version is the
 retryable write-write conflict, and a page it cannot read, or a live slot whose record is too
 short for its stamps (#1362), is the storage error. Unlike SQL's, the key-value short-record
@@ -1532,3 +1527,22 @@ or transaction semantics change. The shared Indexing DESIGN records PostgreSQL r
 split-path invariants, deterministic mutants and before/after measurements. Root integration
 tests exercise this model's real coordinator and current index manager, including catalog/store
 reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+Entry decoding uses a storage-confirmed copy, preserving the original
+DatabaseTypeException as its location-bearing corruption cause. Catalog Load reports both
+invalid record kinds and key-reader failures with the physical page and slot, preserving
+KeyValueCatalogException. Iterator I/O stays outside the decoding catch.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.

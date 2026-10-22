@@ -114,3 +114,12 @@ outlives its transaction, and its eventual disposal cannot release a later write
 still builds a private image before the short live-page copy. The 64-bit frame sequence and
 reserved allocation identities are memory-only: storage format 4, public signatures, error
 codes and the wire protocol do not change. Compaction activation remains #1161's ordered work.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.

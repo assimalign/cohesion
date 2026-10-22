@@ -317,4 +317,5 @@
   <data name="ScriptPrefixRegressed" xml:space="preserve"><value>A declared script checksum, statement count or original generation changed, or its completed prefix regressed.</value></data>
   <data name="ScriptReceiptTooLarge" xml:space="preserve"><value>Declared script receipt exceeds the catalog record limit.</value></data>
   <data name="ScriptPublicationMismatch" xml:space="preserve"><value>The statement target, script identity or expected preceding receipt state does not match this publication.</value></data>
+  <data name="StoredRowDecodeFailed" xml:space="preserve"><value>Row of table '{0}.{1}' (object {2}) does not decode: {3}</value></data>
 </root>

@@ -107,9 +107,11 @@ public sealed class SqlRecordDecodeIntegrityTests
 
         // Assert: the failure names the record; the page itself reads, so the row beside it does.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith(
-            $"The row record in slot {damaged.SlotIndex} of page {(long)damaged.PageId} of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ",
-            Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Row of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ", Case.Sensitive);
         neighbour.ShouldBe([1]);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
     }
@@ -138,7 +140,11 @@ public sealed class SqlRecordDecodeIntegrityTests
 
         // Assert
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.Message.ShouldContain($"slot {damaged.SlotIndex} of page {(long)damaged.PageId} of table 'dbo.t'", Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Row of table 'dbo.t' (object {Table(database).ObjectId}) does not decode: ", Case.Sensitive);
         failure.Message.ShouldContain("does not decode", Case.Sensitive);
     }
 

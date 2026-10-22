@@ -209,7 +209,12 @@ public sealed class GraphEngineTests
             failure.Diagnostics[0].Message.ShouldBe(failure.Message);
             failure.Diagnostics[2].Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
             failure.Message.ShouldContain("recreate the database", Case.Sensitive);
-            failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith("COHDBG017: ", Case.Sensitive);
+            var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+            corruption.PageId.ShouldNotBeNull();
+            corruption.SlotIndex.ShouldNotBeNull();
+            corruption.Message.ShouldNotContain("COHDBG017:");
+            corruption.InnerException.ShouldBeOfType<Internal.GraphRecordFormatException>().Diagnostics
+                .ShouldHaveSingleItem().Code.ShouldBe("COHDBG017");
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
             Directory.GetFiles(directory).Order().ShouldBe(before.Keys.Order());

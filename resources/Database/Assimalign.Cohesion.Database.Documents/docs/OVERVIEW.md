@@ -190,3 +190,16 @@ The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded
 unique inserts also prune their key's history while reusing a single descent. Old snapshot
 views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
 change. The callback follows the current manager after catalog/store reattachment.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+Documents keeps the existing model refusal for a recognized unsupported catalog version;
+its location is appended to the original format remedy. Current-format damage carries the
+common corruption code. Both paths retain the original cause and refuse before recovery writes.

@@ -51,7 +51,7 @@ internal sealed class DocumentReadStream : Stream
             if (_buffer.IsEmpty)
             {
                 var (page, slot) = DocumentStorage.UnpackLocation(_next);
-                var chunk = DocumentChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position);
+                var chunk = DocumentChunkCodec.Decode(_storage.ReadEntry(page, slot), _content.Length - _position, page, slot);
                 _next = chunk.Next;
                 _buffer = chunk.Payload;
             }

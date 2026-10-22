@@ -1293,137 +1293,146 @@ public sealed partial class SqlCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var reader = new DatabaseKeyReader(unit.Data.Span);
-            int kind = reader.ReadInt32();
-
-            switch (kind)
+            try
             {
-                case _viewRecordKind:
-                    LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
-                    break;
-                case namespaceRecordKind:
-                    LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
-                    break;
-                case SqlReclamationRecord.Kind:
-                    var intent = SqlReclamationRecord.Decode(ref reader);
-                    if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
-                    _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
-                    break;
-                case identityCounterRecordKind:
-                    LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
-                    break;
-                case tableRecordKind:
-                    var table = DecodeTable(ref reader);
-                    _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
+                var reader = new DatabaseKeyReader(unit.Data.Span);
+                int kind = reader.ReadInt32();
 
-                    if (table.ObjectId >= _nextObjectId)
-                    {
-                        _nextObjectId = table.ObjectId + 1;
-                    }
-
-                    break;
-
-                case counterRecordKind:
-                    ulong persisted = (ulong)reader.ReadInt64();
-
-                    if (persisted > _nextObjectId)
-                    {
-                        _nextObjectId = persisted;
-                    }
-
-                    if (reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException(
-                            "Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
-                    }
-                    _ddlGeneration = (ulong)reader.ReadInt64();
-                    if (!reader.IsAtEnd || _counterLocation is not null)
-                    {
-                        throw new SqlCatalogException("Malformed catalog counter record.");
-                    }
-
-                    _counterLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case indexRegistrationsKind:
-                    _registrations = DecodeRegistrations(ref reader);
-                    _registrationsLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case recordSpaceFormatKind:
-                case fencedRecordSpaceFormatKind:
-                    _recordSpaceFormatVersion = reader.ReadInt32();
-                    _formatLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case indexRecordKind:
-                    var index = DecodeIndex(ref reader);
-                    _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
-                    break;
-
-                case schemaStateRecordKind:
-                case _pendingMigrationRecordKind:
-                    var chunk = DecodeSchemaStateChunk(ref reader);
-                    (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
-                        chunk.ContentHash,
-                        chunk.Generation,
-                        chunk.Index,
-                        chunk.Count,
-                        chunk.Document,
-                        (unit.PageId, unit.SlotIndex)));
-                    break;
-
-                case defaultCollationRecordKind:
-                    _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("The persisted default collation contains trailing values.");
-                    }
-                    _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-
-                case 12:
+                switch (kind)
                 {
-                    try
-                    {
-                        var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
-                            ?? throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptMalformed);
-                        if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
-                        {
-                            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptDuplicate);
-                        }
-                    }
-                    catch (Exception failure) when (failure is JsonException or ArgumentException)
-                    {
-                        throw new SqlCatalogException("COHSQLS001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptReceiptReadFailed, failure.Message), failure);
-                    }
-                    break;
-                }
-                case 13:
-                    if (_scriptState is not null)
-                    {
-                        throw new SqlCatalogException("Duplicate declared script-set marker.");
-                    }
-                    _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("Malformed declared script-set marker.");
-                    }
-                    _scriptStateLocation = (unit.PageId, unit.SlotIndex);
-                    break;
-                case functionRecordKind:
-                case domainRecordKind:
-                    LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                    if (!reader.IsAtEnd)
-                    {
-                        throw new SqlCatalogException("Malformed SQL definition record.");
-                    }
-                    break;
+                    case _viewRecordKind:
+                        LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException("COHSQLE033", ErrorMessages.ViewMetadataInvalid); }
+                        break;
+                    case namespaceRecordKind:
+                        LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
+                        break;
+                    case SqlReclamationRecord.Kind:
+                        var intent = SqlReclamationRecord.Decode(ref reader);
+                        if (!_pendingReclamations.TryAdd(intent.ObjectId, (unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
+                        _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
+                        break;
+                    case identityCounterRecordKind:
+                        LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
+                        break;
+                    case tableRecordKind:
+                        var table = DecodeTable(ref reader);
+                        _tables[(table.Schema, table.Name)] = new TableSlot(table, (unit.PageId, unit.SlotIndex));
 
-                default:
-                    throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
+                        if (table.ObjectId >= _nextObjectId)
+                        {
+                            _nextObjectId = table.ObjectId + 1;
+                        }
+
+                        break;
+
+                    case counterRecordKind:
+                        ulong persisted = (ulong)reader.ReadInt64();
+
+                        if (persisted > _nextObjectId)
+                        {
+                            _nextObjectId = persisted;
+                        }
+
+                        if (reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException(
+                                "Unsupported catalog counter format: DDL generations require record-space format 8. Recreate the database; no upgrade is available.");
+                        }
+                        _ddlGeneration = (ulong)reader.ReadInt64();
+                        if (!reader.IsAtEnd || _counterLocation is not null)
+                        {
+                            throw new SqlCatalogException("Malformed catalog counter record.");
+                        }
+
+                        _counterLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case indexRegistrationsKind:
+                        _registrations = DecodeRegistrations(ref reader);
+                        _registrationsLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case recordSpaceFormatKind:
+                    case fencedRecordSpaceFormatKind:
+                        _recordSpaceFormatVersion = reader.ReadInt32();
+                        _formatLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case indexRecordKind:
+                        var index = DecodeIndex(ref reader);
+                        _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
+                        break;
+
+                    case schemaStateRecordKind:
+                    case _pendingMigrationRecordKind:
+                        var chunk = DecodeSchemaStateChunk(ref reader);
+                        (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
+                            chunk.ContentHash,
+                            chunk.Generation,
+                            chunk.Index,
+                            chunk.Count,
+                            chunk.Document,
+                            (unit.PageId, unit.SlotIndex)));
+                        break;
+
+                    case defaultCollationRecordKind:
+                        _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("The persisted default collation contains trailing values.");
+                        }
+                        _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+
+                    case 12:
+                    {
+                        try
+                        {
+                            var receipt = JsonSerializer.Deserialize(reader.ReadString(out _), SqlCatalogJsonContext.Default.SqlCatalogScript)
+                                ?? throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptMalformed);
+                            if (!reader.IsAtEnd || !_scripts.TryAdd(receipt.Name, new DefinitionSlot<SqlCatalogScript>(receipt, (unit.PageId, unit.SlotIndex))))
+                            {
+                                throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptReceiptDuplicate);
+                            }
+                        }
+                        catch (Exception failure) when (failure is JsonException or ArgumentException)
+                        {
+                            throw new SqlCatalogException("COHSQLS001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScriptReceiptReadFailed, failure.Message), failure);
+                        }
+                        break;
+                    }
+                    case 13:
+                        if (_scriptState is not null)
+                        {
+                            throw new SqlCatalogException("Duplicate declared script-set marker.");
+                        }
+                        _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("Malformed declared script-set marker.");
+                        }
+                        _scriptStateLocation = (unit.PageId, unit.SlotIndex);
+                        break;
+                    case functionRecordKind:
+                    case domainRecordKind:
+                        LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
+                        if (!reader.IsAtEnd)
+                        {
+                            throw new SqlCatalogException("Malformed SQL definition record.");
+                        }
+                        break;
+
+                    default:
+                        throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
+                }
+            }
+            catch (Exception error) when (error is SqlCatalogException or DatabaseTypeException
+                or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException or JsonException)
+            {
+                var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
+                throw new SqlCatalogException(corruption.Message, error is SqlCatalogException catalog ? catalog.Diagnostics : Array.Empty<Diagnostic>(), corruption);
             }
         }
 

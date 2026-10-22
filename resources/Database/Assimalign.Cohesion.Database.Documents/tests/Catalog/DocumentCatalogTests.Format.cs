@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 using System.Linq;
 using System.Threading.Tasks;
@@ -186,10 +187,14 @@ public sealed partial class DocumentCatalogTests
         // Arrange.
         await using var fixture = await Fixture.Create();
         await fixture.CreateIndex("ix", "a");
+        PageId? damagedPage = null;
+        int damagedSlot = -1;
         using (var registrations = fixture.Storage.GetUnitIterator(1))
         {
             registrations.MoveNext().ShouldBeTrue();
             var unit = registrations.Current;
+            damagedPage = unit.PageId;
+            damagedSlot = unit.SlotIndex;
             using var bracket = fixture.Storage.BeginTransaction();
             fixture.Storage.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, unit.Data.Span[..^1]);
             bracket.Commit();
@@ -197,7 +202,11 @@ public sealed partial class DocumentCatalogTests
 
         // Act / Assert.
         var error = Should.Throw<DocumentCatalogException>(() => DocumentCatalog.EnsureIndexFormat(fixture.Storage));
-        error.InnerException.ShouldBeOfType<System.IO.EndOfStreamException>();
+        var corruption = error.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.PageId.ShouldBe(damagedPage);
+        corruption.SlotIndex.ShouldBe(damagedSlot);
+        corruption.InnerException.ShouldBeOfType<DocumentCatalogException>()
+            .InnerException.ShouldBeOfType<System.IO.EndOfStreamException>();
     }
 
 }

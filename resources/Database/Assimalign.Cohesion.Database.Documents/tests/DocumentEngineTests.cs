@@ -352,7 +352,11 @@ public sealed class DocumentEngineTests
             // Assert: the manager's disposed guard must fire, even though storage has also closed.
             failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found 1, supported 2.", Case.Sensitive);
             failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
-            failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD005");
+            var refused = failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
+            refused.IsFormatRefusal.ShouldBeTrue();
+            refused.PageId.ShouldNotBeNull();
+            refused.SlotIndex.ShouldNotBeNull();
             engine.TryGetDatabase("legacy", out _).ShouldBeFalse();
             var coordinator = openedStorage.OnOffline.ShouldNotBeNull().Target.ShouldBeOfType<TransactionCoordinator>();
             var disposed = await Should.ThrowAsync<ObjectDisposedException>(async () =>

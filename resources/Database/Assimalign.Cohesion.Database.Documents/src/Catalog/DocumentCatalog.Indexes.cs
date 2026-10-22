@@ -270,7 +270,7 @@ public sealed partial class DocumentCatalog
                 continue;
             }
 
-            var record = DocumentCatalogCodec.Decode(bytes.Span);
+            var record = DocumentCatalogCodec.Decode(bytes.Span, page, slot);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
             if (record.Document is { } document && document.CollectionId == collectionId
                 && snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
@@ -424,35 +424,39 @@ public sealed partial class DocumentCatalog
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot, bool IsUnique)> ReadRegistrations(DocumentStorage storage)
     {
-        try
+        var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
+        var objectIds = new HashSet<ulong>();
+        using var iterator = storage.GetUnitIterator(1);
+        while (iterator.MoveNext())
         {
-            var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
-            var objectIds = new HashSet<ulong>();
-            using var iterator = storage.GetUnitIterator(1);
-            while (iterator.MoveNext())
+            var unit = iterator.Current;
+            try
             {
-                var unit = iterator.Current;
                 using var stream = new MemoryStream(unit.Data.ToArray(), writable: false);
                 using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
                 if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5)
                 {
-                    throw new DocumentCatalogException("Invalid physical index registration header.");
+                    throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationHeaderInvalid);
                 }
                 DocumentCatalogCodec.EnsureVersion(5, reader.ReadByte());
                 ulong objectId = reader.ReadUInt64();
                 long root = reader.ReadInt64();
-                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
+                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationNameMissing);
                 byte flags = reader.ReadByte();
                 if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
                 {
-                    throw new DocumentCatalogException("Invalid physical index registration.");
+                    throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationInvalid);
                 }
                 registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
             }
-            return registrations;
+            catch (Exception error) when (error is DocumentCatalogException or IOException or ArgumentException or OverflowException)
+            {
+                var malformed = error as DocumentCatalogException
+                    ?? new DocumentCatalogException(ErrorMessages.PhysicalRegistrationMalformed, error);
+                throw DocumentCatalogCodec.At(unit.PageId, unit.SlotIndex, malformed);
+            }
         }
-        catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
-        { throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationMalformed, error); }
+        return registrations;
     }
 
     private void SaveRegistrations(StorageTransaction bracket)

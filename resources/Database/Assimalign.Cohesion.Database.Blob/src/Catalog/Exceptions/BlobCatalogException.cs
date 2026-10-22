@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Blob.Catalog;
 /// <summary>Reports malformed or unsupported persisted blob catalog metadata.</summary>
 public sealed class BlobCatalogException : Exception
 {
+    internal bool IsFormatRefusal { get; init; }
+
     /// <summary>Initializes a catalog error.</summary>
     /// <param name="message">The error description.</param>
     public BlobCatalogException(string message) : base(message) { }

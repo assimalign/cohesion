@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -43,6 +44,22 @@ internal static class BlobCatalogCodec
         return stream.ToArray();
     }
 
+    internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes, Assimalign.Cohesion.Database.Storage.PageId page, int slot)
+    {
+        try { return Decode(bytes); }
+        catch (BlobCatalogException error)
+        {
+            if (error.IsFormatRefusal)
+            {
+                throw new BlobCatalogException(string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.CatalogFormatRefusalLocation, (long)page, slot, error.Message), error)
+                { IsFormatRefusal = true };
+            }
+            var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
+            throw new BlobCatalogException(corruption.Message, corruption);
+        }
+    }
+
     internal static CatalogRecord Decode(ReadOnlySpan<byte> bytes)
     {
         try
@@ -55,7 +72,8 @@ internal static class BlobCatalogCodec
             byte version = reader.ReadByte();
             if (version != 1)
             {
-                throw new BlobCatalogException($"Unsupported blob catalog format version {version}.");
+                throw new BlobCatalogException(string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.CatalogFormatUnsupported, version)) { IsFormatRefusal = true };
             }
             byte[] identity = reader.ReadBytes(16);
             if (identity.Length != 16)
