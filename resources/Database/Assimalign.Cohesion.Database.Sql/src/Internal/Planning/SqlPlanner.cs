@@ -1064,7 +1064,7 @@ internal sealed partial class SqlPlanner
             ValidateDefaultSyntax(expression, columnName);
             try
             {
-                SqlPersistedExpression.Bind(expression, scope);
+                SqlPersistedExpression.Bind(expression, scope, declaring: true);
                 ValidateExpression(expression, scope);
             }
             catch (SqlPlanningException failure)
@@ -1075,6 +1075,11 @@ internal sealed partial class SqlPlanner
             catch (SqlEvaluationException failure)
             {
                 throw failure.WithContext(string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultExpressionFailure, columnName, "DEFAULT"));
+            }
+            catch (SqlExecutionException failure)
+            {
+                throw new SqlExecutionException(failure.Diagnostics[0].Code!, string.Format(CultureInfo.CurrentCulture,
+                    ErrorMessages.DefaultExpressionFailure, columnName, failure.Message), failure, expression.Location);
             }
             ValidateDefaultType(expression, scope, type.Storage.Type, columnName);
         }
@@ -1123,7 +1128,13 @@ internal sealed partial class SqlPlanner
         {
             throw new SqlPlanningException("COHSQLE013", $"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.");
         }
-        return Collation.FromName(definition.CollationName);
+        try { return Collation.FromName(definition.CollationName); }
+        catch (DatabaseTypeException failure)
+        {
+            string message = definition.DefaultValue is null ? failure.Message : string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultExpressionFailure, definition.ColumnName, failure.Message);
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, message, failure);
+        }
     }
 
     private SqlDropTablePlan PlanDropTable(SqlDropTableExpression drop)
@@ -1473,7 +1484,9 @@ internal sealed partial class SqlPlanner
             case SqlParameterExpression parameter when !evaluator.TryGetParameterValue(parameter, out _):
                 throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{parameter.ParameterName[1..]}'.", parameter.Location);
             case SqlCollateExpression collate:
-                Collation.FromName(collate.CollationName);
+                try { Collation.FromName(collate.CollationName); }
+                catch (DatabaseTypeException failure)
+                { throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, failure.Message, failure, collate.Location); }
                 break;
             case SqlCastExpression cast:
                 ValidateCast(cast, evaluator, boundSubqueries, boundValues);

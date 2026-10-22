@@ -50,6 +50,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     // the monitor before I/O; eviction never takes the flush gate and skips a frame whose
     // WriteInProgress lease protects it. Waiting for such a frame releases the monitor.
     private readonly object _flushGate = new();
+    private int _dirtyPageCount;
+    internal int DirtyPageCount => Volatile.Read(ref _dirtyPageCount);
     private int _capacity;
     private long _writeBackWaits;
 
@@ -824,7 +826,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             return recycledEntry;
         }
 
-        return new BufferEntry(GC.AllocateArray<byte>(Page.Size, pinned: true));
+        return new BufferEntry(GC.AllocateArray<byte>(Page.Size, pinned: true), this);
     }
 
     private void RemoveLocked(long id, BufferEntry entry)
@@ -1061,24 +1063,43 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         // is ahead of the version the last write-back copied.
         public long Version;
         private long _cleanVersion;
+        private readonly object _dirtySync = new();
+        private readonly StorageBufferPool _pool;
 
         // Odd while a rollback rewrites the page in place, advanced by two by every restore
         // (BeginRestore, EndRestore); read by record readers that hold only a pin (BeginRead).
         private int _restoreSequence;
 
-        public BufferEntry(byte[] buffer)
+        public BufferEntry(byte[] buffer, StorageBufferPool pool)
         {
             // A pinned-object-heap array never moves, so its address is stable for the
             // array's whole lifetime; the entry (and every handle on it) keeps it alive.
+            _pool = pool;
             Buffer = buffer;
             Page = new Page((byte*)Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0));
         }
 
         public bool IsDirty => Volatile.Read(ref Version) != Volatile.Read(ref _cleanVersion);
 
-        public void MarkDirty() => Interlocked.Increment(ref Version);
+        public void MarkDirty()
+        {
+            // Pool -> entry is the only lock order. Dirtying never enters the pool monitor.
+            lock (_dirtySync)
+            {
+                if (!IsDirty) { Interlocked.Increment(ref _pool._dirtyPageCount); }
+                Interlocked.Increment(ref Version);
+            }
+        }
 
-        public void MarkClean(long version) => Volatile.Write(ref _cleanVersion, version);
+        public void MarkClean(long version)
+        {
+            lock (_dirtySync)
+            {
+                bool dirty = IsDirty;
+                Volatile.Write(ref _cleanVersion, version);
+                if (dirty && !IsDirty) { Interlocked.Decrement(ref _pool._dirtyPageCount); }
+            }
+        }
 
         /// <summary>
         /// Starts a read of the page that must not observe a rollback's restore half done, and

@@ -56,7 +56,8 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Tables.ShouldBeEmpty();
         catalog.Scripts.ShouldBeEmpty();
         catalog.DdlGeneration.ShouldBe(generation);
@@ -94,7 +95,8 @@ public sealed class SqlCatalogScriptTests
             await catalog.CreateIndexAsync(index, [registration], publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();
         catalog.GetIndexRegistrations().ShouldBeEmpty();
         catalog.Scripts.ShouldBeEmpty();
@@ -173,7 +175,8 @@ public sealed class SqlCatalogScriptTests
             Enumerable.Repeat("BIGINT", count).ToArray(), publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Functions.ShouldHaveSingleItem().ShouldBe(function);
         catalog.Scripts.ShouldBeEmpty();
         catalog.DdlGeneration.ShouldBe(generation);
@@ -235,13 +238,15 @@ public sealed class SqlCatalogScriptTests
         {
             await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.DropIndexAsync(table.ObjectId, "missing", [], CancellationToken.None));
             var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.DropIndexAsync(table.ObjectId, "missing", [], publication, CancellationToken.None));
-            failure.Message.ShouldContain("COHSQLS001");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+            failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         }
         else
         {
             await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.DropTableAsync("dbo", "missing", CancellationToken.None));
             var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.DropTableAsync("dbo", "missing", publication, CancellationToken.None));
-            failure.Message.ShouldContain("COHSQLS001");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+            failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         }
     }
 
@@ -300,7 +305,8 @@ public sealed class SqlCatalogScriptTests
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CompleteScriptStatementAsync(publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Scripts.ShouldHaveSingleItem().ShouldBe(previous);
         catalog.DdlGeneration.ShouldBe(previous.Generation);
     }
@@ -325,7 +331,8 @@ public sealed class SqlCatalogScriptTests
         var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - A receipt cannot certify a different mutation")]
@@ -343,7 +350,8 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Tables.ShouldBeEmpty();
         catalog.Scripts.ShouldBeEmpty();
         catalog.DdlGeneration.ShouldBe(generation);
@@ -371,7 +379,8 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, stale, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Tables.ShouldBeEmpty();
         catalog.Scripts.ShouldHaveSingleItem().ShouldBe(current);
         catalog.DdlGeneration.ShouldBe(current.Generation);
@@ -422,7 +431,8 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, invalid, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Tables.ShouldBeEmpty();
         catalog.Scripts.ShouldHaveSingleItem().ShouldBe(original);
         catalog.DdlGeneration.ShouldBe(generation);
@@ -493,7 +503,8 @@ public sealed class SqlCatalogScriptTests
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.CompleteScriptStatementAsync(publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Scripts.ShouldHaveSingleItem().ShouldBe(previous);
         var read = new SqlCatalogScriptPublication("001", previous.ContentHash, 1, previous, catalog.DdlGeneration, null, string.Empty);
         await catalog.CompleteScriptStatementAsync(read, CancellationToken.None);
@@ -551,7 +562,8 @@ public sealed class SqlCatalogScriptTests
             [new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32), true)], null, publication, CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLS001");
+        failure.Message.ShouldNotContain("COHSQLS001:", Case.Sensitive);
         catalog.Tables.ShouldHaveSingleItem().Name.ShouldBe("intervening");
         catalog.Scripts.ShouldHaveSingleItem().ShouldBe(previous);
         catalog.DdlGeneration.ShouldBe(generation);

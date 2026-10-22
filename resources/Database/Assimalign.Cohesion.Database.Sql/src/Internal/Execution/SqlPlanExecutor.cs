@@ -162,7 +162,7 @@ internal sealed partial class SqlPlanExecutor
             case SqlDropColumnPlan dropColumn:
                 return await ExecuteDropColumnAsync(dropColumn, statement, cancellationToken).ConfigureAwait(false);
             default:
-                throw new DatabaseException($"Plan {plan.GetType().Name} is not executable.");
+                throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlanNotExecutable, plan.GetType().Name));
         }
     }
 
@@ -791,7 +791,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        throw new DatabaseException($"Table '{table.Schema}.{table.Name}' has no column named '{columnName}'.");
+        throw new SqlExecutionException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
     }
 
     /// <summary>
@@ -811,7 +811,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (!_indexManager.TryGetIndex(table.ObjectId, metadata.Name, out var index))
             {
-                throw new DatabaseException($"Index '{metadata.Name}' on '{table.Schema}.{table.Name}' is unavailable; writes cannot bypass its constraints.");
+                throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.WriteIndexUnavailable, metadata.Name, table.Schema, table.Name));
             }
 
             var ordinals = _definitions.Get(table).GetKey(metadata.ColumnNames).Ordinals;
@@ -1088,7 +1088,7 @@ internal sealed partial class SqlPlanExecutor
             // after it planned is not its work and must never enter that list.
             if (statement.ProvisioningSchema is not null)
             {
-                throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' already exists; schema provisioning cannot adopt it.");
+                throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableProvisioningCollision, plan.Schema, plan.Name));
             }
 
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
@@ -1132,7 +1132,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
         {
-            throw new DatabaseException($"Table '{plan.Schema}.{plan.Name}' does not exist.");
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1182,7 +1182,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlCatalogException($"Table '{plan.Schema}.{plan.Name}' does not exist.");
+            throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
         }
 
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
@@ -1198,7 +1198,7 @@ internal sealed partial class SqlPlanExecutor
         EnsureNoViewReads(table);
         if (IncomingReferences(table).Any(reference => reference.Child.ObjectId != table.ObjectId))
         {
-            throw new DatabaseException($"Table '{table.Name}' is referenced by a foreign key and cannot be dropped.");
+            throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableForeignKeyDependent, table.Name));
         }
 
         // The table's indexes fall with it. The catalog removes their metadata
@@ -1261,7 +1261,7 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
-        throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
+        throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LookupTableMissing, schema, name));
     }
 
     /// <summary>
@@ -1278,11 +1278,16 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async Task<DatabaseResult> ExecuteCreateIndexAsync(SqlCreateIndexPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.Table.Constraints.Any(constraint => constraint.Name.Equals(plan.IndexName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SqlExecutionException(SqlExecutionException.DuplicateObjectCode, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ConstraintNameExists, plan.IndexName, plan.Table.Name));
+        }
         if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.IndexName, out _))
         {
             if (statement.ProvisioningSchema is not null)
             {
-                throw new DatabaseException($"Index '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'; schema provisioning cannot adopt it.");
+                throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexProvisioningCollision, plan.IndexName, plan.Table.Schema, plan.Table.Name));
             }
 
             if (plan.IfNotExists)
@@ -1290,7 +1295,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new DatabaseException($"An index named '{plan.IndexName}' already exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
+            throw new SqlExecutionException(SqlExecutionException.DuplicateTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexExists, plan.IndexName, plan.Table.Schema, plan.Table.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1384,7 +1389,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{plan.Table.Schema}.{plan.Table.Name}'.");
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexMissing, plan.IndexName, plan.Table.Schema, plan.Table.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1403,7 +1408,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{currentTable.Schema}.{currentTable.Name}'.");
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentIndexMissing, plan.IndexName, currentTable.Schema, currentTable.Name));
         }
 
         EnsureCanChange(metadata.Owner, metadata.Name, metadata.OwningSchema, "DROP INDEX", statement);
@@ -1440,7 +1445,7 @@ internal sealed partial class SqlPlanExecutor
         if (owner == DatabaseObjectOwner.Schema &&
             !string.Equals(statement.ProvisioningSchema, owningSchema, StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseObjectLockedException(objectName, owningSchema!, operation);
+            throw new DatabaseObjectLockedException(objectName, owningSchema!, operation, new Diagnostic { Code = SqlExecutionException.InsufficientPrivilegeCode });
         }
     }
 
@@ -1448,7 +1453,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(expected.Schema, expected.Name, out SqlCatalogTable current))
         {
-            throw new DatabaseException($"Table '{expected.Schema}.{expected.Name}' does not exist.");
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentTableMissing, expected.Schema, expected.Name));
         }
 
         return current;
@@ -1460,8 +1465,8 @@ internal sealed partial class SqlPlanExecutor
         // drop/recreate during the wait must never authorize changes to the new object.
         if (expected.ObjectId != current.ObjectId)
         {
-            throw new DatabaseException(
-                $"Table '{expected.Schema}.{expected.Name}' was replaced while waiting for a DDL lock. Retry the statement.");
+            throw new SqlExecutionException(SqlExecutionException.SerializationFailureCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableIdentityReplaced, expected.Schema, expected.Name));
         }
     }
 
@@ -1766,8 +1771,8 @@ internal sealed partial class SqlPlanExecutor
                 DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
                 DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
                 DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
-                DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
-                DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float32 => value is string realText ? SqlStandardCasts.ParseReal(realText) : Convert.ToSingle(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float64 => value is string floatText ? SqlStandardCasts.ParseFloat(floatText) : Convert.ToDouble(value, CultureInfo.InvariantCulture),
                 DatabaseType.Decimal => value is string numericText
                     ? SqlCastConverter.ParseNumericText(numericText, column.Type)
                     : Convert.ToDecimal(value, CultureInfo.InvariantCulture),
@@ -1775,55 +1780,67 @@ internal sealed partial class SqlPlanExecutor
                     ?? Convert.ToString(value, CultureInfo.InvariantCulture)!,
                 DatabaseType.Binary or DatabaseType.JsonBinary => value is byte[] bytes
                     ? bytes
-                    : throw new DatabaseException($"Column '{column.Name}' requires binary data."),
+                    : throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnBinaryRequired, column.Name)),
                 DatabaseType.Date => value switch
                 {
                     DateOnly date => date,
-                    string text => SqlTemporalText.ParseDate(text),
+                    string text => SqlTemporalText.ParseAssignmentDate(text),
                     DateTime dateTime => DateOnly.FromDateTime(dateTime),
                     DateTimeOffset instant => DateOnly.FromDateTime(instant.UtcDateTime),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to DATE."),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DateConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.Time => value switch
                 {
                     TimeOnly time => time,
                     DateTimeOffset instant => TimeOnly.FromDateTime(instant.UtcDateTime),
-                    string text => TimeOnly.Parse(text, CultureInfo.InvariantCulture),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIME."),
+                    string text => SqlTemporalText.ParseTime(text),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimeConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.DateTime => value switch
                 {
                     DateTime dateTime => DateTime.SpecifyKind(dateTime, DateTimeKind.Unspecified),
                     DateTimeOffset instant => DateTime.SpecifyKind(instant.UtcDateTime, DateTimeKind.Unspecified),
-                    string text => SqlTemporalText.ParseTimestamp(text),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMP."),
+                    string text => SqlTemporalText.ParseAssignmentTimestamp(text),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimestampConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.DateTimeOffset => value switch
                 {
                     DateTimeOffset dateTimeOffset => dateTimeOffset,
                     DateTime timestamp => new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified), TimeSpan.Zero),
-                    string text => SqlTemporalText.ParseTimestampTz(text),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to TIMESTAMPTZ."),
+                    string text => SqlTemporalText.ParseAssignmentTimestampTz(text),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TimestampTzConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.TimeSpan => value switch
                 {
                     TimeSpan timeSpan => timeSpan,
-                    string text => TimeSpan.Parse(text, CultureInfo.InvariantCulture),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to INTERVAL."),
+                    string text => SqlTemporalText.ParseInterval(text),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IntervalConversionUnsupported, value.GetType().Name)),
                 },
                 DatabaseType.Guid => value switch
                 {
                     Guid guid => guid,
                     string text => Guid.Parse(text),
-                    _ => throw new DatabaseException($"Cannot convert {value.GetType().Name} to UUID."),
+                    _ => throw new SqlExecutionException(SqlExecutionException.DatatypeMismatchCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UuidConversionUnsupported, value.GetType().Name)),
                 },
-                _ => throw new DatabaseException($"Column type {column.Type.Type} cannot store values yet."),
+                _ => throw new SqlExecutionException(SqlExecutionException.UnsupportedCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnStorageUnsupported, column.Type.Type)),
             };
             return SqlCastConverter.ApplyModifiers(converted, column.Type);
         }
         catch (SqlEvaluationException exception)
         {
             throw exception.WithContext($"Column '{column.Name}'{(column.DomainName is null ? string.Empty : $" (domain '{column.DomainName}')")}");
+        }
+        catch (SqlExecutionException exception)
+        {
+            throw exception.WithContext(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ColumnConversionFailed, value, column.Name, column.Type.Type));
+        }
+        catch (Exception exception) when (value is string
+            && column.Type.Type is DatabaseType.Float32 or DatabaseType.Float64
+            && exception is FormatException or OverflowException or InvalidCastException)
+        {
+            throw SqlEvaluationException.CastValueFailed(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.ColumnTextConversionFailed, column.Name, column.Type.Type, exception.Message), exception);
         }
         catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
             or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)
@@ -1833,10 +1850,10 @@ internal sealed partial class SqlPlanExecutor
             throw SqlEvaluationException.NumericValueOutOfRange(
                 $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
         }
-        catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
+        catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException or ArgumentOutOfRangeException)
         {
-            throw new DatabaseException(
-                $"Cannot convert value '{value}' to column '{column.Name}' of type {column.Type.Type}.", exception);
+            throw new SqlExecutionException(SqlExecutionException.ConversionCode(exception),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnConversionFailed, value, column.Name, column.Type.Type), exception);
         }
     }
 

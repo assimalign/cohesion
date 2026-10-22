@@ -4,6 +4,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Database.Language;
 
+/// <summary>Describes a source span using the model parser's line and character positions.</summary>
 public sealed record class Location
 {
     Location(int startLine, int endLine, int start, int end)
@@ -35,13 +36,13 @@ public sealed record class Location
     public int EndLine { get; }
 
     /// <summary>
-    /// 
+    /// Creates a location from the source span reported by a model parser.
     /// </summary>
-    /// <param name="startLine"></param>
-    /// <param name="endLine"></param>
-    /// <param name="start"></param>
-    /// <param name="end"></param>
-    /// <returns></returns>
+    /// <param name="startLine">The line on which the span begins.</param>
+    /// <param name="endLine">The line on which the span ends.</param>
+    /// <param name="start">The span's starting character position.</param>
+    /// <param name="end">The span's ending character position.</param>
+    /// <returns>A location retaining the supplied positions without normalization.</returns>
     public static Location Create(int startLine, int endLine, int start, int end) =>
         new Location(startLine, endLine, start, end);
 }

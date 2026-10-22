@@ -348,7 +348,7 @@ public sealed class SqlWorkerResilienceTests
         StorageOfflineException.Find(error.ShouldNotBeNull()).ShouldNotBeNull();
         (failedCommit / window).ShouldBeLessThan(1.0);
         (drain ? faults.JournalWriteFailures : faults.JournalFlushFailures).ShouldBeGreaterThanOrEqualTo(1);
-        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name);
+        (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name + " lane");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
         refusal.Code.ShouldBe("COHSQLT004");
         refusal.Message.ShouldContain("a write or flush of the journal");
@@ -661,7 +661,7 @@ public sealed class SqlWorkerResilienceTests
         var failing = await CreateAsync(engine, Failing);
         var healthy = await CreateAsync(engine, Healthy);
         var worker = (SqlCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var passes = new ConcurrentQueue<DatabaseCheckpointPass>();
+        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
         worker.PassCompleted = passes.Enqueue;
         var faults = strategy.Faults(Failing);
 
@@ -842,22 +842,22 @@ public sealed class SqlWorkerResilienceTests
 
         // Act: the first full pass fails on one database.
         clock.Advance(options.MaintenanceInterval);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
 
         // A pass before the backoff has passed does not run it again, and keeps the failure.
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
 
         // The backoff passes: the full pass runs again for the failing database alone, and fails.
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
         var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
 
         // The fault clears; the next retry, a backoff later, completes.
         Volatile.Write(ref fail, false);
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
-        worker.RunIteration(CancellationToken.None);
+        CheckpointPace.RunSettled(worker, CancellationToken.None);
 
         // Assert
         afterTheFailure.ShouldBe((1, 1, true));
@@ -967,6 +967,155 @@ public sealed class SqlWorkerResilienceTests
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.JournalSizeLimit));
         Should.Throw<ArgumentOutOfRangeException>(() => SqlDatabaseEngine.Create("sql-engine", new() { CheckpointJournalSize = 1024 * 1024, JournalSizeLimit = 1024 }))
             .ParamName.ShouldBe(nameof(SqlDatabaseEngineOptions.JournalSizeLimit));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Workers: one stalled database leaves healthy lane passes at full pace")]
+    [InlineData(DatabaseEngineWorkerKind.PageWriteBack)]
+    [InlineData(DatabaseEngineWorkerKind.WriteAheadFlush)]
+    [InlineData(DatabaseEngineWorkerKind.VersionPurge)]
+    [InlineData(DatabaseEngineWorkerKind.IndexMaintenance)]
+    public async Task Run_OneDatabaseStalls_ShouldKeepOtherDatabasesAtFullPace(DatabaseEngineWorkerKind kind)
+    {
+        // Arrange: only the chosen worker has a short cadence. Checkpoints cannot supply progress.
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.PageWriteBackInterval = kind == DatabaseEngineWorkerKind.PageWriteBack ? TimeSpan.FromMilliseconds(20) : TimeSpan.FromHours(1);
+        options.MaintenanceInterval = TimeSpan.FromMilliseconds(20);
+        options.Durability = kind == DatabaseEngineWorkerKind.WriteAheadFlush ? StorageCommitDurability.Grouped : StorageCommitDurability.Synchronous;
+        options.GroupCommitWindow = TimeSpan.FromMilliseconds(20);
+        await using var engine = SqlDatabaseEngine.Create("isolated-lanes", options);
+        var failing = await CreateAsync(engine, Failing);
+        var healthy = await CreateAsync(engine, Healthy);
+        var faults = strategy.Faults(Failing);
+        Task blockedWrite = Task.CompletedTask;
+        Task? disposal = null;
+        async Task InspectDisposalAsync()
+        {
+            disposal = Task.Run(async () => await engine.DisposeAsync());
+            (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
+            disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
+        }
+        long written = strategy.Faults(Healthy).PageWrites;
+        try
+        {
+            // Act: page writes and journal fsyncs stall inside DeviceFaults. Purge/index use
+            // the dispatch hook, modeling an unbounded apply/storage latch without a new API.
+            if (kind == DatabaseEngineWorkerKind.PageWriteBack)
+            {
+                faults.StallPageWrites();
+                await InsertAsync(failing, 0, 1);
+                var worker = (SqlPageWriteBackWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPageWrites, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
+                strategy.Faults(Healthy).PageWrites.ShouldBeGreaterThan(written);
+            }
+            else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
+            {
+                faults.StallJournalFlushes();
+                blockedWrite = Task.Run(() => InsertAsync(failing, 0, 1));
+                var worker = (SqlWriteAheadFlushWorker)WorkerOf(engine, kind);
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledJournalFlushes, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+            else if (kind == DatabaseEngineWorkerKind.VersionPurge)
+            {
+                faults.StallPurges();
+                var worker = (SqlVersionPurgeWorker)WorkerOf(engine, kind);
+                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPurges, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+            else
+            {
+                faults.StallPurges();
+                var worker = (SqlIndexMaintenanceWorker)WorkerOf(engine, kind);
+                worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
+                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                    () => faults.StalledPurges, id => InsertAsync(healthy, id, 1), InspectDisposalAsync);
+            }
+        }
+        finally
+        {
+            faults.Clear();
+            await blockedWrite.WaitAsync(Timeout);
+            if (disposal is not null) { await disposal.WaitAsync(Timeout); }
+        }
+        // Assert: released work drains, and no database was failed or taken offline by a stall.
+        (await Eventually(() => faults.StalledPageWrites == 0 && faults.StalledJournalFlushes == 0 && faults.StalledPurges == 0)).ShouldBeTrue();
+        engine.OfflineDatabases.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - WAL lanes: collecting an older flush serves a later commit before self-help")]
+    public async Task WriteAheadFlushWorker_CommitArrivesAfterDetachedFlush_ShouldFlushItBeforeSelfHelp()
+    {
+        // Arrange: a long window makes the worker's service observable through events, not timing.
+        var strategy = new FaultInjectingJournalSqlStorageStrategy(durable: true);
+        var options = Options(strategy);
+        options.Durability = StorageCommitDurability.Grouped;
+        options.GroupCommitWindow = TimeSpan.FromSeconds(5);
+        using var commits = new GroupCommitRecorder();
+        await using var engine = SqlDatabaseEngine.Create("late-flush", options);
+        var database = await CreateAsync(engine, Failing);
+        var worker = (SqlWriteAheadFlushWorker)WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
+        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
+        worker.PassCompleted = passes.Enqueue;
+        var duration = Stopwatch.StartNew();
+        int rounds = 0;
+        do
+        {
+            worker.WaitForLanes(Timeout).ShouldBeTrue();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var registered = new ManualResetEventSlim();
+            var onPending = database.DataStorage.OnCommitPending;
+            int held = 0;
+            Task first = Task.CompletedTask;
+            Task second = Task.CompletedTask;
+            worker.AfterDatabase = (current, result) =>
+            {
+                if (ReferenceEquals(current, database) && result.Units > 0
+                    && Interlocked.CompareExchange(ref held, 1, 0) == 0)
+                {
+                    entered.Set();
+                    release.Wait();
+                }
+            };
+            int missed = commits.MissedCount(Failing);
+            int flushed = commits.FlushCount(Failing);
+            try
+            {
+                // Act: hold the old lane after it acknowledged the first commit. The next
+                // registration's signal is consumed by a pass that finds the old lane running.
+                first = Task.Run(() => InsertAsync(database, rounds * 2, 1));
+                entered.Wait(Timeout).ShouldBeTrue();
+                await first.WaitAsync(Timeout);
+                int before = passes.Count;
+                database.DataStorage.OnCommitPending = () => { onPending?.Invoke(); registered.Set(); };
+                second = Task.Run(() => InsertAsync(database, rounds * 2 + 1, 1));
+                registered.Wait(Timeout).ShouldBeTrue("the later commit must be registered before releasing the old lane");
+                (await Eventually(() => passes.Skip(before).Any(pass => pass.Visits.Any(visit =>
+                    visit.Database == Failing && !visit.Attempted && visit.Reason == DatabaseWorkerPass.VisitReason.Running)))).ShouldBeTrue();
+                release.Set();
+                await second.WaitAsync(Timeout);
+                worker.WaitForLanes(Timeout).ShouldBeTrue();
+                // Assert: the flush worker, rather than the committer's timeout, served both.
+                commits.MissedCount(Failing).ShouldBe(missed);
+                commits.FlushCount(Failing).ShouldBeGreaterThanOrEqualTo(flushed + 2);
+                rounds++;
+            }
+            finally
+            {
+                release.Set();
+                worker.AfterDatabase = null;
+                database.DataStorage.OnCommitPending = onPending;
+                await Task.WhenAll(first, second).WaitAsync(Timeout);
+                worker.WaitForLanes(Timeout).ShouldBeTrue();
+            }
+        }
+        while ((duration.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 6) && duration.Elapsed < Timeout);
+        worker.PassCompleted = null;
+        rounds.ShouldBeGreaterThanOrEqualTo(6);
+        worker.FailureCount.ShouldBe(0);
     }
 
     // Journal size used to exercise checkpoint lanes and failure retries.

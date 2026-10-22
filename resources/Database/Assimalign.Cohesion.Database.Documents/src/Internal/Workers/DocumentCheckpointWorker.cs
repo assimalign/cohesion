@@ -62,14 +62,14 @@ internal sealed class DocumentCheckpointWorker : DatabaseCheckpointWorker<Docume
     /// #1226) leaves the journal untruncated, so the closed storage would stay due for a checkpoint
     /// it refuses, and a failure recorded for the database would never end.
     /// </remarks>
-    protected override bool IsCheckpointDue(DocumentDatabase database, TimeSpan interval, DatabaseCheckpointPass.Visit? visit)
+    protected override bool IsCheckpointDue(DocumentDatabase database, TimeSpan interval, DatabaseWorkerPass.Visit? visit)
     {
         bool closed = database.IsClosed;
         bool dataDue = !closed && database.DataStorage.IsCheckpointDue(interval);
         bool catalogDue = false;
         if (visit is not null)
         {
-            visit.Due = new DatabaseCheckpointPass.DueState(closed, dataDue, catalogDue,
+            visit.Due = new DatabaseWorkerPass.DueState(closed, dataDue, catalogDue,
                 database.DataStorage.JournalLength, database.DataStorage.CheckpointJournalSize);
         }
         return dataDue || catalogDue;

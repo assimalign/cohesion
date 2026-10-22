@@ -25,7 +25,7 @@ internal static class CheckpointPace
         where TDatabase : class
     {
         // Arrange: record the real pump and lanes. No explicit RunIteration or replacement waits.
-        var passes = new ConcurrentQueue<DatabaseCheckpointPass>();
+        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
         worker.PumpBackoffObserved = true;
         using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, worker.RecordTriggerElapsed);
         worker.PassCompleted = passes.Enqueue;
@@ -64,7 +64,7 @@ internal static class CheckpointPace
                 await Task.Delay(5);
                 if (pendingBatch != 0 && passes.Skip(pendingPassCount).Any(pass => pass.Visits.Any(visit =>
                     visit.Database == healthyName && (visit.Attempted || visit.Collected)
-                    && visit.Reason == DatabaseCheckpointPass.VisitReason.Completed)))
+                    && visit.Reason == DatabaseWorkerPass.VisitReason.Completed)))
                 {
                     pendingBatch = 0;
                     completedBatches++;
@@ -78,10 +78,11 @@ internal static class CheckpointPace
             }
             while ((watch.Elapsed < TimeSpan.FromMilliseconds(250) || completedBatches < 4 || worker.FailureCount < 2
                 || passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
-                    && visit.Reason == DatabaseCheckpointPass.VisitReason.BackingOff)) < 3
+                    && visit.Reason == DatabaseWorkerPass.VisitReason.BackingOff)) < 3
                 || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled) < minimumSamples
                 || passes.Count(pass => pass.TriggerMeasured && pass.TriggerSignaled && pass.PumpElapsed.HasValue) < minimumSamples
-                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples)
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Attempted)) < minimumSamples
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0)) < minimumSamples)
                 && watch.Elapsed < TimeSpan.FromSeconds(30));
         }
         finally
@@ -109,39 +110,45 @@ internal static class CheckpointPace
             {
                 visit.GiveUpRequested.ShouldBeFalse(context);
                 visit.Offline.ShouldBeFalse(context);
+                // Bound the observed request independently of the production constant:
+                // a quick device must not hide a quarter-second blocking request.
+                visit.LaneWaitRequested.ShouldBeLessThanOrEqualTo(TimeSpan.FromMilliseconds(5) * visit.LaneWaits, context);
             }
             var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
             healthy.Backoff.ShouldBe(TimeSpan.Zero, context);
-            healthy.Reason.ShouldBeOneOf(DatabaseCheckpointPass.VisitReason.Completed,
-                DatabaseCheckpointPass.VisitReason.NotDue, DatabaseCheckpointPass.VisitReason.Running,
-                DatabaseCheckpointPass.VisitReason.Deferred, DatabaseCheckpointPass.VisitReason.Busy);
+            healthy.Reason.ShouldBeOneOf(DatabaseWorkerPass.VisitReason.Completed,
+                DatabaseWorkerPass.VisitReason.NotDue, DatabaseWorkerPass.VisitReason.Running,
+                DatabaseWorkerPass.VisitReason.Deferred, DatabaseWorkerPass.VisitReason.Busy);
             if (healthy.Attempted)
             {
-                healthy.LaneWaitRequested.ShouldBeLessThanOrEqualTo(laneBudget + DatabaseCheckpointLanes.WaitSlice);
-                healthy.LaneWaits.ShouldBeLessThanOrEqualTo((int)(laneBudget / DatabaseCheckpointLanes.WaitSlice) + 1);
+                healthy.LaneWaitRequested.ShouldBeLessThanOrEqualTo(laneBudget + DatabaseWorkerLanes<bool>.WaitSlice);
+                healthy.LaneWaits.ShouldBeLessThanOrEqualTo((int)(laneBudget / DatabaseWorkerLanes<bool>.WaitSlice) + 1);
             }
             if (healthy.Due is { } due)
             {
                 if (due.IsDue) { healthy.Attempted.ShouldBeTrue($"due healthy visit on {context}"); }
             }
-            if (healthy.Reason == DatabaseCheckpointPass.VisitReason.NotDue)
+            if (healthy.Reason == DatabaseWorkerPass.VisitReason.NotDue)
             {
                 healthy.Due.ShouldNotBeNull().IsDue.ShouldBeFalse($"NotDue evidence on {context}");
             }
             var failing = pass.Visits.Single(visit => visit.Database == failingName);
-            if (failing.Reason == DatabaseCheckpointPass.VisitReason.BackingOff)
+            if (failing.Reason == DatabaseWorkerPass.VisitReason.BackingOff)
             {
                 failing.Backoff.ShouldBe(DatabaseEngineWorker.FailureBackoff);
                 failing.LaneWaits.ShouldBe(0);
                 failing.LaneWaitRequested.ShouldBe(TimeSpan.Zero);
             }
         }
+        VerifyDurations(recorded.Select(pass => pass.Elapsed), laneBudget, "whole checkpoint pass");
         worker.FailureCount.ShouldBeGreaterThanOrEqualTo(2);
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
-            && visit.Reason == DatabaseCheckpointPass.VisitReason.BackingOff)).ShouldBeGreaterThanOrEqualTo(3);
+            && visit.Reason == DatabaseWorkerPass.VisitReason.BackingOff)).ShouldBeGreaterThanOrEqualTo(3);
         recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.Due is { IsDue: true }))
             .ShouldBeGreaterThanOrEqualTo(4);
         completedBatches.ShouldBeGreaterThanOrEqualTo(4);
+        recorded.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.LaneWaits > 0))
+            .ShouldBeGreaterThanOrEqualTo(minimumSamples, "exercise actual lane wait requests");
         var signaled = recorded.Where(pass => pass.TriggerMeasured && pass.TriggerSignaled).ToArray();
         VerifyDurations(signaled.Select(pass => pass.TriggerElapsed), laneBudget, "measured Set wake");
         VerifyDurations(signaled.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value),
@@ -149,6 +156,131 @@ internal static class CheckpointPace
         VerifyDurations(recorded.SelectMany(pass => pass.Visits)
             .Where(visit => visit.Database == healthyName && visit.Attempted).Select(visit => visit.LaneWait),
             laneBudget, "healthy lane wait");
+    }
+
+    // Observe real pump passes while a device or apply-gate surrogate stays held. Physical
+    // progress alone could come from committer self-help; attempted/collected worker visits
+    // prove this worker made progress. Aggregate timing catches persistent scheduling mutants.
+    internal static async Task VerifyIsolationAsync<TResult>(DatabaseLaneWorker<TResult> worker,
+        string failingName, string healthyName, DeviceFaults faults, Func<int> stalled,
+        Func<int, Task> writeHealthy, Func<Task>? beforeRelease = null)
+    {
+        var passes = new ConcurrentQueue<DatabaseWorkerPass>();
+        worker.PumpBackoffObserved = true;
+        using var pump = WorkerPumpObservation.Create(worker, worker.RecordPumpBackoff, worker.RecordTriggerElapsed);
+        worker.PassCompleted = passes.Enqueue;
+        var duration = Stopwatch.StartNew();
+        int writes = 0;
+        try
+        {
+            while (stalled() == 0 && duration.Elapsed < TimeSpan.FromSeconds(30)) { await Task.Delay(5); }
+            stalled().ShouldBe(1, "the fault must hold actual work");
+            do
+            {
+                await writeHealthy(writes++).WaitAsync(TimeSpan.FromSeconds(30));
+                await Task.Delay(5);
+            }
+            while ((duration.Elapsed < TimeSpan.FromMilliseconds(250)
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
+                    && visit.Reason == DatabaseWorkerPass.VisitReason.Running)) < minimumSamples
+                || passes.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName
+                    && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed)) < minimumSamples
+                || (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance
+                    && passes.Count(pass => pass.Visits.Any(visit => visit.Database == failingName
+                        && visit.Reason == DatabaseWorkerPass.VisitReason.Running)
+                        && pass.Visits.Any(visit => visit.Database == healthyName && visit.WorkUnits > 0)) < 4)
+                || passes.Count(pass => pass.TriggerMeasured && pass.PumpElapsed.HasValue) < minimumSamples)
+                && duration.Elapsed < TimeSpan.FromSeconds(30));
+
+            stalled().ShouldBe(1, "healthy work must progress before releasing the stalled database");
+            var recorded = passes.ToArray();
+            var isolated = recorded.Where(pass => pass.Visits.Any(visit => visit.Database == failingName
+                && visit.Reason == DatabaseWorkerPass.VisitReason.Running)).ToArray();
+            isolated.Length.ShouldBeGreaterThanOrEqualTo(minimumSamples);
+            isolated.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName
+                && (visit.Attempted || visit.Collected) && visit.Reason == DatabaseWorkerPass.VisitReason.Completed))
+                .ShouldBeGreaterThanOrEqualTo(minimumSamples);
+            foreach (var pass in isolated)
+            {
+                pass.PassThrew.ShouldBeFalse();
+                pass.PumpBackoff.ShouldBe(TimeSpan.Zero);
+                var healthy = pass.Visits.Single(visit => visit.Database == healthyName);
+                healthy.Backoff.ShouldBe(TimeSpan.Zero);
+                if (healthy.Reason == DatabaseWorkerPass.VisitReason.NotDue)
+                {
+                    healthy.WorkDue.ShouldBe(false, "the pump must provide its due decision for an idle visit");
+                }
+                else { (healthy.Attempted || healthy.Collected || healthy.Reason == DatabaseWorkerPass.VisitReason.Running).ShouldBeTrue(); }
+            }
+            if (worker.Kind != DatabaseEngineWorkerKind.IndexMaintenance)
+            {
+                isolated.Count(pass => pass.Visits.Any(visit => visit.Database == healthyName && visit.WorkUnits > 0))
+                    .ShouldBeGreaterThanOrEqualTo(4, "actual worker I/O or full purge, not committer self-help");
+            }
+            var budget = TimeSpan.FromMilliseconds(100);
+            VerifyDurations(isolated.Select(pass => pass.Elapsed), budget, "isolated whole pass");
+            VerifyDurations(isolated.Where(pass => pass.PumpElapsed.HasValue).Select(pass => pass.PumpElapsed!.Value), budget, "isolated pump pace");
+            VerifyDurations(isolated.Where(pass => pass.TriggerMeasured).Select(pass => pass.TriggerElapsed), budget, "isolated trigger wait");
+            VerifyDurations(isolated.SelectMany(pass => pass.Visits).Where(visit => visit.Database == healthyName)
+                .Select(visit => visit.LaneWait), budget, "isolated healthy lane wait");
+            pump.Failure.ShouldBeNull();
+            worker.PassObserverFailure.ShouldBeNull();
+            worker.FailureCount.ShouldBe(0);
+            if (beforeRelease is not null) { await beforeRelease(); }
+        }
+        finally
+        {
+            worker.PassCompleted = null;
+            faults.Clear();
+        }
+    }
+
+    // A fake clock advances only after the prior operation has settled. RunIteration bounds
+    // its wait and may leave a lane running even for fast work on a busy CI runner.
+    internal static bool RunSettled<TResult>(DatabaseLaneWorker<TResult> worker, CancellationToken cancellationToken)
+    {
+        DatabaseWorkerPass? observed = null;
+        var previous = worker.PassCompleted;
+        worker.PassCompleted = pass =>
+        {
+            Volatile.Write(ref observed, pass);
+            previous?.Invoke(pass);
+        };
+        var duration = Stopwatch.StartNew();
+        bool succeeded = true;
+        try
+        {
+            do
+            {
+                succeeded &= worker.RunIteration(cancellationToken);
+                if (cancellationToken.IsCancellationRequested
+                    || Volatile.Read(ref observed)?.Visits.Any(visit => visit.Reason == DatabaseWorkerPass.VisitReason.Running) != true)
+                {
+                    return succeeded;
+                }
+                worker.WaitForLanes(TimeSpan.FromSeconds(30)).ShouldBeTrue("settle the dispatched work before advancing the clock");
+            }
+            while (duration.Elapsed < TimeSpan.FromSeconds(30));
+            throw new TimeoutException("Worker outcomes did not settle before the test ceiling.");
+        }
+        finally { worker.PassCompleted = previous; }
+    }
+
+    // The protected release seam is the existing public option for an unowned worker.
+    // Test-only inheritance avoids a new grant from Database to the model test assemblies.
+    internal static IAsyncDisposable Own(DatabaseEngineWorker worker) => new WorkerLease(worker);
+
+    private sealed class WorkerLease : IAsyncDisposable
+    {
+        private readonly DatabaseEngineWorker _worker;
+        internal WorkerLease(DatabaseEngineWorker worker) => _worker = worker;
+        public ValueTask DisposeAsync() => WorkerLifetime.Release(_worker);
+    }
+
+    private abstract class WorkerLifetime : DatabaseEngine
+    {
+        private WorkerLifetime() : base("test-worker-lifetime", EngineModel.Sql) { }
+        internal static ValueTask Release(DatabaseEngineWorker worker) => ReleaseUnownedWorkerAsync(worker);
     }
 
     private static void VerifyDurations(IEnumerable<TimeSpan> measured, TimeSpan budget, string description)

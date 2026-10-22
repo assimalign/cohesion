@@ -1,5 +1,60 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Worker lane isolation (#1279)
+
+Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
+time on worker-owned dedicated lanes, with no process-wide scheduling atomic. Idle runners
+retire after 30 seconds.
+
+Admission is round-robin, starting after the last database admitted, including after a
+collected WAL flush rechecks late commits. The working cap is 64 non-stuck operations per
+engine and worker kind. An operation releases its admission slot after four worker intervals,
+clamped to 1–4 seconds (the checkpoint poll is at most one second). It retains its lane and
+storage ownership until I/O returns. A hard ceiling of 128 dedicated threads (twice the cap),
+including parked and stuck runners, bounds replacement cost. Capacity deferral and each newly
+stuck lane report observational failures and root event 35, naming the database and worker kind;
+these reports never take a database offline or replace an unresolved operational fault.
+Warnings repeat at most once per second per database. At the hard ceiling progress waits for a
+runner to return, with an explicit health signal rather than silent loss of maintenance.
+
+Idle visits check pending grouped commits, the constant-time dirty-page count, deferred undo,
+and owed full purge passes on the pump. They allocate nothing and dispatch no lane. SQL/Key-Value
+index stubs dispatch only through their internal test hook until a real maintenance body exists.
+A detached write-back completion wakes collection without advancing other databases' interval;
+the next regular write-back deadline remains absolute, including a stuck-detection timeout.
+Work deferred by capacity remains owed and can use reclaimed slots on these early wakes. Runner parking and result publication
+share one critical section. Provisional and published SQL/Key-Value data file sets keep the same
+lane identity; a published database waits for an outstanding provisional catalog flush before
+flushing that catalog itself. The provisional collection path also rechecks later registrations.
+
+Disposal continues joining every lane before storage closes. Root event 36 names each database
+and worker kind still running, once per second while disposal waits. **Open owner question:
+bounded disposal** would need retained storage ownership for abandoned I/O; no timeout abandons
+I/O or closes its storage. The defaults (64 slots, 128 threads, 30-second idle retirement and the
+1–4-second stuck threshold) need owner review against expected database counts and device latency.
+
+
+A collected WAL flush rechecks later commit registrations before the group window; provisional
+SQL/Key-Value file sets do the same, preventing a reset signal from leaving construction to self-help.
+Only the pump collects outcomes and calls the root failure/reporting methods, preserving per-database
+backoff, give-up fault retention and observational purge refusals. Purge retry and refusal state
+is pump-owned; lanes return full-pass, undo and reclamation facts. A full pass becoming due while
+an earlier lane runs remains owed and wakes the pump after collection. SQL/Key-Value provisional flushes also use lanes, keeping a
+stalled constructor from holding back published databases. Engine disposal joins all lane runners
+before closing storages. Lock order is the root pass gate, then the lane monitor; no lane monitor
+spans model/apply/storage locks, failure reporting or observer callbacks.
+
+The shared DatabaseLaneWorker publishes opt-in DatabaseWorkerPass observations for all kinds.
+Checkpoint due evidence remains optional checkpoint-specific data. Resilience tests hold the actual
+page-write/fsync faults (purge/index use the internal dispatch hook), require at least 12 healthy
+worker completions while the other database is still held, and judge measured waits by median
+and 75-percent share under the budget. They do not credit committer self-help or a statement's
+checkpoint as worker progress. Cancellation, completion, failed thread start, capacity and disposal
+are exercised in the non-parallel lane stress tests. Each runner starts without caller ExecutionContext and restores a clean context after each job,
+preventing apply-gate reentrancy or other AsyncLocal state from crossing databases.
+No public type, visibility grant, project reference or storage format changed. Storage exposes
+its pending-commit and dirty-page scheduling hints without exposing buffer-pool frames.
+
 ## Result diagnostics (#1264)
 
 SQL command and row results return a non-null Diagnostics collection, empty when there is
@@ -723,7 +778,7 @@ plain-string defaults persisted previously. Other expression defaults keep their
 The [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110)
 owns comparison, CAST and assignment behavior: zone-less clocks are UTC when meeting instants,
 and instant-to-clock/date/time uses UTC. Stored TIMESTAMP kinds normalize to Unspecified;
-TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves the existing plain-string
+TIMESTAMPTZ keeps the written offset. SqlTemporalText preserves DATE and timestamp plain-string
 assignment acceptance, then delegates normalized date/offset text to public SqlLiteralText;
 typed literals use its strict readers directly. No session zone or assembly access grant is added.
 The #1648 storage regression launches isolated Unix child test processes with TZ set to
@@ -1646,8 +1701,14 @@ flowchart LR
   the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
   being accidentally treated as text casts. All 19 shared SQL types are covered by the
   [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
-  CAST text reads temporal and interval input through public SqlLiteralText, independently of
-  SqlTemporalText's existing plain-string assignment reader. Zone-dependent conversions follow
+  CAST text reads temporal and interval input through public SqlLiteralText. TIME and INTERVAL
+  plain-string assignment use those same readers (#1422), including trimmed input, day-time
+  unit/clock/ISO intervals and bare signed seconds. PostgreSQL defaults an unqualified interval
+  number to seconds (src/backend/utils/adt/datetime.c:3625-3657); '12' therefore stores twelve
+  seconds rather than twelve days. DATE and timestamp assignment retain SqlTemporalText.
+  Typed schema TimeSpan defaults render signed total seconds with a seconds unit through the
+  existing Sql.Schema/SDK shared renderer, preserving every tick while supplying valid text to
+  this same assignment reader. Zone-dependent conversions follow
   the [timestamp normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
@@ -1663,6 +1724,11 @@ flowchart LR
   stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
   JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
   ownership path as application casts, including folded/shared constants and empty arrays.
+- **Allocation-free cast lookup (#1422).** The frozen cast index uses a value key holding storage
+  ordinals and case-insensitive domain names. Lookup preserves domain-to-domain, domain-to-base,
+  storage-to-domain and storage-to-base precedence, with no formatted or normalized key strings.
+  Binding allocates only its result vector; deterministic tests measure the minimum of three
+  allocation rounds for both individual lookup and full storage-vector resolution.
 - **CAST** binds once per statement (`SqlBoundCast`): the target type, and one cast per storage
   type of the value it may convert, chosen in this order: from the operand's domain when the
   plan knows it (a domain column, or a `CAST` to a domain), then from the value's storage type;
@@ -1947,7 +2013,7 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v7`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v8`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -1958,7 +2024,7 @@ Build with `COHSQLP001` before either file set exists; finite and underflow chec
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v7`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v8`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -2355,7 +2421,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 25 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3005,7 +3071,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 25 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 26 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3031,7 +3097,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-25 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-26 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -3902,13 +3968,11 @@ checkpoint, including one a statement completed after deferral. Requested waits 
 failed database, and an extra 250 ms pump pause deterministic failures, independent of writer
 throughput or scheduler latency. Lane wait elapsed time remains available for diagnosis.
 
-Unconditional pump delays use one internal wait operation, and the worker records each measured
-trigger, inter-pass and lane wait in the per-pass record. Each model test project compiles the
-root's `WorkerPumpObservation` and `CheckpointPace` helpers as linked source files and reaches the
-internal wait hook with `[UnsafeAccessor]`; no model test project references another test
-assembly, and no source-text guard decides these tests. Measured waits are judged by the median
-and a 75% share over at least 12 samples, never by the slowest sample (root DESIGN, "per-pass
-record"). No shipped API, interface or visibility grant is added.
+Unconditional pump delays use one internal wait operation observed through the root's existing
+test grant; a test-only adapter connects it to the model-local record. Model test projects reference
+the root test assembly for that adapter. Its source guard embeds the pump and lane sources and
+rejects raw blocking waits outside their observed operations, so a direct WaitOne or Sleep cannot
+bypass the record. No shipped API, interface or visibility grant is added.
 The old six-second checkpoint floor and median timing ratio are removed: the SQL test passed an
 injected 250 ms pause before this change. Observation uses concrete types and delegates and stays
 NativeAOT- and trimming-safe.
@@ -5278,8 +5342,37 @@ for every declared name and rejects evidence for undeclared names. OQL's
 
 ## Error model
 
+Execution and DDL refusals carry structured diagnostics at their source (#1653). The internal
+SqlExecutionException covers cardinality, store assignment, DDL admission, persisted-expression
+damage and executor invariants; scalar evaluation keeps SqlEvaluationException. COHSQLE046–066
+and their PostgreSQL SQLSTATE mappings are listed in the SQL dialect. Invalid store text reuses
+COHSQLE022, numeric overflow keeps COHSQLE002, and NOT NULL keeps COHSQLE024. Catalog DDL
+guards use the same codes without depending on engine-layer types. An otherwise uncoded catalog
+or plain DatabaseException escaping statement execution receives COHSQLE060 (XX000); ownership
+refusals receive COHSQLE066 (42501), preserving DatabaseObjectLockedException metadata.
+The session uses its existing catch slot to attach the enclosing statement span to unlocated
+diagnostics, retaining a more precise current-statement expression span and concrete constraint/catalog/ownership
+exception types. Already translated storage failures and aborted-transaction refusals retain
+their exact exception identity and recorded cause (#1364). Open-time failures have no statement span. DEFAULT wrappers retain the inner
+carrier and cause. Persisted CHECK/DEFAULT bindings and evaluations discard synthetic offsets before
+statement fallback, as does compiled CHECK provisioning; numeric containment alone cannot establish provenance.
+Definition dependency/native-drop codes COHSQLD002/003 move from message
+prefixes into the carrier, so the wire composes one prefix. Successful statements allocate no
+diagnostics or additional async state. Messages at the changed executor sites use generated
+resources; the remaining SQL resource migration is left to #1470.
+Namespace failures retain COHSQLE028/030 without embedded resource prefixes. Catalog script
+receipt refusals likewise carry their existing COHSQLS001 separately, so the generic statement
+fallback cannot prepend an unrelated code; oversized receipts use COHSQLE042.
+The mappings follow PostgreSQL src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500;
+no reference implementation code was copied. There is no public API, visibility-grant, storage
+format or wire-format change.
+
 Oversized encoded rows and index keys fail with `SqlEvaluationException` / `COHSQLE042`,
 mapped to SQLSTATE 54000 (program_limit_exceeded), naming the table, byte size and limit (#1266).
+Catalog definition records and exhausted catalog DDL generations use the same code. Index-name
+collisions use 42P07, constraint names retain 42710, and FK collation mismatches use COHSQLE063 /
+42P21. A replaced table uses COHSQLE064 / 40001. Unknown declaration collations use 42704;
+only loaded persisted collation failures imply XX001. Fresh CREATE VIEW rendering failures use XX000.
 `SqlRowCodec.Encode` enforces `SlottedPage.MaxRecordSize` (8,092 bytes), covering every caller,
 including script receipts. Referential SET NULL/SET DEFAULT records are encoded only after all
 assignments to their final rows are collected, before the apply bracket. The checked index-key
@@ -6114,7 +6207,7 @@ domain dependencies, including column domain names. Definition DDL excludes
 other catalog mutations while checking dependencies. It refuses native DROP (COHSQLD003), dependent
 DROP (COHSQLD002) and invalid declarations (COHSQLD001). Native DROP classification matches the
 requested normalized name and parameter signature, not every overload sharing that name;
-an unknown signature is COHSQLD001. No interface, new project reference,
+an unknown function signature is COHSQLE009 (42883); a duplicate function is COHSQLE065 (42723). No interface, new project reference,
 shipped-to-shipped internal grant or assembly scanning was added.
 
 Scripts use statement-granular recovery. An internal `ExecuteScriptAsync(request, publication)`
@@ -6160,7 +6253,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v7 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v8 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
@@ -6306,7 +6399,7 @@ Plans without LIKE or application code retain the allocation-free shared evaluat
 Every path observes statement cancellation. Runtime distinct, truth-test
 and escape diagnostics retain the bound source location. PostgreSQL's backslash default, empty escape and unrestricted quoted
 scalar rules apply (like_match.c:428-453,473-476); DIALECT.md specifies the ISO differences.
-Format 25 admits the new persisted expression/view syntax and has no upgrade reader.
+Format 26 admits the new persisted expression/view syntax and has no upgrade reader.
 
 The #1394 resource regressions use 2,048 `%a` fragments and count search transitions
 and compared UTF-16 units instead of elapsed time. Index-backed search is bounded by
@@ -6342,7 +6435,7 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v7**, shared with the SDK;
+Applied/pending compiled documents use **cohesion/database-schema/v8**, shared with the SDK;
 v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
@@ -6392,7 +6485,7 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v7` (#1108), matching Sdk.Database.
+The compiled document is now `cohesion/database-schema/v8` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
 document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening
@@ -6419,7 +6512,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 25 requires the complete table extension 6 record,
+after the existing constraints. Current format 26 requires the complete table extension 6 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -6499,7 +6592,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 25 also requires the call vectors, identity facets and extension 6 missing-value literals;
+  which this catalog always writes. Current format 26 also requires the call vectors, identity facets and extension 6 missing-value literals;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -7053,7 +7146,7 @@ The internal stateless SqlCatalogCreation predicate owns the creation-only recor
 initial counter constraints. SQL uses it directly from Internal/Catalog,
 so recovery decisions use catalog vocabulary without a public API or friend-assembly grant.
 Creation commits collation, dbo and the format marker in that order. Completion changes no
-catalog record layout or record-space format 25. SQL requires its sql.create claim only when
+catalog record layout or record-space format 26. SQL requires its sql.create claim only when
 adopting a marker-free interrupted file set; an empty data scan alone is no proof. The predicate
 receives the default namespace from SQL's shared SqlNamespaceNames constant, avoiding a new
 catalog dependency on the language assembly.
@@ -7145,6 +7238,34 @@ The following public types move from their Catalog or Storage assembly into Assi
 SQL resource collisions retain the catalog keys and original messages; the engine accessors become `EngineIdentityIntegerRequired` (formerly `IdentityIntegerRequired`), `EngineNamespaceMissing` (formerly `NamespaceMissing`), `EngineNamespaceDependentObjects` (formerly `NamespaceDependentObjects`), `EngineViewDependent` (formerly `ViewDependent`), `EngineViewDropDependent` (formerly `ViewDropDependent`). These are internal resource identifiers.
 
 Identical resource keys `ViewMissing` are stored once with their unchanged values.
+
+## Temporal and floating text input fixes (#1422, #1267)
+
+Floating-point and UUID text forms were delivered by #1119 (f520e8160). This branch completes
+the remaining temporal forms and aligns floating assignment with that existing CAST reader.
+
+Record-space format 26 and compiled-schema v8 fence changed temporal DEFAULT and frozen
+missing-value spellings. Every noncurrent catalog is refused before stored expressions bind;
+SqlDataStorageFormatException carries the existing storage-failure code COHSQLE041. Rebuild old
+schema artifacts and recreate old databases with their writing engine's export; there is no
+upgrade path or legacy reader (#1152). Sql.Schema DESIGN records the schema-hash change.
+
+Temporal assignment, DEFAULT and CAST share SqlTemporalReader's explicit format/field-range/interval-overflow
+reason through the existing Sql.Language shared-source link. Each assembly owns a reader and its
+generated resource messages; private reader failures never cross an assembly boundary. Public
+SqlLiteralText translates them to its documented FormatException/OverflowException contract, while SQL
+uses COHSQLE047 / 22007, COHSQLE048 / 22008 and COHSQLE062 / 22015 respectively. There is
+no CLR-exception-type inference or duplicate temporal conversion path. PostgreSQL datetime.c:4247-4290
+provides the classifications; no reference implementation code was copied.
+Floating text assignment calls CAST's ParseReal/ParseFloat, rejecting grouping, overflow and
+underflow. DATE and timestamp assignment retain their established SqlTemporalText grammar.
+
+TIME accepts single-digit hours, AM/PM, a trailing fractional dot and validated written zones
+that are discarded (PostgreSQL datetime.c:2345-2350,2666; date.c:1475-1510). Timestamp's separate
+strict clock reader still refuses a zone. INTERVAL accepts an implicit day before an hour unit,
+optional @ and final ago (datetime.c:3748,3807-3818); non-ASCII whitespace is refused before trimming.
+Cast registration and lookup both use SqlCastKey, including case-insensitive domain identity and
+modifier-independent built-in identity, without formatted duplicate-detection keys.
 
 ## Checkpoint progress observations (#1284)
 

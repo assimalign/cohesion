@@ -1,83 +1,106 @@
 using System;
 using System.Globalization;
 
-using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>
-/// Reads plain-string assignment text as a date, a timestamp or a timestamp with an offset
-/// (<see cref="SqlPlanExecutor.CoerceForColumn"/>), independently of the host's clock or time zone.
-/// Explicit CAST uses the strict public <see cref="SqlLiteralText"/> readers directly.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The text starts with an ISO 8601 date, <c>yyyy-mm-dd</c>: a text without a year (<c>'1.5'</c>)
-/// would otherwise take the current year from the clock. A timestamp's time of day and offset follow
-/// as <see cref="DateTimeOffset.Parse(string, IFormatProvider, DateTimeStyles)"/> reads them in the
-/// invariant culture.
-/// </para>
-/// <para>
-/// <c>TIMESTAMP</c> keeps the clock time as written and ignores an offset, as PostgreSQL's
-/// <c>timestamp_in</c> does (<c>src/backend/utils/adt/timestamp.c</c>): the result's kind is
-/// <see cref="DateTimeKind.Unspecified"/>. <c>TIMESTAMPTZ</c> keeps a written offset and takes UTC
-/// for text without one: the engine has no session time zone, and the host's is not the database's.
-/// </para>
-/// <para>
-/// Every failure is a <see cref="FormatException"/> or an <see cref="OverflowException"/>, the value
-/// faults the cast registry reports as conversion failures.
-/// </para>
-/// </remarks>
+/// <summary>Translates the shared temporal reader's format/range distinction into execution diagnostics.</summary>
 internal static class SqlTemporalText
 {
-    /// <summary>Reads a <c>DATE</c>.</summary>
-    /// <param name="text">The text, <c>yyyy-mm-dd</c>.</param>
-    /// <returns>The date.</returns>
-    /// <exception cref="FormatException">The text is not a date that starts with its year.</exception>
+    private static readonly SqlTemporalReader _reader = new(Message);
+
     internal static DateOnly ParseDate(string text)
     {
-        RequireYearFirst(text, "DATE");
-        return SqlLiteralText.ParseDate(DateOnly.Parse(text, CultureInfo.InvariantCulture).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        try { return _reader.ParseDate(text); }
+        catch (SqlTemporalReadException failure) { throw Failure(failure); }
     }
 
-    /// <summary>Reads a <c>TIMESTAMP</c>: the clock time as written, any offset ignored.</summary>
-    /// <param name="text">The text, <c>yyyy-mm-dd[Thh:mm[:ss[.fffffff]]][offset]</c>.</param>
-    /// <returns>The timestamp, of kind <see cref="DateTimeKind.Unspecified"/>.</returns>
-    /// <exception cref="FormatException">The text is not a timestamp that starts with its year.</exception>
-    /// <exception cref="OverflowException">The timestamp is outside the range the type holds.</exception>
-    internal static DateTime ParseTimestamp(string text) => ParseOffset(text, "TIMESTAMP").DateTime;
-
-    /// <summary>Reads a <c>TIMESTAMPTZ</c>: the written offset, or UTC when none is written.</summary>
-    /// <param name="text">The text, <c>yyyy-mm-dd[Thh:mm[:ss[.fffffff]]][offset]</c>.</param>
-    /// <returns>The timestamp with its offset.</returns>
-    /// <exception cref="FormatException">The text is not a timestamp that starts with its year.</exception>
-    /// <exception cref="OverflowException">The timestamp is outside the range the type holds.</exception>
-    internal static DateTimeOffset ParseTimestampTz(string text) => ParseOffset(text, "TIMESTAMPTZ");
-
-    private static DateTimeOffset ParseOffset(string text, string type)
+    internal static TimeOnly ParseTime(string text)
     {
-        RequireYearFirst(text, type);
-        try
+        try { return _reader.ParseTime(text); }
+        catch (SqlTemporalReadException failure) { throw Failure(failure); }
+    }
+
+    internal static DateTime ParseTimestamp(string text)
+    {
+        try { return _reader.ParseTimestamp(text); }
+        catch (SqlTemporalReadException failure) { throw Failure(failure); }
+    }
+
+    internal static DateTimeOffset ParseTimestampWithTimeZone(string text)
+    {
+        try { return _reader.ParseTimestampWithTimeZone(text); }
+        catch (SqlTemporalReadException failure) { throw Failure(failure); }
+    }
+
+    internal static TimeSpan ParseInterval(string text)
+    {
+        try { return _reader.ParseInterval(text); }
+        catch (SqlTemporalReadException failure) { throw Failure(failure); }
+    }
+
+    // Assignment retains its existing permissive date/timestamp spellings. A reader's
+    // field-range failure is final; only nonstandard grammar tries the established fallback.
+    internal static DateOnly ParseAssignmentDate(string text)
+    {
+        RequireYearFirst(text);
+        try { return _reader.ParseDate(text.Trim()); }
+        catch (SqlTemporalReadException failure)
         {
-            // Plain-string assignment keeps its existing input acceptance. Normalize that input
-            // before delegating to the literal grammar; typed literals call the strict reader directly.
-            var value = DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
-            return SqlLiteralText.ParseTimestampWithTimeZone(value.ToString("yyyy-MM-dd HH:mm:ss.fffffffzzz", CultureInfo.InvariantCulture));
-        }
-        catch (ArgumentOutOfRangeException exception)
-        {
-            // An offset that moves the instant past the type's range.
-            throw new OverflowException($"{type} text '{text}' is outside the range of the type.", exception);
+            if (failure.Kind == SqlTemporalFailureKind.Format && DateOnly.TryParse(text, CultureInfo.InvariantCulture, out var date)) { return date; }
+            throw Failure(failure);
         }
     }
 
-    private static void RequireYearFirst(string text, string type)
+    internal static DateTime ParseAssignmentTimestamp(string text) => ParseAssignmentOffset(text).DateTime;
+    internal static DateTimeOffset ParseAssignmentTimestampTz(string text) => ParseAssignmentOffset(text);
+
+    private static DateTimeOffset ParseAssignmentOffset(string text)
+    {
+        RequireYearFirst(text);
+        try { return _reader.ParseTimestampWithTimeZone(text.Trim()); }
+        catch (SqlTemporalReadException failure)
+        {
+            if (failure.Kind == SqlTemporalFailureKind.Format && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var timestamp)) { return timestamp; }
+            throw Failure(failure);
+        }
+    }
+
+    private static void RequireYearFirst(string text)
     {
         var span = text.AsSpan().TrimStart();
         if (span.Length < 5 || !char.IsAsciiDigit(span[0]) || !char.IsAsciiDigit(span[1]) || !char.IsAsciiDigit(span[2])
             || !char.IsAsciiDigit(span[3]) || span[4] != '-')
-        {
-            throw new FormatException($"{type} text must start with an ISO 8601 date, yyyy-mm-dd.");
-        }
+        { throw new SqlExecutionException(SqlExecutionException.InvalidDatetimeCode, ErrorMessages.TemporalDateTextInvalid); }
     }
+
+    private static SqlExecutionException Failure(SqlTemporalReadException failure)
+        => new(failure.Kind switch
+        {
+            SqlTemporalFailureKind.FieldRange => SqlExecutionException.DatetimeOverflowCode,
+            SqlTemporalFailureKind.IntervalOverflow => SqlExecutionException.IntervalOverflowCode,
+            _ => SqlExecutionException.InvalidDatetimeCode,
+        }, failure.Message, failure.Kind switch
+        {
+            SqlTemporalFailureKind.FieldRange or SqlTemporalFailureKind.IntervalOverflow => new OverflowException(failure.Message, failure.InnerException),
+            SqlTemporalFailureKind.UnsupportedYearMonth => new NotSupportedException(failure.Message, failure.InnerException),
+            _ => new FormatException(failure.Message, failure.InnerException),
+        });
+
+    private static string Message(SqlTemporalTextError error) => error switch
+    {
+        SqlTemporalTextError.DateTextInvalid => ErrorMessages.TemporalDateTextInvalid,
+        SqlTemporalTextError.TimestampTextInvalid => ErrorMessages.TemporalTimestampTextInvalid,
+        SqlTemporalTextError.TimestampSeparatorInvalid => ErrorMessages.TemporalTimestampSeparatorInvalid,
+        SqlTemporalTextError.TimestampZoneRequired => ErrorMessages.TemporalTimestampZoneRequired,
+        SqlTemporalTextError.TimestampOffsetInvalid => ErrorMessages.TemporalTimestampOffsetInvalid,
+        SqlTemporalTextError.TimestampOffsetRange => ErrorMessages.TemporalTimestampOffsetRange,
+        SqlTemporalTextError.TimestampRangeInvalid => ErrorMessages.TemporalTimestampRangeInvalid,
+        SqlTemporalTextError.IntervalYearMonthUnsupported => ErrorMessages.TemporalIntervalYearMonthUnsupported,
+        SqlTemporalTextError.TimeTextInvalid => ErrorMessages.TemporalTimeTextInvalid,
+        SqlTemporalTextError.IntervalTextInvalid => ErrorMessages.TemporalIntervalTextInvalid,
+        _ => throw new ArgumentOutOfRangeException(nameof(error)),
+    };
 }

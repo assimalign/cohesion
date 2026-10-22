@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
@@ -41,9 +43,9 @@ internal sealed partial class SqlPlanExecutor
                     if (environment.Catalog.GetOverloads(drop.Name).Any(function => function is not SqlExpressionFunction &&
                         SqlDefinitionBinder.Key(function).Equals("F:" + signature, StringComparison.OrdinalIgnoreCase)))
                     {
-                        throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Function '{signature}' is engine-registered and cannot be dropped through SQL.");
+                        throw new SqlExecutionException(SqlDefinitionBinder.NativeCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NativeFunctionDrop, signature));
                     }
-                    throw SqlDefinitionBinder.Refuse($"Function '{signature}' does not exist.", drop.Location);
+                    throw new SqlExecutionException(SqlEvaluationException.UnregisteredFunctionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionMissing, signature), location: drop.Location);
                 }
                 CheckDefinitionOwner(definition.Name, definition.Owner, definition.OwningSchema, statement);
                 EnsureNoDependents("F:" + signature);
@@ -57,7 +59,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if (environment.Types.Find(drop.Name) is not null)
                     {
-                        throw new DatabaseException($"{SqlDefinitionBinder.NativeCode}: Type '{drop.Name}' is engine-registered and cannot be dropped through SQL.");
+                        throw new SqlExecutionException(SqlDefinitionBinder.NativeCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NativeTypeDrop, drop.Name));
                     }
                     throw SqlDefinitionBinder.Refuse($"Domain '{drop.Name}' does not exist.", drop.Location);
                 }
@@ -76,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (owner == DatabaseObjectOwner.Schema && !string.Equals(schema, statement.ProvisioningSchema, StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseObjectLockedException(name, schema!, "DROP");
+            throw new DatabaseObjectLockedException(name, schema!, "DROP", new Diagnostic { Code = SqlExecutionException.InsufficientPrivilegeCode });
         }
         if (owner == DatabaseObjectOwner.Adhoc && statement.ProvisioningSchema is not null)
         {
@@ -164,6 +166,6 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var child in SqlPlanner.Children(node)) { Visit(child); }
             }
         }
-        void Dependent(string subject) => throw new DatabaseException($"{SqlDefinitionBinder.DependencyCode}: Cannot drop '{key}': {subject} depends on it.");
+        void Dependent(string subject) => throw new SqlExecutionException(SqlDefinitionBinder.DependencyCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefinitionDropDependent, key, subject));
     }
 }

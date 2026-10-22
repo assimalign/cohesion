@@ -62,6 +62,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     // A page write on the statement's flow, including a dirty-page eviction during apply.
     internal Action<long>? BeforeDataWrite { get; set; }
 
+    internal Action? BeforeCreationComplete { get; set; }
+
+    internal override void CompleteCreation(string databaseName) => BeforeCreationComplete?.Invoke();
+
     /// <summary>
     /// Gets or sets whether every read of this strategy's data files fails, on every flow: the
     /// engine's background workers included, as a device that refuses reads for a while. A page the

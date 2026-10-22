@@ -106,11 +106,11 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
   casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
   Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
-  format v7; result-header format 2 carries Character identity and the declared length.
+  format v8; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in catalog format 25. A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in catalog format 26. A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -208,7 +208,7 @@ on `DatabaseSession`.
 An interrupted create is adopted only with its durable sql.create claim and initial empty
 data storage. Pre-header files can be restarted through CreateDatabaseAsync or declared
 application Build when no other persisted state conflicts. All catalog sizes are probed read-only
-before a format refusal. SQL remains at format 25; the claim does not change record layouts.
+before a format refusal. SQL remains at format 26; the claim does not change record layouts.
 Missing sidecars and ambiguous lost catalogs are preserved and refused.
 
 
@@ -232,7 +232,7 @@ physical index registrations exported by `Database.Indexing`.
 
 - **Fixed-length characters** — columns retain Character identity and length; domains and
   function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
-  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v7.
+  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v8.
 
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default

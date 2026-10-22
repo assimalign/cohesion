@@ -869,6 +869,32 @@ internal sealed class DatabaseEventSource : EventSource
     private void EngineDisposeFailed(string engineName, string model, int failureCount, string exceptionType, string exceptionMessage)
         => WriteEvent(34, engineName, model, failureCount, exceptionType, exceptionMessage);
 
+    [NonEvent]
+    public void WorkerLaneDelayed(DatabaseEngineWorker worker, string database, string reason, TimeSpan elapsed)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            WorkerLaneDelayed(worker.Name, worker.Kind.ToString(), database, reason, elapsed.TotalSeconds);
+        }
+    }
+
+    [Event(35, Level = EventLevel.Warning, Message = "Worker {0} ({1}) database {2} lane delayed: {3}, running {4} s")]
+    private void WorkerLaneDelayed(string workerName, string workerKind, string database, string reason, double elapsedSeconds)
+        => WriteEvent(35, workerName, workerKind, database, reason, elapsedSeconds);
+
+    [NonEvent]
+    public void WorkerLaneDisposalWaiting(DatabaseEngineWorker worker, string database, TimeSpan elapsed)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            WorkerLaneDisposalWaiting(worker.Name, worker.Kind.ToString(), database, elapsed.TotalSeconds);
+        }
+    }
+
+    [Event(36, Level = EventLevel.Warning, Message = "Disposal waiting for worker {0} ({1}) database {2}: {3} s")]
+    private void WorkerLaneDisposalWaiting(string workerName, string workerKind, string database, double elapsedSeconds)
+        => WriteEvent(36, workerName, workerKind, database, elapsedSeconds);
+
     /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {

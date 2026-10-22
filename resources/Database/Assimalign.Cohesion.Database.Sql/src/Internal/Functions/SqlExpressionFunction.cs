@@ -76,8 +76,13 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
         {
             frame[index] = arguments[index].ToObject();
         }
-        object? result = SqlExpressionEvaluator.ForExecution(null, arguments.Context.CancellationToken, transactionStart: arguments.Context.TransactionStart)
-            .Evaluate(PrepareBody(arguments.Context.Collation, arguments.Context.CancellationToken), frame);
+        object? result;
+        try
+        {
+            result = SqlExpressionEvaluator.ForExecution(null, arguments.Context.CancellationToken, transactionStart: arguments.Context.TransactionStart)
+                .Evaluate(PrepareBody(arguments.Context.Collation, arguments.Context.CancellationToken), frame);
+        }
+        catch (DatabaseException failure) { throw SqlExecutionException.FromPersisted(failure); }
         result = SqlPlanExecutor.CoerceForColumn(result, _result);
         CheckDomain(ReturnType, result, arguments.Context);
         return SqlValue.FromObject(result);

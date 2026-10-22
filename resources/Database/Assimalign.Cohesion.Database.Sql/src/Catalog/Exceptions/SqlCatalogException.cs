@@ -1,3 +1,5 @@
+using System;
+
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
@@ -17,8 +19,17 @@ public sealed class SqlCatalogException : DatabaseException
     {
     }
 
-    internal SqlCatalogException(string code, string message)
-        : base(message, [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }])
+    internal SqlCatalogException(string code, string message, Exception? innerException = null, Diagnostic? location = null)
+        : base(message, [new Diagnostic
+        {
+            Code = code,
+            Message = message,
+            Severity = DiagnosticSeverity.Error,
+            Location = location?.Location,
+            Start = location?.Start,
+            End = location?.End,
+            Line = location?.Line ?? 1,
+        }], innerException)
     {
     }
 }

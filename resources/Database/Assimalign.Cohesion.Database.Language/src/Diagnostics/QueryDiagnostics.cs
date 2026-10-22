@@ -38,6 +38,7 @@ public static class QueryDiagnostics
     /// <param name="language">The language whose profile rejected the clause.</param>
     /// <param name="location">The clause's source location.</param>
     /// <returns>The unsupported-clause error diagnostic.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     public static Diagnostic UnsupportedClause(string clause, string language, Location location)
     {
         ArgumentNullException.ThrowIfNull(clause);

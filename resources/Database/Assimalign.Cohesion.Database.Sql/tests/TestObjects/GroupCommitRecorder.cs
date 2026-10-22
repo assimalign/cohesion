@@ -11,6 +11,8 @@ internal sealed class GroupCommitRecorder : EventListener
 {
     private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
 
+    internal Action<string>? Flushed { get; set; }
+
     internal int FlushCount(string database) => Count(database, 8);
     internal int MissedCount(string database) => Count(database, 9);
 
@@ -29,5 +31,6 @@ internal sealed class GroupCommitRecorder : EventListener
     protected override void OnEventWritten(EventWrittenEventArgs eventData)
     {
         if (eventData.EventId is 8 or 9) { _events?.Enqueue(eventData); }
+        if (eventData.EventId == 8 && eventData.Payload?[0] is string database) { Flushed?.Invoke(database); }
     }
 }

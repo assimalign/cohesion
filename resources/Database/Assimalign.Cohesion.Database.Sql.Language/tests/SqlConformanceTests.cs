@@ -47,6 +47,7 @@ public class SqlConformanceTests
     [InlineData("CREATE DOMAIN national AS NATIONAL CHAR VARYING(10);", SqlQueryCommandType.Create)]
     [InlineData("CREATE DOMAIN national AS NCHAR VARYING(10);", SqlQueryCommandType.Create)]
     [InlineData("SELECT CAST(varying AS NATIONAL CHAR(10)), CAST(varying AS NATIONAL CHAR VARYING(10)), CAST(varying AS NCHAR VARYING(10)) FROM national;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT INTERVAL '12', CAST('-12.5' AS INTERVAL), CAST('13:45' AS TIME);", SqlQueryCommandType.Select)]
     [InlineData("ALTER TABLE users ADD COLUMN email VARCHAR(255);", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE users DROP COLUMN email;", SqlQueryCommandType.Alter)]
     [InlineData("DROP TABLE IF EXISTS users;", SqlQueryCommandType.Drop)]

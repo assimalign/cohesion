@@ -139,7 +139,8 @@ public sealed class SqlFunctionExtensibilityWireTests
         // Assert
         refused.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         refused.ConnectionUsable.ShouldBeTrue();
-        refused.Message.ShouldStartWith("Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions.", Case.Sensitive);
+        refused.Message.ShouldStartWith("COHSQLE059: Function 'is_email_volatile' is VOLATILE, and a CHECK admits only IMMUTABLE functions.", Case.Sensitive);
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE059");
         violation.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         violation.ConnectionUsable.ShouldBeTrue();
         violation.Message.ShouldContain("ck_email", Case.Sensitive);

@@ -1,4 +1,8 @@
+using System;
+
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -19,13 +23,30 @@ internal sealed class SqlFunctionResultMismatchException : DatabaseException
     /// <param name="call">The call whose result does not fit.</param>
     /// <param name="returned">The type the call's function returns, as the dialect names it.</param>
     /// <param name="needed">What the position needs, for example <c>BOOLEAN</c> or <c>a value that compares with BIGINT</c>.</param>
-    internal SqlFunctionResultMismatchException(SqlFunctionCallExpression call, string returned, string needed)
-        : base($"Function '{call.FunctionName}' returns {returned}, where the CHECK needs {needed}.")
+    /// <param name="location">The enclosing statement's span if the call has none.</param>
+    /// <param name="innerException">The original refusal when a span is attached.</param>
+    internal SqlFunctionResultMismatchException(SqlFunctionCallExpression call, string returned, string needed,
+        Location? location = null, Exception? innerException = null)
+        : base(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.CheckFunctionResultMismatch, call.FunctionName, returned, needed), [new Diagnostic
+        {
+            Code = SqlExecutionException.DatatypeMismatchCode,
+            Message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.CheckFunctionResultMismatch, call.FunctionName, returned, needed),
+            Severity = DiagnosticSeverity.Error,
+            Start = (call.Location ?? location)?.Start,
+            End = (call.Location ?? location)?.End,
+            Line = (call.Location ?? location)?.StartLine ?? 1,
+            Location = (call.Location ?? location) is null ? null : DiagnosticLocation.Absolute,
+        }], innerException)
     {
         Call = call;
         Returned = returned;
         Needed = needed;
     }
+
+    internal SqlFunctionResultMismatchException At(Location? location) => Diagnostics[0].Start is not null || location is null
+        ? this : new(Call, Returned, Needed, location, this);
 
     /// <summary>Gets the call whose result does not fit.</summary>
     internal SqlFunctionCallExpression Call { get; }

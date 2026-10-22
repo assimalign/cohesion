@@ -108,6 +108,11 @@ public sealed partial class SqlDefinedFunctionTests
             await ExecuteAsync(session, "DROP TABLE cleanup");
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE invalid(v INT CHECK(allowed(v)))"));
             await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE DOMAIN invalid_domain AS INT CHECK(allowed(VALUE))"));
+            if (kind == "wrapper")
+            {
+                (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE invalid_stored(v INT CHECK(wrapped(v)))")))
+                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE009");
+            }
             (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
                 "CREATE FUNCTION invalid_wrapper(p INT) RETURNS BOOLEAN IMMUTABLE RETURN allowed(p)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
         }

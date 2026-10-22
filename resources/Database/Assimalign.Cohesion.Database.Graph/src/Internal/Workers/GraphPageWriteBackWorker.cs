@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
+
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
@@ -28,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// two would share one failure record.
 /// </para>
 /// </remarks>
-internal sealed class GraphPageWriteBackWorker : DatabaseEngineWorker
+internal sealed class GraphPageWriteBackWorker : DatabaseWriteWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
 
@@ -38,43 +41,21 @@ internal sealed class GraphPageWriteBackWorker : DatabaseEngineWorker
         _engine = engine;
     }
 
-    /// <inheritdoc />
-    protected override void RunIterationCore(CancellationToken cancellationToken)
+    protected override GraphDatabase[] GetDatabases()
     {
-        int batchSize = _engine.EngineOptions.PageWriteBackBatchSize;
+        return _engine.GetInstanceSnapshot();
+    }
+    protected override string GetName(GraphDatabase database) => database.Name;
+    protected override bool IsClosed(GraphDatabase database) => database.IsClosed;
+    protected override bool IsOffline(GraphDatabase database) => database.IsOffline;
+    protected override bool IsDue(GraphDatabase database) => database.DataStorage.DirtyPageCount > 0;
+    protected override bool IsOpen(GraphDatabase database) => _engine.IsOpen(database);
 
-        foreach (GraphDatabase database in _engine.GetInstanceSnapshot())
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            // Nothing of an offline database is written (#1243): the engine reports it, and a
-            // failure the worker recorded for it ends. Nor of a database its holder closed: the
-            // engine keeps it registered until its close ends, then forgets it.
-            if (database.IsClosed || database.IsOffline || !BeginDatabase(database.Name))
-            {
-                continue;
-            }
-
-            try
-            {
-                database.DataStorage.WriteBackDirtyPages(batchSize);
-            }
-            catch (ObjectDisposedException) when (!_engine.IsOpen(database))
-            {
-                // The snapshot can race a database drop; nothing to write back.
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // The pages stay dirty and a later pass writes them; an offline database's refusal
-                // is not the worker's failure (the engine lists the database offline).
-                if (!database.IsOffline)
-                {
-                    ReportFailure(database.Name, exception);
-                }
-            }
-        }
+    protected override DatabaseWriteResult RunDatabase(GraphDatabase database, CancellationToken cancellationToken)
+    {
+        DatabaseWriteResult failures = default;
+        int batch = _engine.EngineOptions.PageWriteBackBatchSize;
+        TryWrite(() => database.DataStorage.WriteBackDirtyPages(batch), ref failures);
+        return failures;
     }
 }

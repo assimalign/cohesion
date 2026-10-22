@@ -46,12 +46,6 @@ internal static class SqlCastText
         return time.Ticks == 0 ? day : day + " " + clock;
     }
 
-    internal static TimeSpan ParseInterval(string text)
-    {
-        try { return SqlLiteralText.ParseInterval(text.Trim()); }
-        catch (NotSupportedException exception) { throw new FormatException(exception.Message, exception); }
-    }
-
     internal static string CharacterInput(object value) => value is SqlCharacter character ? character.Text : (string)value;
 
     internal static byte[] ParseBinary(string text)

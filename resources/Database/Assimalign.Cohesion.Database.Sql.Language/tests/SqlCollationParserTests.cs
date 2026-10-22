@@ -61,8 +61,6 @@ public sealed class SqlCollationParserTests
 
     /// <summary>Out-of-scope collation requests fail with the model's explicit surface diagnostic.</summary>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - COLLATE: deferred collation features reject clearly")]
-    [InlineData("CREATE TABLE t (name TEXT COLLATE turkish_ci);")]
-    [InlineData("SELECT name COLLATE swedish FROM t;")]
     [InlineData("CREATE COLLATION custom;")]
     [InlineData("SET COLLATION case_insensitive;")]
     [InlineData("SET SESSION COLLATION case_insensitive;")]
@@ -70,6 +68,19 @@ public sealed class SqlCollationParserTests
     public void Parse_DeferredCollationFeature_ShouldReportModelDiagnostic(string sql)
     {
         Parse(sql).Diagnostics.ShouldContain(item => item.Code == "COHDBL001" && item.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - COLLATE: names resolve during binding (#1653)")]
+    [InlineData("CREATE TABLE t (name TEXT COLLATE turkish_ci);")]
+    [InlineData("SELECT name COLLATE swedish FROM t;")]
+    [InlineData("CREATE TABLE t (v TEXT DEFAULT 'a' COLLATE \"nope\");")]
+    public void Parse_UnknownCollationName_ShouldDeferResolution(string sql)
+    {
+        // Arrange / Act
+        var parsed = Parse(sql);
+
+        // Assert
+        parsed.Diagnostics.ShouldBeEmpty();
     }
 
     /// <summary>Incomplete or duplicate collation clauses do not silently fall back.</summary>

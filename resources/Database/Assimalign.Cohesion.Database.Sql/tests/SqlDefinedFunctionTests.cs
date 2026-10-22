@@ -40,8 +40,8 @@ public sealed partial class SqlDefinedFunctionTests
         rows.ShouldBe([[8, null]]);
         await ExecuteAsync(session, "INSERT INTO items (n) VALUES (2)");
         (await RowsAsync(session, "SELECT id FROM items WHERE n = 2")).ShouldBe([[4]]);
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION plusone(INT)"))).Message.ShouldContain("COHSQLD002");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN positive"))).Message.ShouldContain("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION plusone(INT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN positive"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO items VALUES (-1, 2)"));
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO items VALUES (NULL, 2)"));
         await ExecuteAsync(session, "DROP TABLE items");
@@ -77,10 +77,10 @@ public sealed partial class SqlDefinedFunctionTests
         await using var engine = await builder.BuildAsync();
         await using var session = await SessionAsync(engine);
         // Act + Assert
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE FUNCTION native_echo(p BIGINT) RETURNS BIGINT RETURN p"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE FUNCTION native_echo(p BIGINT) RETURNS BIGINT RETURN p"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE065");
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE DOMAIN native_domain AS BIGINT"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION native_echo(BIGINT)"))).Message.ShouldContain("COHSQLD003");
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN native_domain"))).Message.ShouldContain("COHSQLD003");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION native_echo(BIGINT)"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD003");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP DOMAIN native_domain"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD003");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - A volatile SQL default executes once per omitted row value")]

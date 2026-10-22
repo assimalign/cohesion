@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
+## Maintenance due hints (#1279)
+
+Storage.HasPendingCommits reads the grouped durability gate's requested/durable LSNs under its
+short monitor without performing I/O. Storage.DirtyPageCount reads a resident dirty-page count,
+including pinned pages, in constant time. Each buffer entry serializes dirty/clean version
+transitions with a short entry monitor and adjusts the count once per clean/dirty transition;
+writing an old image cannot clear a concurrent change. Pool operations may enter that monitor,
+but dirtying a page never enters the pool monitor, and neither monitor spans device I/O for
+these hints. Recycling clears its entry's contribution before reuse. These are advisory due
+checks for all five model workers, not guarantees that a following operation will find work.
+They expose no buffer entry, lock or internal component type and preserve durability ordering.
+
 ## Cancelable recovery and engine fences (49a)
 
 The protected `OpenExisting` accepts cancellation, observed during journal initialization, each

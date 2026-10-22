@@ -7,6 +7,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -223,7 +224,13 @@ internal sealed class SqlBoundTableCache
         catch (InsufficientExecutionStackException exception)
         {
             // Only the open knows that a larger stack is the remedy (#1151).
-            throw new DatabaseException($"{exception.Message} Open the database on a thread with a larger stack.", exception);
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogStackInsufficient, exception.Message);
+            throw new DatabaseException(message, [new Diagnostic
+            {
+                Code = SqlEvaluationException.StatementTooComplexCode,
+                Message = message,
+                Severity = DiagnosticSeverity.Error,
+            }], exception);
         }
     }
 
@@ -335,7 +342,7 @@ internal sealed class SqlBoundTableCache
                 var frozen = new SqlCatalogColumn(column.Name, column.Type, true, text, column.Collation);
                 if (!SqlPersistedExpression.IsDefaultLiteral(SqlPersistedExpression.Load(text, "Missing value")))
                 {
-                    throw new DatabaseException($"Missing value of column '{column.Name}' must be a literal.");
+                    throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MissingValueNotLiteral, column.Name));
                 }
                 missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) ? defaults[ordinal] : SqlPlanExecutor.BindDefaultExpression(frozen,
                     $"Missing value of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
@@ -447,13 +454,13 @@ internal sealed class SqlBoundTableCache
             throw new DatabaseException(
                 $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
                 $"arguments the function does not accept ({failure.Message}). {SqlPersistedExpression.UncheckedCallHint}",
-                failure.Diagnostics, failure);
+                SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
         }
 
         throw new DatabaseException(
             $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
             $"({failure.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
-            failure.Diagnostics, failure);
+            SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
     }
 
     /// <summary>

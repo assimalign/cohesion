@@ -405,14 +405,30 @@ baseline.
   tiebreaker attributes); the promoted separator is the
   first at which the entries before it would exceed half the node, so both halves
   keep room for the largest separator.
-- **The leaf split point is one function, `ChooseLeafSplit`** — currently the middle
-  of the leaf, which any split point in `[1, count - 1]` may replace, since adjacent
-  entries always differ. #1196 replaces it with PostgreSQL's strategy for rightmost
-  and single-value splits (`nbtsplitloc.c:130`, `_bt_strategy` `:935`). Measured
-  for 5,000 equal 1,024-byte keys inserted in reference order, before and after this
-  change alike: 1,666 leaves holding 3.0 of a possible 7 entries (39.2% full),
-  height 6, internal fan-out 4.0 — every insert reaches the rightmost leaf, and a
-  middle split leaves the left half half-empty for good.
+- **The leaf split point is one function, `ChooseLeafSplit` (#1196).** An append
+  to the tree keeps `count - 1` entries left, since the separator needs an existing
+  entry on each side. A duplicate-run append does so only when the entire leaf,
+  including the incoming item, has one value and its upper fence proves the run
+  ends here. Equality with `GetKey(0)` proves the whole-page precondition because
+  the insertion slot is after every existing entry. Mixed-key leaves keep the
+  midpoint except for the unchanged rightmost-append rule. This adapts PostgreSQL's
+  rightmost and single-value strategies (`src/backend/access/nbtree/nbtsplitloc.c:287-292`,
+  `:971`, `:987-1033`): PostgreSQL's single-value strategy likewise requires the
+  whole page, including the new item, to contain duplicates. The nearest upper
+  ancestor separator serves as the leaf's high key: a greater key proves the run
+  ends here; an equal key retains the midpoint. This takes at most one extra
+  ancestor walk per split, without a sibling-chain scan, page-format change or
+  change to cursor continuation.
+  Deterministic 5,000-entry, 1,024-byte-key tests halve ordered leaves from 1,666
+  (39.153% full) to 834 (78.211%) with duplicate/ascending heights still 6/3, and
+  preserve the gain for a single-value leaf with a greater upper fence. A run
+  sharing its leaf with a higher key retains the midpoint. Three random
+  seeds improve from 3,052 to 3,047 leaves at height 3 while shuffled duplicate
+  references retain their fill and height (`BTreeShapeTests`, page/byte counts
+  without pruning or timing thresholds; the external SF10 gate remains separate).
+  Shuffled duplicate pairs use 3,144 leaves against midpoint's 3,137 (+0.223%);
+  guards allow at most 0.5% in aggregate and 1% per seed. Update workloads and
+  their accepted sequential-load trade-off are detailed below.
 - **Order is checked in every build.** A leaf split fails unless its separator
   falls strictly after the last entry kept left and at or before the first entry
   moved right, and every separator written into a parent must be strictly between
@@ -420,6 +436,45 @@ baseline.
   the half-done split back. A misordered separator that reached disk would misroute
   lookups permanently (there is no repair path, #1152), and the checks cost four
   comparisons per split.
+
+### Update workloads after sequential loads
+
+Packing sequential loads leaves less space for later updates: 5,000 ascending
+1,024-byte keys use 834 leaves at 78% fill instead of midpoint's 1,666 at 39%.
+The midpoint baseline absorbs new references into that unused space; the fixed
+policy splits more often during updates, an accepted trade-off for the denser
+load. The table reports total leaves after the load plus one new reference per
+key (10,000 entries, seed 1196, no pruning). Capacities include each entry's
+reference, stamps and directory slot; the size shown is the encoded key length.
+
+| Key bytes / entries per leaf | Load order | Update order | Base midpoint (`07fcc48c8`) | Unrestricted run ends (`7a4d055ed`) | Fixed (`d24fac410`) |
+|---|---|---|---|---|---|
+| 1,024 / 7 | ascending | random | 1,667 | 2,580 | 1,944 |
+| 1,024 / 7 | ascending | ascending | 1,667 | 2,500 | 2,500 |
+| 500 / 15 | ascending | random | 715 | 1,299 | 870 |
+| 500 / 15 | ascending | ascending | 715 | 1,429 | 1,072 |
+| 52 / 100 | ascending | random | 100 | 193 | 101 |
+| 52 / 100 | ascending | ascending | 100 | 301 | 101 |
+| 1,024 / 7 | random | random | 2,095 | 2,493 | 2,093 |
+| 1,024 / 7 | random | ascending | 2,228 | 2,367 | 2,228 |
+| 500 / 15 | random | random | 967 | 1,256 | 963 |
+| 500 / 15 | random | ascending | 1,075 | 1,177 | 1,076 |
+| 52 / 100 | random | random | 139 | 190 | 139 |
+| 52 / 100 | random | ascending | 139 | 185 | 139 |
+
+`BTreeShapeTests` bounds the four larger-key ascending-load cases by their
+`7a4d055ed` regression levels and reports both the load's leaves and the total
+after updates. Random-load cases at all three sizes, and the 52-byte
+ascending-load cases, retain the strict 5% midpoint tolerance.
+PostgreSQL makes the equivalent space/headroom trade through its
+[rightmost strategy (`src/backend/access/nbtree/nbtsplitloc.c:287-292`)](https://github.com/postgres/postgres/blob/85f55534e80b633bdb7bfc91eaa5793021d6bf66/src/backend/access/nbtree/nbtsplitloc.c#L287-L292)
+and [single-value strategy (`nbtsplitloc.c:987-1033`)](https://github.com/postgres/postgres/blob/85f55534e80b633bdb7bfc91eaa5793021d6bf66/src/backend/access/nbtree/nbtsplitloc.c#L987-L1033);
+its default leaf fillfactor is 90%, with 96% for single-value pages
+([`src/include/access/nbtree.h:191-203`, default at line 201](https://github.com/postgres/postgres/blob/85f55534e80b633bdb7bfc91eaa5793021d6bf66/src/include/access/nbtree.h#L191-L203)).
+A 90% byte-fill experiment here retained the 834-leaf sequential result but made
+the 64-byte ascending-update case worse, from 175 to 192 leaves (midpoint: 117;
+unrestricted run ends: 349), so it was not adopted and the committed split policy
+is retained.
 
 ### Page format 2 and the format gate
 

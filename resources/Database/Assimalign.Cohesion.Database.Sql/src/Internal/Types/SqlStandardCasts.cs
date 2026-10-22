@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Entries convert storage values; CAST applies target modifiers and domain checks afterwards.
 /// Exact numeric widenings are implicit, narrowings and output to character types assignment,
 /// and text input explicit. JSON/JSONB pairs are assignment casts. Literal text uses SqlLiteralText's strict
-/// grammar; assignment's SqlTemporalText reader retains its separate input acceptance.
+/// grammar, shared by TIME/INTERVAL assignment; SqlTemporalText retains DATE and timestamp assignment acceptance.
 /// </remarks>
 internal static class SqlStandardCasts
 {
@@ -85,11 +85,11 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, decimal>(SqlType.Text, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
         SqlCast.Create<string, float>(SqlType.Text, SqlType.Real, static text => ParseReal(text), Explicit),
         SqlCast.Create<string, double>(SqlType.Text, SqlType.Double, static text => ParseFloat(text), Explicit),
-        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => SqlLiteralText.ParseDate(text.Trim()), Explicit),
-        SqlCast.Create<string, TimeOnly>(SqlType.Text, SqlType.Time, static text => SqlLiteralText.ParseTime(text.Trim()), Explicit),
-        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp, static text => SqlLiteralText.ParseTimestamp(text.Trim()), Explicit),
-        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlLiteralText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
-        SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => SqlCastText.ParseInterval(text), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Text, SqlType.Date, static text => SqlTemporalText.ParseDate(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeOnly>(SqlType.Text, SqlType.Time, static text => SqlTemporalText.ParseTime(text), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Text, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Text, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeSpan>(SqlType.Text, SqlType.Interval, static text => SqlTemporalText.ParseInterval(text), Explicit),
         SqlCast.Create<string, Guid>(SqlType.Text, SqlType.Uuid, static text => Guid.Parse(text.Trim()), Explicit),
 
         SqlCast.Create<string, byte[]>(SqlType.Text, SqlType.Binary, static text => SqlCastText.ParseBinary(text), Explicit),
@@ -124,11 +124,11 @@ internal static class SqlStandardCasts
         SqlCast.Create<string, decimal>(SqlType.Character, SqlType.Numeric, static text => SqlCastConverter.ParseExactDecimal(text), Explicit),
         SqlCast.Create<string, float>(SqlType.Character, SqlType.Real, static text => ParseReal(text), Explicit),
         SqlCast.Create<string, double>(SqlType.Character, SqlType.Double, static text => ParseFloat(text), Explicit),
-        SqlCast.Create<string, DateOnly>(SqlType.Character, SqlType.Date, static text => SqlLiteralText.ParseDate(text.Trim()), Explicit),
-        SqlCast.Create<string, TimeOnly>(SqlType.Character, SqlType.Time, static text => SqlLiteralText.ParseTime(text.Trim()), Explicit),
-        SqlCast.Create<string, DateTime>(SqlType.Character, SqlType.Timestamp, static text => SqlLiteralText.ParseTimestamp(text.Trim()), Explicit),
-        SqlCast.Create<string, DateTimeOffset>(SqlType.Character, SqlType.TimestampTz, static text => SqlLiteralText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
-        SqlCast.Create<string, TimeSpan>(SqlType.Character, SqlType.Interval, static text => SqlCastText.ParseInterval(text), Explicit),
+        SqlCast.Create<string, DateOnly>(SqlType.Character, SqlType.Date, static text => SqlTemporalText.ParseDate(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeOnly>(SqlType.Character, SqlType.Time, static text => SqlTemporalText.ParseTime(text), Explicit),
+        SqlCast.Create<string, DateTime>(SqlType.Character, SqlType.Timestamp, static text => SqlTemporalText.ParseTimestamp(text.Trim()), Explicit),
+        SqlCast.Create<string, DateTimeOffset>(SqlType.Character, SqlType.TimestampTz, static text => SqlTemporalText.ParseTimestampWithTimeZone(text.Trim()), Explicit),
+        SqlCast.Create<string, TimeSpan>(SqlType.Character, SqlType.Interval, static text => SqlTemporalText.ParseInterval(text), Explicit),
         SqlCast.Create<string, Guid>(SqlType.Character, SqlType.Uuid, static text => Guid.Parse(text.Trim()), Explicit),
 
         // Among the exact numbers: widenings implicit, narrowings assignment and range-checked.
@@ -203,7 +203,7 @@ internal static class SqlStandardCasts
             : throw new InvalidCastException("An integer target requires a whole number; truncation is not supported.");
 
     /// <summary>Reads text as a binary floating-point number: no grouping, as for the exact numbers.</summary>
-    private static double ParseFloat(string text)
+    internal static double ParseFloat(string text)
     {
         string input = text.Trim();
         double value = double.Parse(input, NumberStyles.Float, CultureInfo.InvariantCulture);
@@ -230,7 +230,7 @@ internal static class SqlStandardCasts
 
     /// <summary>Narrows to REAL, refusing a finite value REAL overflows or underflows to zero, as PostgreSQL does.</summary>
     // A first rounding to DOUBLE can land on a REAL midpoint; parse directly for the target.
-    private static float ParseReal(string text)
+    internal static float ParseReal(string text)
         => CheckReal(ParseFloat(text), float.Parse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture));
 
     private static float ToReal(double value) => CheckReal(value, (float)value);
