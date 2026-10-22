@@ -14,6 +14,8 @@ representation — model-specific layouts live in the Storage components of each
 - **Buffer pool** — an internal pin/unpin cache over a `StorageStream`;
   checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
+  Shrinking releases surplus recycled buffers as well as evicting residents, including
+  after a partially failed shrink; retained memory follows the resulting capacity.
 - **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
   the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open,
   and internal per-owner free-byte hints for refilling older partially empty record pages.

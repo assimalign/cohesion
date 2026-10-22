@@ -175,6 +175,12 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     _capacity = Math.Max(_capacity, _entries.Count);
                     throw;
                 }
+                finally
+                {
+                    // Shrink the retained pool too: detached buffers are still owned
+                    // memory, including after a partially successful write-back pass.
+                    while (_recycled.Count > _capacity - _entries.Count) { _recycled.Pop(); }
+                }
 
                 AssertInvariantsLocked();
             }

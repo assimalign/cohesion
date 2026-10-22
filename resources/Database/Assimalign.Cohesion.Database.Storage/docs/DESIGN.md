@@ -545,6 +545,15 @@ third of the 4,096-page rate ("Measurements").
   pages, writing dirty ones back through the write-ahead gate, until the resident set fits; if
   more pages than the new capacity are pinned, the resize throws `StorageIOException` and the
   pool keeps its capacity.
+  A shrink also drops recycled entries beyond the space left by resident pages, so retained
+  buffers obey the new capacity. If write-back fails after some evictions, the existing
+  recovery capacity remains the larger of the requested count and surviving residents;
+  surplus recycled buffers are released against that recovered count in `finally`.
+  Before this fix (found during #1541), reducing a 16-frame pool to 1 or 4 retained all
+  16 pinned-heap buffers, and failure after one eviction retained 16 against a recovered
+  capacity of 15. Weak references now observe exactly 1, 4 and 15 surviving buffers,
+  respectively, while the original write failure retains its identity. No pinned handle's
+  buffer is discarded, and no hot pin/unpin, format or public signature changes.
 
 ## The record layer
 
