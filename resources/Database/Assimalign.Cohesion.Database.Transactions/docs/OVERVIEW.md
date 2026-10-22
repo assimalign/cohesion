@@ -63,6 +63,12 @@ The statement-mark/re-grant zero-allocation contract is verified in optimized Re
 with tiered compilation disabled. Functional mark and arbitration tests also run in Debug.
 See DESIGN, unwritten statement marks, for the platform-measurement regression after #1689.
 
+Exact allocation guards also run with background GC disabled in this test host: an upstream
+runtime accounting defect can report unused context bytes as allocations during an empty
+interval. A runtime-configuration guard and a real-allocation positive control verify the
+measurement. Product GC policy and runner parallelism are unaffected. DESIGN records the
+controlled reproduction found during #1288 and its relation to the statement-mark guard.
+
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.

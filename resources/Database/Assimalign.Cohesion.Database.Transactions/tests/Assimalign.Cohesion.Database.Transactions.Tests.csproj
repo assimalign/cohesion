@@ -5,6 +5,9 @@
 		<!-- Allocation guards describe the optimized path, as NativeAOT does. Runtime
 		     tier transitions and first-use helpers must not enter the measured loop. -->
 		<TieredCompilation>false</TieredCompilation>
+		<!-- dotnet/runtime#134724: background GC can charge abandoned allocation-context
+		     bytes to a zero-allocation interval. Keep the exact guard and verify this setting. -->
+		<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />

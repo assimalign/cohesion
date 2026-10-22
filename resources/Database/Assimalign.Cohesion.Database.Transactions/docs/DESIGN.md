@@ -512,11 +512,33 @@ The mark/re-grant allocation guard runs only in Release, with tiered compilation
 this test project, as SQL already does. Its populated-table, uncontended loop still requires
 exactly zero bytes over 1,000 operations after 100 warmups; runtime tier transitions cannot
 define the production allocation contract. The Linux failure after #1689 reported 1,792 bytes;
-Windows did not reproduce it, including with tiering enabled. The optimized path adds no
+Initial unpressured Windows runs did not reproduce it, including with tiering enabled. The optimized path adds no
 entry, owner list, waiter or grant and allocates no product object. A forced 16-byte-array
 allocation per mark fails the guard before restoration. This changes test execution, not
 locking semantics. PostgreSQL likewise handles an already-held lock through its local grant
 path (src/backend/storage/lmgr/lock.c:969-982); no reference code is copied.
+
+**Exact counters also exclude background-GC accounting (found during #1288).** Tiering
+control alone is insufficient: the Storage map's new zero-byte guard passed alone but
+reported 7,288 bytes in the full Release suite. A standalone .NET 10.0.13 win-arm64
+control measured only counter reads and `SpinWait`, yet background GC produced four
+8,136-byte deltas in 256 intervals; the same executable with concurrent GC disabled
+reported zero in every interval. Explicit allocation controls were 64 bytes in all
+32 samples in both modes. Replacing `SpinWait` with the existing 1,000 mark/re-grant
+loop produced seven nonzero intervals out of 2,048 with background GC, and none
+without it. The zero-byte assertion and operation count therefore remain unchanged;
+this test host disables concurrent GC and checks the actual `ConcurrentGC` runtime
+configuration. A real-allocation positive control remains observable. Runner parallelism
+is uncapped; model-engine suites retain their own GC configuration.
+
+This matches the upstream accounting defect [dotnet/runtime#134724](https://github.com/dotnet/runtime/issues/134724)
+and its proposed [fix #134855](https://github.com/dotnet/runtime/pull/134855).
+The consulted runtime source computes the counter after subtracting the unused context
+(`src/coreclr/vm/comutilnative.cpp:859–868`); the normal collection path retires those
+bytes (`src/coreclr/gc/allocation.cpp:1123–1130`), while background context clearing
+zeroes its pointers (`:1149–1158`). No runtime code is copied or changed. The test-only
+configuration gives a platform-independent measurement without an allowance, a minimum
+of retries or suppressing product allocations. The runtime fix remains an upstream follow-up.
 
 This operation performs no undo: it releases only after unwritten arbitration or a failed
 statement bracket that has already been fully restored physically (#1231). Surviving writes
