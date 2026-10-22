@@ -1066,9 +1066,23 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         private readonly object _dirtySync = new();
         private readonly StorageBufferPool _pool;
 
-        // Odd while a rollback rewrites the page in place, advanced by two by every restore
-        // (BeginRestore, EndRestore); read by record readers that hold only a pin (BeginRead).
-        private int _restoreSequence;
+        // Even when stable, odd while a mutable handle or rollback can change the
+        // live bytes. Private to this frame: no process-wide work counter.
+        private long _restoreSequence;
+        private object? _writer;
+        private int _writerThread;
+        private int _writeDepth;
+        private int _writeEpoch;
+        private int _restoring;
+        private int _restoreEpoch;
+        // Allocated only if a bracket completes while a mutable handle is still
+        // pinned. Its eventual disposal must not release a later writer's epoch.
+        private Dictionary<int, int>? _retiredEpochs;
+
+        // Test rendezvous when an unlatched reader must wait for this frame's writer.
+        internal Action? ReadWaitStarted { get; set; }
+        internal Action? ReadCopied { get; set; }
+        internal Action? OwnReadAccepted { get; set; }
 
         public BufferEntry(byte[] buffer, StorageBufferPool pool)
         {
@@ -1102,56 +1116,142 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
 
         /// <summary>
-        /// Starts a read of the page that must not observe a rollback's restore half done, and
-        /// returns the restore sequence to confirm it with (<see cref="IsUnchangedSince"/>). Waits
-        /// while a restore is rewriting the page; a restore is one copy of the page, so the wait is
-        /// short unless the restoring thread is descheduled.
+        /// Starts a private-copy read, confirmed with IsUnchangedSince. Both forward
+        /// writes and rollback use PostgreSQL's change-count protocol
+        /// (src/include/utils/backend_status.h:101-116,181-238); no code copied.
         /// </summary>
-        /// <remarks>
-        /// A sequence lock, PostgreSQL's <c>st_changecount</c> protocol
-        /// (<c>src/include/utils/backend_status.h:101-116</c>, <c>:181-238</c>): the restore makes
-        /// the sequence odd before it changes the page and even again after, and a read that saw
-        /// the same even value before and after it saw no restore. The page's own writers do not
-        /// advance it: a bracket's forward changes publish in an order a pinned reader can follow
-        /// (<see cref="SlottedPage"/>), and only the restore rewrites bytes a reader may be copying.
-        /// </remarks>
-        public int BeginRead()
+        public long BeginRead()
         {
-            int sequence = Volatile.Read(ref _restoreSequence);
-            return (sequence & 1) == 0 ? sequence : WaitForRestore();
+            long sequence = Volatile.Read(ref _restoreSequence);
+            return (sequence & 1) == 0 ? sequence : WaitForWriter();
         }
 
         /// <summary>
-        /// Returns whether no restore started or ran since <paramref name="sequence"/> was read
+        /// Returns whether no write boundary ran since <paramref name="sequence"/> was read
         /// (<see cref="BeginRead"/>): every load the read made before this call happened before the
         /// sequence is read again, so a read this confirms saw one state of the page.
         /// </summary>
-        public bool IsUnchangedSince(int sequence)
+        public bool IsUnchangedSince(long sequence)
         {
+            ReadCopied?.Invoke();
             Volatile.ReadBarrier();
             return Volatile.Read(ref _restoreSequence) == sequence;
         }
 
-        /// <summary>
-        /// Marks the page as being restored in place; the restoring thread holds the page's write
-        /// lock, so no other writer changes it, and calls <see cref="EndRestore"/> when the page is
-        /// whole again, also on failure.
-        /// </summary>
-        public void BeginRestore() => Interlocked.Increment(ref _restoreSequence);
+        internal int BeginWrite(object owner) => BeginWriteCore(owner, restoring: false);
 
-        /// <summary>Marks the restore <see cref="BeginRestore"/> started as finished.</summary>
-        public void EndRestore() => Interlocked.Increment(ref _restoreSequence);
+        private int BeginWriteCore(object owner, bool restoring)
+        {
+            lock (_dirtySync)
+            {
+                RetireCompletedWriter();
+                while (_writer is not null && !ReferenceEquals(_writer, owner))
+                {
+                    Monitor.Wait(_dirtySync);
+                    RetireCompletedWriter();
+                }
+                // Exclude own-thread reads before publishing the restore boundary.
+                if (restoring) { Volatile.Write(ref _restoring, 1); }
+                if (_writer is null)
+                {
+                    do { _writeEpoch = unchecked(_writeEpoch + 1); }
+                    while (_writeEpoch == 0 || (_retiredEpochs?.ContainsKey(_writeEpoch) ?? false));
+                    _writer = owner;
+                    _writerThread = Environment.CurrentManagedThreadId;
+                    Interlocked.Increment(ref _restoreSequence);
+                }
+                else
+                {
+                    // Keep it odd, but invalidate an own-thread read across a
+                    // nested write as well as a read across the outer scope.
+                    Interlocked.Add(ref _restoreSequence, 2);
+                }
+                _writeDepth++;
+                return _writeEpoch;
+            }
+        }
 
-        private int WaitForRestore()
+        internal void AdoptWriter(int epoch, object previousOwner, object owner)
+        {
+            lock (_dirtySync)
+            {
+                if (_writeEpoch == epoch && ReferenceEquals(_writer, previousOwner)) { _writer = owner; }
+            }
+        }
+
+        internal void EndWrite(int epoch)
+        {
+            lock (_dirtySync)
+            {
+                if (_writer is not null && epoch == _writeEpoch)
+                {
+                    if (--_writeDepth == 0) { FinishWriter(); }
+                    else { Interlocked.Add(ref _restoreSequence, 2); }
+                }
+                else if (_retiredEpochs is not null && _retiredEpochs.TryGetValue(epoch, out int count))
+                {
+                    if (count == 1) { _retiredEpochs.Remove(epoch); }
+                    else { _retiredEpochs[epoch] = count - 1; }
+                }
+            }
+        }
+
+        public void BeginRestore(object? owner = null)
+        {
+            _restoreEpoch = BeginWriteCore(owner ?? this, restoring: true);
+        }
+
+        public void EndRestore()
+        {
+            lock (_dirtySync)
+            {
+                Volatile.Write(ref _restoring, 0);
+                EndWrite(_restoreEpoch);
+            }
+        }
+
+        private void RetireCompletedWriter()
+        {
+            if (_writer is StorageTransaction transaction && !transaction.IsActive)
+            {
+                (_retiredEpochs ??= new())[_writeEpoch] = _writeDepth;
+                FinishWriter();
+            }
+        }
+
+        private void FinishWriter()
+        {
+            _writeDepth = 0;
+            _writer = null;
+            Volatile.Write(ref _writerThread, 0);
+            Interlocked.Increment(ref _restoreSequence);
+            Monitor.PulseAll(_dirtySync);
+        }
+
+        private long WaitForWriter()
         {
             var spinner = new SpinWait();
-            int sequence;
-            while (((sequence = Volatile.Read(ref _restoreSequence)) & 1) != 0)
+            bool observed = false;
+            while (true)
             {
+                // Capture before permission: a restore starting after the check
+                // must invalidate this copy, never supply it with a newer token.
+                long sequence = Volatile.Read(ref _restoreSequence);
+                if ((sequence & 1) == 0) { return sequence; }
+                if (Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId
+                    && Volatile.Read(ref _restoring) == 0)
+                {
+                    OwnReadAccepted?.Invoke();
+                    return sequence;
+                }
+                if (!observed)
+                {
+                    ReadWaitStarted?.Invoke();
+                    observed = true;
+                }
+                lock (_dirtySync) { RetireCompletedWriter(); }
                 spinner.SpinOnce();
             }
-
-            return sequence;
         }
     }
 }

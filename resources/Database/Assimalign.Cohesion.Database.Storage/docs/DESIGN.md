@@ -570,14 +570,13 @@ instead of dereferencing it:
   writer — a scan takes a pin, not a latch — so they enforce only what holds in every state a
   well-formed page passes through: the slot index lies inside a directory a page can
   hold, and the record lies inside the page body. That is what keeps a read inside the
-  buffer. A read racing a change can still copy a torn record — stale bytes, or bytes an
-  in-place `UpdateSlot` or a page clear is overwriting — which is the content-isolation
-  question page latches would answer; the layers above own it today (the SQL and key-value
-  reads confirm a record that does not decode by reading it again, each model's DESIGN,
-  "Error model"). A rollback's page restore is not among them: `TryReadRecord` and the unit
-  iterator confirm each read against the page's restore sequence and read again when a restore
-  overlapped it, and a latched structure's pages are restored under its latch ("No reader sees a
-  rollback's restore half done", #1371). A reader that walks slots uses `TryReadSlot`,
+  buffer. Storage's unlatched readers additionally confirm their private copy against the
+  frame's 64-bit restore sequence, advanced by forward writers and rollback (D1, #1365).
+  A copy overlapping `UpdateSlot`, a tombstone stamp, a page clear or compaction is retried;
+  stable malformed geometry still throws. Protected `ReadRecord` confirms its length/read
+  pair together, preventing a concurrent size change from publishing a truncated or padded
+  result. A latched structure's pages are still restored under its latch (#1371).
+  A reader that walks slots uses `TryReadSlot`,
   which reads the slot count and one snapshot of the slot entry and copies the record from
   that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
   the read ("Reading a record through a reference", below).
@@ -740,7 +739,7 @@ reclamation positively and returns `false`; every other failure throws:
 | Its page was freed | `StoragePageManager.TryGetPage`, which checks `FreeSpaceMap.IsAllocated` and pins only an allocated page | `false` |
 | Its page now holds a non-data page, or (owner overload) another owner's records | the page header's type and owner tag, under the pin | `false` |
 | Its slot lies past the slot directory (a rollback reverted it), or is deleted | `SlottedPage.TryReadSlot`, over one snapshot of the slot entry | `false` |
-| Its page is being restored by a failed bracket's rollback | the buffer-pool frame's restore sequence, read before and after | read again once the page is whole (#1371) |
+| Its page is changing in place, including rollback | the buffer-pool frame's restore sequence, read before and after | wait for the mutable scope and retry an overlapping copy (D1, #1365) |
 | Its page fails its checksum, or its header or slot addresses bytes outside the page | the buffer-pool load; the slotted geometry checks | `StorageCorruptionException` |
 | Its page ends inside the stream, or every buffer-pool frame is pinned | the buffer-pool load | `StorageIOException` |
 | The device fails the read | the file handle | its `IOException` |
@@ -753,18 +752,17 @@ the type, owner or slot check. Catching the pin's "not allocated" failure and ch
 again would not do: a page freed and reallocated between the two checks reads as an I/O error,
 which a two-second race test (`StorageRecordReclamationTests`) reproduces on every run. The overload
 without an owner serves the version ledger, which does not know a record's owner and rechecks its
-stamps instead. The checks share the caveat of every pinned read beside the page's single writer
-(above): a read that races a free, a reallocation and a rewrite of the same frame can still see
-torn geometry. A rollback's restore is the one rewrite the read confirms against: until #1371 a
-read during the restore found a committed record's page cleared and returned `false`, and the
-models dropped live rows ("No reader sees a rollback's restore half done").
+stamps instead. Type, owner, slot and payload are inside one frame-sequence confirmation.
+A free/reuse rewrite cannot publish torn geometry or a partly overwritten payload; stable
+reclamation still returns false and stable corruption still throws. This extends #1371's
+rollback-only confirmation to every in-place writer (D1).
 
 A scan meets the same reclamation without a reference. `StorageUnitIterator` pins a page and
 holds the pin across `MoveNext` calls, but not a latch, so the version purge deletes slots, a
 failed statement's rollback reverts the page to fewer slots, and an emptied page is freed while
 the scan stands on it or between its allocation check and its pin. The iterator pins through
 `TryGetPage` and reads each slot through `TryReadSlot`, so it skips what was reclaimed and still
-fails on a page it cannot read; a read a restore overlapped is read again, as above (#1371).
+fails on a page it cannot read; a read any in-place write overlapped is read again (D1).
 Until #1342 it read the slot count, the slot's length and the
 slot as three separate reads, and a SQL `UPDATE` or `DELETE` that scanned its target table beside
 the purge failed with "Cannot read a deleted slot", an out-of-range slot index, or "Page N is not
@@ -1156,14 +1154,51 @@ does not take.
   runs), and the tests that hold a restore open while a read or a scan starts
   (`StorageRollbackRestoreReadTests`) fail at once. Without the single copy the sequence alone
   would be correct, but a reader would wait out a journal read for a spilled pre-image.
-- **The page's own writers do not advance the sequence.** A bracket's forward changes publish in
-  an order a pinned reader follows ("The record layer"), and only the restore rewrites bytes a
-  reader may be copying. A reader waits only while one page is copied, and a restore holds no
-  lock while it copies, so the wait cannot be part of a cycle.
-- **Cost.** On the ARM64 development host an isolated `TryReadRecord` measured 172 to 202 ns per
-  call (run medians) with the check and 160 to 197 ns without it, about 10 ns and inside the
-  run-to-run spread; owner scans and a bracket of 40 inserts rolled back showed no difference
-  beyond noise. The restore copies each page twice, 16 KiB per page, on the rollback path only.
+- **Forward writes advance the sequence too (D1, #1365).** Every writable handle opens a
+  frame-local mutable epoch before changing live bytes and closes it on disposal, including
+  allocation/free clears, `UpdateSlot`, tombstone stamps and LSN stamps. Nested handles from
+  the same physical transaction keep the sequence odd until the last closes; nested boundaries
+  also invalidate earlier reads. `MarkDirty` does not end the scope: bytes may still change.
+  Existing-page first-touch journal I/O precedes the mutable scope. Rollback builds its private
+  image, including spilled-image I/O, before opening the short live-copy scope.
+- **Writer identity and lifetime.** A private frame gate tracks the physical transaction;
+  it does not hold a thread-affine monitor across the handle's lifetime. Disposal remains
+  idempotent and may run on another thread. A synchronous read on the writer's own thread sees
+  its forward changes; another thread waits. Rollback excludes that bypass before advancing
+  its sequence, and an own-thread reader captures its token before checking permission. A
+  restore starting after permission therefore invalidates the copy. The wait loop rechecks
+  permission after a nested restore ends, even with the outer handle still active. Completion
+  publishes the transaction's inactive state with a volatile store. A reader or later writer
+  retires a completed bracket's epoch even when its handle remains pinned, and late disposal
+  cannot close a newer epoch. Only that exceptional lifetime allocates retired-epoch accounting.
+  An interrupted raw overwrite wait releases its newly acquired pin and rethrows the same
+  failure. Mutable access is valid only while the bracket is active. Normal handle allocation size is
+  unchanged; all sequence work is frame-local, with no process-wide per-write atomic counter.
+- **Allocation publication.** The map reserves an identity without publishing it. Pinning,
+  growth and initialization hold no map monitor. Raw allocation publishes after initialization;
+  transaction allocation additionally waits for owner stamping and first-touch ownership.
+  Allocation predicates exclude reservations; failure uses the existing free path. A stale
+  reader that passed the map before free/reuse still confirms its copy against the frame.
+  Exact-EOF short-read speculation was ruled out: `Pin` supplies a zero frame there. Premature
+  visibility was confirmed; a partial-page read retains its existing I/O failure.
+- **Evidence.** The eight original `StorageInPlaceReadTests` cases all failed before the fix:
+  all three read paths returned a synthetic half-written record, four record mutations left
+  the old sequence valid, and allocation exposed the reserved identity. Tests observe a real
+  frame-wait event or completion, with 30-second hang guards. Additional cases exercise size
+  changes, nested handles, completion, cross-thread disposal, token wrap, a copy-to-confirm
+  write, rollback after own-read permission and interrupted overwrite cleanup. The complete
+  focused set has 23 cases.
+  PostgreSQL's change-count reference above informs the ordering/private-copy protocol;
+  no code was copied. The writer lifetime implementation is specific to Cohesion.
+- **Measured cost.** On .NET 10.0.13 / SDK 10.0.401, Windows ARM64 Release with tiering
+  disabled, one warmup and twelve samples per build, a 64-byte owner-scoped `TryReadRecord`
+  (200,000 calls/sample) moved from median 77.518 to 80.02475 ns/read. Same-size `Update`
+  (100,000 calls/sample in one physical bracket, begin/rollback outside the interval) moved
+  from 109.216 to 160.9625 ns/update. Eleven of twelve read samples and all twelve update
+  samples exceeded the before median. Allocation stayed 136 bytes/read and 48.003760
+  bytes/update; the latter amortizes first touch. The private writer gate and ordered epoch cost 51.7465 ns/update
+  in this small in-memory kernel workload. These are descriptive measurements, not timing
+  assertions; correctness requires the D1 ordering. Rollback still copies a page twice.
 
 **A latched structure's pages are restored last, under its latch.** `StoragePageLatch` is the
 tree latch, owned by the storage so a rollback can take it. A structure whose readers take no
@@ -1197,12 +1232,12 @@ as it was before.
   the page's LSN field, which no structure reads.
 - **The overloads without a latch are unchanged**, and right for pages read under a pin
   (records) or read by nothing until their owner publishes them (a new tree's root page).
-- **A design question stays open.** PostgreSQL and Voron never restore a page a reader can see:
+- **Physical index rollback retained (#1393, approved).** PostgreSQL and Voron never restore a page a reader can see:
   PostgreSQL leaves an aborted transaction's index entries for later pruning, and Voron writes
   into private page copies that a rollback discards. Moving index pages off physical rollback
   needs a statement-level stamp or a logical statement undo, and a bracket that can commit some
   pages while rolling back others, which this storage does not offer; the `Database.Indexing`
-  DESIGN records it for the owner.
+  DESIGN records the approved status quo and its tradeoffs.
 
 ### The debug consistency check (#1253)
 

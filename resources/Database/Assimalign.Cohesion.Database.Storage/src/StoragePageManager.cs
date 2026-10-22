@@ -53,9 +53,9 @@ public sealed class StoragePageManager
     /// </summary>
     /// <param name="type">The type of page to allocate.</param>
     /// <returns>A handle to the newly allocated page, pinned in the buffer pool.</returns>
-    internal unsafe StoragePageHandle AllocatePage(PageType type)
+    internal unsafe StoragePageHandle AllocatePage(PageType type, bool publish = true)
     {
-        var pageId = _freeSpaceMap.Allocate();
+        var pageId = _freeSpaceMap.Reserve();
 
         // Pin the page without reading it: every byte is cleared below, so the free page's
         // old content is never needed, and a free page whose last write a crash tore (an
@@ -63,6 +63,7 @@ public sealed class StoragePageManager
         StoragePageHandle handle;
         try
         {
+            PageReserved?.Invoke(pageId);
             handle = _bufferPool.PinForOverwrite(pageId, _stream);
         }
         catch
@@ -86,6 +87,7 @@ public sealed class StoragePageManager
             // Run the audit hook before changing the buffer: if it refuses the allocation,
             // a resident free page must keep its previous bytes and dirty version.
             WroteOutsideJournal?.Invoke((long)pageId);
+            handle.BeginWrite(handle);
 
             // Initialize the fresh page (local copy shares the same pointer). The clear spans
             // the pool buffer's fixed size, never a length read from the page's own header.
@@ -104,7 +106,7 @@ public sealed class StoragePageManager
             // its touch, initialization included (invariant A), and anything else allocating is the
             // storage itself (its first page, an anchor page) or a test through the internal API.
             handle.MarkDirty();
-
+            if (publish) { _freeSpaceMap.Publish(pageId); }
             return handle;
         }
         catch
@@ -122,6 +124,10 @@ public sealed class StoragePageManager
     /// transaction until the next checkpoint writes it.
     /// </summary>
     internal Action<long>? WroteOutsideJournal;
+
+    // Test rendezvous after reserving the identity, before a frame is initialized.
+    // No map or pool monitor is held.
+    internal Action<PageId>? PageReserved { get; set; }
 
     /// <summary>
     /// Returns a page to the free space map, making it available for reuse.
@@ -143,6 +149,7 @@ public sealed class StoragePageManager
         // page headers when the file is reopened, then return it to the map.
         using (var handle = _bufferPool.Pin(pageId, _stream))
         {
+            handle.BeginWrite(handle);
             var page = handle.Page;
             new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = (long)pageId;
@@ -169,7 +176,17 @@ public sealed class StoragePageManager
             throw new StorageIOException($"Page {(long)pageId} is not allocated.");
         }
 
-        return _bufferPool.PinForOverwrite(pageId, _stream);
+        var handle = _bufferPool.PinForOverwrite(pageId, _stream);
+        try
+        {
+            handle.BeginWrite(handle);
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

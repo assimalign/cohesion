@@ -20,8 +20,9 @@ representation — model-specific layouts live in the Storage components of each
   begins only after commit, and recovery rebuilds the owner directories alongside the FSM.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
   pages, storage transactions (`StorageTransaction`), and `StorageUnitIterator` full scans.
-  A rollback restores each page in one copy that record reads confirm against, so a committed
-  record beside a failed bracket's changes is never read as reclaimed; a structure whose readers
+  Every in-place write advances a frame-local sequence: unlatched record reads copy, confirm
+  and retry an overlapping forward write or rollback. Allocation identities stay unpublished
+  until initialization and transaction ownership are ready (D1, #1365). A structure whose readers
   take no page write lock (a B-tree) writes its pages under its `StoragePageLatch`, and a
   rollback restores them last, under that latch (#1371).
 - **Journal** — `StorageJournal` write-ahead logging with begin/commit/rollback
@@ -103,3 +104,13 @@ allocation checks and refuses an attempted free without changing allocator state
 the negative-free/next-negative-allocation defect found during #1365, without changing valid
 page allocation, public signatures or storage format 4. DESIGN records the reproduction and
 measured check cost.
+
+## Confirmed unlatched reads (D1, #1365)
+
+A writable page handle brackets all mutations, including changes after `MarkDirty`.
+Nested handles keep the frame unstable until the last closes; a synchronous writer reads its
+own changes while other threads wait. Completion ends the mutable lifetime even when a pin
+outlives its transaction, and its eventual disposal cannot release a later writer. Rollback
+still builds a private image before the short live-page copy. The 64-bit frame sequence and
+reserved allocation identities are memory-only: storage format 4, public signatures, error
+codes and the wire protocol do not change. Compaction activation remains #1161's ordered work.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
@@ -38,8 +39,9 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// </para>
 /// <para>
 /// A rollback restores pages in place, and no reader sees a page half restored (#1371). A record
-/// read holds only a pin and confirms its read against the page's restore, which copies the
-/// restored page over the live one in one pass. A structure whose readers read its pages without a
+/// read holds only a pin and confirms its private copy against the frame's sequence; both forward
+/// writes and rollback advance it. Rollback copies a privately restored image over the live page
+/// in one pass. A structure whose readers read its pages without a
 /// page write lock (a B-tree) changes them through the overloads that take its
 /// <see cref="StoragePageLatch"/>, and the rollback restores those pages, after every other page,
 /// while it holds each such latch exclusively, so those readers see the structure whole.
@@ -86,7 +88,7 @@ public sealed class StorageTransaction : IDisposable
     /// Gets a value indicating whether the transaction is still active (neither
     /// committed nor rolled back).
     /// </summary>
-    public bool IsActive => _active;
+    public bool IsActive => Volatile.Read(ref _active);
 
     /// <summary>
     /// Gets the pages this transaction has touched, each with the pre-image captured before its
@@ -257,7 +259,7 @@ public sealed class StorageTransaction : IDisposable
     /// transaction's page write locks and active count, so a rollback whose record append
     /// then fails is complete already, and <see cref="Dispose"/> does not roll it back again.
     /// </summary>
-    internal void MarkCompleted() => _active = false;
+    internal void MarkCompleted() => Volatile.Write(ref _active, false);
 
     /// <summary>
     /// Commits the transaction: journals the changed bytes of every modified page and a

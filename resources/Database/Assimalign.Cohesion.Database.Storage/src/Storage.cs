@@ -1436,6 +1436,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// lock for the transaction and captures its pre-image on first touch, so the
     /// mutation is covered by the write-ahead log like any record operation. Used by
     /// subsystems that own their page layout (index structures, catalogs).
+    /// Dispose the handle promptly after mutation: its lifetime brackets the frame's write
+    /// sequence, so other threads' unlatched record readers wait until the scope closes.
+    /// Mutable access ends when the transaction completes, even if the pin remains alive.
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page to modify.</param>
@@ -1528,7 +1531,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     private StoragePageHandle AllocateTouchedPage(StorageTransaction owner, PageType type, ulong ownerId)
     {
-        var handle = _pageManager!.AllocatePage(type);
+        var handle = _pageManager!.AllocatePage(type, publish: false);
 
         try
         {
@@ -1539,6 +1542,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 RegisterIndexOwnerPage(ownerId, handle.Id);
             }
             RegisterTouch(owner, handle, allocationOwnerId: ownerId);
+            handle.BeginWrite(owner);
+            _freeSpaceMap.Publish(handle.Id);
             return handle;
         }
         catch
@@ -1847,10 +1852,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <returns>A copy of the record data.</returns>
     /// <remarks>
-    /// The read is confirmed against the page's restore sequence, as
-    /// <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>'s is: a read that
-    /// a failed bracket's rollback overlapped, and any failure it met, are repeated once the page
-    /// is whole, so the page's restore is never reported as a deleted slot or a malformed page (#1371).
+    /// The length and payload copy are confirmed together against the frame's sequence, as
+    /// <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>'s are. An overlapping
+    /// forward write or rollback, including an unconfirmed geometry failure, retries once the
+    /// frame is stable; confirmed failures retain their identity (D1, #1365).
     /// </remarks>
     protected unsafe ReadOnlyMemory<byte> ReadRecord(PageId pageId, int slotIndex)
     {
@@ -1858,7 +1863,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var entry = handle.Entry;
         while (true)
         {
-            int restore = entry.BeginRead();
+            long restore = entry.BeginRead();
             try
             {
                 var slotted = new SlottedPage(handle.Page);
@@ -1960,7 +1965,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             var entry = handle.Entry;
             while (true)
             {
-                int restore = entry.BeginRead();
+                long restore = entry.BeginRead();
                 try
                 {
                     bool found = TryReadSlotOf(handle.Page, slotIndex, ownerId, out byte[] bytes);
@@ -2453,6 +2458,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 long lsn = _journal!.AppendPageRecord(transaction.Sequence, (PageId)pageId, type, record, out _);
                 _consistency?.CommitRecordJournaled(transaction.Sequence, pageId, type, lsn, record, current);
 
+                handle.BeginWrite(transaction);
                 page.Lsn = lsn;
                 handle.MarkDirty();
             }
@@ -2595,10 +2601,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// rewrote it run by run: a committed record on the page read as reclaimed meanwhile, and the
     /// models above skipped its row.
     /// </remarks>
+    /// <param name="transaction">The physical bracket restoring the page.</param>
     /// <param name="pageId">The page.</param>
     /// <param name="preImage">Its pre-image.</param>
     /// <param name="image">A scratch buffer of at least <see cref="Page.Size"/> bytes.</param>
-    private unsafe void RestorePage(long pageId, in StoragePreImage preImage, byte[] image)
+    private unsafe void RestorePage(StorageTransaction transaction, long pageId, in StoragePreImage preImage, byte[] image)
     {
         using var handle = _pageManager!.GetPage((PageId)pageId);
         var page = new Span<byte>(handle.Page.Pointer, Page.Size);
@@ -2610,7 +2617,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         LoadPreImage(preImage, restored);
 
         var entry = handle.Entry;
-        entry.BeginRestore();
+        entry.BeginRestore(transaction);
         try
         {
             restored.CopyTo(page);
@@ -2731,7 +2738,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     continue;
                 }
 
-                RestorePage(pageId, preImage, image);
+                RestorePage(transaction, pageId, preImage, image);
             }
 
             if (latchedPages)
@@ -2743,7 +2750,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     {
                         if (transaction.IsLatchedPage(pageId))
                         {
-                            RestorePage(pageId, preImage, image);
+                            RestorePage(transaction, pageId, preImage, image);
                         }
                     }
                 }
@@ -3084,6 +3091,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 return false;
             }
 
+            pinned.BeginWrite(transaction);
             handle = pinned;
             return true;
         }
@@ -3102,7 +3110,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private StoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
     {
-        var handle = _pageManager!.AllocatePage(PageType.Data);
+        var handle = _pageManager!.AllocatePage(PageType.Data, publish: false);
 
         try
         {
@@ -3114,6 +3122,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             RegisterOwnerPage(ownerId, handle.Id);
             RegisterTouch(transaction, handle, allocationOwnerId: ownerId);
+            handle.BeginWrite(transaction);
+            _freeSpaceMap.Publish(handle.Id);
             return handle;
         }
         catch
@@ -3240,6 +3250,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 // Stamp the page so the write-ahead gate makes the image durable before any stolen
                 // write of the page reaches the data file, and keep the stamp: a page evicted clean
                 // would reload with its older LSN, and the next delta would name the wrong base.
+                handle.BeginWrite(transaction);
                 page.Lsn = lsn;
                 handle.MarkDirty();
 
