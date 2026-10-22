@@ -15,7 +15,8 @@ representation — model-specific layouts live in the Storage components of each
   checksum stamped on write-back, verified on load. 4,096 pages (32 MiB) by default,
   resizable through `Storage.BufferPoolCapacity`; engines expose it as an option (#1254).
 - **Page management** — the sealed `StoragePageManager` (allocation/free/retrieval/flush);
-  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open.
+  the sealed `StorageFreeSpaceMap` allocation tracking, rebuilt from page headers on open,
+  and internal per-owner free-byte hints for refilling older partially empty record pages.
   Owner-tagged data/index pages can be reclaimed in bounded transactional batches; reuse
   begins only after commit, and recovery rebuilds the owner directories alongside the FSM.
 - **Records** — `Storage` abstract base with insert/read/update/delete over slotted
@@ -124,7 +125,28 @@ their page and slot references. Compaction validates the whole plan before mutat
 preserves borrowed input, and retains deleted slot identities. Existing physical writer
 ownership and D1's mutable frame scope protect the rewrite; readers retry and WAL covers
 both committed and aborted layouts, including torn stolen writes. Older partly empty
-pages are revisited by #1288's subsequent free-byte map. Formats and public APIs are unchanged.
+pages are revisited by #1288's free-byte map. Formats and public APIs are unchanged.
+
+## Refilling older record pages (#1288)
+
+Inserts prefer the current page, then select an older page with sufficient packed capacity
+before extending the file. Deletes/purge and shrinking updates make their space discoverable;
+fragmented candidates compact under D1 writer ownership. Hints use one reusable heap node per
+page and include slot-directory cost. Selection rechecks the allocation generation, so a free
+and same-owner reuse cannot grant a stale writer the replacement page. All hint locks close
+before pinning or I/O.
+
+The map is memory only. Open's existing header scan and rollback seed unmeasured hints, which
+an owned insertion probe validates lazily; raw writable handles invalidate them, and nested
+probes leave them unmeasured until an outer writer can no longer change the layout. There is
+no new eager open-time scan or corruption boundary, format, diagnostic code, public API or
+wire change. Deleted slot identities remain reserved; directory exhaustion can still require
+another page. DESIGN records deterministic space-growth evidence and reference-engine citations.
+
+Storage's exact allocation tests use a guarded test-host configuration with background GC
+disabled to exclude the upstream runtime's allocation-context accounting artifact. The
+node-update bound remains zero, a deliberate allocating mutant still fails, and runner
+parallelism stays uncapped. Product GC configuration is supplied by its consumer.
 
 
 ## Confirmed decode failures (#1372)

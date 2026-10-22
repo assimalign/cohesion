@@ -357,7 +357,20 @@ public readonly unsafe struct SlottedPage
         => TryCompact(0, -1);
 
     // Storage calls these only with physical page ownership and a D1 mutable epoch.
-    internal bool TryCompactForInsert(int recordSize) => TryCompact(recordSize + sizeof(PageSlot), -1);
+    internal bool TryCompactForInsert(int recordSize) => TryCompactForInsert(recordSize, out _);
+
+    internal bool TryCompactForInsert(int recordSize, out int insertionCapacity)
+    {
+        bool compacted = TryCompact(recordSize + sizeof(PageSlot), -1, out insertionCapacity);
+        insertionCapacity -= sizeof(PageSlot);
+        return compacted;
+    }
+
+    internal int GetInsertionCapacity()
+    {
+        TryCompact(int.MaxValue, -1, out int capacity);
+        return capacity - sizeof(PageSlot);
+    }
 
     internal bool TryCompactForUpdate(int index, int recordSize)
     {
@@ -366,6 +379,9 @@ public readonly unsafe struct SlottedPage
     }
 
     private bool TryCompact(int requiredSpace, int omittedSlot)
+        => TryCompact(requiredSpace, omittedSlot, out _);
+
+    private bool TryCompact(int requiredSpace, int omittedSlot, out int availableSpace)
     {
         var header = (Page.Header*)_pointer;
         int slotCount = header->SlotCount;
@@ -413,7 +429,8 @@ public readonly unsafe struct SlottedPage
         }
 
         int omittedLength = omittedSlot < 0 ? 0 : SlotAt(omittedSlot)->Length;
-        if (requiredSpace > SlotDirectoryStart(slotCount) - BodyOffset - usedBytes + omittedLength)
+        availableSpace = SlotDirectoryStart(slotCount) - BodyOffset - usedBytes + omittedLength;
+        if (requiredSpace > availableSpace)
         {
             return false;
         }

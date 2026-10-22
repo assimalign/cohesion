@@ -1072,6 +1072,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         private object? _writer;
         private int _writerThread;
         private int _writeDepth;
+        // Only the owning writer reads this while updating a record-space hint.
+        internal bool HasNestedWriter => _writeDepth > 1;
         private int _writeEpoch;
         private int _restoring;
         private int _restoreEpoch;

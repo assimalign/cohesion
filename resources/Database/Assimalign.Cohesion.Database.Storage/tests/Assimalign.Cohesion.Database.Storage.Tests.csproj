@@ -2,6 +2,9 @@
 
 <PropertyGroup>
 	<RootNamespace>Assimalign.Cohesion.Database.Storage.Tests</RootNamespace>
+		<!-- dotnet/runtime#134724: exact counters must exclude background-GC context
+		     accounting artifacts. The suite asserts the actual runtime setting. -->
+		<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>

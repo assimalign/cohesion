@@ -613,7 +613,7 @@ instead of dereferencing it:
   records are corruption and fail before any byte moves. `Storage.InsertRecord`
   tries this on its current write page before allocating another page when contiguous
   space is insufficient. Deleted slot identities are retained; new inserts append a
-  directory entry. Reusing older partly empty pages remains #1288.
+  directory entry. Older partly empty pages are selected through #1288's free-byte hints below.
 - **Automatic compaction uses the D1 mutable scope (#1161).** Physical transaction
   ownership excludes competing writers, and the frame's writer scope advances its
   sequence before packing and closes after the replacement or insertion is published.
@@ -662,7 +662,7 @@ needed), `GetUnitIterator(ownerId)` iterates only the owner's pages, and
 object ids, so a table scan stops decoding the whole database.
 
 - **An owner is a long-lived object, never a transaction.** Each owner has one current
-  write page, and the free-space map holds only whole free pages, so a record shares a page
+  write page, with a per-owner free-byte map for older pages, so a record shares a page
   only with earlier records of its own owner. An owner per transaction therefore gives every
   transaction a page of its own. The document and blob engines tagged content chunks
   `writer | 1 << 63` until a 180-byte document took a whole 8 KiB page (1.009 pages per
@@ -675,14 +675,74 @@ object ids, so a table scan stops decoding the whole database.
   record, so logical transactions share a page freely as long as their physical brackets do not
   overlap on it: a bracket that touches a page another open bracket holds fails with a
   write-lock error, and the coordinator's apply gate runs a database's brackets one at a time.
-  A record that does not fit the current write page moves the owner to a fresh page, and
-  the page it leaves is not revisited: reusing partly free pages needs a free-space map that
-  records free bytes per page, as PostgreSQL's does (`GetPageWithFreeSpace`,
-  `src/backend/storage/freespace/freespace.c`).
+  A record that does not fit the current write page searches the owner's free-byte hints
+  before extending; a selected older page becomes the next current write page. The
+  whole-page `StorageFreeSpaceMap` remains the allocation/generation authority.
 - **The directory is in-memory only, page headers are the truth.** The per-owner
   page directory is rebuilt on open by the same header scan that rebuilds the
   free-space map (no extra I/O) and maintained at allocation/free time. A persisted
   directory could drift from reality; headers cannot (the FSM precedent).
+- **Free-byte hints are in memory only (#1288).** An indexed maximum heap per owner
+  stores one node per data page. A node holds the bytes available for an insertion
+  after packing, including the cost of its new slot entry:
+  `Page.Size - Page.HeaderSize - (SlotCount + 1) * sizeof(PageSlot) - liveRecordBytes`.
+  Insert subtracts payload plus entry size, delete/purge adds the deleted length,
+  and update adds old length minus new length. Compaction does not change aggregate
+  capacity. Whole-page releases remove the hint; rollback restores an unmeasured hint.
+  Updating a measured node reorders it without allocating a replacement node. The
+  current target remains the fast preference; a heap supplies a fitting older target
+  without copying or walking the owner directory. Among older pages it prefers the
+  greatest available capacity, then the lower page id for a tie, and fills that target
+  before searching again. A sorted set would allocate nodes on ordinary updates;
+  byte buckets could miss a fitting page at their rounding boundary.
+- **A hint never grants a write or establishes capacity.** Selection captures the
+  allocation generation under owner-lock then free-map-lock order. Both locks close
+  before pinning, first-touch registration, a callback or I/O. Registration confirms
+  that generation under the transaction lock; a stale selection is excluded from
+  this insert, including same-owner reuse. D1 writer ownership then protects the
+  physical capacity check and any compaction. A refused capacity is corrected before
+  another candidate is tried. No new process-wide atomic or public pin API is added.
+- **Open preserves its existing validation boundary.** The existing header scan
+  rebuilds data-page membership and seeds unmeasured capacities at the maximum record
+  size. An owned insertion probe measures actual slot geometry. There is no
+  extra eager full-page scan, persisted map, journal record or format change. Cold
+  searches may visit unmeasured full pages once before finding room; measured full
+  pages cannot remain false candidates. Raw `OpenPageForWrite` (with or without a
+  structure latch) invalidates its data page's hint. A nested typed probe leaves the
+  hint unmeasured because the outer writable handle may still change geometry after
+  it returns. Rollback invalidates restored hints without decoding damaged pre-images
+  during exception cleanup. The next owned probe validates them normally.
+- **Reuse evidence and limits.** `StorageFreeBytesTests` keeps 1,024 live 500-byte
+  records and performs 384 insert-before-purge replacements across partly full older
+  pages. After each 32 replacements, twelve samples remain at 67 pages after a seed
+  of 66; the old allocator grew from 68 through 90 in steps of two. Existing record
+  references and all payloads survive. Separate tests cover passed-over contiguous
+  space, fragmentation, shrinking updates, reopen, rollback, raw/nested writers and
+  generation races. Deleted slot entries still occupy directory bytes and are never
+  recycled into another record reference. A permanently anchored page can therefore
+  eventually exhaust directory capacity despite free payload bytes; this map accounts
+  for that cost rather than promising unlimited slot reuse.
+
+  PostgreSQL treats FSM results as hints, rechecks capacity under the buffer lock,
+  reports refusals and searches again (`src/backend/storage/freespace/freespace.c:121–181`,
+  `src/backend/access/heap/hio.c:700–760`). RavenDB records sparse sections on delete
+  and searches candidates before creating another section
+  (`src/Voron/Data/Tables/Table.cs:572–585`, `:783–797`). Neo4j consults reusable IDs
+  before advancing its high id (`community/id-generator/src/main/java/org/neo4j/internal/id/indexed/IndexedIdGenerator.java:426–451`);
+  its fixed-record allocation does not supply the variable-byte accounting used here.
+  These references informed reuse and revalidation; no code was copied.
+
+  **Exact allocation measurement.** The node-reuse guard remains Release-only and
+  requires zero bytes over 100,000 update pairs after warming all measured paths.
+  Storage.Tests disables background GC and verifies the actual `ConcurrentGC` flag,
+  because [dotnet/runtime#134724](https://github.com/dotnet/runtime/issues/134724)
+  can charge unused allocation-context bytes during an allocation-free interval.
+  A full-suite guard failure reported 7,288 bytes despite passing in isolation.
+  Controlled empty intervals and the unchanged statement-mark loop reproduce the
+  artifact, while real-allocation controls remain visible; Transactions DESIGN records
+  the standalone measurements and proposed upstream fix. This changes only the test
+  host configuration, keeps runner parallelism uncapped and keeps the zero-byte bound.
+  Model-engine suites exercise the storage under their own GC configuration.
 - **Owner tags are WAL-covered like all page bytes.** A fresh chain page is tagged
   *before* its first-touch pre-image (and full page image) is captured, so a rolled-back allocation
   restores an empty page still belonging to the chain — a safe leak the owner's
@@ -2351,7 +2411,7 @@ loops.
 **Follow-up resolution (#1161).** Dead bytes are now reclaimed by storage's automatic
 compaction under D1's writer exclusion and read confirmation (record layer above).
 Catalogs retain their fallback relocation when the packed replacement cannot fit.
-Revisiting older partly empty pages remains #1288.
+Revisiting older partly empty pages is covered by #1288's free-byte hints above.
 (The SQL index seek and the version store used to read any `StorageException` from a record
 read as reclamation, `StorageCorruptionException` included; #1342 closed that with
 `Storage.TryReadRecord`, "Reading a record through a reference" above.)

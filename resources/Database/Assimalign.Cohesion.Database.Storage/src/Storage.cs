@@ -79,6 +79,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
     private readonly Dictionary<ulong, SortedSet<long>> _indexOwnerPages = new();
     private readonly Dictionary<ulong, PageId> _currentWritePages = new();
+    private readonly StorageRecordFreeBytes _recordFreeBytes = new();
     private readonly object _ownerLock = new();
 
     private StoragePageManager? _pageManager;
@@ -1015,7 +1016,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var slotted = new SlottedPage(dataHandle.Page);
         slotted.Initialize();
         dataHandle.MarkDirty();
-        RegisterOwnerPage(0, dataHandle.Id);
+        RegisterOwnerPage(0, dataHandle.Id, empty: true);
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
@@ -1448,7 +1449,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId)
     {
         var owner = ValidateTransaction(transaction);
-        return TouchPage(owner, pageId);
+        var handle = TouchPage(owner, pageId);
+        InvalidateRecordFreeBytes(handle);
+        return handle;
     }
 
     /// <summary>
@@ -1470,6 +1473,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         EnlistLatch(owner, latch);
         var handle = TouchPage(owner, pageId);
         owner.MarkLatchedPage((long)pageId);
+        InvalidateRecordFreeBytes(handle);
         return handle;
     }
 
@@ -1785,53 +1789,76 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         PageId? currentWritePage = null;
         long generation = 0;
+        // A later raw-writer invalidation remains unknown: Adjust never promotes it.
+        bool needsMeasurement = false;
         lock (_ownerLock)
         {
             if (_currentWritePages.TryGetValue(ownerId, out var current)
                 && _freeSpaceMap.TryGetAllocationGeneration(current, out generation))
             {
                 currentWritePage = current;
+                needsMeasurement = _recordFreeBytes.IsUnknown((long)current);
             }
         }
 
         OwnerPageIdsReadForWrite?.Invoke();
 
         // The current write page may have been freed since the last insert.
-        if (currentWritePage is null || !TryTouchPage(owner, currentWritePage.Value, out var currentHandle, generation))
+        HashSet<long>? excluded = null;
+        while (true)
         {
-            handle = AllocateDataPage(owner, ownerId, out slotted);
-        }
-        else
-        {
-            handle = currentHandle;
-            try
+            if (currentWritePage is not null && TryTouchPage(owner, currentWritePage.Value, out var currentHandle, generation))
             {
-                slotted = new SlottedPage(handle.Page);
-
-                bool suitable = handle.Page.Type == PageType.Data && handle.Page.OwnerId == ownerId;
-                if (suitable && !slotted.CanFit(data.Length))
+                handle = currentHandle;
+                try
                 {
-                    // A caller may supply bytes borrowed from this same page. Preserve them
-                    // before compaction can move a different record across their old address.
-                    if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
-                    suitable = slotted.TryCompactForInsert(data.Length);
+                    slotted = new SlottedPage(handle.Page);
+                    bool suitable = handle.Page.Type == PageType.Data && handle.Page.OwnerId == ownerId;
+                    bool skip = !suitable || handle.Entry.HasNestedWriter;
+                    if (suitable && !slotted.CanFit(data.Length))
+                    {
+                        // Preserve borrowed input before packing, or releasing this pin.
+                        if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
+                        suitable = slotted.TryCompactForInsert(data.Length, out int capacity);
+                        lock (_ownerLock) { _recordFreeBytes.Measure((long)handle.Id, capacity, handle.Entry.HasNestedWriter); }
+                        if (suitable)
+                        {
+                            handle.MarkDirty();
+                            RecordPageCompacted?.Invoke(handle.Id);
+                        }
+                    }
+                    else if (suitable && needsMeasurement) { MeasureRecordFreeBytes(handle, slotted); }
                     if (suitable)
                     {
-                        handle.MarkDirty();
-                        RecordPageCompacted?.Invoke(handle.Id);
+                        break;
                     }
+                    if (skip) { (excluded ??= new()).Add((long)currentWritePage.Value); }
+                    handle.Dispose();
                 }
-                if (!suitable)
+                catch
                 {
                     handle.Dispose();
-                    handle = AllocateDataPage(owner, ownerId, out slotted);
+                    throw;
                 }
             }
-            catch
+            else if (currentWritePage is not null) { (excluded ??= new()).Add((long)currentWritePage.Value); }
+
+            currentWritePage = null;
+            lock (_ownerLock)
             {
-                handle.Dispose();
-                throw;
+                while (_recordFreeBytes.TryGet(ownerId, data.Length, excluded, out long candidate))
+                {
+                    if (_freeSpaceMap.TryGetAllocationGeneration((PageId)candidate, out generation))
+                    {
+                        currentWritePage = (PageId)candidate;
+                        needsMeasurement = _recordFreeBytes.IsUnknown(candidate);
+                        break;
+                    }
+                    _recordFreeBytes.Remove(candidate);
+                }
             }
+            if (currentWritePage is null) { handle = AllocateDataPage(owner, ownerId, out slotted); break; }
+            RecordPageSelectedForReuse?.Invoke(currentWritePage.Value);
         }
 
         using (handle)
@@ -1839,6 +1866,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             int slotIndex = slotted.InsertSlot(data);
             // A flusher may already have cleaned the intermediate compacted image.
             handle.MarkDirty();
+            lock (_ownerLock)
+            {
+                _recordFreeBytes.Adjust((long)handle.Id, -data.Length - sizeof(PageSlot), handle.Entry.HasNestedWriter);
+                _currentWritePages[ownerId] = handle.Id;
+            }
             return (handle.Id, slotIndex);
         }
     }
@@ -2049,8 +2081,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
+        int oldLength = slotted.GetSlotLength(slotIndex);
         slotted.DeleteSlot(slotIndex);
         handle.MarkDirty();
+        lock (_ownerLock) { _recordFreeBytes.Adjust((long)pageId, oldLength, handle.Entry.HasNestedWriter); }
 
         for (int index = 0; index < slotted.SlotCount; index++)
         {
@@ -2070,6 +2104,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         page.OwnerId = 0;
         slotted.Initialize();
         owner.RegisterPendingFree((long)pageId, pageOwner);
+        lock (_ownerLock) { _recordFreeBytes.Remove((long)pageId); }
     }
 
     /// <summary>
@@ -2098,7 +2133,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
-        if (data.Length > slotted.FreeSpace && data.Length > slotted.GetSlotLength(slotIndex))
+        int oldLength = slotted.GetSlotLength(slotIndex);
+        if (data.Length > slotted.FreeSpace && data.Length > oldLength)
         {
             if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
             if (slotted.TryCompactForUpdate(slotIndex, data.Length))
@@ -2110,6 +2146,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         slotted.UpdateSlot(slotIndex, data);
         // Publish dirtiness after the replacement even if compaction was marked earlier.
         handle.MarkDirty();
+        if (oldLength != data.Length || handle.Entry.HasNestedWriter)
+        {
+            lock (_ownerLock) { _recordFreeBytes.Adjust((long)pageId, oldLength - data.Length, handle.Entry.HasNestedWriter); }
+        }
     }
 
     /// <summary>
@@ -2299,6 +2339,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
                 handle.MarkDirty();
                 owner.RegisterPendingFree((long)pageId, ownerId);
+                lock (_ownerLock) { _recordFreeBytes.Remove((long)pageId); }
                 released++;
             }
         }
@@ -2310,7 +2351,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// Records a data page as belonging to an owner's chain and makes it the
     /// owner's current write page.
     /// </summary>
-    private void RegisterOwnerPage(ulong ownerId, PageId pageId)
+    private void RegisterOwnerPage(ulong ownerId, PageId pageId, bool empty = false)
     {
         lock (_ownerLock)
         {
@@ -2322,6 +2363,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             pages.Add((long)pageId);
             _currentWritePages[ownerId] = pageId;
+            _recordFreeBytes.Register(ownerId, (long)pageId, empty ? SlottedPage.MaxRecordSize : null);
         }
     }
 
@@ -2380,6 +2422,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             foreach (var (pageId, ownerId) in pendingFrees)
             {
+                _recordFreeBytes.Remove(pageId);
                 if (_ownerPages.TryGetValue(ownerId, out var pages))
                 {
                     pages.Remove(pageId);
@@ -2661,6 +2704,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         handle.MarkDirty();
         _consistency?.RolledBack(pageId, page);
+        lock (_ownerLock)
+        {
+            if (handle.Page.Type == PageType.Data && _ownerPages.TryGetValue(handle.Page.OwnerId, out var pages) && pages.Contains(pageId))
+            {
+                _recordFreeBytes.Register(handle.Page.OwnerId, pageId);
+            }
+            else { _recordFreeBytes.Remove(pageId); }
+        }
     }
 
     /// <summary>
@@ -3108,6 +3159,19 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     // Cold-path test rendezvous while the compacted page still has its D1 mutable scope.
     internal Action<PageId>? RecordPageCompacted;
+    internal Action<PageId>? RecordPageSelectedForReuse;
+
+    private void InvalidateRecordFreeBytes(StoragePageHandle handle)
+    {
+        if (handle.Page.Type != PageType.Data) { return; }
+        lock (_ownerLock) { _recordFreeBytes.MarkUnknown((long)handle.Id); }
+    }
+
+    private void MeasureRecordFreeBytes(StoragePageHandle handle, SlottedPage slotted)
+    {
+        int capacity = slotted.GetInsertionCapacity();
+        lock (_ownerLock) { _recordFreeBytes.Measure((long)handle.Id, capacity, handle.Entry.HasNestedWriter); }
+    }
 
     private bool TryTouchPage(StorageTransaction transaction, PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle, long? learnedGeneration = null)
     {
@@ -3155,7 +3219,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             var page = handle.Page;
             page.OwnerId = ownerId;
 
-            RegisterOwnerPage(ownerId, handle.Id);
+            RegisterOwnerPage(ownerId, handle.Id, empty: true);
             RegisterTouch(transaction, handle, allocationOwnerId: ownerId);
             handle.BeginWrite(transaction);
             _freeSpaceMap.Publish(handle.Id);
@@ -3177,6 +3241,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         lock (_ownerLock)
         {
             long pageId = (long)handle.Id;
+            _recordFreeBytes.Remove(pageId);
             if (_ownerPages.TryGetValue(ownerId, out var pages))
             {
                 pages.Remove(pageId);
