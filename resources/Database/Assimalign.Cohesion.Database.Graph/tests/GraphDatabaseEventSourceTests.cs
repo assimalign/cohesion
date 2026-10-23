@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection(nameof(GraphDatabaseEventSourceCollection))]
 public sealed class GraphDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - GraphDatabaseEventSource: Should be named for its assembly")]
     public void GetName_GraphDatabaseEventSource_ShouldEqualAssemblyName()
@@ -99,7 +99,7 @@ public sealed class GraphDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);
@@ -736,14 +736,14 @@ public sealed class GraphDatabaseEventSourceTests
     /// </summary>
     private sealed class RootEventRecorder : EventListener
     {
-        private const string RootSourceName = "Assimalign.Cohesion.Database";
+        private const string rootSourceName = "Assimalign.Cohesion.Database";
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
 
         public IReadOnlyList<EventWrittenEventArgs> Events => _events.ToArray();
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == RootSourceName)
+            if (eventSource.Name == rootSourceName)
             {
                 EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
             }
@@ -751,7 +751,7 @@ public sealed class GraphDatabaseEventSourceTests
 
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
-            if (eventData.EventSource.Name == RootSourceName)
+            if (eventData.EventSource.Name == rootSourceName)
             {
                 _events.Enqueue(eventData);
             }

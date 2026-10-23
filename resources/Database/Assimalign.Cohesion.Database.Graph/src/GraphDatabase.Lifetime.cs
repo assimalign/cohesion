@@ -165,7 +165,7 @@ public sealed partial class GraphDatabase
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException(ErrorMessages.GraphDatabaseLockWriterAsyncDatabase);
+                throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphDatabaseLockWriterAsyncDatabase);
             }
         }
         catch

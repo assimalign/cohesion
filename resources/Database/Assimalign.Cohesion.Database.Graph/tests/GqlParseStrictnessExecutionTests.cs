@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// </summary>
 public sealed class GqlParseStrictnessExecutionTests
 {
-    private const string Seed = "INSERT (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person {name: 'Bob'})";
+    private const string seed = "INSERT (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person {name: 'Bob'})";
 
     /// <param name="gql">A statement with a stray character or an unsupported ISO construct.</param>
     /// <param name="code">The single error code it reports.</param>
@@ -40,7 +40,7 @@ public sealed class GqlParseStrictnessExecutionTests
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         var statement = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
 
         // Act

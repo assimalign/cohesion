@@ -84,11 +84,11 @@ internal static partial class GraphPlanExecutor
                     foreach (var clause in stagePlan.MatchClauses)
                     {
                         await ReplaceBindingsAsync(StreamMatchClauseAsync(database, operation, clause,
-                            StreamBindings(bindings, token), layout, budget, parameters, token)).ConfigureAwait(false);
+                            StreamBindingsAsync(bindings, token), layout, budget, parameters, token)).ConfigureAwait(false);
                     }
                     break;
                 case GqlLetStage or GqlFilterStage or GqlForStage:
-                    await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindings(bindings, token),
+                    await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);
                     break;
                 case GqlInsertStage insertion:
@@ -108,17 +108,17 @@ internal static partial class GraphPlanExecutor
                     await operation.Updates.ApplyAsync(stage, bindings, parameters, token, bindingMemory).ConfigureAwait(false);
                     break;
                 case GqlReturnStage projection when stageIndex != plan.Stages.Count - 1:
-                    await ReplaceBindingsAsync(StreamBoundaryAsync(stagePlan, projection, StreamBindings(bindings, token),
+                    await ReplaceBindingsAsync(StreamBoundaryAsync(stagePlan, projection, StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);
                     break;
                 case GqlNextStage when plan.Stages[stageIndex - 1].Stage is not GqlReturnStage:
-                    await ReplaceBindingsAsync(SeedBinding(layout, budget, token)).ConfigureAwait(false);
+                    await ReplaceBindingsAsync(SeedBindingAsync(layout, budget, token)).ConfigureAwait(false);
                     break;
             }
         }
         affected += await operation.Updates.PublishAsync(token).ConfigureAwait(false);
         if (plan.Projections.Count == 0) { return new GraphMutationResult(affected, plan.Warnings); }
-        return await ProjectResultAsync(database, operation, plan, StreamBindings(bindings, token),
+        return await ProjectResultAsync(database, operation, plan, StreamBindingsAsync(bindings, token),
             parameters, token, paths, scalarsOnly, compositeValues, affected).ConfigureAwait(false);
         }
         finally { bindings.Clear(); bindingMemory.Dispose(); }

@@ -163,7 +163,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         if (!TryEnterOperation())
         {
-            throw new DatabaseException(ErrorMessages.DatabaseSessionEnterOperationDatabase);
+            throw DatabaseException.CreateGraphFailure("CK07003", ErrorMessages.DatabaseSessionEnterOperationDatabase);
         }
 
         var transaction = CurrentTransaction;
@@ -266,7 +266,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted))
         {
-            throw new DatabaseException(ErrorMessages.BeginTransactionCoreAsyncDatabase);
+            throw DatabaseException.CreateGraphFailure("CK04001", ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         _database.EnsureNotDisposed();

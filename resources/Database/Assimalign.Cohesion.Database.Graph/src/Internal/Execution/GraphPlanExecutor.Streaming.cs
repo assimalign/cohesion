@@ -24,7 +24,7 @@ internal static partial class GraphPlanExecutor
         using var executionMemory = budget.Memory.Reserve(512);
         using var layoutMemory = new GraphMemoryOwner(budget.Memory);
         var layout = new GraphBindingLayout(layoutMemory);
-        IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source = SeedBinding(layout, budget, token);
+        IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source = SeedBindingAsync(layout, budget, token);
         for (int i = 0; i < plan.Stages.Count; i++)
         {
             token.ThrowIfCancellationRequested();
@@ -53,7 +53,7 @@ internal static partial class GraphPlanExecutor
             paths, scalarsOnly, compositeValues, 0).ConfigureAwait(false);
     }
 
-    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> SeedBinding(GraphBindingLayout layout, ExpansionBudget budget,
+    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> SeedBindingAsync(GraphBindingLayout layout, ExpansionBudget budget,
         [EnumeratorCancellation] CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -63,7 +63,7 @@ internal static partial class GraphPlanExecutor
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamBindings(
+    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamBindingsAsync(
         IEnumerable<IReadOnlyDictionary<string, object?>> bindings, [EnumeratorCancellation] CancellationToken token)
     {
         foreach (var binding in bindings) { token.ThrowIfCancellationRequested(); yield return binding; }

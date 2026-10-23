@@ -36,7 +36,7 @@ public sealed partial class GqlQueryParser
         // the type test as well as the token count.
         if (expression is not GqlLabelName || _position != first + 1)
         {
-            Error("CG00002", mixedColonMessage, Current);
+            Error("CG00002", _mixedColonMessage, Current);
             return expression;
         }
 
@@ -47,19 +47,19 @@ public sealed partial class GqlQueryParser
         {
             if (Current.Type is TokenType.Bang or TokenType.Percent or TokenType.LeftParen)
             {
-                Error("CG00002", mixedColonMessage, Current);
+                Error("CG00002", _mixedColonMessage, Current);
                 break;
             }
             operands.Add(new GqlLabelName(Identifier(allowKeyword: true)));
         }
         if (!Failed && Current.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Concat)
         {
-            Error("CG00002", mixedColonMessage, Current);
+            Error("CG00002", _mixedColonMessage, Current);
         }
         return GqlLabelConjunction.FromOwnedList(operands);
     }
 
-    private static readonly string mixedColonMessage =
+    private static readonly string _mixedColonMessage =
         ErrorMessages.GqlQueryParserVoid;
 
     // label-expression := label-term ('|' label-term)*

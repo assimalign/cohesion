@@ -35,8 +35,8 @@ public sealed class GqlLabelChainExecutionTests
 
     // 200 distinct labels, so a node carrying all of them fits one graph record; a 10,000-name chain
     // cycles through them 50 times.
-    private static readonly string[] labels = Enumerable.Range(0, 200).Select(i => "L" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
-    private static readonly string[] types = Enumerable.Range(0, 200).Select(i => "T" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
+    private static readonly string[] _labels = Enumerable.Range(0, 200).Select(i => "L" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
+    private static readonly string[] _types = Enumerable.Range(0, 200).Select(i => "T" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
 
     /// <param name="gql">A read whose chain is at <c>{0}</c> (labels) or <c>{1}</c> (types).</param>
     /// <param name="separator">The chain's operator.</param>
@@ -58,7 +58,7 @@ public sealed class GqlLabelChainExecutionTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
-        gql = string.Format(CultureInfo.InvariantCulture, gql, Chain(labels, separator), Chain(types, separator));
+        gql = string.Format(CultureInfo.InvariantCulture, gql, Chain(_labels, separator), Chain(_types, separator));
 
         // Act
         var names = await ColumnAsync(session, gql);
@@ -75,12 +75,12 @@ public sealed class GqlLabelChainExecutionTests
         await using var session = await SeedAsync(engine);
 
         // Act
-        var names = await ColumnAsync(session, "MATCH (a)-[r:" + Chain(types, "|") + "]->(b) RETURN r.name");
+        var names = await ColumnAsync(session, "MATCH (a)-[r:" + Chain(_types, "|") + "]->(b) RETURN r.name");
         var single = await ColumnAsync(session, "MATCH (a)-[r:" + string.Join("&", Enumerable.Repeat("T7", chainLength)) + "]->(b) RETURN r.name");
-        var predicate = await ColumnAsync(session, "MATCH ()-[r]->() WHERE r:" + Chain(types, "|") + " RETURN r.name");
+        var predicate = await ColumnAsync(session, "MATCH ()-[r]->() WHERE r:" + Chain(_types, "|") + " RETURN r.name");
 
         // Assert
-        names.ShouldBe(types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
+        names.ShouldBe(_types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
         single.ShouldBe(["t7"]);
         predicate.ShouldBe(names, ignoreOrder: true);
     }
@@ -91,7 +91,7 @@ public sealed class GqlLabelChainExecutionTests
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         await using var session = await SeedAsync(engine);
-        string every = string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + labels[i % labels.Length]));
+        string every = string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + _labels[i % _labels.Length]));
         string comparisons = string.Join(" AND ", Enumerable.Range(0, chainLength).Select(_ => "n.name <> 'x'"));
 
         // Act
@@ -148,15 +148,15 @@ public sealed class GqlLabelChainExecutionTests
         int before = (await RowsAsync(session, "MATCH (n) RETURN n")).Count;
 
         // Act
-        var result = await session.ExecuteAsync("INSERT (n:" + Chain(labels, separator) + " {name: 'new'})", cancellationToken: CancellationToken.None);
+        var result = await session.ExecuteAsync("INSERT (n:" + Chain(_labels, separator) + " {name: 'new'})", cancellationToken: CancellationToken.None);
         var created = await RowsAsync(session, "MATCH (n {name: 'new'}) RETURN n");
 
         // Assert
         result.AffectedCount.ShouldBe(1);
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(before + 1);
         var node = (GraphNode)created.ShouldHaveSingleItem()[0]!;
-        node.Labels.Order(StringComparer.Ordinal).ShouldBe(labels.Order(StringComparer.Ordinal));
-        (await ColumnAsync(session, "MATCH (n:" + Chain(labels, "&") + ") RETURN n.name")).ShouldBe(["all", "new"]);
+        node.Labels.Order(StringComparer.Ordinal).ShouldBe(_labels.Order(StringComparer.Ordinal));
+        (await ColumnAsync(session, "MATCH (n:" + Chain(_labels, "&") + ") RETURN n.name")).ShouldBe(["all", "new"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a 10,000-name INSERT disjunction is CG05001, writes nothing and keeps the message short")]
@@ -169,7 +169,7 @@ public sealed class GqlLabelChainExecutionTests
 
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("INSERT (:" + Chain(labels, "|") + ")", cancellationToken: CancellationToken.None));
+            await session.ExecuteAsync("INSERT (:" + Chain(_labels, "|") + ")", cancellationToken: CancellationToken.None));
 
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
@@ -461,7 +461,7 @@ public sealed class GqlLabelChainExecutionTests
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("anchor-cost", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        string[] hundred = labels.Take(100).ToArray();
+        string[] hundred = _labels.Take(100).ToArray();
         await session.ExecuteAsync("INSERT (:" + string.Join("&", hundred) + " {name: 'all'}), (:A:B {p: 1, q: 2, name: 'ab'}), " +
             "(:A {p: 1, q: 3, name: 'a'})", cancellationToken: CancellationToken.None);
         var schema = GraphSchema.Open(database, session);
@@ -535,11 +535,11 @@ public sealed class GqlLabelChainExecutionTests
     {
         var database = await engine.CreateDatabaseAsync("chains", CancellationToken.None);
         var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync("INSERT (:" + string.Join("&", labels) + " {name: 'all'}), " +
-            "(:" + string.Join("&", labels.Where((_, i) => i % 2 == 0)) + " {name: 'even'}), (:X {name: 'x'}), ({name: 'u'})",
+        await session.ExecuteAsync("INSERT (:" + string.Join("&", _labels) + " {name: 'all'}), " +
+            "(:" + string.Join("&", _labels.Where((_, i) => i % 2 == 0)) + " {name: 'even'}), (:X {name: 'x'}), ({name: 'u'})",
             cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("MATCH (a), (b) WHERE a.name = 'all' AND b.name = 'even' INSERT " +
-            string.Join(", ", types.Select(type => "(a)-[:" + type + " {name: '" + type.ToLowerInvariant() + "'}]->(b)")),
+            string.Join(", ", _types.Select(type => "(a)-[:" + type + " {name: '" + type.ToLowerInvariant() + "'}]->(b)")),
             cancellationToken: CancellationToken.None);
         return session;
     }

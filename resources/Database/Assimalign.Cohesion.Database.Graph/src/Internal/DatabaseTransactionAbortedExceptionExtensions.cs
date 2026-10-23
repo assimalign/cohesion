@@ -1,7 +1,7 @@
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 // Database owns the exception; Graph owns the catalog-conflict diagnostic.
-internal static class DatabaseTransactionAbortedExceptionExtensions
+internal static partial class DatabaseTransactionAbortedExceptionExtensions
 {
     private static readonly string _catalogSnapshotChangedMessage = ErrorMessages.CatalogSnapshotChanged;
 

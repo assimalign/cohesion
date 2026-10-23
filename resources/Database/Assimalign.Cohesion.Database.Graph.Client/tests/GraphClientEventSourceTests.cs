@@ -362,14 +362,14 @@ public sealed class GraphClientEventSourceTests
     /// </summary>
     private sealed class GraphClientActivityRecorder : EventListener
     {
-        private const string TaskSource = "System.Threading.Tasks.TplEventSource";
+        private const string taskSource = "System.Threading.Tasks.TplEventSource";
 
         // Compared by name: the source may be created while this listener exists, before its Log
         // field is assigned.
-        private const string GraphClientSource = "Assimalign.Cohesion.Database.Graph.Client";
+        private const string graphClientSource = "Assimalign.Cohesion.Database.Graph.Client";
 
         // TplEventSource's TasksFlowActivityIds keyword: it turns on EventSource's activity tracking.
-        private const EventKeywords TasksFlowActivityIds = (EventKeywords)0x80;
+        private const EventKeywords tasksFlowActivityIds = (EventKeywords)0x80;
 
         // Initialized before the base constructor calls OnEventSourceCreated for existing sources.
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
@@ -378,11 +378,11 @@ public sealed class GraphClientEventSourceTests
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == TaskSource)
+            if (eventSource.Name == taskSource)
             {
-                EnableEvents(eventSource, EventLevel.Informational, TasksFlowActivityIds);
+                EnableEvents(eventSource, EventLevel.Informational, tasksFlowActivityIds);
             }
-            else if (eventSource.Name == GraphClientSource)
+            else if (eventSource.Name == graphClientSource)
             {
                 EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
             }
@@ -390,7 +390,7 @@ public sealed class GraphClientEventSourceTests
 
         protected override void OnEventWritten(EventWrittenEventArgs eventData)
         {
-            if (eventData.EventSource.Name == GraphClientSource)
+            if (eventData.EventSource.Name == graphClientSource)
             {
                 // Read on the writing thread: the property is computed from the current thread when
                 // first read, and cached.

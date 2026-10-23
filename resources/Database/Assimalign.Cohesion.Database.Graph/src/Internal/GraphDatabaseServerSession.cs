@@ -258,7 +258,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.Startup)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StartupExpected, frame.Value.Type), string.Empty, string.Empty).ConfigureAwait(false);
                 return false;
             }
 
@@ -266,7 +266,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolVersionUnsupported, startup.Version.Major, ProtocolVersion.Current), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -276,7 +276,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (database is null)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseNotFound, startup.Database), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -303,7 +303,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationResponseExpected, frame.Value.Type), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -311,7 +311,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
             if (!authenticated)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationFailed, startup.Principal), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -323,7 +323,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, exception.Code, exception.Message), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -645,7 +645,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
 
                 using var encoder = new GraphResultRowEncoder(rowWriter, (resultSet as GraphQueryResult)?.CompositeColumns);
                 byte[] header = new GraphProtocolResultHeaderMessage(columns).Encode();
-                if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
+                if (header.Length > GraphValueCodec.MaxPayloadLength) { throw new GraphPlanningException("CG02013", ErrorMessages.CompositeLimit); }
                 await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, header, cancellationToken).ConfigureAwait(false);
                 await foreach (DatabaseRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -662,9 +662,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         if (result.Status != DatabaseResultStatus.Success)
         {
             var diagnostics = result.Diagnostics;
-            string detail = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionWriteResultAsyncDatabase, diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
+            string detail = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error)?.Message
                 ?? diagnostics.FirstOrDefault()?.Message
-                ?? $"The statement completed with status {result.Status}.");
+                ?? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionWriteResultAsyncDatabase, result.Status);
 
             // Reported as an ExecutionFailure by the caller, which aborts an explicit transaction first.
             throw new DatabaseException(detail, diagnostics);
@@ -733,7 +733,7 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
         {
             while (true)
             {
-                string notice = FormattableString.Invariant($"Diagnostic overflow: retained the first {entries.Count} of {total} Warning/Error entries in source order; omitted the remaining {total - entries.Count}. Limits: 4096 entries and 1048576 encoded bytes.");
+                string notice = string.Format(System.Globalization.CultureInfo.InvariantCulture, ErrorMessages.DiagnosticsOverflow, entries.Count, total, total - entries.Count);
                 if (entries.Count < ProtocolDiagnosticsMessage.MaxEntryCount &&
                     DiagnosticSize("CK07001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
                 {

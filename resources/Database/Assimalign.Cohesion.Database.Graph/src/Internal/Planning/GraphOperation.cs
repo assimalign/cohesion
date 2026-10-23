@@ -74,7 +74,7 @@ internal sealed class GraphOperation
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
-            throw new DatabaseException(ErrorMessages.GraphOperationEnsureActiveDatabase);
+            throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
         }
     }
 

@@ -2810,3 +2810,53 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Explicit private execution state
+
+Memory accounting leases, query accounting and path frontiers use explicit constructors and fields. Lease disposal remains idempotent, the final lease returns only cleared buffers, and each frontier retains the same accounted work and memory ownership. Private asynchronous iterators have `Async` names. Conflict extension members and assembly-local Engine resource bindings live under `src/Internal/`; shared binding namespace markers and public component namespaces remain unchanged.
+
+## Direct catalog diagnostic carriers
+
+`GraphCatalogException` keeps its existing base class and public constructors and adds
+`public IReadOnlyList<Diagnostic> Diagnostics { get; }`. The collection is never null; existing
+public constructors leave it empty. Internal catalog producers attach `CG06006` for malformed catalog data, `CG03003` for invalid catalog schema, and `CG04007` for a catalog snapshot conflict.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04002` | Statement/operation transaction is no longer active |
+| `CK07003` | Another statement/operation already holds the session |
+| `CK02001` | Result field does not support the requested byte accessor |
+| `CK02002` | Required result field is NULL |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+Existing prefix-bearing Graph failures retain their established identities and text. The
+completion-status fallback comes from resources; an existing result diagnostic still wins.
+
+The result-header size guard uses the same `CG02013` value-limit diagnostic as row-size
+validation, retaining the existing limit detail and ExecutionFailure category. A synthetic
+header regression exercises the guard directly through the existing runtime test seam;
+ordinary projection admission and the 16 MiB cap are unchanged.
+Graph handshake refusals and the CK07001 overflow notice bind their existing wording through
+resources. Protocol categories, authentication/version negotiation and the overflow notice's
+invariant formatting and published limits remain unchanged.

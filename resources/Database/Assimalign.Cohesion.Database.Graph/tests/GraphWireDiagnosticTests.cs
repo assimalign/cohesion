@@ -141,6 +141,31 @@ public sealed class GraphWireDiagnosticTests
         failure.Message.ShouldBe(error.Message);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - Wire: an oversized result header carries the existing value-limit identity")]
+    public async Task WriteResultAsync_OversizedHeader_ShouldCarryValueLimitDiagnosticAsync()
+    {
+        // Exercise the real header encoder without parsing or executing a large statement.
+        await using var harness = await GraphServerHarness.StartAsync();
+        await using var client = await harness.DialAsync();
+        await client.HandshakeAsync();
+        var session = (GraphDatabaseServerSession)harness.Server.Sessions.Single();
+        var result = new GraphQueryResult([
+            new DatabaseColumn { Name = new string('h', GraphValueCodec.MaxPayloadLength), Ordinal = 0, Type = DatabaseType.String },
+        ], []);
+
+        var failure = await Should.ThrowAsync<GraphPlanningException>(() =>
+            WriteResultAsync(session, result, new DatabaseKeyWriter(), CancellationToken.None));
+
+        failure.ShouldBeOfType<GraphPlanningException>();
+        failure.Message.ShouldBe("Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.");
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("CG02013");
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+    }
+
     private static void AssertDiagnostic(DatabaseException failure, string code, Location location)
     {
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();

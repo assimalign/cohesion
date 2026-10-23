@@ -65,6 +65,21 @@ public sealed class GraphDatabaseNameTests : IDisposable
         await engine.DisposeAsync();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Open: logical absence retains its precise exception and shared diagnostic")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenDatabaseAsync_AbsentName_ShouldCarryLogicalAbsenceDiagnostic(bool onDisk)
+    {
+        // Arrange
+        await using var engine = CreateEngine(onDisk);
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("absent", TestTimeout.Token()));
+        // Assert
+        failure.GetType().ShouldBe(typeof(DatabaseNotFoundException));
+        failure.InnerException.ShouldBeNull();
+        CheckDiagnostic(failure, "CK03002");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Names: a create of 'SALES' after 'sales' is refused as existing, open or not (#1392)")]
     [InlineData(true)]
     [InlineData(false)]
@@ -83,6 +98,8 @@ public sealed class GraphDatabaseNameTests : IDisposable
         // Assert: the refusals left the database as it was.
         whileOpen.ShouldNotBeOfType<DatabaseNotFoundException>();
         whileClosed.ShouldNotBeOfType<DatabaseNotFoundException>();
+        CheckDiagnostic(whileOpen, "CK03001");
+        CheckDiagnostic(whileClosed, "CK03001");
         AssertDirectories(onDisk, "sales");
         (await ReadAsync(await engine.OpenDatabaseAsync("sales", TestTimeout.Token()), node)).ShouldBe("sales-node");
         await engine.DisposeAsync();
@@ -570,5 +587,15 @@ public sealed class GraphDatabaseNameTests : IDisposable
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         var node = await database.GetNodeAsync(session, id, TestTimeout.Token());
         return node.ShouldNotBeNull().Properties["marker"];
+    }
+    private static void CheckDiagnostic(DatabaseException failure, string code)
+    {
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+        failure.Message.StartsWith(code + ": ", StringComparison.Ordinal).ShouldBeFalse();
     }
 }

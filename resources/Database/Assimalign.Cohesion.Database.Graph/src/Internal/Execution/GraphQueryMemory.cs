@@ -6,14 +6,20 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Statement-owned retained execution memory; no shared atomics or process-heap samples.</summary>
-internal sealed class GraphQueryMemory(long limit, GraphQueryMemoryPool? pool = null)
+internal sealed class GraphQueryMemory
 {
-    private GraphQueryMemoryPool? _pool = pool;
+    private GraphQueryMemoryPool? _pool;
     private GraphQueryMemoryBuffers? _buffers;
     private Dictionary<object, (int References, long Bytes)>? _values;
     private Stack<object?>? _pending;
     private List<object>? _journal;
-    internal long Limit { get; } = limit;
+    internal GraphQueryMemory(long limit, GraphQueryMemoryPool? pool = null)
+    {
+        Limit = limit;
+        _pool = pool;
+    }
+
+    internal long Limit { get; }
     internal long RetainedBytes { get; private set; }
     internal long PeakRetainedBytes { get; private set; }
     internal int ActiveLeases { get; private set; }

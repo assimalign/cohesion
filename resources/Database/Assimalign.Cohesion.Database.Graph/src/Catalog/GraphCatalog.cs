@@ -225,7 +225,7 @@ public sealed class GraphCatalog
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
         if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
         {
-            throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
+            throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
                 index.Name, previous.PropertyKey)) { IsCallerError = true };
         }
         return SaveAsync(record, prior, context, cancellationToken);
@@ -262,7 +262,7 @@ public sealed class GraphCatalog
             RefuseSchemaOwner(found.Record, "ALTER");
             if (found.Record.Id != record.Id)
             {
-                throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
+                throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
                     record.Name)) { IsCallerError = true };
             }
         }
@@ -274,7 +274,7 @@ public sealed class GraphCatalog
         {
             if (_definitions.TryGetValue(record.Id, out var keys) && keys.Any(key => key != (record.Kind, record.Name)))
             {
-                throw new GraphCatalogException(ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
+                throw new GraphCatalogException("CG03003", ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
             }
         }
         return SaveAsync(record, previous, context, cancellationToken);
@@ -345,14 +345,14 @@ public sealed class GraphCatalog
     }
 
     internal static GraphCatalogException Conflict()
-        => new(ErrorMessages.GraphCatalogConflictGraphCatalog) { IsConflict = true };
+        => new("CG04007", ErrorMessages.GraphCatalogConflictGraphCatalog) { IsConflict = true };
 
     private void RequireMutableDefinition(Guid id, TransactionSnapshot snapshot, string operation, bool labelOnly = false)
     {
         var found = FindDefinition(id, snapshot, labelOnly ? (byte)1 : null) ?? default;
         if (found.Record is null)
         {
-            throw new GraphCatalogException(ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
+            throw new GraphCatalogException("CG03003", ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
         }
         RefuseSchemaOwner(found.Record, operation);
     }

@@ -465,3 +465,16 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Model failure producer completion
+
+GQL syntax and evaluation are unchanged. Engine state and result-access refusals carry the
+[model producer diagnostics](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#model-failure-producer-completion);
+the existing wire formatter includes the code once and keeps exception detail code-free.
+Direct catalog failures preserve their concrete exception type and non-null Diagnostics.
+No SQLSTATE mapping, protocol version or storage format is added.
+
+The result-header size guard uses the same `CG02013` value-limit diagnostic as row-size
+validation, retaining the existing limit detail and ExecutionFailure category. A synthetic
+header regression exercises the guard directly through the existing runtime test seam;
+ordinary projection admission and the 16 MiB cap are unchanged.

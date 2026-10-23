@@ -166,7 +166,7 @@
   <data name="ServerSessionExecuteAsyncProtocol" xml:space="preserve"><value>Malformed component encoding for parameter '{0}'.</value></data>
   <data name="SessionExecuteAsyncDatabaseParse" xml:space="preserve"><value>A graph statement must not be empty.</value></data>
   <data name="SessionWritePathsAsyncGraphPlanning" xml:space="preserve"><value>A path request did not produce a graph path result.</value></data>
-  <data name="ServerSessionWriteResultAsyncDatabase" xml:space="preserve"><value>{0}</value></data>
+  <data name="ServerSessionWriteResultAsyncDatabase" xml:space="preserve"><value>The statement completed with status {0}.</value></data>
   <data name="ServerSessionRunAsyncValueTask" xml:space="preserve"><value>An unexpected server error terminated the session.</value></data>
   <data name="ServerSessionReadyLoopAsyncValueTask" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
   <data name="ServerSessionExecuteAsyncValueTask" xml:space="preserve"><value>{0}: {1}</value></data>
@@ -248,4 +248,10 @@
   <data name="DatabaseNameConsecutiveDots" xml:space="preserve"><value>The name holds two dots in a row.</value></data>
   <data name="DatabaseNameDeviceReserved" xml:space="preserve"><value>'{0}' is a Windows device name.</value></data>
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
+  <data name="StartupExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="DiagnosticsOverflow" xml:space="preserve"><value>Diagnostic overflow: retained the first {0} of {1} Warning/Error entries in source order; omitted the remaining {2}. Limits: 4096 entries and 1048576 encoded bytes.</value></data>
 </root>

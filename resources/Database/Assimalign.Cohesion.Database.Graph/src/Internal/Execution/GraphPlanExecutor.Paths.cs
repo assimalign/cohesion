@@ -42,10 +42,15 @@ internal static partial class GraphPlanExecutor
         };
     }
 
-    private sealed class PathFrontier(GraphQueryMemory memory) : IDisposable
+    private sealed class PathFrontier : IDisposable
     {
         private readonly Stack<(PathState State, long Bytes)> _states = new();
-        private readonly GraphMemoryOwner _memory = new(memory);
+        private readonly GraphMemoryOwner _memory;
+
+        internal PathFrontier(GraphQueryMemory memory)
+        {
+            _memory = new GraphMemoryOwner(memory);
+        }
         internal int Count => _states.Count;
         internal void Push(PathState state)
         {
@@ -105,7 +110,7 @@ internal static partial class GraphPlanExecutor
         IAsyncEnumerable<StoredGraphNode> candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
         if (anchorNode?.Variable is { } variable && input[variable] is GraphNode bound)
-        { candidates = StreamBoundNodes(operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : [], budget, token); }
+        { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : [], budget, token); }
         else if (anchor.NodeIndex < shape.Segments.Count && shape.Segments[anchor.NodeIndex] is
             { Quantifier: null, Body.Edge: { Variable: { } edgeVariable } edgePattern } &&
             input.TryGetValue(edgeVariable, out var edgeBinding) && edgeBinding is GraphRelationship boundEdge)
@@ -116,7 +121,7 @@ internal static partial class GraphPlanExecutor
             if (edgePattern.Direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight &&
                 boundEdge.From != boundEdge.To && operation.Updates.FindNode(boundEdge.To.Value) is { } other)
             { endpoints.Add(other); }
-            candidates = StreamBoundNodes(endpoints, budget, token);
+            candidates = StreamBoundNodesAsync(endpoints, budget, token);
         }
         else { candidates = operation.Updates.StreamAnchorAsync(anchor, budget, token); }
 
@@ -270,7 +275,7 @@ internal static partial class GraphPlanExecutor
         }
     }
 
-    private static async IAsyncEnumerable<StoredGraphNode> StreamBoundNodes(IEnumerable<StoredGraphNode> nodes,
+    private static async IAsyncEnumerable<StoredGraphNode> StreamBoundNodesAsync(IEnumerable<StoredGraphNode> nodes,
         ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
     {
         foreach (var node in nodes) { token.ThrowIfCancellationRequested(); budget.Consume(); yield return node; }

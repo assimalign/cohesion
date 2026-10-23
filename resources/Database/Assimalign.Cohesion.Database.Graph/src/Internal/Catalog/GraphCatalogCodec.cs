@@ -55,7 +55,7 @@ internal static class GraphCatalogCodec
         catch (GraphCatalogException error)
         {
             var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
-            throw new GraphCatalogException(corruption.Message, corruption) { IsConflict = error.IsConflict, IsCallerError = error.IsCallerError };
+            throw new GraphCatalogException("CG06006", corruption.Message, corruption) { IsConflict = error.IsConflict, IsCallerError = error.IsCallerError };
         }
     }
 
@@ -71,10 +71,10 @@ internal static class GraphCatalogCodec
             byte version = reader.ReadByte();
             if (version != 1)
             {
-                throw new GraphCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog, version));
+                throw new GraphCatalogException("CG06006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog, version));
             }
             var id = new Guid(reader.ReadBytes(16));
-            string name = ReadString(reader) ?? throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog2);
+            string name = ReadString(reader) ?? throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog2);
             CatalogRecord result;
             if (kind is 1 or 2)
             {
@@ -90,7 +90,7 @@ internal static class GraphCatalogCodec
                 byte required = reader.ReadByte();
                 if (required > 1)
                 {
-                    throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog3);
+                    throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog3);
                 }
                 result = new CatalogRecord(Property: new GraphPropertyKeyMetadata(id, name,
                     type == byte.MaxValue ? null : (DatabaseType)type, required == 1));
@@ -98,22 +98,22 @@ internal static class GraphCatalogCodec
             else if (kind == 4)
             {
                 result = new CatalogRecord(Index: new GraphIndexMetadata(id, name,
-                    ReadString(reader) ?? throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog4)));
+                    ReadString(reader) ?? throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog4)));
             }
             else
             {
-                throw new GraphCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog5, kind));
+                throw new GraphCatalogException("CG06006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog5, kind));
             }
             Validate(result);
             if (stream.Position != stream.Length)
             {
-                throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog6);
+                throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog6);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog7, error);
+            throw new GraphCatalogException("CG06006", ErrorMessages.GraphCatalogCodecDecodeGraphCatalog7, error);
         }
     }
 
@@ -161,7 +161,7 @@ internal static class GraphCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new GraphCatalogException(ErrorMessages.CatalogCodecReadStringGraphCatalog);
+            throw new GraphCatalogException("CG06006", ErrorMessages.CatalogCodecReadStringGraphCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

@@ -82,11 +82,11 @@ public sealed class GqlKeywordDispositionTests
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
         ["NONE"] = Rejects("MATCH (a) WHERE NONE(a.tags) RETURN a", "NONE"),
         ["SINGLE"] = Rejects("MATCH (a) WHERE SINGLE(a.tags) RETURN a", "SINGLE"),
-        ["CASE"] = Parses(CaseExpression),
-        ["WHEN"] = Parses(CaseExpression),
-        ["THEN"] = Parses(CaseExpression),
-        ["ELSE"] = Parses(CaseExpression),
-        ["END"] = Parses(CaseExpression),
+        ["CASE"] = Parses(caseExpression),
+        ["WHEN"] = Parses(caseExpression),
+        ["THEN"] = Parses(caseExpression),
+        ["ELSE"] = Parses(caseExpression),
+        ["END"] = Parses(caseExpression),
         ["COALESCE"] = Parses("RETURN COALESCE(NULL, 1)"),
         ["NULLIF"] = Parses("RETURN NULLIF(1, 1)"),
         ["GRAPH"] = Rejects("CREATE GRAPH g", "GRAPH"),
@@ -161,7 +161,7 @@ public sealed class GqlKeywordDispositionTests
         ["LABELED"] = Parses("MATCH (n) WHERE n IS NOT LABELED A RETURN n"),
     };
 
-    private const string CaseExpression = "MATCH (a) RETURN CASE WHEN a.x = 1 THEN 1 ELSE 2 END";
+    private const string caseExpression = "MATCH (a) RETURN CASE WHEN a.x = 1 THEN 1 ELSE 2 END";
 
     [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: every keyword and recognized-unsupported entry has a case")]
     public void Corpus_EveryKeywordAndTableEntry_ShouldHaveACase()

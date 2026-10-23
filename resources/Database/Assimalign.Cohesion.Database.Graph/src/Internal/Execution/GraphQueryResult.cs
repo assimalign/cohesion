@@ -73,12 +73,12 @@ internal sealed class GraphQueryResult : DatabaseResultSet
             null => ReadOnlyMemory<byte>.Empty,
             JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
             string text => Encoding.UTF8.GetBytes(text),
-            _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowGetBytesDatabase, ordinal)),
+            _ => throw DatabaseException.CreateGraphFailure("CK02001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowGetBytesDatabase, ordinal)),
         };
         public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => _values[ordinal] ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowRequiredDatabase, ordinal));
+        private object Required(int ordinal) => _values[ordinal] ?? throw DatabaseException.CreateGraphFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowRequiredDatabase, ordinal));
     }
 }

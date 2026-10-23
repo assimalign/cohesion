@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>Registers deferred graph engines through the dependency-free Database application seam.</summary>
-public static class GraphDatabaseApplicationExtensions
+public static partial class GraphDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {

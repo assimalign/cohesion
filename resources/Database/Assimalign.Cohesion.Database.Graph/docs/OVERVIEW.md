@@ -243,3 +243,37 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Explicit private execution state
+
+Private execution accounting uses explicit constructors, with unchanged lease ownership, budgets and path results. Internal helpers follow the folder and asynchronous naming conventions; see [DESIGN.md](DESIGN.md).
+
+## Direct catalog diagnostics
+
+`GraphCatalogException.Diagnostics` is non-null and preserves the existing catalog error identities
+without changing exception ancestry or message text. See [DESIGN.md](DESIGN.md#direct-catalog-diagnostic-carriers)
+for producer codes and the legacy public-constructor contract.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Session-state, result-row and model-specific refusals expose structured codes while preserving
+their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
+lists each condition. Successful execution, transaction ownership, storage formats and wire
+layouts are unchanged; the existing wire formatter includes an error code once.
+
+The result-header size guard uses the same `CG02013` value-limit diagnostic as row-size
+validation, retaining the existing limit detail and ExecutionFailure category. A synthetic
+header regression exercises the guard directly through the existing runtime test seam;
+ordinary projection admission and the 16 MiB cap are unchanged.
+Graph handshake refusals and the CK07001 overflow notice bind their existing wording through
+resources. Protocol categories, authentication/version negotiation and the overflow notice's
+invariant formatting and published limits remain unchanged.

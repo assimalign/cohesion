@@ -23,8 +23,8 @@ public sealed class GraphLabelChainWireTests
 {
     private const int chainLength = 10_000;
 
-    private static readonly string[] labels = Enumerable.Range(0, 100).Select(i => "L" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
-    private static readonly string[] types = Enumerable.Range(0, 10).Select(i => "T" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
+    private static readonly string[] _labels = Enumerable.Range(0, 100).Select(i => "L" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
+    private static readonly string[] _types = Enumerable.Range(0, 10).Select(i => "T" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
 
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Label chains: 10,000-name chains in MATCH, WHERE and INSERT return the expected rows")]
     public async Task QueryAsync_TenThousandNameChains_ShouldReturnExpectedRows()
@@ -32,10 +32,10 @@ public sealed class GraphLabelChainWireTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        await connection.ExecuteAsync("CREATE (:" + string.Join("&", labels) + " {name: 'all'}), (:L0 {name: 'one'}), (:X {name: 'x'})",
+        await connection.ExecuteAsync("CREATE (:" + string.Join("&", _labels) + " {name: 'all'}), (:L0 {name: 'one'}), (:X {name: 'x'})",
             cancellationToken: harness.Token);
         await connection.ExecuteAsync("MATCH (a), (b) WHERE a.name = 'all' AND b.name = 'one' INSERT " +
-            string.Join(", ", types.Select(type => "(a)-[:" + type + " {name: '" + type.ToLowerInvariant() + "'}]->(b)")),
+            string.Join(", ", _types.Select(type => "(a)-[:" + type + " {name: '" + type.ToLowerInvariant() + "'}]->(b)")),
             cancellationToken: harness.Token);
 
         // Act
@@ -49,9 +49,9 @@ public sealed class GraphLabelChainWireTests
         var labeled = await connection.QueryAsync("MATCH (n) WHERE n IS NOT LABELED " + Chain("|") + " RETURN n.name",
             cancellationToken: harness.Token);
         var predicates = await connection.QueryAsync("MATCH (n) WHERE " +
-            string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + labels[i % labels.Length])) + " RETURN n.name",
+            string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + _labels[i % _labels.Length])) + " RETURN n.name",
             cancellationToken: harness.Token);
-        var edges = await connection.QueryAsync("MATCH (a)-[r:" + Chain(types, "|") + "]->(b) RETURN r.name", cancellationToken: harness.Token);
+        var edges = await connection.QueryAsync("MATCH (a)-[r:" + Chain(_types, "|") + "]->(b) RETURN r.name", cancellationToken: harness.Token);
 
         // Assert
         colons.ShouldBe(1);
@@ -63,7 +63,7 @@ public sealed class GraphLabelChainWireTests
         labeledEvery.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
         labeled.ShouldHaveSingleItem()[0].ShouldBe("x");
         predicates.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"], ignoreOrder: true);
-        edges.Select(row => (string?)row[0]).ShouldBe(types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
+        edges.Select(row => (string?)row[0]).ShouldBe(_types.Select(type => type.ToLowerInvariant()), ignoreOrder: true);
         connection.IsOpen.ShouldBeTrue();
     }
 
@@ -174,7 +174,7 @@ public sealed class GraphLabelChainWireTests
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
-    private static string Chain(string separator) => Chain(labels, separator);
+    private static string Chain(string separator) => Chain(_labels, separator);
 
     private static string Chain(string[] names, string separator)
         => string.Join(separator, Enumerable.Range(0, chainLength).Select(i => names[i % names.Length]));
