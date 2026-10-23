@@ -23,6 +23,8 @@ using Assimalign.Cohesion.FileSystem;
 /// var stream = StorageStream.FromInMemory();
 /// </code>
 /// </example>
+[global::System.Diagnostics.DebuggerDisplay("StorageStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageStream.DebugView))]
 public sealed class StorageStream : Stream, IFileSystemFileHandle
 {
     private readonly Stream _inner;
@@ -306,5 +308,13 @@ public sealed class StorageStream : Stream, IFileSystemFileHandle
     {
         await _inner.DisposeAsync().ConfigureAwait(false);
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageStream value)
+        {
+            _ = value;
+        }
     }
 }

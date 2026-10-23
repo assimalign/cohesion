@@ -18,6 +18,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// read overlapping an in-place write or rollback retries against the frame's sequence, so
 /// the scan returns only a confirmed private copy (D1, #1365).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageUnitIterator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator.DebugView))]
 public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
 {
     private readonly StoragePageManager _pageManager;
@@ -233,5 +235,17 @@ public sealed unsafe class StorageUnitIterator : IEnumerator<StorageUnit>
         }
 
         return -1;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageUnitIterator value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageUnit Current => _target.Current;
     }
 }

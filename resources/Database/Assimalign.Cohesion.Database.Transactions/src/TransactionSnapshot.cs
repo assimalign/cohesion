@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// the snapshot was taken — that is, <c>x &lt; Maximum</c> and <c>x</c> is not in the
 /// active set. The snapshot owner always sees its own writes.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionSnapshot")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionSnapshot.DebugView))]
 public sealed class TransactionSnapshot
 {
     private readonly FrozenSet<ulong> _active;
@@ -94,5 +96,19 @@ public sealed class TransactionSnapshot
             return true;
         }
         return !_active.Contains(writer.Value);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionSnapshot _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionSnapshot value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Owner => _target.Owner;
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Minimum => _target.Minimum;
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Maximum => _target.Maximum;
     }
 }

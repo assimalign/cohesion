@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// not statements. Writers must collect their targets before applying changes.
 /// Instances support one reader at a time; concurrent moves and disposal are unsupported.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BTreeCursor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.BTreeCursor.DebugView))]
 public sealed class BTreeCursor : IAsyncDisposable
 {
     internal const int BatchSize = 64;
@@ -143,5 +145,13 @@ public sealed class BTreeCursor : IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_position < 0 || _position >= Count) { throw new InvalidOperationException(ErrorMessages.CursorNotPositioned); }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.BTreeCursor value)
+        {
+            _ = value;
+        }
     }
 }

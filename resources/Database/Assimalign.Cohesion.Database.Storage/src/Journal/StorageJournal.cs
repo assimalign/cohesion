@@ -125,6 +125,8 @@ using Assimalign.Cohesion.FileSystem;
 /// (<c>issue_xlog_fsync</c>, <c>src/backend/access/transam/xlog.c:9877-9937</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageJournal")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageJournal.DebugView))]
 public sealed class StorageJournal : IAsyncDisposable, IDisposable
 {
     /// <summary>
@@ -1920,4 +1922,16 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// Journal frame magic value ('WAL2').
     /// </summary>
     private const int magicValue = 0x324C4157;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageJournal _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageJournal value)
+        {
+            _target = value;
+        }
+
+        public bool IsOffline => _target.IsOffline;
+    }
 }

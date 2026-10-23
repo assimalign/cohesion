@@ -31,6 +31,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// </code>
 /// </example>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoragePageHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageHandle.DebugView))]
 public sealed class StoragePageHandle : IDisposable
 {
     private readonly StorageBufferPool _pool;
@@ -109,5 +111,19 @@ public sealed class StoragePageHandle : IDisposable
             if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch); }
             _pool.Unpin(Entry);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StoragePageHandle _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StoragePageHandle value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.PageId Id => _target.Id;
+        public bool IsDirty => _target.IsDirty;
+        public int PinCount => _target.PinCount;
     }
 }

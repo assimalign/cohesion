@@ -52,6 +52,8 @@ using Assimalign.Cohesion.Database.Storage.Internal;
 /// operation of a statement calls through it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageTransaction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageTransaction.DebugView))]
 public sealed class StorageTransaction : IDisposable
 {
     /// <summary>
@@ -321,6 +323,19 @@ public sealed class StorageTransaction : IDisposable
         {
             throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageValidateTransactionFailure, Sequence));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageTransaction value)
+        {
+            _target = value;
+        }
+
+        public long Sequence => _target.Sequence;
+        public bool IsActive => _target.IsActive;
     }
 }
 

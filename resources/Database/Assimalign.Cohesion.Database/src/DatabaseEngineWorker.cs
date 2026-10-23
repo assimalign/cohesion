@@ -1108,6 +1108,8 @@ public abstract class DatabaseEngineWorker
     /// The failure record of one database: the failure, how often it repeated, when its streak
     /// started, when the database may be tried again, and what the passes since did with it.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("DatabaseFailure")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.DatabaseEngineWorker.DatabaseFailure.DebugView))]
     private sealed class DatabaseFailure
     {
         // The clock the offline streak is timed on, and its first offline-capable failure
@@ -1160,6 +1162,27 @@ public abstract class DatabaseEngineWorker
             }
 
             _offlineFailedPass = pass;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.DatabaseEngineWorker.DatabaseFailure _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.DatabaseEngineWorker.DatabaseFailure value)
+            {
+                _target = value;
+            }
+
+            public global::System.Exception Fault => _target.Fault;
+            public global::System.Exception? OperationalFault => _target.OperationalFault;
+            public int Failures => _target.Failures;
+            public int OfflineFailures => _target.OfflineFailures;
+            public long Order => _target.Order;
+            public long RetryAt => _target.RetryAt;
+            public long VisitedPass => _target.VisitedPass;
+            public long FailedPass => _target.FailedPass;
+            public long UnfinishedPass => _target.UnfinishedPass;
+            public long? LaneReportedAt => _target.LaneReportedAt;
         }
     }
 }

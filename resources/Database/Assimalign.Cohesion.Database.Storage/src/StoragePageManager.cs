@@ -22,6 +22,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// refuses to pin or free it, whatever page id a caller (a damaged B-tree reference, say) hands it.
 /// The owning storage creates and owns the manager; it is not disposable on its own.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoragePageManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageManager.DebugView))]
 public sealed class StoragePageManager
 {
     private readonly StorageStream _stream;
@@ -308,5 +310,13 @@ public sealed class StoragePageManager
     {
         FlushAll();
         return default;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StoragePageManager value)
+        {
+            _ = value;
+        }
     }
 }

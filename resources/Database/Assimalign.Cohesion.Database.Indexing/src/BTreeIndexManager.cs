@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// implementation, so catalogs no longer cast the manager to its registry.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BTreeIndexManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.BTreeIndexManager.DebugView))]
 public sealed class BTreeIndexManager
 {
     private readonly BTreeIndexManagerOptions _options;
@@ -349,6 +351,14 @@ public sealed class BTreeIndexManager
                     new IndexDefinition(pair.Value.Name, pair.Value.Kind, pair.Value.IsUnique),
                     pair.Value.RootPageId))
                 .ToList();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.BTreeIndexManager value)
+        {
+            _ = value;
         }
     }
 }

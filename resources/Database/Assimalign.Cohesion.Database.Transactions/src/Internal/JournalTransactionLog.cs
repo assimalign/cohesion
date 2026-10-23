@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// the journal's <see cref="StorageJournal.EnsureDurable"/> — a flush that covers one
 /// commit covers every earlier record, so concurrent commits share fsyncs.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JournalTransactionLog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.Internal.JournalTransactionLog.DebugView))]
 internal sealed class JournalTransactionLog : TransactionLog
 {
     private readonly StorageJournal _journal;
@@ -102,5 +104,13 @@ internal sealed class JournalTransactionLog : TransactionLog
         }
 
         return default;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.Internal.JournalTransactionLog value)
+        {
+            _ = value;
+        }
     }
 }

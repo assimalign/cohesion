@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 // Caller holds Storage's owner lock. Nodes are allocated once per page; changing
 // free bytes moves the existing node in its owner's maximum heap without allocation.
+[global::System.Diagnostics.DebuggerDisplay("StorageRecordFreeBytes")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecordFreeBytes.DebugView))]
 internal sealed class StorageRecordFreeBytes
 {
     private readonly Dictionary<long, Entry> _pages = new();
@@ -120,6 +122,8 @@ internal sealed class StorageRecordFreeBytes
         heap[right].Index = right;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Entry")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecordFreeBytes.Entry.DebugView))]
     private sealed class Entry
     {
         internal readonly ulong Owner;
@@ -135,6 +139,22 @@ internal sealed class StorageRecordFreeBytes
             Capacity = capacity;
             Known = known;
             Index = index;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecordFreeBytes.Entry value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecordFreeBytes value)
+        {
+            _ = value;
         }
     }
 }

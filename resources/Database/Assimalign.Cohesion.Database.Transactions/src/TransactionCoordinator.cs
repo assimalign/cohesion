@@ -53,6 +53,8 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// record space at open).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionCoordinator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.DebugView))]
 public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly Storage _storage;
@@ -1150,6 +1152,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// no second begin: the journal or the checkpoint anchor keeps naming the writer.
     /// </para>
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("GatedJournalLog")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.GatedJournalLog.DebugView))]
     private sealed class GatedJournalLog : TransactionLog
     {
         private readonly TransactionCoordinator _coordinator;
@@ -1315,5 +1319,27 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             _writers.TryRemove(sequence, out _);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.GatedJournalLog value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionManager Manager => _target.Manager;
+        public global::Assimalign.Cohesion.Database.Transactions.LockManager LockManager => _target.LockManager;
+        public global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore VersionStore => _target.VersionStore;
     }
 }

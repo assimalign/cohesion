@@ -4,6 +4,8 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Database.Execution.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabasePlanDescriptionRow Fields = {FieldCount}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Execution.Internal.DatabasePlanDescriptionRow.DebugView))]
 internal sealed class DatabasePlanDescriptionRow : DatabaseRow
 {
     private readonly object?[] _values;
@@ -26,4 +28,17 @@ internal sealed class DatabasePlanDescriptionRow : DatabaseRow
         ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(GetString(ordinal)!);
 
     private object Required(int ordinal) => _values[ordinal] ?? throw new InvalidOperationException();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Execution.Internal.DatabasePlanDescriptionRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Execution.Internal.DatabasePlanDescriptionRow value)
+        {
+            _target = value;
+        }
+
+        public int FieldCount => _target.FieldCount;
+        public bool SupportsMissing => _target.SupportsMissing;
+    }
 }

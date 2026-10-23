@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// back a transaction that enlisted it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoragePageLatch")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageLatch.DebugView))]
 public sealed class StoragePageLatch
 {
     private static long _created;
@@ -100,4 +102,12 @@ public sealed class StoragePageLatch
     /// </summary>
     /// <exception cref="SynchronizationLockException">The current thread does not hold the latch exclusively.</exception>
     public void ExitWrite() => _latch.ExitWriteLock();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StoragePageLatch value)
+        {
+            _ = value;
+        }
+    }
 }

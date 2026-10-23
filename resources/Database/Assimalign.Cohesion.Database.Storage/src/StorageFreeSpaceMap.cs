@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// the same page to two transactions.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageFreeSpaceMap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageFreeSpaceMap.DebugView))]
 public sealed class StorageFreeSpaceMap
 {
     private readonly object _sync = new();
@@ -234,6 +236,14 @@ public sealed class StorageFreeSpaceMap
                 // Opening has no active transactions: generation zero is sufficient.
                 _freeQueue.Enqueue(id);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageFreeSpaceMap value)
+        {
+            _ = value;
         }
     }
 }

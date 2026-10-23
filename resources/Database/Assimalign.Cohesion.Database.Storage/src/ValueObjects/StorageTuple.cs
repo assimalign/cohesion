@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// This type provides a shared tuple wire format for row-oriented use cases while still allowing
 /// model-specific encodings (JSON, BSON, binary row layouts) when needed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageTuple")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageTuple.DebugView))]
 public readonly struct StorageTuple
 {
     private readonly StorageTupleField[] _fields;
@@ -186,5 +188,17 @@ public readonly struct StorageTuple
     public IReadOnlyList<StorageTupleField> AsReadOnlyList()
     {
         return _fields ?? Array.Empty<StorageTupleField>();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StorageTuple _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageTuple value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

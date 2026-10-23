@@ -172,3 +172,12 @@ conditions described in DESIGN. Messages, exception types, original causes and s
 remain unchanged. DatabaseNotFoundException adds a diagnostics-bearing constructor whose third
 inner-exception argument is required; existing constructors and null-inner calls retain their
 contracts. Physical SQL/KeyValuePair refusals use CK06004/CK06005. No disk or wire version changes.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// carry the shared 16-byte writer/deleter stamp prefix. Payloads remain in the
 /// record space; the ledger supplies logical undo and safe space reclamation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RecordSpaceVersionStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore.DebugView))]
 public sealed class RecordSpaceVersionStore : VersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
@@ -566,4 +568,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
         byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore value)
+        {
+            _ = value;
+        }
+    }
 }

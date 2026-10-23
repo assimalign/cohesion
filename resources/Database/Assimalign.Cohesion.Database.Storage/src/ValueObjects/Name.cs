@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <summary>
 /// A strongly-typed name for a storage resource, segment, or other named entity.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Name")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Name.DebugView))]
 public readonly struct Name : IEquatable<Name>
 {
     private readonly string? _value;
@@ -55,4 +57,17 @@ public readonly struct Name : IEquatable<Name>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(Name left, Name right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.Name _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Name value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

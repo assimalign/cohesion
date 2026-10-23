@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// each wire frame is reported once. The core is already asynchronous, so the trace adds one
 /// enabled check per frame and nothing else while no listener takes it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolStreamFrameReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.Internal.ProtocolStreamFrameReader.DebugView))]
 internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
 {
     private readonly Stream _stream;
@@ -143,5 +145,17 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
         }
 
         return total;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.Internal.ProtocolStreamFrameReader _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.Internal.ProtocolStreamFrameReader value)
+        {
+            _target = value;
+        }
+
+        public bool SupportsBorrowedPayloads => _target.SupportsBorrowedPayloads;
     }
 }

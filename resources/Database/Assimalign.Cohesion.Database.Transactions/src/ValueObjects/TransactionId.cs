@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// wire protocol, but unordered. MVCC visibility ordering uses
 /// <see cref="TransactionSequence"/> instead (see docs/DESIGN.md).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionId")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionId.DebugView))]
 public readonly struct TransactionId : IEquatable<TransactionId>
 {
     private readonly Guid _value;
@@ -61,4 +63,16 @@ public readonly struct TransactionId : IEquatable<TransactionId>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(TransactionId left, TransactionId right) => left._value != right._value;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionId _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionId value)
+        {
+            _target = value;
+        }
+
+        public global::System.Guid Value => _target.Value;
+    }
 }

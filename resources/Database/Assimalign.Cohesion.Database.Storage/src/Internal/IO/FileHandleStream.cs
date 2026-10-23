@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.FileSystem;
 
 /// <summary>A sequential cursor over an owned positional handle.</summary>
+[global::System.Diagnostics.DebuggerDisplay("FileHandleStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.FileHandleStream.DebugView))]
 internal sealed class FileHandleStream : Stream
 {
     private readonly IFileSystemFileHandle _handle;
@@ -116,5 +118,20 @@ internal sealed class FileHandleStream : Stream
             await _handle.DisposeAsync().ConfigureAwait(false);
         }
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.Internal.FileHandleStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.FileHandleStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public long Position => _target.Position;
     }
 }

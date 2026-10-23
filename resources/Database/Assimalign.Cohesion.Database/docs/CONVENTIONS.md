@@ -46,4 +46,25 @@ protocol overflow notices are wire warning descriptions, rather than exception-m
 their invariant wording and transport limits remain unchanged. Exception prose and its explanatory
 format fragments live in generated resources. No storage or wire version changes are required.
 
-The post-main rules audit also checks private field/constant naming, explicit constructors, partial extension containers, internal helper placement and build item-group structure. The debugger-view rule excludes Database. Pure naming and constructor-syntax changes preserve message text, diagnostic identities, work accounting, ownership and all statement budgets. Deferred P8/D9 surfaces and the documented hosting ownership exception are retained.
+The post-main rules audit also checks private field/constant naming, explicit constructors, partial extension containers, internal helper placement and build item-group structure. Database source now also follows the debugger-view rule described below. Pure naming and constructor-syntax changes preserve message text, diagnostic identities, work accounting, ownership and all statement budgets. Deferred P8/D9 surfaces and the documented hosting ownership exception are retained.
+
+
+## Debugger inspection
+
+Concrete types in Database `src/` folders follow the debugger display and proxy convention
+in `.claude/rules/general-rules.md`. A view is needed only for explicit private/internal
+instance state that requires filtering, including inherited state. Existing effective base
+displays/proxies are reused. Exceptions, EventSource subclasses, compiler-generated backing
+storage, already hidden state, tests, shared source, fixtures and samples remain excluded.
+
+A new view is private, nested, last in the same primary type file, and has a public constructor
+with public read-only projections of reviewed public/protected state. Inspection never runs
+queries, enumerates results, resolves services, takes locks, delegates storage/stream reads,
+invokes callbacks, or lazily creates data. Stored references may be returned without accessing
+their contents. Ref structs capture only safe scalar snapshots; borrowed spans, pointers and
+ref-like values never escape into heap views. Types without a safe permitted projection use
+an empty view and type-name display. Existing diagnostic summaries and redaction remain intact.
+
+These additions affect debugger inspection only. Original constructors, methods, property
+getters, field initializers and instance layout are unchanged, as are public runtime APIs,
+error identities, formats, wire messages and normal allocation budgets.

@@ -47,6 +47,8 @@ namespace Assimalign.Cohesion.Database.Storage.Units;
 /// └──────────────────────────────────────┘  Offset 8191
 /// </code>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SlottedPage")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Units.SlottedPage.DebugView))]
 public readonly unsafe struct SlottedPage
 {
     private readonly byte* _pointer;
@@ -566,5 +568,13 @@ public readonly unsafe struct SlottedPage
     {
         long pageId = ((Page.Header*)_pointer)->PageId;
         return new StorageCorruptionException((PageId)pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageCorruptionFailure, pageId, detail));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Units.SlottedPage value)
+        {
+            _ = value;
+        }
     }
 }

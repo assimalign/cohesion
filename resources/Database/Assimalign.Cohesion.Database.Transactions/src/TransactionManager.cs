@@ -61,6 +61,8 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// granted after the release sees the end and gives the grant back.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionManager.DebugView))]
 public sealed class TransactionManager : IAsyncDisposable
 {
     private static readonly string _errorTransactionManagerClaimEndFailure3 = ErrorMessages.TransactionManagerClaimEndFailure3;
@@ -998,5 +1000,13 @@ public sealed class TransactionManager : IAsyncDisposable
         }
 
         drained?.TrySetResult();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionManager value)
+        {
+            _ = value;
+        }
     }
 }

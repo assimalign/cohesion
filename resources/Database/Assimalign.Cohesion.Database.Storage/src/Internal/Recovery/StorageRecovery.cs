@@ -227,6 +227,8 @@ internal static class StorageRecovery
     /// the data stream with a fresh checksum. Past the capacity the least recently used page is
     /// written early and read back, verified, when its next record needs it.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("RedoCache")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecovery.RedoCache.DebugView))]
     private sealed class RedoCache
     {
         private readonly StorageStream _data;
@@ -327,6 +329,14 @@ internal static class StorageRecovery
         {
             PageChecksum.Stamp(buffer);
             _data.WritePage((PageId)pageId, buffer);
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageRecovery.RedoCache value)
+            {
+                _ = value;
+            }
         }
     }
 }

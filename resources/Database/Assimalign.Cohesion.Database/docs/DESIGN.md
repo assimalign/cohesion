@@ -1448,3 +1448,12 @@ existing coded model failures. Public arbitrary-message constructors and BCL inv
 remain unchanged. Execution's parameterless InvalidOperationException/Convert row failures retain
 their BCL kinds; adding a root carrier there would create a dependency cycle and expand the
 deferred #1264 P8 result contract. This audit introduces no such result API change.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

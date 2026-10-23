@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Types;
 /// Keys are self-describing: <see cref="PeekType"/> reveals the next component's
 /// type before it is read.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseKeyReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Types.DatabaseKeyReader.DebugView))]
 public ref struct DatabaseKeyReader
 {
     private readonly ReadOnlySpan<byte> _source;
@@ -352,5 +354,17 @@ public ref struct DatabaseKeyReader
         var span = _source.Slice(_position, length);
         _position += length;
         return span;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly bool _value0;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Types.DatabaseKeyReader value)
+        {
+            _value0 = value.IsAtEnd;
+        }
+
+        public bool IsAtEnd => _value0;
     }
 }

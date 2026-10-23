@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>
 /// A strongly-typed name for a logical database instance.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseName Length = {Length}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.DatabaseName.DebugView))]
 public readonly struct DatabaseName : IEquatable<DatabaseName>
 {
     private readonly string? _value;
@@ -61,4 +63,17 @@ public readonly struct DatabaseName : IEquatable<DatabaseName>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(DatabaseName left, DatabaseName right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.DatabaseName _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.DatabaseName value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

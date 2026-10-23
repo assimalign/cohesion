@@ -62,6 +62,8 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// it; seeks start before the first entry of their key, at <c>(key, -inf)</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BTreeIndex")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.BTreeIndex.DebugView))]
 public sealed class BTreeIndex
 {
     // Optional test observer of physical entry-directory reads. The ordinary path neither
@@ -1671,6 +1673,8 @@ public sealed class BTreeIndex
     /// Which of the entries a lookup walks it wants: an allocation-free predicate for
     /// <see cref="TryFindEntry"/>.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("EntryMatch")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.BTreeIndex.EntryMatch.DebugView))]
     private readonly struct EntryMatch
     {
         private readonly EntryMatchKind _kind;
@@ -1721,5 +1725,27 @@ public sealed class BTreeIndex
                 && node.GetDeleter(index) == _stamp,
             _ => false,
         };
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Indexing.BTreeIndex.EntryMatch value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Indexing.BTreeIndex _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.BTreeIndex value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Indexing.IndexKind Kind => _target.Kind;
+        public bool IsUnique => _target.IsUnique;
     }
 }

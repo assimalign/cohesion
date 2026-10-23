@@ -38,6 +38,8 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// leftmost child, <c>i</c> for the child to the right of separator <c>i</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BTreeNode")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Indexing.Internal.BTreeNode.DebugView))]
 internal readonly ref struct BTreeNode
 {
     private readonly Span<byte> _body;
@@ -487,5 +489,13 @@ internal readonly ref struct BTreeNode
         _body.Slice(start + DirectorySlotSize, DirectorySlotSize * (count - index - 1)).CopyTo(_body[start..]);
         _body.Slice(directoryOffset + DirectorySlotSize * (count - 1), DirectorySlotSize).Clear();
         EntryCount = (ushort)(count - 1);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Indexing.Internal.BTreeNode value)
+        {
+            _ = value;
+        }
     }
 }

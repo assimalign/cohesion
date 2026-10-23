@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Protocol;
 /// <summary>An immutable endpoint-selected set of model message identifiers.</summary>
 /// <remarks>One channel binds one family for its entire lifetime. Identifiers 5 through 9
 /// and 64 through 255 belong to models; all other identifiers are reserved by the core.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolMessageFamily")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily.DebugView))]
 public sealed class ProtocolMessageFamily
 {
     private readonly bool[] _types = new bool[256];
@@ -77,4 +79,17 @@ public sealed class ProtocolMessageFamily
         ProtocolMessageType.AuthenticateResponse or ProtocolMessageType.Ready or
         ProtocolMessageType.Error or ProtocolMessageType.Ping or ProtocolMessageType.Pong or
         ProtocolMessageType.Terminate or ProtocolMessageType.Diagnostics || _types[(byte)type];
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolCapability> Capabilities => _target.Capabilities;
+    }
 }

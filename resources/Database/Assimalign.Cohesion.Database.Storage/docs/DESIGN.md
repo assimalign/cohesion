@@ -2923,3 +2923,9 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 `StoragePageLatch()` is public; the parameterless `Create()` factory is removed. Its creation-order rule is unchanged.
+
+## Debugger inspection convention
+
+Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

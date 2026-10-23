@@ -61,6 +61,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// which a sealed type cannot have (plan §6.2).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LockManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.DebugView))]
 public sealed class LockManager
 {
     private static readonly string _errorLockManagerFailEndedFailure = ErrorMessages.LockManagerFailEndedFailure;
@@ -1536,6 +1538,8 @@ public sealed class LockManager
     /// (<see cref="ReportBlocked"/>). Created only while a listener takes the source's warnings, so
     /// a wait costs nothing more when nobody listens.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("BlockedWaitReport")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.BlockedWaitReport.DebugView))]
     private sealed class BlockedWaitReport : IDisposable
     {
         private readonly LockManager _manager;
@@ -1570,6 +1574,14 @@ public sealed class LockManager
         public void Dispose() => _timer.Dispose();
 
         private void Report() => _manager.ReportBlocked(_waiter, _started);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.BlockedWaitReport value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private readonly record struct LockGrant(byte Modes, ulong Sequence);
@@ -1595,6 +1607,8 @@ public sealed class LockManager
         public bool WakeScheduled { get; set; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("LockTimeoutScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.LockTimeoutScope.DebugView))]
     private sealed class LockTimeoutScope : IDisposable
     {
         private LockManager? _manager;
@@ -1611,8 +1625,18 @@ public sealed class LockManager
             var manager = Interlocked.Exchange(ref _manager, null);
             if (manager is not null) { manager._lockTimeout.Value = _previous; }
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.LockTimeoutScope value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Waiter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter.DebugView))]
     private sealed class Waiter
     {
         private readonly LockManager _manager;
@@ -1645,5 +1669,27 @@ public sealed class LockManager
 
         // The wait's cancellation callback.
         public void Cancel(string outcome) => _manager.CancelWaiter(this, outcome);
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager.Waiter value)
+            {
+                _target = value;
+            }
+
+            public ulong Owner => _target.Owner;
+            public global::Assimalign.Cohesion.Database.Transactions.LockMode Mode => _target.Mode;
+            public string? CancellationOutcome => _target.CancellationOutcome;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.LockManager value)
+        {
+            _ = value;
+        }
     }
 }

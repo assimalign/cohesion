@@ -260,3 +260,12 @@ Exception messages and format templates are generated from `src/Properties/Error
 format arguments use the current culture. Cancellation and abort templates used during normal
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Borrowed token spans and lazy statement diagnostics are omitted. The lexer view retains no ref-like instance; profile views expose already stored vocabulary metadata without enumeration.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

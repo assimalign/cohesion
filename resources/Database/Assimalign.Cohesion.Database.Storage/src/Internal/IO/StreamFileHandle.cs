@@ -16,6 +16,8 @@ using Assimalign.Cohesion.FileSystem;
 /// takes the same gate, so no operation can observe or replace the stream's storage
 /// while another is using it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StreamFileHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StreamFileHandle.DebugView))]
 internal sealed class StreamFileHandle : IFileSystemFileHandle
 {
     private readonly Stream _stream;
@@ -156,4 +158,16 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
 
     public void Dispose() => _stream.Dispose();
     public ValueTask DisposeAsync() => _stream.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.Internal.StreamFileHandle _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StreamFileHandle value)
+        {
+            _target = value;
+        }
+
+        public bool SupportsDurableFlush => _target.SupportsDurableFlush;
+    }
 }

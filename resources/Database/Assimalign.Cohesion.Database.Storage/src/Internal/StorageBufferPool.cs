@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// A bounded clock cache over pinned-heap page buffers. Cached pins own only frame-local
 /// state; mapping changes and admission use the pool monitor, never while doing page I/O.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("StorageBufferPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.DebugView))]
 internal sealed unsafe class StorageBufferPool : IDisposable
 {
     private readonly ConcurrentDictionary<long, BufferEntry> _entries = new();
@@ -619,6 +621,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         _recycled.Push(entry);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("LoadOperation")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.LoadOperation.DebugView))]
     private sealed class LoadOperation
     {
         private TaskCompletionSource? _completion;
@@ -629,6 +633,14 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         {
             if (failure is not null) { _failure = ExceptionDispatchInfo.Capture(failure); }
             _completion?.SetResult();
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.LoadOperation value)
+            {
+                _ = value;
+            }
         }
     }
 
@@ -794,6 +806,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// <summary>
     /// Holds a page buffer and the associated page metadata.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("BufferEntry")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry.DebugView))]
     internal sealed unsafe class BufferEntry
     {
         public readonly byte[] Buffer;
@@ -1035,6 +1049,30 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 lock (_dirtySync) { RetireCompletedWriter(); }
                 spinner.SpinOnce();
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry value)
+            {
+                _target = value;
+            }
+
+            public int PinCount => _target.PinCount;
+            public bool IsRecycled => _target.IsRecycled;
+            public bool WriteInProgress => _target.WriteInProgress;
+            public long Version => _target.Version;
+            public bool IsDirty => _target.IsDirty;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool value)
+        {
+            _ = value;
         }
     }
 }

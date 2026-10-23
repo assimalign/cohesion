@@ -65,6 +65,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// found".
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageConsistencyCheck")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageConsistencyCheck.DebugView))]
 internal sealed class StorageConsistencyCheck
 {
     /// <summary>
@@ -460,4 +462,12 @@ internal sealed class StorageConsistencyCheck
 
     private static InvalidOperationException Inconsistent(long pageId, string detail)
         => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConsistencyCheckInconsistentFailure, pageId, detail));
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageConsistencyCheck value)
+        {
+            _ = value;
+        }
+    }
 }
