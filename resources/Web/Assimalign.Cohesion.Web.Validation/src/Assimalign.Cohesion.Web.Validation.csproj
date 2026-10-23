@@ -15,4 +15,7 @@
 		     package's opt-in, not a dependency of endpoint mapping). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

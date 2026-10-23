@@ -9,6 +9,8 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<!-- Integration acceptance: drive the manifest through the generic gateway

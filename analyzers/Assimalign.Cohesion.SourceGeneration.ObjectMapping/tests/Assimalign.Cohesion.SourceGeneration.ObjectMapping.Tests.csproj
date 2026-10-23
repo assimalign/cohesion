@@ -12,6 +12,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration.ObjectMapping" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectMapping" />
 	</ItemGroup>
 </Project>

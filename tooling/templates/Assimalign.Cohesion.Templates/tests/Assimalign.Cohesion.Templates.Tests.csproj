@@ -11,6 +11,8 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="Shouldly" />
     <CohesionPackageReference Include="xunit" />

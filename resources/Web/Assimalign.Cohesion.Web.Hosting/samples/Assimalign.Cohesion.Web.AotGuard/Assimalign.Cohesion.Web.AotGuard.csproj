@@ -61,6 +61,8 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Projects the builder.Services.Add<Feature> verbs the feature packages declare as component integrations (#1380). -->
     <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
     <CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />

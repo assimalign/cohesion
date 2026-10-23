@@ -26,21 +26,21 @@ public class ComponentIntegrationGeneratorTests
         #nullable enable
         using System;
 
-        namespace Test.Seams;
+        namespace Assimalign.Cohesion.DependencyInjection;
 
-        public interface ISeam
+        public interface IServiceProviderBuilder
         {
         }
 
         public static class SeamExtensions
         {
-            extension(ISeam seam)
+            extension(IServiceProviderBuilder seam)
             {
-                public ISeam AddThing<T>(Func<IServiceProvider, T> factory)
+                public IServiceProviderBuilder AddSingleton<T>(Func<IServiceProvider, T> factory)
                     where T : class
                     => seam;
 
-                public ISeam AddThing<T>(T instance)
+                public IServiceProviderBuilder AddSingleton<T>(T instance)
                     where T : class
                     => seam;
             }
@@ -56,29 +56,35 @@ public class ComponentIntegrationGeneratorTests
         using System;
         using System.Collections.Generic;
 
-        namespace Test.Seams;
+        namespace Assimalign.Cohesion.DependencyInjection;
 
-        public interface ISeam
+        public interface IServiceProviderBuilder
         {
         }
 
-        public sealed class RecordingSeam : ISeam
+        public sealed class RecordingSeam : IServiceProviderBuilder
         {
             public List<object> Products { get; } = new();
+
+            public int ProducerInvocations { get; set; } = 1;
         }
 
         public static class SeamExtensions
         {
-            extension(ISeam seam)
+            extension(IServiceProviderBuilder seam)
             {
-                public ISeam AddThing<T>(Func<IServiceProvider, T> factory)
+                public IServiceProviderBuilder AddSingleton<T>(Func<IServiceProvider, T> factory)
                     where T : class
                 {
-                    ((RecordingSeam)seam).Products.Add(factory(null!));
+                    var recordingSeam = (RecordingSeam)seam;
+                    for (int i = 0; i < recordingSeam.ProducerInvocations; i++)
+                    {
+                        recordingSeam.Products.Add(factory(null!));
+                    }
                     return seam;
                 }
 
-                public ISeam AddThing<T>(T instance)
+                public IServiceProviderBuilder AddSingleton<T>(T instance)
                     where T : class
                     => seam;
             }
@@ -111,19 +117,19 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(
             """
             using Test.Contributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             internal static class Consumer
             {
-                internal static ISeam Configure(ISeam seam) => seam.AddProjected("configured");
+                internal static IServiceProviderBuilder Configure(IServiceProviderBuilder seam) => seam.AddProjected("configured");
             }
             """,
             new[] { contributor },
             new[] { seam });
 
         string generated = GeneratedText(result);
-        generated.ShouldContain("extension(global::Test.Seams.ISeam builder)", Case.Sensitive);
-        generated.ShouldContain("public global::Test.Seams.ISeam AddProjected(", Case.Sensitive);
+        generated.ShouldContain("extension(global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder builder)", Case.Sensitive);
+        generated.ShouldContain("public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddProjected(", Case.Sensitive);
         AssertNoErrors(result.Compilation);
     }
 
@@ -164,7 +170,7 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
         string generated = GeneratedText(result);
 
-        CountOccurrences(generated, "public global::Test.Seams.ISeam AddProjected(").ShouldBe(2);
+        CountOccurrences(generated, "public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddProjected(").ShouldBe(2);
         generated.ShouldContain("global::System.String @name", Case.Sensitive);
         generated.ShouldContain("global::System.Int32 @count", Case.Sensitive);
         AssertNoErrors(result.Compilation);
@@ -273,7 +279,7 @@ public class ComponentIntegrationGeneratorTests
                 && diagnostic.Severity == DiagnosticSeverity.Warning);
         CountOccurrences(
             GeneratedText(result),
-            "public global::Test.Seams.ISeam AddProjected(").ShouldBe(1);
+            "public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddProjected(").ShouldBe(1);
         AssertNoErrors(result.Compilation);
     }
 
@@ -303,7 +309,7 @@ public class ComponentIntegrationGeneratorTests
 
         result.RunResult.GeneratedTrees.Length.ShouldBe(1);
         GeneratedText(result).ShouldContain(
-            "extension(global::Test.Seams.ISeam builder)",
+            "extension(global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder builder)",
             Case.Sensitive);
     }
 
@@ -348,7 +354,7 @@ public class ComponentIntegrationGeneratorTests
         string explicitGenerated = GeneratedText(explicitResult);
 
         explicitGenerated.ShouldContain(
-            "builder.AddThing<global::Test.ContractContributor.IThing>(",
+            "builder.AddSingleton<global::Test.ContractContributor.IThing>(",
             Case.Sensitive);
         AssertNoErrors(explicitResult.Compilation);
 
@@ -368,13 +374,13 @@ public class ComponentIntegrationGeneratorTests
             new[] { seam });
         string inferredGenerated = GeneratedText(inferredResult);
 
-        inferredGenerated.ShouldContain("builder.AddThing(", Case.Sensitive);
-        inferredGenerated.ShouldNotContain("builder.AddThing<", Case.Sensitive);
+        inferredGenerated.ShouldContain("builder.AddSingleton(", Case.Sensitive);
+        inferredGenerated.ShouldNotContain("builder.AddSingleton<", Case.Sensitive);
         AssertNoErrors(inferredResult.Compilation);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: missing attribute type is a silent no-op")]
-    public void Generator_AttributeTypeMissing_EmitsAndReportsNothing()
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: assembly-local internal declarations work without a Core reference")]
+    public void Generator_InternalAttributeWithoutCoreReference_EmitsCallableVerb()
     {
         MetadataReference contributor = CompileReference(
             "Test.Contributor",
@@ -382,7 +388,7 @@ public class ComponentIntegrationGeneratorTests
                 """
                 public static Func<IServiceProvider, IThing> CreateThing()
                     => _ => new Thing();
-                """));
+                """), includeCore: false);
         MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
 
         GeneratorResult result = Run(
@@ -391,6 +397,18 @@ public class ComponentIntegrationGeneratorTests
             new[] { seam },
             includeCore: false);
 
+        result.RunResult.GeneratedTrees.Length.ShouldBe(1);
+        result.RunResult.Diagnostics.ShouldBeEmpty();
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: Core does not expose the opt-in attribute")]
+    public void Generator_WithoutOptIn_DoesNotExposeAttribute()
+    {
+        GeneratorResult result = Run(string.Empty, Array.Empty<MetadataReference>());
+        IAssemblySymbol core = result.Compilation.SourceModule.ReferencedAssemblySymbols
+            .Single(assembly => assembly.Name == "Assimalign.Cohesion.Core");
+        core.GetTypeByMetadataName("Assimalign.Cohesion.ComponentIntegrationAttribute").ShouldBeNull();
         result.RunResult.GeneratedTrees.ShouldBeEmpty();
         result.RunResult.Diagnostics.ShouldBeEmpty();
     }
@@ -403,8 +421,8 @@ public class ComponentIntegrationGeneratorTests
             using System;
 
             [assembly: Assimalign.Cohesion.ComponentIntegration(
-                "Test.Seams.ISeam",
-                "AddThing",
+                "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
+                "AddSingleton",
                 typeof(Test.MalformedContributor.Components),
                 "CreateThing")]
 
@@ -460,8 +478,8 @@ public class ComponentIntegrationGeneratorTests
             using System;
 
             [assembly: Assimalign.Cohesion.ComponentIntegration(
-                "Test.Seams.ISeam",
-                "AddThing",
+                "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
+                "AddSingleton",
                 typeof(Test.MalformedNamedArgument.Components),
                 "CreateThing",
                 Verb = "AddProjected",
@@ -562,7 +580,7 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
 
         GeneratedText(result).ShouldContain(
-            "extension(global::Test.Seams.ISeam componentBuilder2)",
+            "extension(global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder componentBuilder2)",
             Case.Sensitive);
         AssertNoErrors(result.Compilation);
     }
@@ -576,10 +594,11 @@ public class ComponentIntegrationGeneratorTests
             using Assimalign.Cohesion;
 
             [assembly: ComponentIntegration(
-                "Test.Seams.ISeam",
-                "new",
+                ComponentIntegrationTarget.ServiceProviderBuilder,
+                ComponentIntegrationMethod.AddSingleton,
                 typeof(Test.KeywordContributor.Components),
                 nameof(Test.KeywordContributor.Components.@new),
+                ComponentIntegrationTemplate.Factory,
                 Verb = "return",
                 Contract = typeof(Test.KeywordContributor.IThing))]
 
@@ -602,17 +621,17 @@ public class ComponentIntegrationGeneratorTests
             #nullable enable
             using System;
 
-            namespace Test.Seams;
+            namespace Assimalign.Cohesion.DependencyInjection;
 
-            public interface ISeam
+            public interface IServiceProviderBuilder
             {
             }
 
             public static class SeamExtensions
             {
-                extension(ISeam seam)
+                extension(IServiceProviderBuilder seam)
                 {
-                    public ISeam @new<T>(Func<IServiceProvider, T> factory)
+                    public IServiceProviderBuilder AddSingleton<T>(Func<IServiceProvider, T> factory)
                         where T : class
                         => seam;
                 }
@@ -624,18 +643,18 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(
             """
             using Test.KeywordContributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             internal static class Consumer
             {
-                internal static ISeam Configure(ISeam seam) => seam.@return();
+                internal static IServiceProviderBuilder Configure(IServiceProviderBuilder seam) => seam.@return();
             }
             """,
             new[] { contributor },
             new[] { seam });
         string generated = GeneratedText(result);
 
-        generated.ShouldContain("builder.@new<", Case.Sensitive);
+        generated.ShouldContain("builder.AddSingleton<", Case.Sensitive);
         generated.ShouldContain("Components.@new()", Case.Sensitive);
         generated.ShouldContain(" @return(", Case.Sensitive);
         AssertNoErrors(result.Compilation);
@@ -676,11 +695,11 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(
             """
             using Test.BuilderContributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             internal static class Consumer
             {
-                internal static ISeam Configure(ISeam seam) => seam.AddProjected(builder => { });
+                internal static IServiceProviderBuilder Configure(IServiceProviderBuilder seam) => seam.AddProjected(builder => { });
             }
             """,
             new[] { contributor },
@@ -688,7 +707,7 @@ public class ComponentIntegrationGeneratorTests
         string generated = GeneratedText(result);
 
         generated.ShouldContain(
-            "public global::Test.Seams.ISeam AddProjected(global::System.Action<global::Test.BuilderContributor.ThingBuilder>? @configure = null)",
+            "public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddProjected(global::System.Action<global::Test.BuilderContributor.ThingBuilder>? @configure = null)",
             Case.Sensitive);
         generated.ShouldContain(
             "var cohesionComponentFactory = new global::Test.BuilderContributor.ThingBuilder();",
@@ -698,7 +717,7 @@ public class ComponentIntegrationGeneratorTests
             "var cohesionComponent = cohesionComponentFactory.Build();",
             Case.Sensitive);
         generated.ShouldContain(
-            "builder.AddThing<global::Test.BuilderContributor.IThing>(_ => cohesionComponent);",
+            "builder.AddSingleton<global::Test.BuilderContributor.IThing>(_ => cohesionComponent);",
             Case.Sensitive);
         generated.ShouldNotContain("(global::System.Func<", Case.Sensitive);
         AssertNoErrors(result.Compilation);
@@ -800,7 +819,7 @@ public class ComponentIntegrationGeneratorTests
         result.RunResult.Diagnostics.ShouldNotContain(
             diagnostic => diagnostic.Id == "COHCMP0007");
         GeneratedText(result).ShouldContain(
-            "public global::Test.Seams.ISeam AddProjected(",
+            "public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddProjected(",
             Case.Sensitive);
         AssertNoErrors(result.Compilation);
     }
@@ -816,15 +835,15 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(
             """
             using Test.OptionalBuilderContributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             internal static class Consumer
             {
-                internal static ISeam Bare(ISeam seam) => seam.AddProjected();
+                internal static IServiceProviderBuilder Bare(IServiceProviderBuilder seam) => seam.AddProjected();
 
-                internal static ISeam ExplicitNull(ISeam seam) => seam.AddProjected(null);
+                internal static IServiceProviderBuilder ExplicitNull(IServiceProviderBuilder seam) => seam.AddProjected(null);
 
-                internal static ISeam Configured(ISeam seam) => seam.AddProjected(builder => { });
+                internal static IServiceProviderBuilder Configured(IServiceProviderBuilder seam) => seam.AddProjected(builder => { });
             }
             """,
             new[] { contributor },
@@ -835,7 +854,49 @@ public class ComponentIntegrationGeneratorTests
             "AddProjected(global::System.Action<global::Test.OptionalBuilderContributor.ThingBuilder>? @configure = null)",
             Case.Sensitive);
         generated.ShouldContain("@configure?.Invoke(cohesionComponentFactory);", Case.Sensitive);
-        generated.ShouldNotContain("ArgumentNullException", Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb supports provider-aware configuration")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Generator_BuilderTemplateVerbWithServiceProvider_EmitsCallableDeferredComposition(bool includeContract)
+    {
+        // Arrange
+        string contributorSource = BuilderContributorSource(includeContract: includeContract);
+        MetadataReference contributor = CompileReference("Test.BuilderContributor", contributorSource);
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+
+        // Act
+        GeneratorResult result = Run(
+            """
+            using System;
+            using Test.BuilderContributor;
+            using Assimalign.Cohesion.DependencyInjection;
+
+            internal static class Consumer
+            {
+                internal static IServiceProviderBuilder Configure(IServiceProviderBuilder seam) => seam.AddProjected((provider, builder) =>
+                {
+                    _ = provider.GetService(typeof(IThing));
+                });
+
+                internal static IServiceProviderBuilder ConfigureMethodGroup(IServiceProviderBuilder seam) => seam.AddProjected(ConfigureBuilder);
+
+                private static void ConfigureBuilder(IServiceProvider provider, ThingBuilder builder) { }
+            }
+            """,
+            new[] { contributor },
+            new[] { seam });
+
+        // Assert
+        string generated = GeneratedText(result);
+        generated.ShouldContain(
+            "AddProjected(global::System.Action<global::System.IServiceProvider, global::Test.BuilderContributor.ThingBuilder> @configure)",
+            Case.Sensitive);
+        generated.ShouldContain("@configure(cohesionServiceProvider, cohesionComponentFactory);", Case.Sensitive);
+        generated.ShouldContain("return cohesionComponentFactory.Build();", Case.Sensitive);
+        result.RunResult.Diagnostics.ShouldBeEmpty();
         AssertNoErrors(result.Compilation);
     }
 
@@ -862,6 +923,90 @@ public class ComponentIntegrationGeneratorTests
         registered.ShouldBe(new[] { "configured" });
     }
 
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: provider callback uses a fresh builder on every producer invocation")]
+    public void Generator_ProviderCallbackInvokedRepeatedly_BuildsFreshProducts()
+    {
+        // Arrange / Act
+        string[] registered = ExecuteNamedThingConsumer(
+            """
+            seam.ProducerInvocations = 2;
+            int configureCalls = 0;
+            seam.AddProjected((provider, builder) => builder.Name += (++configureCalls).ToString());
+            """);
+
+        // Assert
+        registered.ShouldBe(new[] { "default1", "default2" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: custom block executes with expanded placeholders")]
+    public void Generator_CustomBody_RegistersConfiguredProduct()
+    {
+        string[] registered = ExecuteNamedThingConsumer(
+            """seam.AddProjected(builder => builder.Name = "custom");""",
+            useCustomTemplate: true);
+        registered.ShouldBe(new[] { "custom" });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: invalid custom declarations are diagnosed")]
+    [InlineData("$unknown$;", "")]
+    [InlineData("return $receiver$", "")]
+    [InlineData("return $receiver$;", "int broken =")]
+    public void Generator_InvalidCustomBodyOrSignature_ReportsDiagnostic(string statements, string signature)
+    {
+        string source = ContributorSource("public static IThing CreateThing() => new Thing();")
+            .Replace("ComponentIntegrationTemplate.Factory,", $$"""
+                ComponentIntegrationTemplate.Custom,
+                Signature = "{{signature}}",
+                Body = "{ {{statements}} }",
+                """);
+        MetadataReference contributor = CompileReference("Test.CustomContributor", source);
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+        result.RunResult.GeneratedTrees.ShouldBeEmpty();
+        result.RunResult.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHCMP0003");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: one builder declaration emits only its selected signature")]
+    public void Generator_SingleBuilderDeclaration_EmitsOnlySelectedSignature()
+    {
+        var root = CSharpSyntaxTree.ParseText(BuilderContributorSource()).GetCompilationUnitRoot();
+        string source = root.RemoveNode(root.AttributeLists[1], SyntaxRemoveOptions.KeepNoTrivia)!.ToFullString();
+        MetadataReference contributor = CompileReference("Test.BuilderContributor", source);
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource, includeCore: false);
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+        CountOccurrences(GeneratedText(result), " AddProjected(").ShouldBe(1);
+        GeneratedText(result).ShouldNotContain("Action<global::System.IServiceProvider,", Case.Sensitive);
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: explicit registration method selects the sink")]
+    [InlineData("AddSingleton")]
+    [InlineData("AddScoped")]
+    [InlineData("AddTransient")]
+    public void Generator_ExplicitTargetMethod_UsesSelectedSink(string targetMethod)
+    {
+        string source = BuilderContributorSource().Replace("ComponentIntegrationMethod.AddSingleton", "ComponentIntegrationMethod." + targetMethod);
+        MetadataReference contributor = CompileReference("Test.BuilderContributor", source);
+        MetadataReference seam = CompileReference("Test.Seam", SeamSource.Replace("AddSingleton", targetMethod), includeCore: false);
+        GeneratorResult result = Run(string.Empty, new[] { contributor }, new[] { seam });
+        GeneratedText(result).ShouldContain("builder." + targetMethod + "<", Case.Sensitive);
+        result.RunResult.Diagnostics.ShouldBeEmpty();
+        AssertNoErrors(result.Compilation);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: unknown catalog values are rejected")]
+    [InlineData("ComponentIntegrationTarget.ServiceProviderBuilder", "(ComponentIntegrationTarget)999")]
+    [InlineData("ComponentIntegrationMethod.AddSingleton", "(ComponentIntegrationMethod)999")]
+    [InlineData("ComponentIntegrationTemplate.Factory", "(ComponentIntegrationTemplate)999")]
+    public void Generator_UnknownCatalogValue_ReportsSchemaDiagnostic(string original, string replacement)
+    {
+        string source = ContributorSource("public static IThing CreateThing() => new Thing();").Replace(original, replacement);
+        MetadataReference contributor = CompileReference("Test.InvalidCatalogContributor", source);
+        GeneratorResult result = Run(string.Empty, new[] { contributor });
+        result.RunResult.GeneratedTrees.ShouldBeEmpty();
+        result.RunResult.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHCMP0001");
+    }
+
     [Fact(DisplayName = "Cohesion Test [SourceGeneration.ComponentModel] - Generator: builder-template verb emits the complete eager composition body")]
     public void Generator_BuilderTemplateVerb_EmitsCompleteEagerCompositionBody()
     {
@@ -882,11 +1027,11 @@ public class ComponentIntegrationGeneratorTests
         GeneratorResult result = Run(
             """
             using Test.EndToEndBuilderContributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             internal static class Consumer
             {
-                internal static ISeam Configure(ISeam seam) =>
+                internal static IServiceProviderBuilder Configure(IServiceProviderBuilder seam) =>
                     seam.AddEndToEnd(builder => builder.Configure("configured"));
             }
             """,
@@ -900,7 +1045,7 @@ public class ComponentIntegrationGeneratorTests
         generated.ShouldContain(
             Indent(NormalizeLineEndings(
                 """
-                    public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder>? @configure = null)
+                    public global::Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder>? @configure = null)
                     {
                         // Composed eagerly so the factory's own Build-time validation fires at registration
                         // time rather than at first resolve. Without a callback the builder's defaults are built.
@@ -910,7 +1055,7 @@ public class ComponentIntegrationGeneratorTests
 
                         // Registered through the Func<> sink so the container captures the product for
                         // disposal (an instance registration would become an uncaptured ConstantCallSite).
-                        builder.AddThing<global::Test.EndToEndBuilderContributor.IThing>(_ => cohesionComponent);
+                        builder.AddSingleton<global::Test.EndToEndBuilderContributor.IThing>(_ => cohesionComponent);
                         return builder;
                     }
                 """),
@@ -936,10 +1081,11 @@ public class ComponentIntegrationGeneratorTests
             using Assimalign.Cohesion;
 
             [assembly: ComponentIntegration(
-                targetTypeName: "Test.Seams.ISeam",
-                targetMethodName: "AddThing",
+                target: ComponentIntegrationTarget.ServiceProviderBuilder,
+                targetMethod: ComponentIntegrationMethod.AddSingleton,
                 factoryType: typeof({{contributorNamespace}}.Components),
                 factoryMethodName: nameof({{contributorNamespace}}.Components.CreateThing),
+                template: ComponentIntegrationTemplate.Factory,
                 Verb = "{{verb}}"{{contract}})]
 
             namespace {{contributorNamespace}};
@@ -968,19 +1114,28 @@ public class ComponentIntegrationGeneratorTests
             public IThing Build()
                 => new Thing();
             """,
-        string additionalTypes = "") =>
+        string additionalTypes = "",
+        bool includeContract = true) =>
         $$"""
             #nullable enable
             using System;
             using Assimalign.Cohesion;
 
             [assembly: ComponentIntegration(
-                targetTypeName: "Test.Seams.ISeam",
-                targetMethodName: "AddThing",
+                target: ComponentIntegrationTarget.ServiceProviderBuilder,
+                targetMethod: ComponentIntegrationMethod.AddSingleton,
                 factoryType: typeof({{contributorNamespace}}.ThingBuilder),
                 factoryMethodName: nameof({{contributorNamespace}}.ThingBuilder.Build),
-                Verb = "{{verb}}",
-                Contract = typeof({{contributorNamespace}}.IThing))]
+                template: ComponentIntegrationTemplate.Builder,
+                Verb = "{{verb}}"{{(includeContract ? $", Contract = typeof({contributorNamespace}.IThing)" : string.Empty)}})]
+
+            [assembly: ComponentIntegration(
+                target: ComponentIntegrationTarget.ServiceProviderBuilder,
+                targetMethod: ComponentIntegrationMethod.AddSingleton,
+                factoryType: typeof({{contributorNamespace}}.ThingBuilder),
+                factoryMethodName: nameof({{contributorNamespace}}.ThingBuilder.Build),
+                template: ComponentIntegrationTemplate.BuilderWithServiceProvider,
+                Verb = "{{verb}}"{{(includeContract ? $", Contract = typeof({contributorNamespace}.IThing)" : string.Empty)}})]
 
             namespace {{contributorNamespace}};
 
@@ -1006,12 +1161,10 @@ public class ComponentIntegrationGeneratorTests
     /// recording seam, then loads and invokes the consumer and returns each registered product's name in
     /// registration order.
     /// </summary>
-    private static string[] ExecuteNamedThingConsumer(string registrations)
+    private static string[] ExecuteNamedThingConsumer(string registrations, bool useCustomTemplate = false)
     {
         const string contributorNamespace = "Test.NamedBuilderContributor";
-        byte[] contributorImage = CompileImage(
-            contributorNamespace,
-            BuilderContributorSource(
+        string source = BuilderContributorSource(
                 contributorNamespace: contributorNamespace,
                 builderMembers: """
                     public string Name { get; set; } = "default";
@@ -1029,14 +1182,32 @@ public class ComponentIntegrationGeneratorTests
 
                         public string Name { get; }
                     }
-                    """));
+                    """);
+        if (useCustomTemplate)
+        {
+            source = source.Replace("template: ComponentIntegrationTemplate.Builder,", """"
+                template: ComponentIntegrationTemplate.Custom,
+                Signature = "global::System.Action<global::Test.NamedBuilderContributor.ThingBuilder>? configure = null",
+                Body = """
+                {
+                    var builder = new $factoryType$();
+                    ($arguments$)?.Invoke(builder);
+                    var component = builder.$factoryMethod$();
+                    $seamType$ integrationTarget = $receiver$;
+                    integrationTarget.$targetMethod$<$contract$>(_ => component);
+                    return integrationTarget;
+                }
+                """,
+                """");
+        }
+        byte[] contributorImage = CompileImage(contributorNamespace, source);
         byte[] seamImage = CompileImage("Test.Seam", RecordingSeamSource, includeCore: false);
 
         GeneratorResult result = Run(
             $$"""
             using System.Linq;
             using Test.NamedBuilderContributor;
-            using Test.Seams;
+            using Assimalign.Cohesion.DependencyInjection;
 
             public static class Consumer
             {
@@ -1101,7 +1272,7 @@ public class ComponentIntegrationGeneratorTests
         CSharpParseOptions parseOptions = new(LanguageVersion.Preview);
         CSharpCompilation compilation = CSharpCompilation.Create(
             assemblyName,
-            new[] { CSharpSyntaxTree.ParseText(source, parseOptions) },
+            ContributorSyntaxTrees(source, parseOptions),
             references,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
@@ -1155,7 +1326,23 @@ public class ComponentIntegrationGeneratorTests
     }
 
     private static MetadataReference CoreReference() =>
-        MetadataReference.CreateFromFile(typeof(ComponentIntegrationAttribute).Assembly.Location);
+        MetadataReference.CreateFromFile(typeof(AppEnvironment).Assembly.Location);
+
+    private static IEnumerable<SyntaxTree> ContributorSyntaxTrees(string source, CSharpParseOptions parseOptions)
+    {
+        yield return CSharpSyntaxTree.ParseText(source, parseOptions);
+        if (!source.Contains("ComponentIntegration(") || source.Contains("class ComponentIntegrationAttribute"))
+        {
+            yield break;
+        }
+
+        Assembly assembly = typeof(ComponentIntegrationGeneratorTests).Assembly;
+        foreach (string name in assembly.GetManifestResourceNames().Where(static name => name.StartsWith("ComponentIntegration.", StringComparison.Ordinal)))
+        {
+            using var reader = new StreamReader(assembly.GetManifestResourceStream(name)!);
+            yield return CSharpSyntaxTree.ParseText(reader.ReadToEnd(), parseOptions, path: name);
+        }
+    }
 
     private static string GeneratedText(GeneratorResult result) =>
         string.Join(

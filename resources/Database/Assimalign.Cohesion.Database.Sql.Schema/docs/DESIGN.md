@@ -300,7 +300,7 @@ See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-re
 
 ## Modifier validation (#1438)
 
-The builders and compiled-schema validator link Sql.Language/shared/SqlTypeModifiers through
+The builders and compiled-schema validator link Sql.Language/shared/Types/SqlTypeModifiers through
 CohesionSharedSource, as does Sdk.Database. The helper owns the built-in mapping, modifier ranges
 and argument splitter; it is stateless, internal and reflection-free. No Language assembly
 reference or public bridge is needed. Column(selector, sqlType) refuses an invalid modifier

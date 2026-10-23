@@ -16,4 +16,7 @@
 		     dependency rule allows. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

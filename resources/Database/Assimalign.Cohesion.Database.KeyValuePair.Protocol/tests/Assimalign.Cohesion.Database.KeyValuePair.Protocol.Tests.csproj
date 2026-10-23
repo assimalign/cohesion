@@ -5,6 +5,8 @@
     </PropertyGroup>
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
+    </ItemGroup>
+    <ItemGroup>
         <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
         <CohesionPackageReference Include="xunit" />
         <CohesionPackageReference Include="xunit.runner.visualstudio" />

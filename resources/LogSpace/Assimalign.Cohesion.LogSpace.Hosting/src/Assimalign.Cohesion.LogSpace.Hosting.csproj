@@ -9,6 +9,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

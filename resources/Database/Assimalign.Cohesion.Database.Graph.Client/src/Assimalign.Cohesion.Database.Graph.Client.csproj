@@ -3,7 +3,9 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Graph.Client</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" Module="Diagnostics" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />

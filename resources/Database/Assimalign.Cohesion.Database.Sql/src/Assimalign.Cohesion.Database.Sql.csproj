@@ -4,10 +4,7 @@
 	</PropertyGroup>
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the SQL model's wire-protocol server
 		     (SqlDatabaseServer and its machinery are implemented in this package —
 		     servers are per-model and each model carries its own copy, owner decision
@@ -20,5 +17,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
 	</ItemGroup>
 </Project>

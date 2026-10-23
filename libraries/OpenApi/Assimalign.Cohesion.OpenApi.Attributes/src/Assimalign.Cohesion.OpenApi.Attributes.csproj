@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenApi" />
+	</ItemGroup>
+	<ItemGroup>
 		<!--
 			The source generator discovers these attributes at compile time and emits their
 			metadata as static data, so the attribute path needs no runtime reflection. This

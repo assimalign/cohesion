@@ -17,6 +17,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 </Project>

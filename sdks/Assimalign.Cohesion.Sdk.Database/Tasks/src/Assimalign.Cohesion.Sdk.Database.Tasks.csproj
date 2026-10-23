@@ -8,10 +8,12 @@
 		<IsAotCompatible>true</IsAotCompatible>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" Module="Defaults" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Schema" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />

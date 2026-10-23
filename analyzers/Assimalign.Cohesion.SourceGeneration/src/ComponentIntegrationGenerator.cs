@@ -4,10 +4,12 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 using Assimalign.Cohesion.SourceGeneration.Internal;
@@ -22,7 +24,6 @@ namespace Assimalign.Cohesion.SourceGeneration;
 public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
 {
     private const string AttributeMetadataName = "Assimalign.Cohesion.ComponentIntegrationAttribute";
-    private const string CoreAssemblyName = "Assimalign.Cohesion.Core";
     private const int CSharp14LanguageVersion = (int)LanguageVersion.CSharp14;
 
     /// <summary>
@@ -56,11 +57,6 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
 
     private static CollectedProjections Collect(Compilation compilation, CancellationToken cancellationToken)
     {
-        if (compilation.GetTypesByMetadataName(AttributeMetadataName).IsDefaultOrEmpty)
-        {
-            return CollectedProjections.Empty;
-        }
-
         var projections = new List<ProjectionModel>();
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         var missingSeams = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -172,6 +168,9 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                     out string factoryMethodName,
                     out string? declaredVerb,
                     out INamedTypeSymbol? contract,
+                    out ComponentIntegrationTemplate template,
+                    out string? signature,
+                    out string? body,
                     out string error))
             {
                 diagnostics.Add(DiagnosticInfo.Create(
@@ -220,6 +219,26 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 continue;
             }
 
+            if (template == ComponentIntegrationTemplate.Custom)
+            {
+                if (!TryCreateCustomProjection(
+                        assemblyName, targetTypeName, seam, renderedTargetMethodName,
+                        factoryType, renderedFactoryMethodName, renderedVerb, contract,
+                        signature, body, out ProjectionModel customProjection, out string customError))
+                {
+                    AddUnsupportedShapeDiagnostic(diagnostics, integrationName, customError);
+                    continue;
+                }
+                projections.Add(customProjection);
+                continue;
+            }
+
+            if (signature is not null || body is not null)
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "Signature and Body require the Custom template");
+                continue;
+            }
+
             IMethodSymbol[] methods = factoryType.GetMembers(factoryMethodName)
                 .OfType<IMethodSymbol>()
                 .Where(static method => method.DeclaredAccessibility == Accessibility.Public
@@ -243,6 +262,12 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                     diagnostics,
                     integrationName,
                     "the factory method group is ambiguous because it contains both static and instance members");
+                continue;
+            }
+
+            if (hasStaticMethod != (template == ComponentIntegrationTemplate.Factory))
+            {
+                AddUnsupportedShapeDiagnostic(diagnostics, integrationName, "the selected template does not match the factory method kind");
                 continue;
             }
 
@@ -334,9 +359,11 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                         contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
                         contract is not null,
                         false,
+                        false,
                         string.Join(
                             ParameterNameSeparator,
-                            method.Parameters.Select(static parameter => parameter.Name))));
+                            method.Parameters.Select(static parameter => parameter.Name)),
+                        string.Empty));
                 }
 
                 continue;
@@ -424,6 +451,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
             }
 
             string factoryTypeName = factoryType.ToDisplayString(_typeDisplayFormat);
+            bool usesServiceProvider = template == ComponentIntegrationTemplate.BuilderWithServiceProvider;
             projections.Add(new ProjectionModel(
                 assemblyName,
                 factoryType.ContainingNamespace.IsGlobalNamespace
@@ -441,14 +469,18 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 renderedVerb,
                 // Optional (owner decision 39, #1395): a verb with nothing to configure is called bare,
                 // so a builder template also covers registrations that take no arguments.
-                $"global::System.Action<{factoryTypeName}>? @configure = null",
+                usesServiceProvider
+                    ? $"global::System.Action<global::System.IServiceProvider, {factoryTypeName}> @configure"
+                    : $"global::System.Action<{factoryTypeName}>? @configure = null",
                 string.Empty,
                 contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
                 contract is not null,
                 true,
+                usesServiceProvider,
                 string.Join(
                     ParameterNameSeparator,
-                    new[] { "configure", "cohesionComponentFactory", "cohesionComponent" })));
+                    new[] { "configure", "cohesionComponentFactory", "cohesionComponent", "cohesionServiceProvider" }),
+                string.Empty));
         }
     }
 
@@ -468,14 +500,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
 
     private static bool CouldContainDeclaration(IAssemblySymbol assembly)
     {
-        if (string.Equals(assembly.Identity.Name, CoreAssemblyName, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        IModuleSymbol? module = assembly.Modules.FirstOrDefault();
-        return module is not null && module.ReferencedAssemblies.Any(
-            static identity => identity.Name == CoreAssemblyName);
+        return assembly.GetTypeByMetadataName(AttributeMetadataName) is not null;
     }
 
     private static bool TryDecode(
@@ -486,6 +511,9 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         out string factoryMethodName,
         out string? verb,
         out INamedTypeSymbol? contract,
+        out ComponentIntegrationTemplate template,
+        out string? signature,
+        out string? body,
         out string error)
     {
         targetTypeName = string.Empty;
@@ -494,11 +522,14 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         factoryMethodName = string.Empty;
         verb = null;
         contract = null;
+        template = default;
+        signature = null;
+        body = null;
         error = string.Empty;
 
-        if (attribute.ConstructorArguments.Length != 4 || !HasExpectedConstructorShape(attribute))
+        if (attribute.ConstructorArguments.Length != 5 || !HasExpectedConstructorShape(attribute))
         {
-            error = "a constructor with shape (string, string, Type, string) is required";
+            error = "a constructor with shape (ComponentIntegrationTarget, ComponentIntegrationMethod, Type, string, ComponentIntegrationTemplate) is required";
             return false;
         }
 
@@ -506,22 +537,25 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         TypedConstant targetMethod = attribute.ConstructorArguments[1];
         TypedConstant factory = attribute.ConstructorArguments[2];
         TypedConstant factoryMethod = attribute.ConstructorArguments[3];
+        TypedConstant templateArgument = attribute.ConstructorArguments[4];
 
         if (HasError(targetType)
             || HasError(targetMethod)
             || HasError(factory)
-            || HasError(factoryMethod))
+            || HasError(factoryMethod)
+            || HasError(templateArgument))
         {
             error = "a constructor argument contains an error symbol";
             return false;
         }
 
-        if (!IsStringConstant(targetType, allowNull: false)
-            || targetType.Value is not string decodedTargetType
-            || decodedTargetType.Length == 0
-            || !IsStringConstant(targetMethod, allowNull: false)
-            || targetMethod.Value is not string decodedTargetMethod
-            || decodedTargetMethod.Length == 0
+        if (targetType.Value is not int decodedTarget
+            || ComponentIntegrationCatalog.GetTargetTypeName((ComponentIntegrationTarget)decodedTarget) is not string decodedTargetType
+            || targetMethod.Value is not int decodedMethod
+            || ComponentIntegrationCatalog.GetMethodName((ComponentIntegrationMethod)decodedMethod) is not string decodedTargetMethod
+            || templateArgument.Value is not int decodedTemplate
+            || decodedTemplate < (int)ComponentIntegrationTemplate.Factory
+            || decodedTemplate > (int)ComponentIntegrationTemplate.Custom
             || !IsTypeConstant(factory, allowNull: false)
             || factory.Value is not INamedTypeSymbol decodedFactory
             || decodedFactory.TypeKind == TypeKind.Error
@@ -529,7 +563,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
             || factoryMethod.Value is not string decodedFactoryMethod
             || decodedFactoryMethod.Length == 0)
         {
-            error = "constructor arguments do not match (string, string, Type, string)";
+            error = "constructor arguments contain an unknown target, method or template, or an invalid factory";
             return false;
         }
 
@@ -537,10 +571,29 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         targetMethodName = decodedTargetMethod;
         factoryType = decodedFactory;
         factoryMethodName = decodedFactoryMethod;
+        template = (ComponentIntegrationTemplate)decodedTemplate;
 
         foreach (KeyValuePair<string, TypedConstant> namedArgument in attribute.NamedArguments)
         {
-            if (namedArgument.Key == "Verb")
+            if (namedArgument.Key is "Signature" or "Body")
+            {
+                if (HasError(namedArgument.Value)
+                    || !HasExpectedNamedPropertyShape(attribute, namedArgument.Key, expectsType: false)
+                    || !IsStringConstant(namedArgument.Value, allowNull: true))
+                {
+                    error = $"{namedArgument.Key} must be a string or null";
+                    return false;
+                }
+                if (namedArgument.Key == "Signature")
+                {
+                    signature = namedArgument.Value.Value as string;
+                }
+                else
+                {
+                    body = namedArgument.Value.Value as string;
+                }
+            }
+            else if (namedArgument.Key == "Verb")
             {
                 if (HasError(namedArgument.Value)
                     || !HasExpectedNamedPropertyShape(attribute, "Verb", expectsType: false)
@@ -595,15 +648,16 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
     private static bool HasExpectedConstructorShape(AttributeData attribute)
     {
         if (attribute.AttributeConstructor is not IMethodSymbol constructor
-            || constructor.Parameters.Length != 4)
+            || constructor.Parameters.Length != 5)
         {
             return false;
         }
 
-        return constructor.Parameters[0].Type.SpecialType == SpecialType.System_String
-            && constructor.Parameters[1].Type.SpecialType == SpecialType.System_String
+        return constructor.Parameters[0].Type.ToDisplayString() == "Assimalign.Cohesion.ComponentIntegrationTarget"
+            && constructor.Parameters[1].Type.ToDisplayString() == "Assimalign.Cohesion.ComponentIntegrationMethod"
             && IsSystemType(constructor.Parameters[2].Type)
-            && constructor.Parameters[3].Type.SpecialType == SpecialType.System_String;
+            && constructor.Parameters[3].Type.SpecialType == SpecialType.System_String
+            && constructor.Parameters[4].Type.ToDisplayString() == "Assimalign.Cohesion.ComponentIntegrationTemplate";
     }
 
     private static bool HasExpectedNamedPropertyShape(
@@ -1081,14 +1135,42 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                     ? $"<{projection.ContractTypeName}>"
                     : string.Empty;
 
-                builder.AppendLine(
-                    $"{indent}        /// <summary>Registers the component produced by "
-                    + $"<c>{EscapeXml(projection.FactoryTypeName)}.{EscapeXml(projection.FactoryMethodName)}</c> "
-                    + $"on this <c>{EscapeXml(projection.SeamTypeName)}</c>.</summary>");
+                builder.AppendLine(projection.CustomBody.Length > 0
+                    ? $"{indent}        /// <summary>Applies the custom component integration to this <c>{EscapeXml(projection.SeamTypeName)}</c>.</summary>"
+                    : $"{indent}        /// <summary>Registers the component produced by "
+                        + $"<c>{EscapeXml(projection.FactoryTypeName)}.{EscapeXml(projection.FactoryMethodName)}</c> "
+                        + $"on this <c>{EscapeXml(projection.SeamTypeName)}</c>.</summary>");
+                if (projection.UsesServiceProvider)
+                {
+                    builder.AppendLine(
+                        $"{indent}        /// <remarks>Configuration and construction run when the registration's producer is invoked.</remarks>");
+                    // Preserve the existing Verb(null) call: the two unrelated Action types would
+                    // otherwise be ambiguous. Lambdas with two parameters still select this overload.
+                    builder.AppendLine(
+                        $"{indent}        [global::System.Runtime.CompilerServices.OverloadResolutionPriority(-1)]");
+                }
                 builder.AppendLine(
                     $"{indent}        public {projection.SeamTypeName} {projection.Verb}({projection.ParameterList})");
                 builder.AppendLine($"{indent}        {{");
-                if (projection.IsBuilderTemplate)
+                if (projection.CustomBody.Length > 0)
+                {
+                    string customBody = ExpandCustomBody(projection.CustomBody, projection, receiver);
+                    foreach (string line in customBody.Replace("\r\n", "\n").Split('\n'))
+                    {
+                        builder.AppendLine($"{indent}            {line}");
+                    }
+                }
+                else if (projection.UsesServiceProvider)
+                {
+                    builder.AppendLine($"{indent}            global::System.ArgumentNullException.ThrowIfNull(@configure, nameof(@configure));");
+                    builder.AppendLine($"{indent}            {receiver}.{projection.TargetMethodName}{contract}(cohesionServiceProvider =>");
+                    builder.AppendLine($"{indent}            {{");
+                    builder.AppendLine($"{indent}                var cohesionComponentFactory = new {projection.FactoryTypeName}();");
+                    builder.AppendLine($"{indent}                @configure(cohesionServiceProvider, cohesionComponentFactory);");
+                    builder.AppendLine($"{indent}                return cohesionComponentFactory.{projection.FactoryMethodName}();");
+                    builder.AppendLine($"{indent}            }});");
+                }
+                else if (projection.IsBuilderTemplate)
                 {
                     builder.AppendLine(
                         $"{indent}            // Composed eagerly so the factory's own Build-time validation fires at registration");
@@ -1117,7 +1199,10 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                         $"{indent}            {receiver}.{projection.TargetMethodName}{contract}("
                         + $"{projection.FactoryTypeName}.{projection.FactoryMethodName}({projection.ArgumentList}));");
                 }
-                builder.AppendLine($"{indent}            return {receiver};");
+                if (projection.CustomBody.Length == 0)
+                {
+                    builder.AppendLine($"{indent}            return {receiver};");
+                }
                 builder.AppendLine($"{indent}        }}");
                 builder.AppendLine();
             }
@@ -1132,6 +1217,101 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         }
         builder.AppendLine();
     }
+
+    private static bool TryCreateCustomProjection(
+        string assemblyName,
+        string targetTypeName,
+        INamedTypeSymbol seam,
+        string targetMethodName,
+        INamedTypeSymbol factoryType,
+        string factoryMethodName,
+        string verb,
+        INamedTypeSymbol? contract,
+        string? signature,
+        string? body,
+        out ProjectionModel projection,
+        out string error)
+    {
+        projection = default;
+        error = string.Empty;
+        if (signature is null || body is null || string.IsNullOrWhiteSpace(body))
+        {
+            error = "the Custom template requires both Signature (without parentheses) and Body (a complete C# block)";
+            return false;
+        }
+
+        ParameterListSyntax parameters = SyntaxFactory.ParseParameterList("(" + signature + ")");
+        if (parameters.ContainsDiagnostics || parameters.Parameters.Any(static parameter => parameter.Identifier.IsMissing))
+        {
+            error = "the custom Signature is not a valid C# parameter list";
+            return false;
+        }
+
+        projection = new ProjectionModel(
+            assemblyName,
+            factoryType.ContainingNamespace.IsGlobalNamespace ? string.Empty : factoryType.ContainingNamespace.ToDisplayString(),
+            targetTypeName,
+            seam.ToDisplayString(_typeDisplayFormat),
+            seam.ContainingNamespace.IsGlobalNamespace ? string.Empty : seam.ContainingNamespace.ToDisplayString(),
+            seam.ContainingAssembly.Identity.Name,
+            targetMethodName,
+            factoryType.ToDisplayString(_typeDisplayFormat),
+            factoryMethodName,
+            verb,
+            signature,
+            string.Join(", ", parameters.Parameters.Select(static parameter =>
+                (parameter.Modifiers.Any(SyntaxKind.RefKeyword) ? "ref "
+                    : parameter.Modifiers.Any(SyntaxKind.OutKeyword) ? "out "
+                    : parameter.Modifiers.Any(SyntaxKind.InKeyword) ? "in " : string.Empty)
+                + "@" + parameter.Identifier.ValueText)),
+            contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
+            contract is not null,
+            false,
+            false,
+            string.Join(ParameterNameSeparator, parameters.Parameters.Select(static parameter => parameter.Identifier.ValueText)),
+            body);
+
+        string expanded = ExpandCustomBody(body, projection, "cohesionReceiver");
+        if (Regex.IsMatch(expanded, @"\$[A-Za-z_][A-Za-z0-9_]*\$"))
+        {
+            error = "the custom Body contains an unknown placeholder";
+            return false;
+        }
+        if (!body.TrimStart().StartsWith("{", StringComparison.Ordinal)
+            || !body.TrimEnd().EndsWith("}", StringComparison.Ordinal)
+            || SyntaxFactory.ParseStatement(expanded) is not BlockSyntax block || block.ContainsDiagnostics)
+        {
+            error = "the custom Body is not a valid complete C# block";
+            return false;
+        }
+
+        // Keep the original text so raw string literals retain their contents and indentation.
+        string trimmed = body.Trim();
+        projection = projection with
+        {
+            CustomBody = trimmed.Substring(1, trimmed.Length - 2).Trim(),
+            ParameterNames = string.Join(ParameterNameSeparator,
+                parameters.Parameters.Select(static parameter => parameter.Identifier.ValueText)
+                    .Concat(block.DescendantTokens()
+                        .Where(static token => token.IsKind(SyntaxKind.IdentifierToken))
+                        .Select(static token => token.ValueText))),
+        };
+        if (projection.CustomBody.Length == 0)
+        {
+            error = "the custom Body must implement the extension method, including its return";
+            return false;
+        }
+        return true;
+    }
+
+    private static string ExpandCustomBody(string body, ProjectionModel projection, string receiver) => body
+        .Replace("$receiver$", receiver)
+        .Replace("$arguments$", projection.ArgumentList)
+        .Replace("$targetMethod$", projection.TargetMethodName)
+        .Replace("$seamType$", projection.SeamTypeName)
+        .Replace("$factoryType$", projection.FactoryTypeName)
+        .Replace("$factoryMethod$", projection.FactoryMethodName)
+        .Replace("$contract$", projection.ContractTypeName);
 
     private static string EscapeXml(string value) => value
         .Replace("&", "&amp;")
@@ -1159,7 +1339,9 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
         string ContractTypeName,
         bool HasContract,
         bool IsBuilderTemplate,
-        string ParameterNames);
+        bool UsesServiceProvider,
+        string ParameterNames,
+        string CustomBody);
 
     private readonly record struct CollectedProjections(
         EquatableArray<ProjectionModel> Projections,

@@ -12,6 +12,8 @@
   <ItemGroup>
     <CohesionResourceReference Include="..\GatewaySmokeWeb\GatewaySmokeWeb.csproj" />
     <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionGatewayProvider Include="JitTest"
       Name="jit-test"
       GatewayType="global::GatewaySmoke.JitTestGateway"

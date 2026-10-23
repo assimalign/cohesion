@@ -7,7 +7,11 @@
 
 	<ItemGroup>
 	  <Compile Remove="Spcification\**" />
+	</ItemGroup>
+	<ItemGroup>
 	  <EmbeddedResource Remove="Spcification\**" />
+	</ItemGroup>
+	<ItemGroup>
 	  <None Remove="Spcification\**" />
 	</ItemGroup>
 	<ItemGroup>

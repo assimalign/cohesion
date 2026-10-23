@@ -12,6 +12,8 @@
 	</ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Content.Ebml" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="$(CohesionRepositoryDirectory)libraries\Content\Assimalign.Cohesion.Content.Binary\tests\Shared\*.cs" Link="Shared\Binary\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

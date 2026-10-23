@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <CohesionPackageReference Include="NUlid" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="content\noncomposable.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

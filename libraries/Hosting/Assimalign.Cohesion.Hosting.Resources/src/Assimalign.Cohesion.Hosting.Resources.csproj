@@ -7,9 +7,11 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="CommandDiagnostics" />
 	</ItemGroup>
 </Project>

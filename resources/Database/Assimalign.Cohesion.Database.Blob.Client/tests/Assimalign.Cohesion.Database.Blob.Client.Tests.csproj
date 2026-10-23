@@ -9,6 +9,8 @@
     <CohesionPackageReference Include="xunit.runner.visualstudio" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Shouldly" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

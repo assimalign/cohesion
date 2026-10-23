@@ -13,7 +13,11 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionSetting Include="LogSpace:Retention" Type="TimeSpan" Default="30.00:00:00" />
-    <CohesionMount Update="data" Size="200Gi" />                                <!-- overrides the Sdk.LogSpace 10Gi default; a manifest fact the gateway's plan turns into a volume claim -->
+  </ItemGroup>
+  <ItemGroup>
+    <CohesionMount Update="data" Size="200Gi" />
+  </ItemGroup>
+  <ItemGroup>                                <!-- overrides the Sdk.LogSpace 10Gi default; a manifest fact the gateway's plan turns into a volume claim -->
     <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Routing</RootNamespace>
 	</PropertyGroup>
@@ -9,4 +9,7 @@
 		     hosting-isolation rule. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forwarded" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

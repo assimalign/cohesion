@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Caching" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />
@@ -18,8 +20,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching.InMemory" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
