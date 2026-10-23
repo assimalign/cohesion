@@ -5,4 +5,11 @@
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="DiagnosticsOrderInvalid" xml:space="preserve"><value>Diagnostics must immediately precede completion or Error.</value></data>
+  <data name="SqlClientCreateArgument" xml:space="preserve"><value>Connection settings are required.</value></data>
+  <data name="SqlClientCreateArgument2" xml:space="preserve"><value>A connection factory is required.</value></data>
+  <data name="SqlRowGetOrdinalArgument" xml:space="preserve"><value>The result set has no column named '{0}'.</value></data>
+  <data name="SqlRowFieldSqlClient" xml:space="preserve"><value>The value at ordinal {0} is null; use IsNull to guard nullable columns.</value></data>
+  <data name="SqlRowFieldSqlClient2" xml:space="preserve"><value>The value at ordinal {0} of runtime type {1} cannot be read as {2}.</value></data>
+  <data name="ExecuteCoreAsyncDatabaseClient" xml:space="preserve"><value>The server closed the connection mid-exchange.</value></data>
+  <data name="ExecuteCoreAsyncDatabaseClient2" xml:space="preserve"><value>Unexpected {0} frame in a Sql execute exchange.</value></data>
 </root>

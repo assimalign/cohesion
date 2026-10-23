@@ -180,8 +180,8 @@ internal sealed partial class SqlPlanExecutor
         }
         catch (DatabaseException failure)
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
-                ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type) + ". " + failure.Message, innerException: failure);
+            throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentTypeMismatchSqlEvaluation, string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.DefaultStorageFailure, column.Name, column.Type.Type) + ". " + failure.Message), innerException: failure);
         }
     }
 
@@ -342,7 +342,7 @@ internal sealed partial class SqlPlanExecutor
         // Defaults accept hex only: no octal escapes, whitespace or general text-to-binary cast.
         if (!value.StartsWith("\\x", StringComparison.Ordinal))
         {
-            throw new FormatException("A binary DEFAULT must be a quoted \\x-prefixed hexadecimal value.");
+            throw new FormatException(ErrorMessages.PlanExecutorParseBinaryDefaultFormat);
         }
 
         return Convert.FromHexString(value.AsSpan(2));

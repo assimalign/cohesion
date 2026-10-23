@@ -20,7 +20,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<SqlClientException>(() => connection.ExecuteAsync("INSERT INTO identities VALUES (8)", cancellationToken: SqlClientTestHarness.Timeout()).AsTask());
 
         // Assert
-        failure.Message.ShouldContain("COHSQLE025", Case.Sensitive);
+        failure.Message.ShouldContain("CS03025", Case.Sensitive);
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT id FROM identities", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem().GetInt64(0).ShouldBe(100L);

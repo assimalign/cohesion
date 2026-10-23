@@ -63,7 +63,7 @@ public sealed class SqlSubqueryWireTests
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05013");
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("pending");
         await ExecuteAsync(connection, "ROLLBACK");
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
@@ -271,7 +271,7 @@ public sealed class SqlSubqueryWireTests
             () => ExecuteAsync(connection, "INSERT INTO target_rows SELECT id FROM source_rows"));
         literalError.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         selectError.Kind.ShouldBe(literalError.Kind);
-        string code = kind == "UNIQUE" ? "COHSQLE037" : "COHSQLE039";
+        string code = kind == "UNIQUE" ? "CS03037" : "CS03039";
         literalError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         selectError.Message.ShouldContain(kind);

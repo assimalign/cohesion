@@ -43,7 +43,7 @@ internal sealed class SqlLikePattern
     {
         if (escape.Length != 0 && (!Rune.TryGetRuneAt(escape, 0, out var rune) || rune.Utf16SequenceLength != escape.Length))
         {
-            throw new SqlPlanningException("COHSQLE034", ErrorMessages.LikeEscapeInvalid);
+            throw new SqlPlanningException("CS02034", ErrorMessages.LikeEscapeInvalid);
         }
     }
 
@@ -61,7 +61,7 @@ internal sealed class SqlLikePattern
             if (escape.Length != 0 && pattern.AsSpan(index).StartsWith(escape, StringComparison.Ordinal))
             {
                 index += escape.Length;
-                if (index == pattern.Length) { throw new SqlPlanningException("COHSQLE034", ErrorMessages.LikeEscapeInvalid); }
+                if (index == pattern.Length) { throw new SqlPlanningException("CS02034", ErrorMessages.LikeEscapeInvalid); }
                 int length = ScalarLength(pattern, index);
                 literal.Append(pattern, index, length);
                 index += length;
@@ -429,7 +429,7 @@ internal sealed class SqlLikePattern
         if (!collation.IsIndexBacked && amount > limit - work)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            throw new SqlPlanningException("COHSQLE040", ErrorMessages.LikeWorkLimit);
+            throw new SqlPlanningException("CS05040", ErrorMessages.LikeWorkLimit);
         }
         work += amount;
     }

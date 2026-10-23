@@ -16,30 +16,30 @@ public sealed class SqlInvalidStatementConformanceTests
 {
     public static IEnumerable<object[]> InvalidStatements()
     {
-        yield return ["UPDATE t SET a = 1, a = 2", "COHSQLE019", "a"];
-        yield return ["UPDATE t SET a = 1, a = 2 WHERE 1 = 0", "COHSQLE019", "a"];
-        yield return ["UPDATE t SET a = DEFAULT, A = 2", "COHSQLE019", "A"];
-        yield return ["CREATE TABLE d (a INT, CONSTRAINT pk_d PRIMARY KEY(a, A))", "COHSQLE019", "pk_d"];
-        yield return ["CREATE TABLE d (a INT, CONSTRAINT uq_d UNIQUE(a, A))", "COHSQLE019", "uq_d"];
-        yield return ["CREATE TABLE d (a INT, CONSTRAINT fk_d FOREIGN KEY(a, A) REFERENCES p(a, b))", "COHSQLE019", "fk_d"];
-        yield return ["CREATE TABLE d (a INT, b INT, CONSTRAINT fk_d FOREIGN KEY(a, b) REFERENCES p(a, A))", "COHSQLE019", "fk_d"];
-        yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, b) REFERENCES p(a, A)", "COHSQLE019", "fk_t"];
-        yield return ["ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY(a, A)", "COHSQLE019", "pk_t"];
-        yield return ["ALTER TABLE t ADD CONSTRAINT uq_t UNIQUE(a, A)", "COHSQLE019", "uq_t"];
-        yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, A) REFERENCES p(a, b)", "COHSQLE019", "fk_t"];
-        yield return ["CREATE TABLE d (a INT PRIMARY KEY, b INT PRIMARY KEY)", "COHSQLE019", "PRIMARY KEY"];
-        yield return ["CREATE TABLE d (a INT PRIMARY KEY, b INT, CONSTRAINT pk_d PRIMARY KEY(b))", "COHSQLE019", "pk_d"];
-        yield return ["CREATE TABLE d (a INT, b INT, PRIMARY KEY(a), CONSTRAINT pk_d PRIMARY KEY(b))", "COHSQLE019", "pk_d"];
-        yield return ["ALTER TABLE p ADD CONSTRAINT pk_p PRIMARY KEY(a)", "COHSQLE019", "pk_p"];
-        yield return ["ALTER TABLE p ADD COLUMN c INT PRIMARY KEY", "COHSQLE019", "PRIMARY KEY"];
-        yield return ["ALTER TABLE t ADD COLUMN c INT PRIMARY KEY PRIMARY KEY", "COHSQLE019", "PRIMARY KEY"];
-        yield return ["CREATE TABLE d (a INT PRIMARY KEY PRIMARY KEY)", "COHSQLE019", "PRIMARY KEY"];
-        yield return ["CREATE TABLE d (a VARCHAR(0))", "SQL0005", "a"];
-        yield return ["CREATE TABLE d (a DECIMAL(99, 50))", "SQL0005", "a"];
-        yield return ["CREATE TABLE d (a DECIMAL(5, 9))", "SQL0005", "a"];
-        yield return ["UPDATE t SET a = SUM(a)", "COHSQLE017", "Aggregate functions are not allowed in UPDATE SET."];
-        yield return ["UPDATE t SET a = 1 WHERE COUNT(*) > 0", "COHSQLE017", "Aggregate functions are not allowed in WHERE."];
-        yield return ["DELETE FROM t WHERE COUNT(*) > 0", "COHSQLE017", "Aggregate functions are not allowed in WHERE."];
+        yield return ["UPDATE t SET a = 1, a = 2", "CS01019", "a"];
+        yield return ["UPDATE t SET a = 1, a = 2 WHERE 1 = 0", "CS01019", "a"];
+        yield return ["UPDATE t SET a = DEFAULT, A = 2", "CS01019", "A"];
+        yield return ["CREATE TABLE d (a INT, CONSTRAINT pk_d PRIMARY KEY(a, A))", "CS01019", "pk_d"];
+        yield return ["CREATE TABLE d (a INT, CONSTRAINT uq_d UNIQUE(a, A))", "CS01019", "uq_d"];
+        yield return ["CREATE TABLE d (a INT, CONSTRAINT fk_d FOREIGN KEY(a, A) REFERENCES p(a, b))", "CS01019", "fk_d"];
+        yield return ["CREATE TABLE d (a INT, b INT, CONSTRAINT fk_d FOREIGN KEY(a, b) REFERENCES p(a, A))", "CS01019", "fk_d"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, b) REFERENCES p(a, A)", "CS01019", "fk_t"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT pk_t PRIMARY KEY(a, A)", "CS01019", "pk_t"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT uq_t UNIQUE(a, A)", "CS01019", "uq_t"];
+        yield return ["ALTER TABLE t ADD CONSTRAINT fk_t FOREIGN KEY(a, A) REFERENCES p(a, b)", "CS01019", "fk_t"];
+        yield return ["CREATE TABLE d (a INT PRIMARY KEY, b INT PRIMARY KEY)", "CS01019", "PRIMARY KEY"];
+        yield return ["CREATE TABLE d (a INT PRIMARY KEY, b INT, CONSTRAINT pk_d PRIMARY KEY(b))", "CS01019", "pk_d"];
+        yield return ["CREATE TABLE d (a INT, b INT, PRIMARY KEY(a), CONSTRAINT pk_d PRIMARY KEY(b))", "CS01019", "pk_d"];
+        yield return ["ALTER TABLE p ADD CONSTRAINT pk_p PRIMARY KEY(a)", "CS01019", "pk_p"];
+        yield return ["ALTER TABLE p ADD COLUMN c INT PRIMARY KEY", "CS01019", "PRIMARY KEY"];
+        yield return ["ALTER TABLE t ADD COLUMN c INT PRIMARY KEY PRIMARY KEY", "CS01019", "PRIMARY KEY"];
+        yield return ["CREATE TABLE d (a INT PRIMARY KEY PRIMARY KEY)", "CS01019", "PRIMARY KEY"];
+        yield return ["CREATE TABLE d (a VARCHAR(0))", "CS00005", "a"];
+        yield return ["CREATE TABLE d (a DECIMAL(99, 50))", "CS00005", "a"];
+        yield return ["CREATE TABLE d (a DECIMAL(5, 9))", "CS00005", "a"];
+        yield return ["UPDATE t SET a = SUM(a)", "CS05017", "Aggregate functions are not allowed in UPDATE SET."];
+        yield return ["UPDATE t SET a = 1 WHERE COUNT(*) > 0", "CS05017", "Aggregate functions are not allowed in WHERE."];
+        yield return ["DELETE FROM t WHERE COUNT(*) > 0", "CS05017", "Aggregate functions are not allowed in WHERE."];
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Invalid statements: reject before mutation with coded diagnostics (#1192)")]
@@ -60,7 +60,7 @@ public sealed class SqlInvalidStatementConformanceTests
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
         failure.Message.ShouldContain(detail, Case.Sensitive);
         if (detail == "PRIMARY KEY") { failure.Message.ShouldContain($"table '{PrimaryKeyTable(sql)}'", Case.Sensitive); }
-        if (code == "COHSQLE019" && sql.Contains("(a, A)")) { failure.Message.ShouldContain("A", Case.Sensitive); }
+        if (code == "CS01019" && sql.Contains("(a, A)")) { failure.Message.ShouldContain("A", Case.Sensitive); }
         await using var rows = (await session.ExecuteAsync("SELECT a FROM t", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         (await SqlT1ScalarTests.ReadAsync(rows)).ShouldHaveSingleItem()[0].ShouldBe(7);
         await session.ExecuteAsync("CREATE TABLE d (a INT, b INT, CONSTRAINT uq_good UNIQUE(a, b))", cancellationToken: CancellationToken.None);
@@ -134,7 +134,7 @@ public sealed class SqlInvalidStatementConformanceTests
             await session.ExecuteAsync("ALTER TABLE p ADD COLUMN b INT UNIQUE PRIMARY KEY", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE019");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01019");
         failure.Message.ShouldContain("PrimaryKey_p_b_1", Case.Sensitive);
         failure.Message.ShouldContain("table 'p'", Case.Sensitive);
     }

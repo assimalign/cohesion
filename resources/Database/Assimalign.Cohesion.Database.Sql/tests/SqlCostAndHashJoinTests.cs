@@ -98,7 +98,7 @@ public sealed class SqlCostAndHashJoinTests
             if (refuse)
             {
                 var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
-                failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE067");
+                failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
                 session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
                 session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(budget);
             }
@@ -136,7 +136,7 @@ public sealed class SqlCostAndHashJoinTests
             await session.ExecuteAsync($"INSERT INTO {table} VALUES " + string.Join(',', Enumerable.Range(1, 80).Select(id => $"({id},{id},'x')")), cancellationToken: CancellationToken.None);
         }
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT l.id FROM l JOIN r ON l.k=r.k", cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE067");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(20_000);
     }
@@ -244,7 +244,7 @@ public sealed class SqlCostAndHashJoinTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
         failure.Diagnostics.ShouldNotBeEmpty();
         if (sql.StartsWith("EXPLAIN", StringComparison.Ordinal))
-        { failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE057"); }
+        { failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05057"); }
         await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT id FROM t", cancellationToken: CancellationToken.None);
         int count = 0;
         await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { Convert.ToInt32(row.GetValue(0)).ShouldBe(1); count++; }
@@ -295,7 +295,7 @@ public sealed class SqlCostAndHashJoinTests
         }
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "SELECT l.id FROM l JOIN r ON l.k=r.k", cancellationToken: CancellationToken.None));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE067");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05067");
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         session.LastStatementMetrics.PeakHashMemoryBytes.ShouldBeLessThanOrEqualTo(1024);
         await using var rows = (DatabaseResultSet)await session.ExecuteAsync("SELECT COUNT(*) FROM l", cancellationToken: CancellationToken.None);

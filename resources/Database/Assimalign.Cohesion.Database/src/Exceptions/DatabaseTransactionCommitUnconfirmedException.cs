@@ -36,7 +36,7 @@ namespace Assimalign.Cohesion.Database;
 /// kernel's exception as the inner exception); a statement that committed by itself, or a storage
 /// bracket whose commit record was written before the flush failed
 /// (<see cref="Create(string, string, StorageOfflineException)"/>). The codes are those of
-/// <see cref="DatabaseOfflineException"/>: <c>COHSQLT004</c>, <c>COHDBK002</c>,
+/// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>COHDBK002</c>,
 /// <c>COHDBD002</c>, <c>COHDBG012</c> and <c>COHDBB002</c>.
 /// </para>
 /// </remarks>
@@ -68,7 +68,7 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
     /// the database went offline. Either way the effect survives the reopen exactly when its
     /// records reached stable storage.
     /// </summary>
-    /// <param name="code">The model's structured offline code, for example <c>COHSQLT004</c>.</param>
+    /// <param name="code">The model's structured offline code, for example <c>CS04004</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The storage's offline error.</param>
     /// <returns>The exception to throw.</returns>

@@ -43,14 +43,14 @@ public sealed class SqlPagingWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Paging: rejections preserve coded diagnostics and a usable connection")]
-    [InlineData("SELECT id FROM users LIMIT 1 FETCH FIRST 1 ROW ONLY", "SQL0003")]
-    [InlineData("SELECT TOP (1) id FROM users LIMIT 1", "SQL0003")]
-    [InlineData("SELECT TOP (1) id FROM users OFFSET 1 ROWS", "SQL0003")]
-    [InlineData("SELECT TOP (1) id FROM users FETCH FIRST 1 ROW ONLY", "SQL0003")]
-    [InlineData("SELECT id FROM users OFFSET 1 OFFSET 2", "SQL0003")]
-    [InlineData("SELECT id FROM users FETCH FIRST 1 ROW", "SQL0003")]
-    [InlineData("SELECT id FROM users FETCH FIRST 1+1 ROWS ONLY", "SQL0003")]
-    [InlineData("SELECT TOP id FROM users", "SQL0003")]
+    [InlineData("SELECT id FROM users LIMIT 1 FETCH FIRST 1 ROW ONLY", "CS00003")]
+    [InlineData("SELECT TOP (1) id FROM users LIMIT 1", "CS00003")]
+    [InlineData("SELECT TOP (1) id FROM users OFFSET 1 ROWS", "CS00003")]
+    [InlineData("SELECT TOP (1) id FROM users FETCH FIRST 1 ROW ONLY", "CS00003")]
+    [InlineData("SELECT id FROM users OFFSET 1 OFFSET 2", "CS00003")]
+    [InlineData("SELECT id FROM users FETCH FIRST 1 ROW", "CS00003")]
+    [InlineData("SELECT id FROM users FETCH FIRST 1+1 ROWS ONLY", "CS00003")]
+    [InlineData("SELECT TOP id FROM users", "CS00003")]
     [InlineData("SELECT id FROM users FETCH FIRST 10 PERCENT ROWS ONLY", "CK00001")]
     [InlineData("SELECT id FROM users ORDER BY id FETCH FIRST 1 ROW WITH TIES", "CK00001")]
     [InlineData("SELECT TOP (10) PERCENT id FROM users", "CK00001")]
@@ -62,9 +62,9 @@ public sealed class SqlPagingWireTests
     [InlineData("SELECT id FROM users FETCH FIRST (SELECT id FROM users) ROWS ONLY", "CK00001")]
     [InlineData("SELECT TOP (SELECT id FROM users) id FROM users", "CK00001")]
     [InlineData("SELECT TOP 1 id FROM users WINDOW w AS ()", "CK00001")]
-    [InlineData("SELECT TOP (-1) id FROM users", "COHSQLE018")]
-    [InlineData("SELECT id FROM users FETCH FIRST -1 ROWS ONLY", "COHSQLE018")]
-    [InlineData("SELECT id FROM users OFFSET -1 ROWS", "COHSQLE018")]
+    [InlineData("SELECT TOP (-1) id FROM users", "CS02018")]
+    [InlineData("SELECT id FROM users FETCH FIRST -1 ROWS ONLY", "CS02018")]
+    [InlineData("SELECT id FROM users OFFSET -1 ROWS", "CS02018")]
     public async Task QueryAsync_RejectedPaging_ShouldKeepConnectionUsable(string sql, string code)
     {
         // Arrange
@@ -76,7 +76,7 @@ public sealed class SqlPagingWireTests
             await connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout()));
 
         // Assert
-        error.Code.ShouldBe(code == "COHSQLE018" ? ProtocolErrorCode.ExecutionFailure : ProtocolErrorCode.ParseFailure);
+        error.Code.ShouldBe(code == "CS02018" ? ProtocolErrorCode.ExecutionFailure : ProtocolErrorCode.ParseFailure);
         error.Message.ShouldContain(code, Case.Sensitive);
         if (sql.StartsWith("DELETE TOP") || sql.StartsWith("UPDATE TOP") || sql.StartsWith("INSERT TOP"))
         {

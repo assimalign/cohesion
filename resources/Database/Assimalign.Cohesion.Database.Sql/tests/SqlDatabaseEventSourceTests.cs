@@ -102,7 +102,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         if (request is not null)
         {
             var failure = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(request, CancellationToken.None).AsTask());
-            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00006");
         }
         else
         {
@@ -181,7 +181,7 @@ public sealed partial class SqlDatabaseEventSourceTests
             await session.ExecuteAsync("SELECT trace_stack(id) FROM items", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05004");
         NewEvent(recorder, 11, "StatementTooComplex", "database", "depth").Payload.ShouldBe(["stack", -1]);
         NewEvent(recorder, 10, "StatementPlanned", "database", "accessPath", "recordsExamined");
         recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain("private statement content");

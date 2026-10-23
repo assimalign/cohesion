@@ -27,7 +27,7 @@ public sealed class SqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE017");
+        diagnostic.Code.ShouldBe("CS05017");
         diagnostic.Start.ShouldBe(value.Location!.Start);
         diagnostic.End.ShouldBe(value.Location.End);
     }
@@ -46,7 +46,7 @@ public sealed class SqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE013");
+        diagnostic.Code.ShouldBe("CS05013");
         diagnostic.Start.ShouldBe(request.Statement.SqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(request.Statement.SqlExpression.Location.End);
     }
@@ -67,7 +67,7 @@ public sealed class SqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE005");
+        diagnostic.Code.ShouldBe("CS01005");
         diagnostic.Start.ShouldBe(column.Location!.Start);
         diagnostic.End.ShouldBe(column.Location.End);
     }
@@ -89,7 +89,7 @@ public sealed class SqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE021");
+        diagnostic.Code.ShouldBe("CS04021");
         diagnostic.Start.ShouldBe(request.Statement.SqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(request.Statement.SqlExpression.Location.End);
         diagnostic.Message.ShouldBe(failure.Message);
@@ -113,18 +113,18 @@ public sealed class SqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE005");
+        diagnostic.Code.ShouldBe("CS01005");
         diagnostic.Start.ShouldBe(sql.LastIndexOf(column, System.StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + column.Length);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Diagnostics: evaluator faults carry codes and expression spans")]
-    [InlineData("SELECT id FROM t LIMIT NOT 1", "COHSQLE003", true)]
-    [InlineData("SELECT CAST(9999999999999999999999999999999999 AS INT) FROM t", "COHSQLE002", false)]
-    [InlineData("SELECT CAST('invalid' AS INT) FROM t", "COHSQLE022", false)]
-    [InlineData("SELECT CAST('9999999999999999999999999999999999' AS INT) FROM t", "COHSQLE002", false)]
-    [InlineData("SELECT @value + 1 FROM t", "COHSQLE003", false)]
-    [InlineData("SELECT 1 / 0 FROM t", "COHSQLE001", false)]
+    [InlineData("SELECT id FROM t LIMIT NOT 1", "CS02003", true)]
+    [InlineData("SELECT CAST(9999999999999999999999999999999999 AS INT) FROM t", "CS02002", false)]
+    [InlineData("SELECT CAST('invalid' AS INT) FROM t", "CS02022", false)]
+    [InlineData("SELECT CAST('9999999999999999999999999999999999' AS INT) FROM t", "CS02002", false)]
+    [InlineData("SELECT @value + 1 FROM t", "CS02003", false)]
+    [InlineData("SELECT 1 / 0 FROM t", "CS02001", false)]
     public async Task Execute_EvaluationFault_ShouldCarryExpressionSpanAsync(string sql, string code, bool count)
     {
         // Arrange

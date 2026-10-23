@@ -55,7 +55,7 @@ public sealed class SqlDerivedTableParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(d => d.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(d => d.Code == "CS00003");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Derived tables: mutation targets remain named relations")]

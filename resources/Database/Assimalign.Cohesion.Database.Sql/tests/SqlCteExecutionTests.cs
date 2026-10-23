@@ -138,12 +138,12 @@ public sealed partial class SqlCteExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - WITH: all definitions bind before any row is read")]
-    [InlineData("WITH a AS (SELECT id FROM t), A AS (SELECT id FROM t) SELECT * FROM a", "COHSQLE026")]
-    [InlineData("WITH a AS (SELECT id FROM b), b AS (SELECT id FROM t) SELECT * FROM a", "COHSQLE026")]
-    [InlineData("WITH a (x, y) AS (SELECT id FROM t) SELECT * FROM a", "COHSQLE013")]
-    [InlineData("WITH unused AS (SELECT missing FROM t) SELECT id FROM t", "COHSQLE015")]
-    [InlineData("WITH unused AS (SELECT id FROM t LIMIT missing) SELECT id FROM t", "COHSQLE005")]
-    [InlineData("WITH unused AS (SELECT id FROM t LIMIT TRUE) SELECT id FROM t", "COHSQLE018")]
+    [InlineData("WITH a AS (SELECT id FROM t), A AS (SELECT id FROM t) SELECT * FROM a", "CS01026")]
+    [InlineData("WITH a AS (SELECT id FROM b), b AS (SELECT id FROM t) SELECT * FROM a", "CS01026")]
+    [InlineData("WITH a (x, y) AS (SELECT id FROM t) SELECT * FROM a", "CS05013")]
+    [InlineData("WITH unused AS (SELECT missing FROM t) SELECT id FROM t", "CS01015")]
+    [InlineData("WITH unused AS (SELECT id FROM t LIMIT missing) SELECT id FROM t", "CS01005")]
+    [InlineData("WITH unused AS (SELECT id FROM t LIMIT TRUE) SELECT id FROM t", "CS02018")]
     public async Task Execute_InvalidDefinition_ShouldFailBeforeReading(string sql, string code)
     {
         // Arrange

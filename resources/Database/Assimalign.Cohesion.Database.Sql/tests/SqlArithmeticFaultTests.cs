@@ -23,8 +23,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlArithmeticFaultTests
 {
-    private const string DivisionByZero = "COHSQLE001";
-    private const string OutOfRange = "COHSQLE002";
+    private const string DivisionByZero = "CS02001";
+    private const string OutOfRange = "CS02002";
 
     private const string CreateNumbers =
         "CREATE TABLE numbers (id INT PRIMARY KEY, tiny_value TINYINT, small_value SMALLINT, int_value INT, " +
@@ -37,7 +37,7 @@ public sealed class SqlArithmeticFaultTests
 
     /// <summary>Every operand family divides or takes a remainder by zero, literal, column, computed, or bound.</summary>
     /// <param name="expression">The faulting projection.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: division and modulo by zero fail the statement with COHSQLE001")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: division and modulo by zero fail the statement with CS02001")]
     [InlineData("int_value / 0")]
     [InlineData("int_value % 0")]
     [InlineData("tiny_value / (id - id)")]
@@ -67,7 +67,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert: a coded statement failure, not DivideByZeroException, and the session runs on.
         AssertCode(failure, DivisionByZero);
-        failure.DiagnosticDetail("COHSQLE001").ShouldStartWith("Division by zero", Case.Sensitive);
+        failure.DiagnosticDetail("CS02001").ShouldStartWith("Division by zero", Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
     }
@@ -77,7 +77,7 @@ public sealed class SqlArithmeticFaultTests
     /// by it has no Decimal result, so it is out of range rather than a false division by zero.
     /// </summary>
     /// <param name="expression">The faulting projection.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with CS02002")]
     [InlineData("int_value / @tinyDouble")]
     [InlineData("int_value % @tinyDouble")]
     [InlineData("decimal_value / @tinySingle")]
@@ -142,7 +142,7 @@ public sealed class SqlArithmeticFaultTests
 
     /// <summary>ISO store assignment: a value a numeric column cannot hold is out of range, and nothing is written.</summary>
     /// <param name="statement">The overflowing write.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: storing a value a numeric column cannot hold fails with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: storing a value a numeric column cannot hold fails with CS02002")]
     [InlineData("UPDATE numbers SET int_value = big_value")]
     [InlineData("UPDATE numbers SET tiny_value = tiny_value + 120")]
     [InlineData("UPDATE numbers SET decimal_value = @huge WHERE id = 2")]
@@ -226,8 +226,8 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, castSql));
 
         // Assert
-        integer.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: integer literal 9223372036854775808 exceeds BIGINT.");
-        fractional.DiagnosticDetail("COHSQLE002").ShouldBe("Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
+        integer.DiagnosticDetail("CS02002").ShouldBe("Numeric value out of range: integer literal 9223372036854775808 exceeds BIGINT.");
+        fractional.DiagnosticDetail("CS02002").ShouldBe("Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
         cast.ShouldBeOfType<SqlEvaluationException>();
         var diagnostic = cast.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(OutOfRange);
@@ -337,7 +337,7 @@ public sealed class SqlArithmeticFaultTests
 
     /// <summary>BIGINT results beyond the signed 64-bit range fail instead of wrapping.</summary>
     /// <param name="expression">The overflowing projection, evaluated on the row holding BIGINT's maximum.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: BIGINT overflow fails with COHSQLE002 instead of wrapping")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: BIGINT overflow fails with CS02002 instead of wrapping")]
     [InlineData("9223372036854775807 + 1")]
     [InlineData("big_value + 1")]
     [InlineData("big_value + id")]
@@ -366,7 +366,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert
         AssertCode(failure, OutOfRange);
-        failure.DiagnosticDetail("COHSQLE002").ShouldStartWith("Numeric value out of range", Case.Sensitive);
+        failure.DiagnosticDetail("CS02002").ShouldStartWith("Numeric value out of range", Case.Sensitive);
         (await ScalarAsync(session, "SELECT big_value FROM numbers WHERE id = 2")).ShouldBe(long.MaxValue);
     }
 
@@ -401,7 +401,7 @@ public sealed class SqlArithmeticFaultTests
 
     /// <summary>Decimal results and approximate operands outside Decimal's range fail with the same code.</summary>
     /// <param name="expression">The overflowing projection.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: DECIMAL overflow and unrepresentable approximate operands fail with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: DECIMAL overflow and unrepresentable approximate operands fail with CS02002")]
     [InlineData("@maximum * 2")]
     [InlineData("@maximum + @maximum")]
     [InlineData("-@maximum - 1")]
@@ -463,7 +463,7 @@ public sealed class SqlArithmeticFaultTests
     }
 
     /// <summary>A REAL branch beyond Decimal's range cannot take a Decimal result type.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: result-type normalization reports out-of-range values with COHSQLE002")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: result-type normalization reports out-of-range values with CS02002")]
     public async Task ResultTypeNormalization_OutOfRange_ShouldFailWithCode()
     {
         // Arrange
@@ -478,7 +478,7 @@ public sealed class SqlArithmeticFaultTests
 
     /// <summary>SUM and AVG accumulation overflow carries the overflow code.</summary>
     /// <param name="aggregate">The accumulating aggregate.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: SUM and AVG overflow fail with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Arithmetic: SUM and AVG overflow fail with CS02002")]
     [InlineData("SUM")]
     [InlineData("AVG")]
     public async Task Aggregate_Overflow_ShouldFailWithCode(string aggregate)
@@ -551,7 +551,7 @@ public sealed class SqlArithmeticFaultTests
         // Assert
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith("COHSQLE055: Cannot compare values of types", Case.Sensitive);
+        error.Message.ShouldStartWith("CS02055: Cannot compare values of types", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
         (await CountAsync(client)).ShouldBe(2L);
     }

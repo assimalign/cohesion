@@ -32,7 +32,7 @@ public sealed class SqlStorageOperationsTests
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a statement, BEGIN, COMMIT and ROLLBACK of an open
-    /// transaction, over the wire too — is refused with COHSQLT004, and nothing reaches either file
+    /// transaction, over the wire too — is refused with CS04004, and nothing reaches either file
     /// set, while the background workers run and when the sessions close. Reopening the database
     /// runs recovery, which keeps the commit when its record's bytes survived and drops it when
     /// they were lost with the failed fsync; the open transaction is aborted either way.
@@ -123,17 +123,17 @@ public sealed class SqlStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CS04004");
         unconfirmed.Message.ShouldStartWith("Database 'app' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHSQLT004" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHSQLT004" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CS04004" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CS04004" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        statementError.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        statementError.Message.ShouldStartWith("CS04004", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHSQLT004", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CS04004", Case.Sensitive);
         harness.Engine.State.ShouldBe(EngineState.Running);
 
-        staleCommit.Code.ShouldBe("COHSQLT004");
+        staleCommit.Code.ShouldBe("CS04004");
 
         // Assert: nothing reached either file set after the failure, from the workers or the close.
         catalogOfflineAtOnce.ShouldBeTrue();
@@ -253,13 +253,13 @@ public sealed class SqlStorageOperationsTests
 
         // Assert
         unspent.ShouldBe(0);
-        ddl.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        ddl.Diagnostics.ShouldContain(d => d.Code == "CS04004");
         ddl.Message.ShouldStartWith("Database", Case.Sensitive);
         StorageOfflineException.Find(ddl).ShouldNotBeNull().CommitRecordWritten.ShouldBeTrue();
         dataOfflineAtOnce.ShouldBeTrue();
         dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
         dataAfterTheWorkers.Journal.ShouldBe(dataAtTheFailure.Journal);
-        commit.Code.ShouldBe("COHSQLT004");
+        commit.Code.ShouldBe("CS04004");
         engine.OfflineDatabases.ShouldBe([(DatabaseName)name]);
     }
 
@@ -375,8 +375,8 @@ public sealed class SqlStorageOperationsTests
         // Assert: refused with the offline code, and the table is still there.
         dropWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
-        offline.Code.ShouldBe("COHSQLT004");
-        offline.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        offline.Code.ShouldBe("CS04004");
+        offline.Diagnostics.ShouldContain(d => d.Code == "CS04004");
         offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 't'")).ShouldBe(1L);
         (await Scalar(observer, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
@@ -508,8 +508,8 @@ public sealed class SqlStorageOperationsTests
         // reservation's identity never reused.
         createWaited.ShouldBeTrue();
         var offline = refused.ShouldBeOfType<DatabaseOfflineException>();
-        offline.Code.ShouldBe("COHSQLT004");
-        offline.Diagnostics.ShouldContain(d => d.Code == "COHSQLT004");
+        offline.Code.ShouldBe("CS04004");
+        offline.Diagnostics.ShouldContain(d => d.Code == "CS04004");
         offline.Message.ShouldStartWith("Database 'ddl' is offline", Case.Sensitive);
         (await Scalar(observer, "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'u'")).ShouldBe(0L);
         reopened.Catalog.TryGetTable("dbo", "v", out var next).ShouldBeTrue();

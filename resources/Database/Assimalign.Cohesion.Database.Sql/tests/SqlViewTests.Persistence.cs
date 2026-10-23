@@ -57,8 +57,8 @@ public sealed partial class SqlViewTests
         var inline = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, body));
         var view = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE VIEW invalid AS " + body));
         // Assert
-        inline.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE006");
-        view.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE006");
+        inline.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01006");
+        view.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01006");
         database.Catalog.Views.ShouldBeEmpty();
     }
 
@@ -136,7 +136,7 @@ public sealed partial class SqlViewTests
         await using var reader = await restored.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT n FROM v"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE009");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01009");
         restored.Catalog.Views.ShouldHaveSingleItem().Columns[0].Type.Type.ShouldBe(Types.DatabaseType.Int32);
     }
 
@@ -369,7 +369,7 @@ public sealed partial class SqlViewTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE VIEW v AS SELECT '" + new string('x', 9000) + "' AS n FROM t"));
         // Assert
         error.Message.ShouldContain("8,092", Case.Sensitive);
-        error.Diagnostics[0].Code.ShouldBe("COHSQLE033");
+        error.Diagnostics[0].Code.ShouldBe("CS03033");
         database.Catalog.DdlGeneration.ShouldBe(before);
         database.Catalog.Views.ShouldBeEmpty();
     }

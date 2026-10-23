@@ -60,7 +60,7 @@ public sealed class SqlRow
 
         if (!_ordinals.TryGetValue(name, out int ordinal))
         {
-            throw new ArgumentException($"The result set has no column named '{name}'.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowGetOrdinalArgument, name), nameof(name));
         }
 
         return ordinal;
@@ -220,7 +220,7 @@ public sealed class SqlRow
 
         if (value is null)
         {
-            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, $"The value at ordinal {ordinal} is null; use IsNull to guard nullable columns.");
+            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowFieldSqlClient, ordinal));
         }
 
         if (value is T typed)
@@ -236,7 +236,7 @@ public sealed class SqlRow
         }
         catch (Exception exception) when (exception is InvalidCastException or FormatException or OverflowException)
         {
-            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, $"The value at ordinal {ordinal} of runtime type {value.GetType()} cannot be read as {typeof(T)}.", exception);
+            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowFieldSqlClient2, ordinal, value.GetType(), typeof(T)), exception);
         }
     }
 }

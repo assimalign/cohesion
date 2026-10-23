@@ -106,7 +106,7 @@ public sealed class SqlTypedLiteralTests
         literal.Location.End.ShouldBe(7 + text.Length);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Typed literals: malformed content reports SQL0008 at the whole literal")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Typed literals: malformed content reports CS00008 at the whole literal")]
     [InlineData("DATE '2024-02-30'")]
     [InlineData("DATE '2024-1-1'")]
     [InlineData("TIME '24:00:00'")]
@@ -161,7 +161,7 @@ public sealed class SqlTypedLiteralTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("SQL0008");
+        diagnostic.Code.ShouldBe("CS00008");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + text.Length);
     }
@@ -246,7 +246,7 @@ public sealed class SqlTypedLiteralTests
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
         statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.ShouldBeOfType<SqlColumnReferenceExpression>().ColumnName.ShouldBe(name);
-        new SqlQueryParser().Parse("SELECT X '00';").Diagnostics.ShouldContain(d => d.Code == "SQL0003");
+        new SqlQueryParser().Parse("SELECT X '00';").Diagnostics.ShouldContain(d => d.Code == "CS00003");
         new SqlQueryParser().Parse("CREATE TABLE t (c TEXT DEFAULT -'x');").Diagnostics.ShouldBeEmpty();
     }
 }

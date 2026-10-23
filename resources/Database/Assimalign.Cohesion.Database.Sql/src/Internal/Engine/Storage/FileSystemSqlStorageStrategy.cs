@@ -80,13 +80,13 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
         if (!File.Exists(files.Data))
         {
-            throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
         }
 
         if (!File.Exists(files.Journal) || !File.Exists(files.Backup))
         {
             throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                ErrorMessages.CreationSidecarMissing, databaseName), "COHSQLC001");
+                ErrorMessages.CreationSidecarMissing, databaseName), "CS03401");
         }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 

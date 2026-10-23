@@ -99,7 +99,7 @@ public sealed class SqlIndexReadIntegrityTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith(failureKind == 0 ? "CK06003: " : "COHSQLE041: ", Case.Sensitive);
+            error.Message.ShouldStartWith(failureKind == 0 ? "CK06003: " : "CS06041: ", Case.Sensitive);
             error.Message.ShouldNotContain("CK06003: CK06003:", Case.Sensitive);
             if (failureKind == 0)
             {
@@ -111,9 +111,9 @@ public sealed class SqlIndexReadIntegrityTests
                 transaction.State.ShouldBe(TransactionState.Faulted);
                 var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
                     await engineSession.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
-                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT005");
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04005");
                 refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
-                    .ShouldBe(failureKind == 0 ? "CK06003" : "COHSQLE041");
+                    .ShouldBe(failureKind == 0 ? "CK06003" : "CS06041");
             }
         }
         finally { faults.Clear(); }
@@ -124,7 +124,7 @@ public sealed class SqlIndexReadIntegrityTests
                 await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("COMMIT").Encode());
                 var commit = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
                 commit.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-                commit.Message.ShouldStartWith("COHSQLT005: ", Case.Sensitive);
+                commit.Message.ShouldStartWith("CS04005: ", Case.Sensitive);
                 engineSession.CurrentTransaction.ShouldBeNull();
             }
             else { await transaction.RollbackAsync(CancellationToken.None); }
@@ -167,7 +167,7 @@ public sealed class SqlIndexReadIntegrityTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHSQLT004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CS04004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -302,7 +302,7 @@ public sealed class SqlIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "CK06003" : "COHSQLE041");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "CK06003" : "CS06041");
             if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
             transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(failure);
             var cleanup = recorder.Events.Where(item => item.EventId == 25).ShouldHaveSingleItem();

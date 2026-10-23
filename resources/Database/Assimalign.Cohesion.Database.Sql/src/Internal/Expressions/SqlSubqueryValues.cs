@@ -106,5 +106,5 @@ internal sealed class SqlSubqueryValues
     internal static object?[] Get(SqlSubqueryValues? subqueries, int slot)
         => subqueries is not null && subqueries.TryGet(slot, out var values)
             ? values
-            : throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation.");
+            : throw new DatabaseException(ErrorMessages.EvaluatorNotMaterializedSqlPlanning);
 }

@@ -41,7 +41,7 @@ public sealed class SqlUnsupportedFunctionTests
         foreach (string expression in new[] { name + "()" })
         {
             var diagnostic = new SqlQueryParser().Parse($"SELECT {expression} FROM t;").Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("SQL0003");
+            diagnostic.Code.ShouldBe("CS00003");
             diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
             diagnostic.Message.ShouldNotBeNull().ShouldContain(name, Case.Sensitive);
         }

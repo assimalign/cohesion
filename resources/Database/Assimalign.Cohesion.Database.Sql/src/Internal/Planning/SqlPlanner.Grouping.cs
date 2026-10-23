@@ -22,7 +22,7 @@ internal sealed partial class SqlPlanner
         {
             if (ContainsAggregate(key))
             {
-                throw new SqlPlanningException("COHSQLE017", "Aggregate functions are not allowed in GROUP BY.", key.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning, key.Location);
             }
             ValidateExpression(key, evaluator, _subqueryTypes);
         }
@@ -140,19 +140,19 @@ internal sealed partial class SqlPlanner
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
                 // The overload is chosen by its arguments' types over the input row: SUM and AVG
-                // take a numeric argument, so SUM over text fails here with COHSQLE006, whatever
+                // take a numeric argument, so SUM over text fails here with CS01006, whatever
                 // the rows (#1189). The grouping executor creates the chosen function's accumulators.
                 if (call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) &&
                     (!call.HasWithinGroupOrdering || call.OrderBy.Count == 0))
                 {
-                    throw new SqlPlanningException("SQL0003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
+                    throw new SqlPlanningException("CS00003", ErrorMessages.ListaggRequiresWithinGroup, call.Location);
                 }
                 var function = (SqlAggregateFunction)evaluator.ResolveFunction(call)!;
                 foreach (var argument in Children(call))
                 {
                     if (ContainsAggregate(argument))
                     {
-                        throw new SqlPlanningException("COHSQLE017", "Nested aggregate functions are not allowed.", call.Location);
+                        throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning2, call.Location);
                     }
                     if (argument is not SqlStarExpression)
                     {
@@ -162,7 +162,7 @@ internal sealed partial class SqlPlanner
                 if (call.Quantifier == SqlSetQuantifier.Distinct && call.OrderBy.Any(key =>
                     !call.Arguments.Any(argument => SameGroupExpression(argument, key.Expression, evaluator))))
                 {
-                    throw new SqlPlanningException("COHSQLE032", ErrorMessages.DistinctOrderingArgument, call.Location);
+                    throw new SqlPlanningException("CS05032", ErrorMessages.DistinctOrderingArgument, call.Location);
                 }
                 if (function is SqlStringAggregateFunction && call.Arguments.Count > 1 &&
                     call.Arguments[1] is not (SqlLiteralExpression { LiteralType: SqlLiteralType.String or SqlLiteralType.Null } or SqlParameterExpression))
@@ -192,11 +192,11 @@ internal sealed partial class SqlPlanner
             if (expression is SqlColumnReferenceExpression reference)
             {
                 if (evaluator.IsOuterColumn(reference)) { return; }
-                throw new SqlPlanningException("COHSQLE017", $"Column '{reference.ColumnName}' must appear in GROUP BY or be used in an aggregate function.", reference.Location);
+                throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanGroupSqlPlanning3, reference.ColumnName), reference.Location);
             }
             if (expression is SqlStarExpression)
             {
-                throw new SqlPlanningException("COHSQLE017", "SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.", expression.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanGroupSqlPlanning4, expression.Location);
             }
             ValidateExpression(expression, evaluator, _subqueryTypes, outputSlots);
             foreach (var child in Children(expression))
@@ -435,7 +435,7 @@ internal sealed partial class SqlPlanner
         {
             return a >= b ? left : right;
         }
-        throw new SqlPlanningException("COHSQLE017", $"Grouped CASE/COALESCE results require compatible types; found {left} and {right}.");
+        throw new SqlPlanningException("CS05017", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerCommonGroupTypeSqlPlanning, left, right));
     }
 
     /// <summary>Preserves parameter type metadata without reflection.</summary>

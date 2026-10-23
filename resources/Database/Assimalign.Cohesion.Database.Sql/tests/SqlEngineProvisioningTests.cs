@@ -156,9 +156,9 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             .BuildAsync());
 
         // Assert: coded, naming the engine and the database, and nothing created or migrated.
-        drift.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'sales': the declared schema (hash ", Case.Sensitive);
+        drift.Message.ShouldStartWith("CS03103: SQL engine 'verify', database 'sales': the declared schema (hash ", Case.Sensitive);
         drift.Message.ShouldContain($"the database records schema hash {Sales.Compile().Hash}");
-        missing.Message.ShouldStartWith("COHSQLP003: SQL engine 'verify', database 'archive': the database does not exist.", Case.Sensitive);
+        missing.Message.ShouldStartWith("CS03103: SQL engine 'verify', database 'archive': the database does not exist.", Case.Sensitive);
         await using var reopened = SqlDatabaseEngine.Create("verify", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");
         sales.Catalog.TryGetTable("dbo", "orders", out var orders).ShouldBeTrue();
@@ -196,7 +196,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
         // Assert: the refusal is coded, and the engine, its server and its worker were released
         // before the build threw, the worker's pump thread joined.
         failure.Message.ShouldStartWith(
-            "COHSQLP002: SQL engine 'fails', database 'sales': the database was created with default collation 'case_insensitive', but it is declared with 'binary'.",
+            "CS03102: SQL engine 'fails', database 'sales': the database was created with default collation 'case_insensitive', but it is declared with 'binary'.",
             Case.Sensitive);
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
         server.ShouldNotBeNull().Stops.ShouldBe(1);
@@ -247,7 +247,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Assert
         failure.Message.ShouldStartWith(
-            "COHSQLP004: SQL engine 'steps', database 'shop': applying schema 'shop': step 1 of 1 (AddConstraint 'children.",
+            "CS03104: SQL engine 'steps', database 'shop': applying schema 'shop': step 1 of 1 (AddConstraint 'children.",
             Case.Sensitive);
         failure.Message.ShouldEndWith("Every completed step was compensated.", Case.Sensitive);
     }
@@ -271,7 +271,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Assert: refused in phase 3, before the engine (whose creation makes the root directory).
         failure.Message.ShouldBe(
-            "COHSQLP001: SQL engine 'principals' cannot provision database 'sales': its schema declares principal 'reader', " +
+            "CS03101: SQL engine 'principals' cannot provision database 'sales': its schema declares principal 'reader', " +
             "and principals and grants are refused until their DDL exists. Nothing was opened or written.");
         product.ShouldBeNull();
         Directory.Exists(_rootPath).ShouldBeFalse();
@@ -292,7 +292,7 @@ public sealed class SqlEngineProvisioningTests : IDisposable
             await CreateBuilder("invalid").AddDatabase(invalid).BuildAsync());
 
         // Assert
-        failure.Message.ShouldStartWith("COHSQLP001: SQL engine 'invalid' cannot provision database 'sales': ", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS03101: SQL engine 'invalid' cannot provision database 'sales': ", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<SqlSchemaValidationException>();
         Directory.Exists(_rootPath).ShouldBeFalse();
     }
@@ -382,11 +382,11 @@ public sealed class SqlEngineProvisioningTests : IDisposable
 
         // Assert
         destructive.Message.ShouldStartWith(
-            "COHSQLP005: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
+            "CS03105: SQL engine 'policy', database 'sales': Destructive migration step 'DropTable' for 'archive' was refused.",
             Case.Sensitive);
         destructive.Message.ShouldEndWith("Nothing was changed.", Case.Sensitive);
         adopt.Message.ShouldBe(
-            "COHSQLP005: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
+            "CS03105: SQL engine 'policy', database 'shop': SQL schema 'shop' cannot adopt table 'parents' because it " +
             "was not created by this schema. Nothing was changed.");
         await using var reopened = SqlDatabaseEngine.Create("policy", new SqlDatabaseEngineOptions { RootPath = _rootPath });
         var sales = await reopened.OpenDatabaseAsync("sales");

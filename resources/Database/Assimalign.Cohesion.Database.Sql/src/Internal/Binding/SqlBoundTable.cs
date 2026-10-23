@@ -146,6 +146,6 @@ internal sealed class SqlBoundTable
             }
         }
 
-        throw new InvalidOperationException($"CHECK constraint '{constraint.Name}' is not bound for table '{Table.Schema}.{Table.Name}'.");
+        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableGetCheckFailure, constraint.Name, Table.Schema, Table.Name));
     }
 }

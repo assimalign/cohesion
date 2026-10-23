@@ -40,7 +40,7 @@ public sealed partial class SqlDefinedFunctionTests
                 (await RowsAsync(session, "SELECT IS_SQL_DEFINED FROM COHESION_SCHEMA.DOMAINS WHERE DOMAIN_NAME = 'positive'")).ShouldBe([["YES"]]);
             }
             var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await ScriptBuilder(root: root, sql: ScriptSql + " ").BuildAsync());
-            failure.Message.ShouldContain("COHSQLS001");
+            failure.Message.ShouldContain("CS03201");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
@@ -214,12 +214,12 @@ public sealed partial class SqlDefinedFunctionTests
             await using var session = await database.CreateSessionAsync();
             // Assert
             (await RowsAsync(session, "SELECT n FROM t")).ShouldBe([[2L]]);
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t (id) VALUES (2)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t (id) VALUES (2)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
         }
         var declared = SqlDatabaseEngine.CreateBuilder("native-missing");
         declared.Options.StorageStrategy = images.CaptureDurableImages();
         declared.AddDatabase("functions");
-        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declared.BuildAsync())).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        (await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declared.BuildAsync())).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted SQL function domain signatures enforce argument and result constraints")]
@@ -249,7 +249,7 @@ public sealed partial class SqlDefinedFunctionTests
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT read_positive(CAST(-1 AS INT)) FROM t"));
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(CAST(-1 AS INT)) FROM t"));
         await SqlConstraintAssertions.ThrowAsync(() => RowsAsync(reader, "SELECT make_positive(NULL) FROM t"));
-        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "DROP DOMAIN positive"))).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
     }
 
     private sealed class ScriptRow

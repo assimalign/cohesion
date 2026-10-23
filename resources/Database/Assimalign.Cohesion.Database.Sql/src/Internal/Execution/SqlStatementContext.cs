@@ -99,7 +99,7 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Requires binding to have supplied the catalog image before execution, including empty inputs.</summary>
     internal SqlCatalogSnapshot RequireCatalogSnapshot()
-        => CatalogSnapshot ?? throw new DatabaseException("Internal invariant: a bound system relation requires a captured catalog snapshot.");
+        => CatalogSnapshot ?? throw new DatabaseException(ErrorMessages.ContextRequireCatalogSnapshotDatabase);
 
     /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
     internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);

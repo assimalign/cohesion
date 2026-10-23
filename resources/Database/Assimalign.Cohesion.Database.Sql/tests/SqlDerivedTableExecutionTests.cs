@@ -80,17 +80,17 @@ public sealed class SqlDerivedTableExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Derived tables: invalid names and shapes fail before enumeration")]
-    [InlineData("SELECT * FROM (SELECT id FROM t WHERE 1 = 0) d (a, b)", "COHSQLE013")]
-    [InlineData("SELECT * FROM (SELECT id, id + 1 AS n FROM t) d (a)", "COHSQLE013")]
-    [InlineData("SELECT * FROM (SELECT id AS \"\" FROM t) d", "COHSQLE013")]
-    [InlineData("SELECT * FROM (SELECT id FROM t) d (\" \")", "COHSQLE013")]
-    [InlineData("SELECT t.id FROM (SELECT id FROM t) d", "COHSQLE015")]
-    [InlineData("SELECT bogus.x FROM (SELECT id FROM t) d (x)", "COHSQLE015")]
-    [InlineData("SELECT d.id FROM (SELECT id, id FROM t) d", "COHSQLE015")]
-    [InlineData("SELECT * FROM t, (SELECT missing FROM t) d", "COHSQLE015")]
-    [InlineData("SELECT * FROM (SELECT nope FROM t) d", "COHSQLE015")]
-    [InlineData("SELECT * FROM (SELECT x.id FROM t) d", "COHSQLE015")]
-    [InlineData("SELECT * FROM (SELECT t.id FROM t hidden) d", "COHSQLE015")]
+    [InlineData("SELECT * FROM (SELECT id FROM t WHERE 1 = 0) d (a, b)", "CS05013")]
+    [InlineData("SELECT * FROM (SELECT id, id + 1 AS n FROM t) d (a)", "CS05013")]
+    [InlineData("SELECT * FROM (SELECT id AS \"\" FROM t) d", "CS05013")]
+    [InlineData("SELECT * FROM (SELECT id FROM t) d (\" \")", "CS05013")]
+    [InlineData("SELECT t.id FROM (SELECT id FROM t) d", "CS01015")]
+    [InlineData("SELECT bogus.x FROM (SELECT id FROM t) d (x)", "CS01015")]
+    [InlineData("SELECT d.id FROM (SELECT id, id FROM t) d", "CS01015")]
+    [InlineData("SELECT * FROM t, (SELECT missing FROM t) d", "CS01015")]
+    [InlineData("SELECT * FROM (SELECT nope FROM t) d", "CS01015")]
+    [InlineData("SELECT * FROM (SELECT x.id FROM t) d", "CS01015")]
+    [InlineData("SELECT * FROM (SELECT t.id FROM t hidden) d", "CS01015")]
     public async Task Execute_InvalidDerivedRelation_ShouldRejectBeforeReading(string sql, string code)
     {
         // Arrange
@@ -187,7 +187,7 @@ public sealed class SqlDerivedTableExecutionTests
 
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE015");
+        diagnostic.Code.ShouldBe("CS01015");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(reference);
     }
 

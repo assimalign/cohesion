@@ -42,7 +42,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// as a conversion failure naming the source and the target (<c>CAST from TEXT to DATE failed:
 /// ...</c>), the original as its inner exception, as the built-in casts fail. Anything else it throws,
 /// other than a <see cref="DatabaseException"/> (which passes unchanged), an exhausted stack or
-/// memory, is a fault of the conversion's code: <c>COHSQLE007</c> (<c>Cast TEXT AS cents failed:
+/// memory, is a fault of the conversion's code: <c>CS05007</c> (<c>Cast TEXT AS cents failed:
 /// ...</c>), which leaves the session and an explicit transaction usable, as for a function. That
 /// includes an <see cref="OperationCanceledException"/> unless the statement's own token is
 /// canceled, regardless of the token carried by the exception. The conversion never receives the
@@ -109,17 +109,17 @@ public sealed class SqlCast
         ArgumentNullException.ThrowIfNull(convert);
         if (!Enum.IsDefined(context))
         {
-            throw new ArgumentOutOfRangeException(nameof(context), context, "The cast context is not defined.");
+            throw new ArgumentOutOfRangeException(nameof(context), context, ErrorMessages.SqlCastCreateFailure);
         }
         if (source.IsPseudo || target.IsPseudo)
         {
             throw new ArgumentException(
-                $"A cast converts between storage types and domains; {(source.IsPseudo ? source : target).Name} is a pseudo-type.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastCreateArgument, (source.IsPseudo ? source : target).Name),
                 source.IsPseudo ? nameof(source) : nameof(target));
         }
         if (source.Equals(target) || (!source.IsDomain && !target.IsDomain && source.Storage.Type == target.Storage.Type))
         {
-            throw new ArgumentException($"A cast from {source.Name} to {target.Name} converts a type to itself.", nameof(target));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastCreateArgument2, source.Name, target.Name), nameof(target));
         }
 
         RequireStorage(SqlValueConverter<TSource>.Type, source, "TSource", nameof(source));
@@ -146,8 +146,7 @@ public sealed class SqlCast
             !(mapped.Storage.Type == DatabaseType.String && type.Storage.Type == DatabaseType.Character))
         {
             throw new ArgumentException(
-                $"{parameter} maps to {mapped.Name}, but {type.Name}{(type.IsDomain ? $" (a domain over {type.BaseType!.Name})" : string.Empty)} " +
-                $"is stored as {SqlType.NameOf(type.Storage.Type)}; give the cast the CLR type of its storage.", argument);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastRequireStorageArgument, parameter, mapped.Name, type.Name, (type.IsDomain ? $" (a domain over {type.BaseType!.Name})" : string.Empty), SqlType.NameOf(type.Storage.Type)), argument);
         }
     }
 }

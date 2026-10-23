@@ -37,7 +37,7 @@ internal sealed class SqlQueryExecutor
 
     internal static IReadOnlyDictionary<string, object?>? NormalizeParameters(IReadOnlyDictionary<string, object?>? parameters)
         => ParameterBindings.Normalize(parameters, name =>
-            new SqlPlanningException("COHSQLE023", $"More than one parameter key binds the name '{name}'."));
+            new SqlPlanningException("CS01023", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NormalizeParametersSqlPlanning, name)));
 
     internal SqlCatalogSnapshot CaptureCatalogSnapshot() => _catalog.CaptureSnapshot();
 

@@ -12,6 +12,6 @@ internal sealed class DiagnosticSessionResult : DatabaseResult
     public override IReadOnlyList<Diagnostic> Diagnostics { get; } =
     [
         new Diagnostic { Code = "SQLTEST001", Message = "Test warning", Severity = DiagnosticSeverity.Warning, Start = 0, End = 6, Line = 1 },
-        new Diagnostic { Code = "SQL0100", Message = "Statement does not end with ';'.", Severity = DiagnosticSeverity.Information },
+        new Diagnostic { Code = "CS00100", Message = "Statement does not end with ';'.", Severity = DiagnosticSeverity.Information },
     ];
 }

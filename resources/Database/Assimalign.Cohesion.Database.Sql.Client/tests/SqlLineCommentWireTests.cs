@@ -90,7 +90,7 @@ public sealed class SqlLineCommentWireTests
 
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        error.Message.ShouldContain("CS00003", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);

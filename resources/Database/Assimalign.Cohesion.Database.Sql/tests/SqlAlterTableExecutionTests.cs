@@ -139,7 +139,7 @@ public sealed class SqlAlterTableExecutionTests
         await ExecuteAsync(session, "UPDATE t SET stored = NULL");
         (await RowsAsync(session, "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 't' AND COLUMN_NAME = 'stored'"))[0][0].ShouldBe("YES");
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER id DROP NOT NULL"));
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
         error.Message.ShouldContain("Conflicting NULL/NOT NULL declarations for column 'id'.", Case.Sensitive);
     }
 
@@ -157,7 +157,7 @@ public sealed class SqlAlterTableExecutionTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER id " + action));
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE025");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03025");
         error.Message.ShouldContain("id", Case.Sensitive);
         await ExecuteAsync(session, "INSERT INTO t DEFAULT VALUES");
         (await RowsAsync(session, "SELECT id FROM t"))[0][0].ShouldBe(1);
@@ -216,16 +216,16 @@ public sealed class SqlAlterTableExecutionTests
         // Act / Assert
         var error = await session.ExecuteAsync("ALTER TABLE t " + action, cancellationToken: CancellationToken.None);
         error.Status.ShouldBe(DatabaseResultStatus.Error);
-        error.Diagnostics!.ShouldContain(diagnostic => diagnostic.Code == "COHSQLT003");
+        error.Diagnostics!.ShouldContain(diagnostic => diagnostic.Code == "CS04003");
         (await RowsAsync(session, "SELECT v FROM t"))[0][0].ShouldBe(7);
         await transaction.CommitAsync(CancellationToken.None);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RENAME: collisions leave definition and generation unchanged")]
-    [InlineData("ALTER TABLE t RENAME TO u", "COHSQLE013", "Table 'dbo.u' already exists.")]
-    [InlineData("ALTER TABLE t RENAME TO t", "COHSQLE013", "Table 'dbo.t' already exists.")]
-    [InlineData("ALTER TABLE t RENAME a TO a", "COHSQLE013", "Column 'a' already exists on 't'.")]
-    [InlineData("ALTER TABLE t RENAME a TO b", "COHSQLE013", "Column 'b' already exists on 't'.")]
+    [InlineData("ALTER TABLE t RENAME TO u", "CS05013", "Table 'dbo.u' already exists.")]
+    [InlineData("ALTER TABLE t RENAME TO t", "CS05013", "Table 'dbo.t' already exists.")]
+    [InlineData("ALTER TABLE t RENAME a TO a", "CS05013", "Column 'a' already exists on 't'.")]
+    [InlineData("ALTER TABLE t RENAME a TO b", "CS05013", "Column 'b' already exists on 't'.")]
     public async Task ExecuteAsync_Collision_ShouldLeaveCatalogUnchanged(string sql, string code, string message)
     {
         // Arrange
@@ -264,7 +264,7 @@ public sealed class SqlAlterTableExecutionTests
                 new SqlRenamePlan(table, null, "TABLES"), new SqlStatementContext(transaction, database.Coordinator), CancellationToken.None));
 
             // Assert
-            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE021");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS04021");
             failure.Message.ShouldContain("System view 'INFORMATION_SCHEMA.TABLES' is read-only.", Case.Sensitive);
             database.Catalog.DdlGeneration.ShouldBe(generation);
             database.Catalog.TryGetTable("INFORMATION_SCHEMA", "staging", out var unchanged).ShouldBeTrue();
@@ -306,7 +306,7 @@ public sealed class SqlAlterTableExecutionTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await builder.BuildAsync(CancellationToken.None));
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD002");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03302");
         error.Message.ShouldContain("001-create", Case.Sensitive);
         await using var reopened = SqlDatabaseEngine.Create("rename-script-reopen", new SqlDatabaseEngineOptions { StorageStrategy = storage.CaptureDurableImages() });
         var database = await reopened.OpenDatabaseAsync("db", CancellationToken.None);
@@ -378,7 +378,7 @@ public sealed class SqlAlterTableExecutionTests
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ALTER v SET DEFAULT wrong_type()"));
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05013");
         error.Message.ShouldContain("Column 'v': DEFAULT result type Date is incompatible with column type Int32.", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out var after).ShouldBeTrue();
         after.ShouldBeSameAs(before);

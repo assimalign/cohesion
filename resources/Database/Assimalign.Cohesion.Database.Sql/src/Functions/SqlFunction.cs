@@ -68,15 +68,15 @@ public abstract class SqlFunction
         ArgumentNullException.ThrowIfNull(returnType);
         if (kind is not (SqlFunctionKind.Scalar or SqlFunctionKind.Aggregate))
         {
-            throw new ArgumentOutOfRangeException(nameof(kind), kind, "The function kind is not defined.");
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, ErrorMessages.SqlFunctionFailure);
         }
         if (volatility is not (SqlFunctionVolatility.Immutable or SqlFunctionVolatility.Stable or SqlFunctionVolatility.Volatile))
         {
-            throw new ArgumentOutOfRangeException(nameof(volatility), volatility, "The volatility is not defined.");
+            throw new ArgumentOutOfRangeException(nameof(volatility), volatility, ErrorMessages.SqlFunctionFailure2);
         }
         if (nullBehavior is not (SqlNullBehavior.ReturnsNullOnNullInput or SqlNullBehavior.CalledOnNullInput))
         {
-            throw new ArgumentOutOfRangeException(nameof(nullBehavior), nullBehavior, "The NULL behavior is not defined.");
+            throw new ArgumentOutOfRangeException(nameof(nullBehavior), nullBehavior, ErrorMessages.SqlFunctionFailure3);
         }
 
         _parameters = parameters.ToArray();
@@ -89,8 +89,8 @@ public abstract class SqlFunction
         if (returnType.IsPseudo && !(ReferenceEquals(returnType, SqlType.AnyElement) && polymorphic))
         {
             throw new ArgumentException(ReferenceEquals(returnType, SqlType.AnyElement)
-                ? $"Function '{name}' returns ANYELEMENT but has no ANYELEMENT parameter to take the result type from."
-                : $"Function '{name}' cannot return the pseudo-type {returnType.Name}.", nameof(returnType));
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionArgument, name)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionArgument2, name, returnType.Name), nameof(returnType));
         }
 
         Name = name;
@@ -136,7 +136,7 @@ public abstract class SqlFunction
     /// <summary>
     /// Gets whether the function never returns NULL, as <c>COUNT</c>, which returns 0 for an empty
     /// group: a projection of a bare call to it is reported as not nullable. A leaf sets it in its
-    /// constructor; a function that sets it and returns NULL fails the statement as <c>COHSQLE007</c>.
+    /// constructor; a function that sets it and returns NULL fails the statement as <c>CS05007</c>.
     /// </summary>
     public bool IsNeverNull { get; protected init; }
 
@@ -200,7 +200,7 @@ public abstract class SqlFunction
     /// <param name="result">What the core returned.</param>
     /// <param name="arguments">The call's arguments; none for an aggregate's result, whose ANYELEMENT type is not checked.</param>
     /// <returns>The result, converted to the declared type when it widened to it.</returns>
-    /// <exception cref="DatabaseException">The result does not match (<c>COHSQLE007</c>, naming the function).</exception>
+    /// <exception cref="DatabaseException">The result does not match (<c>CS05007</c>, naming the function).</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal SqlValue CheckResult(in SqlValue result, scoped in SqlArguments arguments)
         => HasDeclaredResultType(result.Type, in arguments) ? result : CheckResultSlow(result, in arguments);
@@ -229,7 +229,7 @@ public abstract class SqlFunction
     /// <param name="result">What the core returned.</param>
     /// <param name="arguments">The call's arguments.</param>
     /// <returns>The result, converted to the declared type when it widened to it.</returns>
-    /// <exception cref="DatabaseException">The result does not match (<c>COHSQLE007</c>, naming the function).</exception>
+    /// <exception cref="DatabaseException">The result does not match (<c>CS05007</c>, naming the function).</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal SqlValue CheckResultSlow(in SqlValue result, scoped in SqlArguments arguments)
     {
@@ -275,7 +275,7 @@ public abstract class SqlFunction
     }
 
     private SqlEvaluationException ResultMismatch(string returned, string declared)
-        => SqlEvaluationException.FunctionFailed(Name, new InvalidCastException($"The function returned {returned}, but {declared}."));
+        => SqlEvaluationException.FunctionFailed(Name, new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionResultMismatchInvalidCast, returned, declared)));
 
     /// <summary>Throws when a call passes a number of arguments the function does not take.</summary>
     /// <param name="count">The number of arguments.</param>
@@ -285,7 +285,7 @@ public abstract class SqlFunction
         if (!AcceptsCount(count))
         {
             throw new ArgumentException(
-                $"Function '{Name}' takes {(VariadicParameter is null ? "exactly" : "at least")} {_parameters.Length} argument(s), but {count} were passed.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfArgumentCountInvalidArgument, Name, (VariadicParameter is null ? "exactly" : "at least"), _parameters.Length, count),
                 "arguments");
         }
     }

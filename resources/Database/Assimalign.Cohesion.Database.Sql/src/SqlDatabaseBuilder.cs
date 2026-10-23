@@ -65,7 +65,7 @@ public sealed class SqlDatabaseBuilder
     /// <remarks>
     /// A database is created with it, and an existing database keeps the collation it was created
     /// with: a key's collation id is persisted in it. The build refuses an existing database whose
-    /// collation is not this one (<c>COHSQLP002</c>, owner decision 56 of 2026-10-09), an unset value
+    /// collation is not this one (<c>CS03102</c>, owner decision 56 of 2026-10-09), an unset value
     /// meaning <see cref="Collation.Binary"/>.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The engine builder's build has begun.</exception>
@@ -93,7 +93,7 @@ public sealed class SqlDatabaseBuilder
             _engine.EnsureMutable();
             if (value is not (SqlProvisioningMode.Apply or SqlProvisioningMode.Verify))
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "The provisioning mode is not defined.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.SqlDatabaseBuilderFailure);
             }
 
             _provisioning = value;
@@ -153,7 +153,7 @@ public sealed class SqlDatabaseBuilder
         if (new DatabaseName(schema.Name) != _name)
         {
             throw new ArgumentException(
-                $"Schema '{schema.Name}' cannot be the schema of database '{_name}': a schema names the database it declares.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseBuilderSchemaArgument, schema.Name, _name),
                 nameof(schema));
         }
 
@@ -168,7 +168,7 @@ public sealed class SqlDatabaseBuilder
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentException">The name or SQL is blank, or the name is duplicated or too long.</exception>
     /// <exception cref="InvalidOperationException">The engine builder's build has begun.</exception>
-    /// <remarks>Scripts run inline. Each statement and its receipt commit together; an interrupted script resumes after its committed prefix. Changing a recorded body is refused with COHSQLS001.</remarks>
+    /// <remarks>Scripts run inline. Each statement and its receipt commit together; an interrupted script resumes after its committed prefix. Changing a recorded body is refused with CS03201.</remarks>
     public SqlDatabaseBuilder Script(string name, string sql)
     {
         _engine.EnsureMutable();
@@ -176,7 +176,7 @@ public sealed class SqlDatabaseBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         if (name.Length > 128 || Scripts.Exists(script => script.Name == name))
         {
-            throw new ArgumentException("Script names must be unique and at most 128 characters.", nameof(name));
+            throw new ArgumentException(ErrorMessages.SqlDatabaseBuilderScriptArgument, nameof(name));
         }
         Scripts.Add((name, sql));
         return this;
@@ -186,7 +186,7 @@ public sealed class SqlDatabaseBuilder
     {
         if (_schema is not null)
         {
-            throw new InvalidOperationException($"Database '{_name}' already declares its schema.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderThrowIfSchemaDeclaredFailure, _name));
         }
     }
 }

@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal sealed partial class SqlPlanExecutor
 {
+    private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
     // Test seam: after the final INSERT effect, while its statement apply is still admitted.
     internal static Action? AfterInsertApplied { get; set; }
     internal static Action? AfterSelfCommit { get; set; }
@@ -843,7 +845,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        throw new SqlExecutionException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
+        throw new SqlExecutionException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
     }
 
     /// <summary>
@@ -1047,7 +1049,7 @@ internal sealed partial class SqlPlanExecutor
         if (deleter != TransactionSequence.None && deleter != self)
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': the row was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure, table.Schema, table.Name, deleter));
         }
     }
 
@@ -1067,8 +1069,7 @@ internal sealed partial class SqlPlanExecutor
         {
             throw new StorageCorruptionException(
                 pageId,
-                $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' holds " +
-                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsureSnapshotSeesCascadeRowFailure2, slotIndex, (long)pageId, table.Schema, table.Name, record.Length, SqlRowCodec.StampHeaderSize));
         }
 
         return SqlRowCodec.ReadStamps(record.Span);
@@ -1901,7 +1902,7 @@ internal sealed partial class SqlPlanExecutor
             // ISO store assignment: a value the numeric column cannot hold is a numeric
             // value out of range (SQLSTATE 22003), the same fault as an overflowing result.
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorCoerceForColumnSqlEvaluation, Convert.ToString(value, CultureInfo.InvariantCulture), column.Name, column.Type.Type), exception);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException or ArgumentOutOfRangeException)
         {

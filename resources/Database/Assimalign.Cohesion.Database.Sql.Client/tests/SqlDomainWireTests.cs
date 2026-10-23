@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// decision 68): through the real SQL server and the typed client, DDL names a domain registered on the
 /// engine, its column returns its base type, a write that assigns it is checked, an application's cast
 /// runs under <c>CAST</c>, and once the domain is gone from the next engine's build, the database still
-/// opens and serves reads while each write to the column fails with <c>COHSQLE010</c> on a connection
+/// opens and serves reads while each write to the column fails with <c>CS02010</c> on a connection
 /// that stays usable.
 /// </summary>
 public sealed class SqlDomainWireTests
@@ -46,7 +46,7 @@ public sealed class SqlDomainWireTests
         row["filled"].ShouldBe(9);
         var failure = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("INSERT INTO values_table VALUES (2, -1)", cancellationToken: Timeout()));
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION weak(p INT) RETURNS INT IMMUTABLE RETURN fallback(p)", cancellationToken: Timeout()));
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("CREATE FUNCTION recursive(p INT) RETURNS INT RETURN recursive(p)", cancellationToken: Timeout()));
         await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("DROP DOMAIN positive", cancellationToken: Timeout()));
@@ -71,13 +71,13 @@ public sealed class SqlDomainWireTests
         // Assert
         violation.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         violation.ConnectionUsable.ShouldBeTrue();
-        violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
-        violation.Message.ShouldBe("COHSQLE038: DOMAIN constraint 'email' on 'dbo.contacts' was violated.");
+        violation.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
+        violation.Message.ShouldBe("CS03038: DOMAIN constraint 'email' on 'dbo.contacts' was violated.");
         SqlRow row = rows.ShouldHaveSingleItem();
         (row["email"], row["balance"], row["shown"], row["parsed"]).ShouldBe(("ann@example.com", 123L, "$1.23", 456L));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: a domain column reopens bound, then refuses writes with COHSQLE010 once the domain is removed")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: a domain column reopens bound, then refuses writes with CS02010 once the domain is removed")]
     public async Task Reopen_DomainColumn_ShouldBindAgainThenRefuseWritesOnceTheDomainIsRemoved()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-domain-wire", Guid.NewGuid().ToString("N"));
@@ -97,7 +97,7 @@ public sealed class SqlDomainWireTests
                 await using var connection = await second.Client.ConnectAsync(Timeout());
                 (await Should.ThrowAsync<SqlClientException>(async () =>
                     await connection.ExecuteAsync("INSERT INTO contacts VALUES (2, 'nobody', 'b')", cancellationToken: Timeout())))
-                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE038");
+                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03038");
             }
 
             // Act 2: an engine whose build no longer registers it.
@@ -114,7 +114,7 @@ public sealed class SqlDomainWireTests
             refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
             refused.ConnectionUsable.ShouldBeTrue();
             refused.Message.ShouldBe(
-                "COHSQLE010: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not register, so the column " +
+                "CS02010: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not register, so the column " +
                 "cannot be written and the write is refused. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), " +
                 "or drop the column.");
             (await reader.QueryAsync("SELECT note FROM contacts", cancellationToken: Timeout())).ShouldHaveSingleItem()["note"].ShouldBe("changed");
@@ -137,16 +137,16 @@ public sealed class SqlDomainWireTests
 
     /// <summary>
     /// An application cast that throws is a coded statement failure over the wire: invalid text is
-    /// COHSQLE022, and implementation faults or unrelated cancellation are COHSQLE007. The connection
+    /// CS02022, and implementation faults or unrelated cancellation are CS05007. The connection
     /// stays usable, where a raw cancellation would have closed it.
     /// </summary>
     /// <param name="input">The text the cast is given.</param>
     /// <param name="message">The failure the client receives.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Domains: application cast failures keep their wire code and the connection stays usable")]
-    [InlineData("npe", "COHSQLE007: Cast TEXT AS points failed: npe!")]
-    [InlineData("oce", "COHSQLE007: Cast TEXT AS points failed: not this statement")]
-    [InlineData("bad", "COHSQLE022: CAST from TEXT to points failed: not a number of points")]
+    [InlineData("npe", "CS05007: Cast TEXT AS points failed: npe!")]
+    [InlineData("oce", "CS05007: Cast TEXT AS points failed: not this statement")]
+    [InlineData("bad", "CS02022: CAST from TEXT to points failed: not a number of points")]
     public async Task QueryAsync_ThrowingApplicationCast_ShouldBeCodedAndKeepTheConnection(string input, string message)
     {
         // Arrange

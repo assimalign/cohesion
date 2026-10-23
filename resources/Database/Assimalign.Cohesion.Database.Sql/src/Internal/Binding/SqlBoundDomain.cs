@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// A stored column's domain bound against one table version (phase E3): the domain's check as a
 /// call over the column's value, which every write that assigns the column evaluates, or the reason
-/// the domain does not resolve, which fails such a write with <c>COHSQLE010</c>.
+/// the domain does not resolve, which fails such a write with <c>CS02010</c>.
 /// </summary>
 /// <param name="Ordinal">The column's ordinal in the table version.</param>
 /// <param name="Name">The domain's name.</param>

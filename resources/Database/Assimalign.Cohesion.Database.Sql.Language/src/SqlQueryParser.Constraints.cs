@@ -37,7 +37,7 @@ public sealed partial class SqlQueryParser
             ExpectDdlToken(ref lexer, TokenType.LeftParen, "'('");
             if (lexer.Current.Type is TokenType.RightParen or TokenType.Semicolon or TokenType.Eof)
             {
-                AddSyntaxDiagnostic(ref lexer, "Expected a CHECK predicate.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid);
             }
             int start = lexer.Current.Position;
             var expression = ParseExpression(ref lexer);
@@ -58,7 +58,7 @@ public sealed partial class SqlQueryParser
         }
         else if (!IsKeyword(ref lexer, "REFERENCES"))
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected PRIMARY KEY, FOREIGN KEY, REFERENCES, CHECK, or UNIQUE.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid2);
             return new SqlConstraintDefinition(name, SqlConstraintKind.Check, columns);
         }
 
@@ -86,7 +86,7 @@ public sealed partial class SqlQueryParser
                 {
                     Advance(ref lexer);
                     if (IsWord(ref lexer, "ACTION")) { Advance(ref lexer); }
-                    else { AddSyntaxDiagnostic(ref lexer, "Expected ACTION."); }
+                    else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid3); }
                 }
                 else if (IsKeyword(ref lexer, "SET"))
                 {
@@ -104,13 +104,13 @@ public sealed partial class SqlQueryParser
                     if (lexer.Current.Type == TokenType.LeftParen)
                     {
                         AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
-                            "Column lists after ON DELETE SET NULL or SET DEFAULT are not supported by the SQL surface.");
+                            ErrorMessages.SqlQueryParserParseConstraintVoid4);
                         ParseConstraintColumns(ref lexer);
                     }
                 }
                 else
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Expected CASCADE, RESTRICT, NO ACTION, SET NULL, or SET DEFAULT.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid5);
                 }
             }
             else if (IsKeyword(ref lexer, "UPDATE"))
@@ -125,12 +125,12 @@ public sealed partial class SqlQueryParser
             }
             else
             {
-                AddSyntaxDiagnostic(ref lexer, "Expected DELETE after ON.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid6);
             }
         }
         if (columns.Count != parentColumns.Count)
         {
-            AddSyntaxDiagnostic(ref lexer, "Foreign key and referenced key must contain the same number of columns.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid7);
         }
         return new SqlConstraintDefinition(name, SqlConstraintKind.ForeignKey, columns,
             parent, parentColumns, action);
@@ -144,7 +144,7 @@ public sealed partial class SqlQueryParser
         {
             if (!IsIdentifierOrKeyword(ref lexer))
             {
-                AddSyntaxDiagnostic(ref lexer, "Expected a constraint column name.");
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.QueryParserParseConstraintColumnsVoid);
                 break;
             }
             columns.Add(ReadDdlIdentifier(ref lexer));
@@ -160,7 +160,7 @@ public sealed partial class SqlQueryParser
     {
         if (!IsIdentifierOrKeyword(ref lexer))
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected an identifier.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserReadDdlIdentifierVoid);
             return "?";
         }
         string name = CurrentIdentifierText(ref lexer);
@@ -175,7 +175,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             return true;
         }
-        AddSyntaxDiagnostic(ref lexer, $"Expected {keyword}.");
+        AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserExpectDdlKeywordVoid, keyword));
         return false;
     }
 
@@ -186,7 +186,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             return true;
         }
-        AddSyntaxDiagnostic(ref lexer, $"Expected {description}.");
+        AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserExpectDdlKeywordVoid, description));
         return false;
     }
 }

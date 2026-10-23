@@ -65,7 +65,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 Expect(ref lexer, TokenType.RightBracket, "']' after the array type");
             }
-            AddTypeModifierDiagnostic(subject, "Array types are not supported; use a scalar type.", arrayStart, _lastTokenEnd, "CK00001");
+            AddTypeModifierDiagnostic(subject, ErrorMessages.SqlQueryParserParseDefinitionTypeVoid, arrayStart, _lastTokenEnd, "CK00001");
             resolvedType = null;
         }
         return type;
@@ -175,7 +175,7 @@ public sealed partial class SqlQueryParser
             }
             if (!SqlTypeModifiers.IsIntervalRange(first, last))
             {
-                AddSyntaxDiagnostic(ref lexer, $"Invalid INTERVAL field range '{first} TO {last}'.");
+                AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserParseIntervalQualifierVoid, first, last));
             }
             type += " " + last;
             end = lexer.Current.Position + lexer.Current.Value.Length;
@@ -215,7 +215,7 @@ public sealed partial class SqlQueryParser
             {
                 if (sawVolatility)
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Function volatility may be declared only once.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCreateFunctionVoid);
                 }
                 sawVolatility = true;
                 volatility = CurrentText(ref lexer).ToUpperInvariant();
@@ -225,7 +225,7 @@ public sealed partial class SqlQueryParser
             {
                 if (sawNullBehavior)
                 {
-                    AddSyntaxDiagnostic(ref lexer, "Function null behavior may be declared only once.");
+                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCreateFunctionVoid2);
                 }
                 sawNullBehavior = true;
                 strict = IsKeyword(ref lexer, "STRICT");

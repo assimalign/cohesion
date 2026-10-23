@@ -10,28 +10,28 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlExecutionException : DatabaseException
 {
     private readonly Location? _location;
-    internal const string CardinalityCode = "COHSQLE046";
-    internal const string InvalidDatetimeCode = "COHSQLE047";
-    internal const string DatetimeOverflowCode = "COHSQLE048";
-    internal const string DuplicateTableCode = "COHSQLE049";
-    internal const string DuplicateObjectCode = "COHSQLE050";
-    internal const string UndefinedTableCode = "COHSQLE051";
-    internal const string UndefinedObjectCode = "COHSQLE052";
-    internal const string InvalidTableCode = "COHSQLE053";
-    internal const string InvalidForeignKeyCode = "COHSQLE054";
-    internal const string DatatypeMismatchCode = "COHSQLE055";
-    internal const string DependentObjectsCode = "COHSQLE056";
-    internal const string UnsupportedCode = "COHSQLE057";
-    internal const string DamagedDefinitionCode = "COHSQLE058";
-    internal const string InvalidDefinitionCode = "COHSQLE059";
-    internal const string InternalErrorCode = "COHSQLE060";
-    internal const string DuplicateColumnCode = "COHSQLE061";
-    internal const string IntervalOverflowCode = "COHSQLE062";
-    internal const string CollationMismatchCode = "COHSQLE063";
-    internal const string SerializationFailureCode = "COHSQLE064";
-    internal const string DuplicateFunctionCode = "COHSQLE065";
-    internal const string InsufficientPrivilegeCode = "COHSQLE066";
-    internal const string StatementMemoryBudgetCode = "COHSQLE067";
+    internal const string CardinalityCode = "CS02046";
+    internal const string InvalidDatetimeCode = "CS02047";
+    internal const string DatetimeOverflowCode = "CS02048";
+    internal const string DuplicateTableCode = "CS03049";
+    internal const string DuplicateObjectCode = "CS03050";
+    internal const string UndefinedTableCode = "CS01051";
+    internal const string UndefinedObjectCode = "CS01052";
+    internal const string InvalidTableCode = "CS03053";
+    internal const string InvalidForeignKeyCode = "CS03054";
+    internal const string DatatypeMismatchCode = "CS02055";
+    internal const string DependentObjectsCode = "CS03056";
+    internal const string UnsupportedCode = "CS05057";
+    internal const string DamagedDefinitionCode = "CS06058";
+    internal const string InvalidDefinitionCode = "CS03059";
+    internal const string InternalErrorCode = "CS05060";
+    internal const string DuplicateColumnCode = "CS03061";
+    internal const string IntervalOverflowCode = "CS02062";
+    internal const string CollationMismatchCode = "CS02063";
+    internal const string SerializationFailureCode = "CS04064";
+    internal const string DuplicateFunctionCode = "CS03065";
+    internal const string InsufficientPrivilegeCode = "CS03066";
+    internal const string StatementMemoryBudgetCode = "CS05067";
 
     internal SqlExecutionException(string code, string message, Exception? innerException = null, Location? location = null)
         : base(message, [new Diagnostic
@@ -52,7 +52,7 @@ internal sealed class SqlExecutionException : DatabaseException
         ? this : new(Diagnostics[0].Code!, Message, InnerException ?? this, location);
 
     internal SqlExecutionException WithContext(string context)
-        => new(Diagnostics[0].Code!, context + ": " + Message, this, _location);
+        => new(Diagnostics[0].Code!, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, context, Message), this, _location);
 
     /// <summary>Preserves a wrapped carrier, coding an unclassified inner failure when necessary.</summary>
     internal static IReadOnlyList<Diagnostic> DiagnosticsOf(DatabaseException failure, string fallbackCode = InternalErrorCode,
@@ -76,7 +76,7 @@ internal sealed class SqlExecutionException : DatabaseException
     // they happen to fit inside the caller's statement. Only the statement can locate it.
     internal static DatabaseException FromPersisted(DatabaseException failure)
     {
-        if (SqlDatabase.IsStorageFailure(failure) || failure.Diagnostics is [{ Code: "COHSQLT005" }, ..]) { return failure; }
+        if (SqlDatabase.IsStorageFailure(failure) || failure.Diagnostics is [{ Code: "CS04005" }, ..]) { return failure; }
         bool located = false;
         foreach (var diagnostic in failure.Diagnostics)
         {

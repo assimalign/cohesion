@@ -263,7 +263,7 @@ internal sealed partial class SqlPlanExecutor
             if (volatility == SqlFunctionVolatility.Volatile &&
                 Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
             {
-                throw new SqlPlanningException("COHSQLE027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
+                throw new SqlPlanningException("CS03027", string.Format(CultureInfo.CurrentCulture, ErrorMessages.VolatileDefaultBackfill, column.Name));
             }
             boundDefault = BindDefaultExpression(column, $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'",
                 _definitions.Functions, _catalog.DefaultCollation, cancellationToken, declaring: true);
@@ -465,6 +465,6 @@ internal sealed partial class SqlPlanExecutor
         }
 
         DatabaseException UsedByConstraint(SqlCatalogConstraint constraint, Exception? cause = null)
-            => new($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.", cause);
+            => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogDropColumnCoreAsyncSqlCatalog2, columnName, constraint.Name), cause);
     }
 }

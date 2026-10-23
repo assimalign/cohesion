@@ -153,7 +153,7 @@ public sealed class SqlSchemaDdlInterlockReviewTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await pending.WaitAsync(timeout.Token));
 
         // Assert: the retry operates on the complete new set, with no stranded locks.
-        failure.Diagnostics.ShouldContain(value => value.Code == "COHSQLE013");
+        failure.Diagnostics.ShouldContain(value => value.Code == "CS05013");
         failure.Message.ShouldContain("Retry the statement", Case.Sensitive);
         database.Catalog.DdlGeneration.ShouldBe(generation);
         database.Catalog.Tables.Count.ShouldBe(2);

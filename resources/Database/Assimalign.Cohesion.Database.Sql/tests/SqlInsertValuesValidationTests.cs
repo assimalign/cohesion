@@ -22,11 +22,11 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// a target column used to resolve against the table and then index the empty row it is evaluated
 /// over: the <c>IndexOutOfRangeException</c> was not a <see cref="DatabaseException"/>, so over the
 /// wire it ended the session with <c>Internal</c>. Planning now rejects every column reference in
-/// those clauses with <c>COHSQLE005</c>, before anything executes.
+/// those clauses with <c>CS01005</c>, before anything executes.
 /// </summary>
 public sealed class SqlInsertValuesValidationTests
 {
-    private const string ColumnReferenceNotAllowed = "COHSQLE005";
+    private const string ColumnReferenceNotAllowed = "CS01005";
 
     /// <summary>
     /// A column reference anywhere in a VALUES row fails planning with the coded error on both session
@@ -181,7 +181,7 @@ public sealed class SqlInsertValuesValidationTests
     /// A sign over an operand the plan types as non-numeric is checked in VALUES too, while
     /// planning, so a later row's fault leaves the earlier rows unwritten.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES: a non-numeric sign operand is COHSQLE003 while planning")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES: a non-numeric sign operand is CS02003 while planning")]
     public async Task ExecuteAsync_NonNumericSignInValues_ShouldFailWithInvalidOperandType()
     {
         // Arrange
@@ -193,7 +193,7 @@ public sealed class SqlInsertValuesValidationTests
             session.ExecuteAsync("INSERT INTO v (id, a) VALUES (2, 2), (3, +'abc')").AsTask());
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE003");
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS02003");
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
     }
 

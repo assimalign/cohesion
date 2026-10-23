@@ -21,13 +21,13 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   transaction auto-commit. The session and transaction are sealed leaves of the root
   bases, which own the end state machine: a failed statement leaves the transaction
   active, and a transaction the kernel ended under its caller refuses work with
-  `COHSQLT005` until it is rolled back. A storage, I/O or index failure (`COHSQLE041`, or
+  `CS04005` until it is rolled back. A storage, I/O or index failure (`CS06041`, or
   `CK06003` for corruption) is the exception: it aborts the explicit transaction, which
-  then refuses work with `COHSQLT005` naming that cause until it is rolled back (#1364). In
+  then refuses work with `CS04005` naming that cause until it is rolled back (#1364). In
   autocommit the next statement can run. Writing statements prepare wire headers/rows before
   commit; encoding failures roll back only the statement. Read-only statements encode during
   delivery and can end partial results with a coded statement error. Both paths preserve the
-  connection and explicit transaction on result failures; uncoded failures use COHSQLE045.
+  connection and explicit transaction on result failures; uncoded failures use CS05045.
   Each header/row is bounded by the 16 MiB frame limit, with no aggregate result cap.
   Transport failures during delivery are terminal (#1651).
 - **Database scope (A5)** — every session stays bound to the database that
@@ -46,7 +46,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
   with no pending intent still skips in constant time. Deferred failure takes only that database
-  offline with `COHSQLP004`, retaining intent for the next open. Inline failures retain compensation;
+  offline with `CS03104`, retaining intent for the next open. Inline failures retain compensation;
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys
@@ -65,7 +65,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   at plan time with precise messages. Statements nest at most the engine's
   `ExpressionNestingLimit` (256 levels by default, 32..4096; an `AND`/`OR` chain
   of any length is one level), and a statement within it that exhausts the
-  executing thread's stack fails with `COHSQLE004` instead of ending the process
+  executing thread's stack fails with `CS05004` instead of ending the process
   (#1151). Typed requests for an engine with another limit parse with it through
   `SqlQueryRequest.FromSql(sql, parameters, parserOptions)`.
 - **Functions** — `SqlDatabaseEngineBuilder.Functions` holds the standard library (`UPPER`,
@@ -77,18 +77,18 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   `SqlDatabaseEngine.Functions`, visible in every database of the engine. A built-in cannot be
   replaced or shadowed (an overload of its name must take another number of arguments), and a
   reserved, type or quantifier name cannot be registered. Calls resolve by name,
-  argument count and type once per statement (an ambiguous call is `COHSQLE008`); an `Immutable`
+  argument count and type once per statement (an ambiguous call is `CS01008`); an `Immutable`
   call over constants is folded; a strict function (the default; a typed one can be created
   `CalledOnNullInput`) is not called over NULL; a CHECK admits only `Immutable` functions; and
   what a function throws, or a result of another type than it declares, fails the statement as
-  `COHSQLE007`. One function instance serves every session, so it must be thread-safe. A
+  `CS05007`. One function instance serves every session, so it must be thread-safe. A
   `SELECT` without `FROM` returns one row, so `SELECT f(x)` tries a function directly (#1373). A compiled schema's
   `table.Check(name, sql)` binds to the frozen catalog before the build touches any file
-  (`COHSQLP001` when it does not); a schema that is new or changed also has every CHECK
+  (`CS03101` when it does not); a schema that is new or changed also has every CHECK
   qualifier validated, while an already-applied schema keeps its recorded binding (#1191). A stored CHECK whose function a later build no longer
   registers, or registers with a result that no longer fits, does not stop its database from
   opening: its reads proceed, each write that would
-  evaluate it fails with `COHSQLE009`, and an engine that declares the database fails its build
+  evaluate it fails with `CS01009`, and an engine that declares the database fails its build
   with that code. `COHESION_SCHEMA.FUNCTIONS` lists the catalog and the special forms.
   `samples/Assimalign.Cohesion.Database.Sql.AotSample` is the NativeAOT guard for all of it, in
   process and over the wire. See DESIGN.md, "Functions (E2)".
@@ -96,11 +96,11 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   the built-in casts, and an application's domains (`SqlType.CreateDomain(name, baseType,
   check?)`, added with `Types.Add`) and casts to or from them (`SqlCast.Create<TSource,
   TTarget>(...)`, added with `Types.AddCast`), frozen into `SqlDatabaseEngine.Types`. DDL and
-  `CAST` resolve a built-in type name first and a domain otherwise (`COHSQLE010` for neither).
+  `CAST` resolve a built-in type name first and a domain otherwise (`CS02010` for neither).
   A column of a domain stores its base type and keeps the domain's name in the catalog; every
   write that assigns it, and every `CAST` to it, runs the domain's immutable check. A database
   whose column names a domain the opening engine does not register opens, reads, and refuses
-  writes to that column with `COHSQLE010`. `CAST` applies the registry's casts, the engine's own
+  writes to that column with `CS02010`. `CAST` applies the registry's casts, the engine's own
   (now including text to DATE, TIME, TIMESTAMP, TIMESTAMPTZ, INTERVAL, UUID, REAL and DOUBLE)
   and the application's alike. A typed schema names a domain with `table.Column(selector,
   "email")`, and `schema.Type<T>(t => t.Decimal(p, s))` declares one. See DESIGN.md, "Types,
@@ -129,7 +129,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   owner decision 2026-07-14; see DESIGN.md).
 - **Storage operations** — a failed journal or data fsync takes the database offline, both
   file sets at once: every later operation, in process and over the server, is refused with
-  `DatabaseOfflineException` (`COHSQLT004`) until `OpenDatabaseAsync` reopens it and
+  `DatabaseOfflineException` (`CS04004`) until `OpenDatabaseAsync` reopens it and
   recovery decides the unconfirmed commit (#1243); a DDL statement that had committed part of
   itself at the failure is reported unconfirmed and one that had committed nothing is refused
   (#1272), and `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB),
@@ -348,7 +348,7 @@ Access selection compares bounded snapshot-visible index probes without stored s
 Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
-hash builds per statement; COHSQLE067 (SQLSTATE 53200) refuses excess memory, without spill.
+hash builds per statement; CS05067 (SQLSTATE 53200) refuses excess memory, without spill.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
 executes to report candidate work in the same eight-column description; unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
@@ -368,3 +368,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

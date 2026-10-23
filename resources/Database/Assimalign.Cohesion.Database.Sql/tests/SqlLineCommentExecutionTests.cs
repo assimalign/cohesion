@@ -105,7 +105,7 @@ public sealed class SqlLineCommentExecutionTests
         var typed = await Should.ThrowAsync<DatabaseParseException>(() => RunAsync(session, sql, typed: true));
 
         // Assert
-        error.Message.ShouldStartWith("SQL parse error SQL0003: ", Case.Sensitive);
+        error.Message.ShouldStartWith("SQL parse error CS00003: ", Case.Sensitive);
         typed.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)).ShouldBe(error.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Message, diagnostic.Start, diagnostic.End)));
         (await SnapshotAsync(session)).ShouldBe(["1,10", "2,20", "3,30"]);
     }

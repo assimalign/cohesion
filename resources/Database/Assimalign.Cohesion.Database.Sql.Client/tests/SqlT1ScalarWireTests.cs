@@ -81,7 +81,7 @@ public sealed class SqlT1ScalarWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE002");
+        failure.Diagnostics[0].Code.ShouldBe("CS02002");
         failure.ConnectionUsable.ShouldBeTrue();
         next.ShouldHaveSingleItem().GetValue(0).ShouldBe(-1L);
     }

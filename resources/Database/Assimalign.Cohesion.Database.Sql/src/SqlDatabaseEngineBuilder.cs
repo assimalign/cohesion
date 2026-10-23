@@ -41,7 +41,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// returned. A failure in phases 4 to 6 disposes the engine, with its servers, workers and open
 /// databases, before the build throws. A database the engine opens but does not declare opens even
 /// when a stored CHECK calls a function the engine does not register; each write that would
-/// evaluate that CHECK fails with <c>COHSQLE009</c> (owner decision 65 of 2026-10-09).
+/// evaluate that CHECK fails with <c>CS01009</c> (owner decision 65 of 2026-10-09).
 /// </para>
 /// <para>
 /// Worker and server factories run after the engine exists, in registration order (every worker
@@ -299,9 +299,9 @@ public sealed class SqlDatabaseEngineBuilder
     /// anything is created, and the refusal names the engine.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
-    /// A declared database was refused before anything was created (<c>COHSQLP001</c>, a declared
+    /// A declared database was refused before anything was created (<c>CS03101</c>, a declared
     /// CHECK that does not bind to the function catalog included), or its provisioning failed after
-    /// the engine was created (<c>COHSQLP002</c> to <c>COHSQLP005</c>, or <c>COHSQLE009</c> for a stored
+    /// the engine was created (<c>CS03102</c> to <c>CS03105</c>, or <c>CS01009</c> for a stored
     /// CHECK that calls a function the engine does not register); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>

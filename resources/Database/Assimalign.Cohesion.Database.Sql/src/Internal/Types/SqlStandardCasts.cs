@@ -77,7 +77,7 @@ internal static class SqlStandardCasts
         // From text: explicit only.
         SqlCast.Create<string, bool>(SqlType.Text, SqlType.Boolean, static text => bool.TryParse(text.Trim(), out bool parsed)
             ? parsed
-            : throw new InvalidCastException("BOOLEAN requires a boolean or TRUE/FALSE text."), Explicit),
+            : throw new InvalidCastException(ErrorMessages.SqlStandardCastsCreateInvalidCast), Explicit),
         SqlCast.Create<string, sbyte>(SqlType.Text, SqlType.TinyInt, static text => checked((sbyte)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, short>(SqlType.Text, SqlType.SmallInt, static text => checked((short)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, int>(SqlType.Text, SqlType.Integer, static text => checked((int)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
@@ -116,7 +116,7 @@ internal static class SqlStandardCasts
         // From CHAR: explicit only.
         SqlCast.Create<string, bool>(SqlType.Character, SqlType.Boolean, static text => bool.TryParse(text.Trim(), out bool parsed)
             ? parsed
-            : throw new InvalidCastException("BOOLEAN requires a boolean or TRUE/FALSE text."), Explicit),
+            : throw new InvalidCastException(ErrorMessages.SqlStandardCastsCreateInvalidCast), Explicit),
         SqlCast.Create<string, sbyte>(SqlType.Character, SqlType.TinyInt, static text => checked((sbyte)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, short>(SqlType.Character, SqlType.SmallInt, static text => checked((short)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
         SqlCast.Create<string, int>(SqlType.Character, SqlType.Integer, static text => checked((int)Whole(SqlCastConverter.ParseExactDecimal(text))), Explicit),
@@ -200,7 +200,7 @@ internal static class SqlStandardCasts
     private static decimal Whole(decimal value)
         => decimal.Truncate(value) == value
             ? value
-            : throw new InvalidCastException("An integer target requires a whole number; truncation is not supported.");
+            : throw new InvalidCastException(ErrorMessages.SqlStandardCastsWholeInvalidCast);
 
     /// <summary>Reads text as a binary floating-point number: no grouping, as for the exact numbers.</summary>
     internal static double ParseFloat(string text)
@@ -239,11 +239,11 @@ internal static class SqlStandardCasts
     {
         if (float.IsInfinity(narrowed) && !double.IsInfinity(value))
         {
-            throw new OverflowException($"Value {value.ToString(CultureInfo.InvariantCulture)} is out of range for REAL.");
+            throw new OverflowException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStandardCastsCheckRealOverflow, value.ToString(CultureInfo.InvariantCulture)));
         }
         if (narrowed == 0f && value != 0d)
         {
-            throw new OverflowException($"Value {value.ToString(CultureInfo.InvariantCulture)} underflows REAL.");
+            throw new OverflowException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStandardCastsCheckRealOverflow2, value.ToString(CultureInfo.InvariantCulture)));
         }
 
         return narrowed;

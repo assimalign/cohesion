@@ -69,7 +69,7 @@ public sealed class SqlCatalogTable
 
         if (columns.Count == 0)
         {
-            throw new SqlCatalogException($"Table '{schema}.{name}' must declare at least one column.");
+            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableSqlCatalog, schema, name));
         }
 
         ObjectId = objectId;
@@ -82,7 +82,7 @@ public sealed class SqlCatalogTable
         var constraintCopy = new SqlCatalogConstraint[constraints?.Count ?? 0];
         for (int index = 0; index < constraintCopy.Length; index++)
         {
-            constraintCopy[index] = constraints![index] ?? throw new ArgumentException("A constraint cannot be null.", nameof(constraints));
+            constraintCopy[index] = constraints![index] ?? throw new ArgumentException(ErrorMessages.SqlCatalogTableArgument, nameof(constraints));
         }
         Constraints = Array.AsReadOnly(constraintCopy);
 
@@ -94,14 +94,14 @@ public sealed class SqlCatalogTable
             if (dropped[index] < 0 || dropped[index] >= PhysicalColumnCount)
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is outside its {PhysicalColumnCount} physical columns.",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument2, dropped[index], schema, name, PhysicalColumnCount),
                     nameof(droppedColumnOrdinals));
             }
 
             if (index > 0 && dropped[index] == dropped[index - 1])
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is listed more than once.", nameof(droppedColumnOrdinals));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument3, dropped[index], schema, name), nameof(droppedColumnOrdinals));
             }
         }
 

@@ -17,8 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlArithmeticWireTests
 {
-    private const string DivisionByZero = "COHSQLE001";
-    private const string OutOfRange = "COHSQLE002";
+    private const string DivisionByZero = "CS02001";
+    private const string OutOfRange = "CS02002";
 
     /// <summary>Every fault reaches the client as a coded execution failure on a still-usable connection.</summary>
     /// <param name="statement">The faulting command.</param>
@@ -58,7 +58,7 @@ public sealed class SqlArithmeticWireTests
 
     /// <summary>A bound zero divisor of every numeric runtime type is caught, not only literal zero.</summary>
     /// <param name="divisor">The bound divisor.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: bound zero divisors of every numeric type fail with COHSQLE001")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: bound zero divisors of every numeric type fail with CS02001")]
     [MemberData(nameof(ZeroDivisors))]
     public async Task QueryAsync_BoundZeroDivisor_ShouldFailWithCode(object divisor)
     {
@@ -82,7 +82,7 @@ public sealed class SqlArithmeticWireTests
 
     /// <summary>A bound nonzero divisor too small for Decimal is out of range, never reported as zero.</summary>
     /// <param name="divisor">The bound nonzero divisor.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with COHSQLE002")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with CS02002")]
     [MemberData(nameof(UnderflowingDivisors))]
     public async Task QueryAsync_UnderflowingApproximateDivisor_ShouldFailOutOfRange(object divisor)
     {
@@ -126,8 +126,8 @@ public sealed class SqlArithmeticWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("COHSQLE055: Cannot compare values of types", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE055");
+        failure.Message.ShouldStartWith("CS02055: Cannot compare values of types", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02055");
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
     }

@@ -44,7 +44,7 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
         }
 
         /// <inheritdoc />
-        /// <exception cref="SqlEvaluationException">The row count overflowed (<c>COHSQLE002</c>).</exception>
+        /// <exception cref="SqlEvaluationException">The row count overflowed (<c>CS02002</c>).</exception>
         protected override void AddCore(scoped in SqlArguments arguments)
         {
             var value = arguments[0];
@@ -55,7 +55,7 @@ internal sealed class SqlExtremumFunction : SqlAggregateFunction
             catch (OverflowException exception)
             {
                 throw SqlEvaluationException.NumericValueOutOfRange(
-                    $"{_name} overflowed; the aggregate cannot be represented as a decimal or count.", exception);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AccumulatorAddCoreSqlEvaluation2, _name), exception);
             }
 
             // A value the engine read from a row keeps the box it was read from, so comparing and

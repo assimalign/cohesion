@@ -93,7 +93,7 @@ public sealed class SqlPagingParserTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Paging: malformed and mixed counts receive SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Paging: malformed and mixed counts receive CS00003")]
     [InlineData("SELECT id FROM t LIMIT 1 FETCH FIRST 1 ROW ONLY")]
     [InlineData("SELECT TOP (1) id FROM t LIMIT 1")]
     [InlineData("SELECT TOP (1) id FROM t OFFSET 1 ROWS")]
@@ -121,7 +121,7 @@ public sealed class SqlPagingParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(item => item.Code == "CS00003");
         statement.Diagnostics.ShouldNotContain(item => item.Code == "CK00001");
     }
 

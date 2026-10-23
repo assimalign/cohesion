@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 /// <summary>Declaration-time modifier rules, shared by SQL syntax, resolution and typed schemas.</summary>
 internal static class SqlTypeModifiers
 {
-    internal const string DiagnosticCode = "SQL0005";
+    internal const string DiagnosticCode = "CS00005";
     internal const int MaximumLength = 10_485_760;
     internal const int MaximumPrecision = 28;
     internal const string ArgumentShape = "Type arguments must be one or two unsigned integer literals within the Int32 range.";

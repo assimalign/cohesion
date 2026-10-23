@@ -73,7 +73,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// data if that prefix ran. Both session seams refuse it and the tables are unchanged.
     /// </summary>
     /// <param name="sql">The statement whose tail the parser used to drop.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a statement with leftover text reports SQL0003 and changes nothing")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a statement with leftover text reports CS00003 and changes nothing")]
     [InlineData("DELETE FROM t WHRE id = 1;")]
     [InlineData("UPDATE t SET name = 'z' WHRE id = 1;")]
     [InlineData("UPDATE t SET name = u.name FROM u WHERE t.id = u.id;")]
@@ -114,8 +114,8 @@ public sealed class SqlStatementCompletenessExecutionTests
         var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None).AsTask());
 
         // Assert
-        textError.Message.ShouldContain("SQL0003", Case.Sensitive);
-        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0003" && diagnostic.Severity == DiagnosticSeverity.Error);
+        textError.Message.ShouldContain("CS00003", Case.Sensitive);
+        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "CS00003" && diagnostic.Severity == DiagnosticSeverity.Error);
         session.CurrentTransaction.ShouldBeNull();
         (await SnapshotAsync(session)).ShouldBe(before);
     }
@@ -139,7 +139,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldContain(action == "ALTER COLUMN" ? "CK00001" : "SQL0003", Case.Sensitive);
+        error.Message.ShouldContain(action == "ALTER COLUMN" ? "CK00001" : "CS00003", Case.Sensitive);
         error.ShouldContainMessage(action, Case.Sensitive);
         (await SnapshotAsync(session)).ShouldBe(before);
         (await RowsAsync(session, "SELECT name, age FROM t WHERE id = 1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { "ann", 36 });
@@ -153,20 +153,20 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// <param name="sql">The malformed DDL statement.</param>
     /// <param name="code">The diagnostic for type modifiers or surrounding syntax.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: malformed DDL fails at parse time and changes no schema")]
-    [InlineData("CREATE TABLE z (a VARCHAR(25 5));", "SQL0005")]
-    [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));", "SQL0005")]
-    [InlineData("CREATE TABLE z (c VARCHAR(-5));", "SQL0005")]
-    [InlineData("CREATE TABLE z (a CHAR(MAX));", "SQL0005")]
-    [InlineData("CREATE TABLE z (a VARCHAR(abc));", "SQL0005")]
-    [InlineData("CREATE TABLE z (a TEXT NOT);", "SQL0003")]
-    [InlineData("CREATE TABLE IF NOT z (a INT);", "SQL0003")]
-    [InlineData("ALTER TABLE t ADD COLUMN c CHAR(MAX);", "SQL0005")]
-    [InlineData("ALTER TABLE ADD COLUMN c INT;", "SQL0003")]
-    [InlineData("ALTER INDEX ix RENAME TO iy;", "SQL0003")]
-    [InlineData("CREATE INDEX ON t (name);", "SQL0003")]
-    [InlineData("CREATE INDEX IF EXISTS ix ON t (name);", "SQL0003")]
-    [InlineData("CREATE INDEX ix ON t (name,, age);", "SQL0003")]
-    [InlineData("DROP TABLE IF t;", "SQL0003")]
+    [InlineData("CREATE TABLE z (a VARCHAR(25 5));", "CS00005")]
+    [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));", "CS00005")]
+    [InlineData("CREATE TABLE z (c VARCHAR(-5));", "CS00005")]
+    [InlineData("CREATE TABLE z (a CHAR(MAX));", "CS00005")]
+    [InlineData("CREATE TABLE z (a VARCHAR(abc));", "CS00005")]
+    [InlineData("CREATE TABLE z (a TEXT NOT);", "CS00003")]
+    [InlineData("CREATE TABLE IF NOT z (a INT);", "CS00003")]
+    [InlineData("ALTER TABLE t ADD COLUMN c CHAR(MAX);", "CS00005")]
+    [InlineData("ALTER TABLE ADD COLUMN c INT;", "CS00003")]
+    [InlineData("ALTER INDEX ix RENAME TO iy;", "CS00003")]
+    [InlineData("CREATE INDEX ON t (name);", "CS00003")]
+    [InlineData("CREATE INDEX IF EXISTS ix ON t (name);", "CS00003")]
+    [InlineData("CREATE INDEX ix ON t (name,, age);", "CS00003")]
+    [InlineData("DROP TABLE IF t;", "CS00003")]
     public async Task ExecuteAsync_MalformedDdl_ShouldFailAtParseTimeWithoutSchemaChange(string sql, string code)
     {
         // Arrange

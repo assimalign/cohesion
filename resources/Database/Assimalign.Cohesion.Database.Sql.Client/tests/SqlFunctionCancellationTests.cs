@@ -42,7 +42,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(functions.Failure);
         functions.Calls.ShouldBeGreaterThan(0);
@@ -109,7 +109,7 @@ public sealed class SqlFunctionCancellationTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Message.ShouldStartWith($"CS05007: Function '{function}' failed:", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         functions.Calls.ShouldBeGreaterThan(0);
         functions.LastToken.IsCancellationRequested.ShouldBeFalse();
@@ -203,7 +203,7 @@ public sealed class SqlFunctionCancellationTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive);
+        failure.Message.ShouldStartWith($"CS05007: Function '{function}' failed:", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token.CanBeCanceled && !token.IsCancellationRequested);
@@ -240,7 +240,7 @@ public sealed class SqlFunctionCancellationTests
         else if (defaultDeclaration)
         {
             var rejected = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, declaration, binding.Token));
-            rejected.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+            rejected.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         }
         else
         {
@@ -260,7 +260,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, defaultDeclaration ? declaration : sql, statement.Token));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         if (defaultDeclaration)
         {
             failure.Message.ShouldContain("Column 'v'", Case.Sensitive);
@@ -321,7 +321,7 @@ public sealed class SqlFunctionCancellationTests
         {
             var rejected = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.ExecuteAsync(declaration, cancellationToken: timeout.Token));
-            rejected.Message.ShouldStartWith("COHSQLE007:", Case.Sensitive);
+            rejected.Message.ShouldStartWith("CS05007:", Case.Sensitive);
             rejected.ConnectionUsable.ShouldBeTrue();
         }
         else
@@ -357,11 +357,11 @@ public sealed class SqlFunctionCancellationTests
         // Assert
         if (defaultDeclaration)
         {
-            coded.Message.ShouldStartWith("COHSQLE007: Column 'v'", Case.Sensitive);
+            coded.Message.ShouldStartWith("CS05007: Column 'v'", Case.Sensitive);
             coded.Message.ShouldContain($"Function '{function}' failed:", Case.Sensitive);
             await AssertDefaultAbsentAsync(database);
         }
-        else { coded.Message.ShouldStartWith($"COHSQLE007: Function '{function}' failed:", Case.Sensitive); }
+        else { coded.Message.ShouldStartWith($"CS05007: Function '{function}' failed:", Case.Sensitive); }
         coded.ConnectionUsable.ShouldBeTrue();
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token.CanBeCanceled && !token.IsCancellationRequested);
@@ -400,7 +400,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, second.Token));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == second.Token);
@@ -434,7 +434,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql, statement.Token));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE007");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05007");
         failure.Message.ShouldStartWith($"Function '{function}' failed:", Case.Sensitive);
         functions.Calls.ShouldBeGreaterThan(0);
         functions.Tokens.ShouldAllBe(token => token == statement.Token);

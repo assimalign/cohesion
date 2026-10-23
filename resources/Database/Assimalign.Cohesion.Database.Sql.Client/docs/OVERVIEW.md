@@ -41,8 +41,8 @@ nor `Sql.Language`.
   command; an observer overrides only the hooks it needs.
 
 For a constraint failure, catch `SqlClientException` and read
-`exception.Diagnostics[0].Code`: COHSQLE037 (unique), COHSQLE038 (CHECK/domain),
-COHSQLE039 (foreign key), or COHSQLE024 (NOT NULL). `exception.Code` is the protocol
+`exception.Diagnostics[0].Code`: CS03037 (unique), CS03038 (CHECK/domain),
+CS03039 (foreign key), or CS03024 (NOT NULL). `exception.Code` is the protocol
 category; the engine code also prefixes the message when diagnostics are not negotiated.
 
 ## Dependencies
@@ -91,3 +91,13 @@ See `docs/DESIGN.md` for the design decisions behind the surface.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Pool return now rolls back unfinished SQL/Graph transactions using negotiated server status before reusing a session; uncertified sessions are discarded (#1540).
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

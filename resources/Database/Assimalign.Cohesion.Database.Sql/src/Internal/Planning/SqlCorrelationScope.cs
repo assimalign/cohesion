@@ -56,7 +56,7 @@ internal sealed class SqlCorrelationScope
             }
             if (key < 0)
             {
-                throw new SqlPlanningException("COHSQLE017", string.Format(CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS05017", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.CorrelatedUngroupedColumn, column.ColumnName), column.Location);
             }
             value = new SqlBoundSlot(key);

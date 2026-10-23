@@ -34,7 +34,7 @@ public sealed class SqlTypeModifierTests
                 // A domain name resolves, but nested domains retain their existing refusal.
                 var error = await Should.ThrowAsync<DatabaseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03301");
                 error.Message.ShouldBe("Domain 'bounded' must have a built-in base type.");
                 continue;
             }
@@ -193,7 +193,7 @@ public sealed class SqlTypeModifierTests
             {
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                error.Message.ShouldContain("CS00005", Case.Sensitive);
                 error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }
@@ -223,7 +223,7 @@ public sealed class SqlTypeModifierTests
             else
             {
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
-                error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                error.Message.ShouldContain("CS00005", Case.Sensitive);
                 error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }

@@ -57,7 +57,7 @@ internal sealed partial class SqlPlanner
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
             // PostgreSQL src/backend/rewrite/rewriteHandler.c:1168 rejects repeated whole-column assignments.
             if (!assigned.Add(ordinal))
-            { throw new SqlPlanningException("COHSQLE019", string.Format(CultureInfo.CurrentCulture,
+            { throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location); }
             if (table.Columns[ordinal].Identity is { IsAlways: true })
             { throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden); }
@@ -69,7 +69,7 @@ internal sealed partial class SqlPlanner
         return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
             clause.Where is null ? null : evaluator.BindPredicate(clause.Where));
 
-        SqlPlanningException Invalid(string reason) => new("COHSQLE035",
+        SqlPlanningException Invalid(string reason) => new("CS03035",
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.UpsertArbiterInvalid, target, table.Schema, table.Name, reason), insert.Location);
 
         bool IsLegacyPrimaryKey(string name)
@@ -88,9 +88,9 @@ internal sealed partial class SqlPlanner
         void Validate(SqlExpression expression, string? predicateClause = null)
         {
             if (ContainsAggregate(expression))
-            { throw new SqlPlanningException("COHSQLE017", ErrorMessages.UpsertAggregate, expression.Location); }
+            { throw new SqlPlanningException("CS05017", ErrorMessages.UpsertAggregate, expression.Location); }
             if (ContainsStar(expression))
-            { throw new SqlPlanningException("COHSQLE013", ErrorMessages.UpsertStar, expression.Location); }
+            { throw new SqlPlanningException("CS05013", ErrorMessages.UpsertStar, expression.Location); }
             if (predicateClause is null) { ValidateExpression(expression, evaluator); }
             else { ValidatePredicate(expression, evaluator, predicateClause); }
         }

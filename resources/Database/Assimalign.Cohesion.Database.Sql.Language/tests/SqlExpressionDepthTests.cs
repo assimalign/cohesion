@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// Server and PostgreSQL). Only genuine nesting counts: an expression tree nests at most the
 /// configured limit (256 by default, 32..4096), counted by tree depth so that each link of an
 /// arithmetic chain is a level while a whole <c>AND</c>/<c>OR</c> chain is one, and parentheses
-/// nest at most as deep. Deeper text reports <c>SQL0006</c> before anything executes, and no input
+/// nest at most as deep. Deeper text reports <c>CS00006</c> before anything executes, and no input
 /// overflows the parser's stack.
 /// </summary>
 public sealed class SqlExpressionDepthTests
@@ -81,7 +81,7 @@ public sealed class SqlExpressionDepthTests
         statement.ExpressionNestingDepth.ShouldBe(Limit);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: one level past the default limit reports SQL0006")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: one level past the default limit reports CS00006")]
     [MemberData(nameof(Constructs))]
     public void Parse_ExpressionPastLimit_ShouldReportSql0006(string construct)
     {
@@ -354,9 +354,9 @@ public sealed class SqlExpressionDepthTests
         error.Start.ShouldBe("SELECT ".Length + 2 * Limit);
     }
 
-    /// <summary>The examples DIALECT.md gives report SQL0006 at the token it names.</summary>
+    /// <summary>The examples DIALECT.md gives report CS00006 at the token it names.</summary>
     /// <param name="example">The documented example.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: SQL0006 is reported where the dialect documents it")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: CS00006 is reported where the dialect documents it")]
     [InlineData("256 nested calls")]
     [InlineData("256 comparisons in right-nested OR groups")]
     public void Parse_DocumentedExample_ShouldReportAtDocumentedToken(string example)
@@ -440,7 +440,7 @@ public sealed class SqlExpressionDepthTests
         var rejected = Parse(pastLimit);
 
         // Assert
-        Errors(accepted).ShouldNotContain(error => error.Code == "SQL0006");
+        Errors(accepted).ShouldNotContain(error => error.Code == "CS00006");
         accepted.ExpressionNestingDepth.ShouldBe(Limit);
         AssertRejected(rejected, command);
     }
@@ -449,7 +449,7 @@ public sealed class SqlExpressionDepthTests
     public void Parse_PastLimit_ShouldKeepEarlierDiagnosticsOnly()
     {
         // Arrange: ~ is reported before the limit; the unclosed parentheses and missing END after
-        // it would each report SQL0003 if the abandoned rules were allowed to.
+        // it would each report CS00003 if the abandoned rules were allowed to.
         string sql = $"SELECT ~a, (CASE WHEN {Build("additive", Limit + 1)} THEN 1 FROM t WHRE (id = 1;";
 
         // Act
@@ -457,7 +457,7 @@ public sealed class SqlExpressionDepthTests
 
         // Assert
         statement.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Select(diagnostic => diagnostic.Code).ShouldBe(["CK00001", "SQL0006"]);
+            .Select(diagnostic => diagnostic.Code).ShouldBe(["CK00001", "CS00006"]);
         statement.SqlExpression.ShouldNotBeOfType<SqlSelectExpression>();
     }
 
@@ -481,13 +481,13 @@ public sealed class SqlExpressionDepthTests
     /// <summary>
     /// One of the deepest statements the default limit accepts, 256 parentheses around 256 levels
     /// of calls, each level a full pass down the precedence ladder: it parses on a thread with
-    /// ample stack, and on one too small to recurse that far it is SQL0007, never an overflow.
+    /// ample stack, and on one too small to recurse that far it is CS00007, never an overflow.
     /// </summary>
     /// <param name="stackKilobytes">The thread's maximum stack size.</param>
     /// <param name="code">The error expected, or null when the statement parses.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a thread with too little stack gets SQL0007, never a stack overflow")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a thread with too little stack gets CS00007, never a stack overflow")]
     [InlineData(8 * 1024, null)]
-    [InlineData(160, "SQL0007")]
+    [InlineData(160, "CS00007")]
     public void Parse_DeepestStatementByStackSize_ShouldParseOrReportSql0007(int stackKilobytes, string? code)
     {
         // Arrange
@@ -752,7 +752,7 @@ public sealed class SqlExpressionDepthTests
             needed.ShouldBeGreaterThanOrEqualTo(template.Contains("{1}", StringComparison.Ordinal) ? 120 : depth);
             Errors(atNeeded).ShouldBeEmpty();
             atNeeded.ExpressionNestingDepth.ShouldBe(needed);
-            Errors(belowNeeded).ShouldContain(error => error.Code == "SQL0006");
+            Errors(belowNeeded).ShouldContain(error => error.Code == "CS00006");
         }
     }
 
@@ -783,7 +783,7 @@ public sealed class SqlExpressionDepthTests
     private static Diagnostic AssertRejected(SqlQueryStatement statement, SqlQueryCommandType command)
     {
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0006");
+        error.Code.ShouldBe("CS00006");
         error.Severity.ShouldBe(DiagnosticSeverity.Error);
 
         // Nothing past the limit was parsed, so only the command type is kept.

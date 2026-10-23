@@ -188,5 +188,5 @@ internal sealed class SqlResultPreparation
     }
 
     private static DatabaseException Failure(string message, Exception? cause = null)
-        => new(message, [new Diagnostic { Code = "COHSQLE045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
+        => new(message, [new Diagnostic { Code = "CS05045", Message = message, Severity = DiagnosticSeverity.Error }], cause);
 }

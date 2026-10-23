@@ -69,9 +69,9 @@ public sealed class SqlBoundExpressionTests
     /// <param name="term">A term that fails when evaluated.</param>
     /// <param name="failure">The start of the error it raises.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Bound expressions: failing terms follow the parameter and evaluation contracts")]
-    [InlineData("SQRT(-1) = 1", "COHSQLE002: Numeric value out of range:")]
+    [InlineData("SQRT(-1) = 1", "CS02002: Numeric value out of range:")]
     [InlineData("id = @missing", "No value was supplied for parameter 'missing'.")]
-    [InlineData("id > 99999999999999999999", "COHSQLE002: Numeric value out of range: integer literal 99999999999999999999 exceeds BIGINT.")]
+    [InlineData("id > 99999999999999999999", "CS02002: Numeric value out of range: integer literal 99999999999999999999 exceeds BIGINT.")]
     public async Task ExecuteAsync_FailingTermBehindShortCircuit_ShouldFollowBindingContract(string term, string failure)
     {
         // Arrange
@@ -87,7 +87,7 @@ public sealed class SqlBoundExpressionTests
         {
             var rejected = await Should.ThrowAsync<DatabaseException>(() =>
                 RowsAsync(session, $"SELECT id FROM t WHERE id < 0 AND {term}", parameters));
-            rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE020");
+            rejected.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01020");
             rejected.Message.ShouldBe(failure);
             (await RowsAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe([[2L]]);
             return;

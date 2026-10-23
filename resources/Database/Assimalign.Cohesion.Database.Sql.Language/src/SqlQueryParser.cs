@@ -88,8 +88,8 @@ public sealed partial class SqlQueryParser : QueryParser
             }
             emptyStmt.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0001",
-                Message = "Query text is empty.",
+                Code = "CS00001",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic,
                 Start = 0,
                 End = 0,
                 Severity = DiagnosticSeverity.Error,
@@ -212,7 +212,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // A statement that crossed a nesting limit was abandoned at that point (#1151): only
-        // its SQL0006 and what was reported before it describe the text, and only its command
+        // its CS00006 and what was reported before it describe the text, and only its command
         // type is kept, so no consumer ever receives the partial tree.
         if (NestingExceeded)
         {
@@ -241,8 +241,8 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             statement.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0002",
-                Message = "Unsupported or unknown SQL command.",
+                Code = "CS00002",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic2,
                 Start = firstTokenPosition,
                 End = firstTokenPosition,
                 Severity = DiagnosticSeverity.Error,
@@ -255,8 +255,8 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             statement.AddDiagnostic(new Diagnostic
             {
-                Code = "SQL0100",
-                Message = "Statement does not end with ';'.",
+                Code = "CS00100",
+                Message = ErrorMessages.SqlQueryParserParseCoreDiagnostic3,
                 Start = _lastTokenEnd,
                 End = _lastTokenEnd,
                 Severity = DiagnosticSeverity.Information,
@@ -306,14 +306,14 @@ public sealed partial class SqlQueryParser : QueryParser
         }
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected the end of the transaction-control statement.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseTransactionVoid);
             ConsumeRemaining(ref lexer);
         }
         return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
     }
 
     /// <summary>
-    /// Reports <c>SQL0003</c> at the current token unless an error already starts there.
+    /// Reports <c>CS00003</c> at the current token unless an error already starts there.
     /// Recovery leaves the offending token in place, so the enclosing parsers that next
     /// expect something at it would otherwise report the same mistake again.
     /// </summary>
@@ -331,8 +331,8 @@ public sealed partial class SqlQueryParser : QueryParser
     /// </summary>
     private void AddExpectedDiagnostic(ref TokenLexer lexer, string what)
         => AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
-            ? $"Expected {what} before the end of the statement."
-            : $"Expected {what} but found {DescribeToken(ref lexer)}.");
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserAddExpectedDiagnosticVoid, what)
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserAddExpectedDiagnosticVoid2, what, DescribeToken(ref lexer)));
 
     /// <summary>
     /// Consumes <paramref name="token"/> when it is current; otherwise reports it as
@@ -439,27 +439,27 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 case TokenType.String when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
-                        "Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid);
                     break;
                 case TokenType.QuotedIdentifier when !IsTerminatedQuoted(value):
                     AddSyntaxDiagnostic(position, position + 1,
-                        "Unterminated quoted identifier: the closing \" is missing, so the identifier runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid2);
                     break;
                 case TokenType.Comment when value.StartsWith("/*", StringComparison.Ordinal) && !IsTerminatedBlockComment(value):
                     AddSyntaxDiagnostic(position, position + 2,
-                        "Unterminated block comment: the closing */ is missing, so the comment runs to the end of the text.");
+                        ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid3);
                     break;
                 case TokenType.Unrecognized:
                     _sawUnrecognizedCharacter = true;
                     AddSyntaxDiagnostic(position, position + value.Length,
-                        $"Unexpected character {DescribeCharacter(value)}; it is not part of the SQL dialect.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid4, DescribeCharacter(value)));
                     break;
                 case TokenType.Float when value[^1] is 'e' or 'E' or '+' or '-':
                     // The lexer takes an exponent marker without digits into the literal, so
                     // SELECT 1e FROM t parsed and then failed at execution with a raw
                     // FormatException naming no code or span (#1101).
                     AddSyntaxDiagnostic(position, position + value.Length,
-                        $"Malformed numeric literal '{value.ToString()}': the exponent has no digits.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid5, value.ToString()));
                     break;
             }
         }
@@ -537,7 +537,7 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         _parseDiagnostics.Add(new Diagnostic
         {
-            Code = "SQL0003",
+            Code = "CS00003",
             Message = message,
             Start = start,
             End = end,
@@ -586,7 +586,7 @@ public sealed partial class SqlQueryParser : QueryParser
             if (!HasErrorAt(lexer.Current.Position))
             {
                 AddSyntaxDiagnostic(ref lexer,
-                    $"Unexpected {DescribeToken(ref lexer)} after the end of the {StatementName(expression)} statement.{ImplicitAliasHint(ref lexer)}");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectTrailingTokensVoid, DescribeToken(ref lexer), StatementName(expression), ImplicitAliasHint(ref lexer)));
             }
 
             return;
@@ -595,7 +595,7 @@ public sealed partial class SqlQueryParser : QueryParser
         if (Advance(ref lexer) && !HasErrorAt(lexer.Current.Position))
         {
             AddSyntaxDiagnostic(ref lexer,
-                $"Unexpected {DescribeToken(ref lexer)} after ';'. A request accepts exactly one statement.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QueryParserRejectTrailingTokensVoid2, DescribeToken(ref lexer)));
         }
     }
 

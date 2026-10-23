@@ -18,13 +18,13 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// (phase E2 of the engine extensibility program, owner decisions 60 to 67 and 71): registered
 /// through the engine builder's <see cref="SqlDatabaseEngineBuilder.Functions"/>, resolved by name,
 /// argument count and type once per statement, folded when immutable over constants, short-circuited
-/// when strict, admitted in a CHECK only when immutable, and coded <c>COHSQLE007</c> when they throw.
+/// when strict, admitted in a CHECK only when immutable, and coded <c>CS05007</c> when they throw.
 /// </summary>
 public sealed partial class SqlFunctionExtensibilityTests
 {
-    private const string FunctionSignatureMismatch = "COHSQLE006";
-    private const string FunctionFailed = "COHSQLE007";
-    private const string AmbiguousFunctionCall = "COHSQLE008";
+    private const string FunctionSignatureMismatch = "CS01006";
+    private const string FunctionFailed = "CS05007";
+    private const string AmbiguousFunctionCall = "CS01008";
 
     /// <summary>The builder starts with the standard library, and the built engine executes it and the application's functions.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: the builder holds the standard library and the engine freezes the registrations")]
@@ -117,20 +117,20 @@ public sealed partial class SqlFunctionExtensibilityTests
     }
 
     /// <summary>
-    /// A call that several overloads accept equally well is ambiguous (<c>COHSQLE008</c>, SQLSTATE
-    /// 42725), and one no overload's types accept is <c>COHSQLE006</c>; both fail while planning,
+    /// A call that several overloads accept equally well is ambiguous (<c>CS01008</c>, SQLSTATE
+    /// 42725), and one no overload's types accept is <c>CS01006</c>; both fail while planning,
     /// over an empty table as over a populated one, and leave the session usable.
     /// </summary>
     /// <param name="sql">The statement.</param>
     /// <param name="code">The coded failure.</param>
     /// <param name="message">The start of its message.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: an ambiguous call is COHSQLE008 and a call no overload accepts is COHSQLE006, at plan time")]
-    [InlineData("SELECT describe(NULL) FROM t", AmbiguousFunctionCall, "COHSQLE008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well.")]
-    [InlineData("SELECT describe(@missing) FROM t", AmbiguousFunctionCall, "COHSQLE008: Function call 'describe(unknown)' is ambiguous")]
-    [InlineData("SELECT describe(flag) FROM t", FunctionSignatureMismatch, "COHSQLE006: Function 'describe' has no overload that accepts argument types (BOOLEAN). Accepted: describe(BIGINT) or describe(TEXT).")]
-    [InlineData("SELECT clamp(name, 1, 2) FROM t", FunctionSignatureMismatch, "COHSQLE006: Function 'clamp' has no overload that accepts argument types (TEXT, INTEGER, INTEGER). Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
-    [InlineData("SELECT clamp(1, 2) FROM t", FunctionSignatureMismatch, "COHSQLE006: Function 'clamp' takes exactly 3 arguments but was called with 2. Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
-    [InlineData("SELECT id FROM t WHERE describe(NULL) = 'x'", AmbiguousFunctionCall, "COHSQLE008:")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: an ambiguous call is CS01008 and a call no overload accepts is CS01006, at plan time")]
+    [InlineData("SELECT describe(NULL) FROM t", AmbiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well.")]
+    [InlineData("SELECT describe(@missing) FROM t", AmbiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous")]
+    [InlineData("SELECT describe(flag) FROM t", FunctionSignatureMismatch, "CS01006: Function 'describe' has no overload that accepts argument types (BOOLEAN). Accepted: describe(BIGINT) or describe(TEXT).")]
+    [InlineData("SELECT clamp(name, 1, 2) FROM t", FunctionSignatureMismatch, "CS01006: Function 'clamp' has no overload that accepts argument types (TEXT, INTEGER, INTEGER). Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
+    [InlineData("SELECT clamp(1, 2) FROM t", FunctionSignatureMismatch, "CS01006: Function 'clamp' takes exactly 3 arguments but was called with 2. Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
+    [InlineData("SELECT id FROM t WHERE describe(NULL) = 'x'", AmbiguousFunctionCall, "CS01008:")]
     public async Task ExecuteAsync_UnresolvableCall_ShouldFailAtPlanTime(string sql, string code, string message)
     {
         foreach (bool withRows in new[] { false, true })
@@ -287,11 +287,11 @@ public sealed partial class SqlFunctionExtensibilityTests
     }
 
     /// <summary>
-    /// What a function throws fails the statement as <c>COHSQLE007</c>, naming the function, with the
+    /// What a function throws fails the statement as <c>CS05007</c>, naming the function, with the
     /// original as the inner exception; a <see cref="DatabaseException"/> it throws reaches the
     /// statement unchanged. Either way the session stays usable.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a throwing function fails the statement as COHSQLE007 naming it")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a throwing function fails the statement as CS05007 naming it")]
     public async Task ExecuteAsync_ThrowingFunction_ShouldFailAsCohsqle007()
     {
         // Arrange
@@ -312,7 +312,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         // Assert
         var coded = failed.ShouldBeOfType<SqlEvaluationException>();
         coded.Code.ShouldBe(FunctionFailed);
-        coded.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'clamp' failed: ", Case.Sensitive);
+        coded.DiagnosticDetail("CS05007").ShouldStartWith("Function 'clamp' failed: ", Case.Sensitive);
         coded.InnerException.ShouldBeOfType<ArgumentException>();
         passedThrough.ShouldNotBeOfType<SqlEvaluationException>();
         passedThrough.Message.ShouldBe("refuse: negative input");
@@ -347,7 +347,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         // Assert
         failed.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionFailed);
         failed.InnerException.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("not positive");
-        divided.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE001");
+        divided.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS02001");
         inside.ShouldBe([[1L], [4L]]);
         committed.ShouldBe([[1L], [4L]]);
     }
@@ -392,8 +392,8 @@ public sealed partial class SqlFunctionExtensibilityTests
         having.ShouldBe([["a"], ["b"]]);
     }
 
-    /// <summary>An aggregate that throws while it accumulates fails the statement as <c>COHSQLE007</c>.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a throwing aggregate fails the statement as COHSQLE007")]
+    /// <summary>An aggregate that throws while it accumulates fails the statement as <c>CS05007</c>.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a throwing aggregate fails the statement as CS05007")]
     public async Task ExecuteAsync_ThrowingAggregate_ShouldFailAsCohsqle007()
     {
         // Arrange
@@ -410,7 +410,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionFailed);
-        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'product' failed: ", Case.Sensitive);
+        failure.DiagnosticDetail("CS05007").ShouldStartWith("Function 'product' failed: ", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<OverflowException>();
     }
 

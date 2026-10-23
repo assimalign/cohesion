@@ -39,7 +39,7 @@ public sealed class SqlT1ScalarRegressionTests
                 }) { await session.ExecuteAsync(ddl, cancellationToken: CancellationToken.None); }
                 await session.ExecuteAsync("INSERT INTO t VALUES (1, DATE '2024-03-04', TIMESTAMP '2024-03-04 12:00:00')", cancellationToken: CancellationToken.None);
                 var dependency = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DROP FUNCTION passthrough(INT)", cancellationToken: CancellationToken.None).AsTask());
-                dependency.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+                dependency.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
             }
 
             // Act
@@ -161,10 +161,10 @@ public sealed class SqlT1ScalarRegressionTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT i FROM t WHERE {expression} IS NULL", cancellationToken: CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics[0].Code.ShouldBe("CS02003");
         failure.Message.ShouldContain(op, Case.Sensitive);
         var check = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"CREATE TABLE refused (i INT, d DATE, ts TIMESTAMP, iv INTERVAL, CHECK ({expression} IS NULL))", cancellationToken: CancellationToken.None).AsTask());
-        check.Diagnostics[0].Code.ShouldBe("COHSQLE003");
+        check.Diagnostics[0].Code.ShouldBe("CS02003");
         (await Rows(session, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'refused'")).ShouldBeEmpty();
     }
 
@@ -235,7 +235,7 @@ public sealed class SqlT1ScalarRegressionTests
         object expected = type switch { "DATE" => new DateOnly(2024, 3, 4), "TIME" => new TimeOnly(12, 34, 56), "TIMESTAMP" => SqlT1ScalarTests.Instant.UtcDateTime, _ => SqlT1ScalarTests.Instant };
         (await Rows(session, "SELECT v FROM t")).ShouldBe([[expected]]);
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT v FROM t LIMIT {expression}", cancellationToken: CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE018");
+        failure.Diagnostics[0].Code.ShouldBe("CS02018");
     }
 
     private static async Task<List<object?[]>> Rows(SqlDatabaseSession session, string sql)

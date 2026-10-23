@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// The SQL session and transaction on the root bases (concrete-types plan §6.4, "SQL in P4",
 /// #1260): the transaction gains the end gate, the repeatable rollback, the <c>Faulted</c> state
 /// for a transaction the kernel ended under its caller, and a coded aborted error,
-/// <c>COHSQLT005</c>; a commit observes its token only before it starts; the session's teardown
+/// <c>CS04005</c>; a commit observes its token only before it starts; the session's teardown
 /// ends its transaction with a cause; and the session's "already active" check, its closed-session
 /// refusal and its checks' order are the base's. A statement stays statement-atomic: a failed
 /// statement never aborts the transaction, so SQL never calls the base's abort. Each test names the
@@ -90,7 +90,7 @@ public sealed class SqlTransactionContractTests
         again.ShouldHaveMessage(AlreadyActive);
         serializable.ShouldHaveMessage(AlreadyActive);
         text.Status.ShouldBe(DatabaseResultStatus.Error);
-        text.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
+        text.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("CS04001");
         unsupported.Message.ShouldStartWith("IsolationLevel.Serializable is not supported by the SQL engine yet", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
     }
@@ -124,7 +124,7 @@ public sealed class SqlTransactionContractTests
     /// <summary>
     /// A transaction the kernel ended under its caller (its database was dropped while the session
     /// held it) reports <see cref="TransactionState.Faulted"/>, stays the session's transaction, and
-    /// refuses statements, BEGIN and COMMIT with SQL's coded aborted error, <c>COHSQLT005</c>, until
+    /// refuses statements, BEGIN and COMMIT with SQL's coded aborted error, <c>CS04005</c>, until
     /// the caller rolls it back. The root bases order that refusal against a canceled token: both
     /// execute seams check the token first, and BEGIN refuses the open transaction before it checks
     /// the token. Before the bases the model popped the transaction from the session as soon as its
@@ -134,7 +134,7 @@ public sealed class SqlTransactionContractTests
     /// the manager that closed under the transaction ended its context as Faulted
     /// (<c>TransactionManager.cs</c>, its disposal), which the base reports once the caller ended it.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Transaction: one the kernel ended is Faulted and refuses work with COHSQLT005 until the caller rolls it back")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Transaction: one the kernel ended is Faulted and refuses work with CS04005 until the caller rolls it back")]
     public async Task ExecuteAsync_TransactionEndedByTheKernel_ShouldBeFaultedAndRefuseWorkWithCohsqlt005()
     {
         // Arrange
@@ -166,7 +166,7 @@ public sealed class SqlTransactionContractTests
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         canceledTyped.CancellationToken.ShouldBe(canceled.Token);
         canceledBegin.Message.ShouldBe("The session's transaction is aborted; statements are refused until it is rolled back.");
-        canceledBegin.Diagnostics[0].Code.ShouldBe("COHSQLT005");
+        canceledBegin.Diagnostics[0].Code.ShouldBe("CS04005");
         text.Message.ShouldBe(canceledBegin.Message);
         ddl.Message.ShouldBe(canceledBegin.Message);
         textBegin.Message.ShouldBe(canceledBegin.Message);
@@ -179,13 +179,13 @@ public sealed class SqlTransactionContractTests
 
     /// <summary>
     /// A COMMIT, typed or as statement text, of a transaction the kernel ended under its caller
-    /// ends it and fails with <c>COHSQLT005</c>, committing nothing; a second commit reports the
+    /// ends it and fails with <c>CS04005</c>, committing nothing; a second commit reports the
     /// same. Before the bases the model refused it by the kernel's state ("Cannot commit
     /// transaction in state …"), and the text COMMIT answered "COMMIT requires an open transaction."
     /// because the session had dropped the transaction.
     /// </summary>
     /// <param name="text">True to commit with the <c>COMMIT</c> statement, false through the transaction.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Transaction: COMMIT of one the kernel ended fails with COHSQLT005 and commits nothing")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Transaction: COMMIT of one the kernel ended fails with CS04005 and commits nothing")]
     [InlineData(true)]
     [InlineData(false)]
     public async Task CommitAsync_TransactionEndedByTheKernel_ShouldFailWithCohsqlt005(bool text)
@@ -214,7 +214,7 @@ public sealed class SqlTransactionContractTests
 
         // Assert
         commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed.");
-        commit.Diagnostics[0].Code.ShouldBe("COHSQLT005");
+        commit.Diagnostics[0].Code.ShouldBe("CS04005");
         again.Message.ShouldStartWith("The transaction is ", Case.Sensitive);
         transaction.State.ShouldNotBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
@@ -252,12 +252,12 @@ public sealed class SqlTransactionContractTests
 
     /// <summary>
     /// Closing a session ends its transaction as the session's teardown: the caller's rollback
-    /// afterwards raises nothing, and its commit fails with <c>COHSQLT005</c> naming the closure,
+    /// afterwards raises nothing, and its commit fails with <c>CS04005</c> naming the closure,
     /// "The session closed before the transaction ended.", and commits nothing. Before the bases the
     /// model's teardown disposed the transaction, and a later commit reported "Cannot commit
     /// transaction in state 'RolledBack'.".
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Transaction: closing the session ends the transaction; a later rollback is a no-op and a commit fails with COHSQLT005 naming the closure")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Transaction: closing the session ends the transaction; a later rollback is a no-op and a commit fails with CS04005 naming the closure")]
     public async Task DisposeAsync_SessionWithTransaction_ShouldEndItWithTheTeardownCause()
     {
         // Arrange
@@ -275,7 +275,7 @@ public sealed class SqlTransactionContractTests
         // Assert
         transaction.State.ShouldBe(TransactionState.RolledBack);
         commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed. Cause: The session closed before the transaction ended.");
-        commit.Diagnostics[0].Code.ShouldBe("COHSQLT005");
+        commit.Diagnostics[0].Code.ShouldBe("CS04005");
         commit.InnerException.ShouldNotBeNull().Message.ShouldBe("The session closed before the transaction ended.");
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync(TestTimeout.Token());
@@ -319,11 +319,11 @@ public sealed class SqlTransactionContractTests
     /// <summary>
     /// On an offline database (#1243) the root bases check before the model: BEGIN on the session
     /// that holds an open transaction is refused "already active", where the model refused it with
-    /// <c>COHSQLT004</c>; and a canceled token is refused before the offline database by session
+    /// <c>CS04004</c>; and a canceled token is refused before the offline database by session
     /// creation, BEGIN, both execute seams and schema provisioning, where the model reported
-    /// <c>COHSQLT004</c> first. The transaction's own commit still gets the coded refusal.
+    /// <c>CS04004</c> first. The transaction's own commit still gets the coded refusal.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: the base's checks come before COHSQLT004, a canceled token included")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Offline: the base's checks come before CS04004, a canceled token included")]
     public async Task ExecuteAsync_OnOfflineDatabase_ShouldRunTheBaseChecksFirst()
     {
         // Arrange: a commit's fsync fails and takes the database offline under an open transaction.
@@ -371,7 +371,7 @@ public sealed class SqlTransactionContractTests
         canceledSchema.CancellationToken.ShouldBe(canceled.Token);
         foreach (var refusal in new[] { begin, statement, provisioning, commit })
         {
-            refusal.Code.ShouldBe("COHSQLT004");
+            refusal.Code.ShouldBe("CS04004");
         }
     }
 

@@ -99,12 +99,12 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: temporal suffix lookahead leaves modifier validation to the grammar")]
-    [InlineData("()", "SQL0005")]
-    [InlineData("(-1)", "SQL0005")]
-    [InlineData("(x)", "SQL0005")]
-    [InlineData("(1,2,3)", "SQL0005")]
-    [InlineData("(x, (1))", "SQL0005")]
-    [InlineData("( /*arg*/ x)", "SQL0005")]
+    [InlineData("()", "CS00005")]
+    [InlineData("(-1)", "CS00005")]
+    [InlineData("(x)", "CS00005")]
+    [InlineData("(1,2,3)", "CS00005")]
+    [InlineData("(x, (1))", "CS00005")]
+    [InlineData("( /*arg*/ x)", "CS00005")]
     [InlineData("(0)", "CK00001")]
     [InlineData("(6)", "CK00001")]
     [InlineData("(7)", "CK00001")]
@@ -166,13 +166,13 @@ public class SqlConformanceTests
         statement.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry SQL0002, empty input SQL0001")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry CS00002, empty input CS00001")]
     public void Parse_UnknownAndEmpty_ShouldCarryDeclaredDiagnostics()
     {
-        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "SQL0002");
-        Parse("").Diagnostics.ShouldContain(d => d.Code == "SQL0001");
-        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "SQL0100");
-        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "SQL0100");
+        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
+        Parse("").Diagnostics.ShouldContain(d => d.Code == "CS00001");
+        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00100");
+        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00100");
     }
 
     // ── Literal handling (#174) ────────────────────────────────────────

@@ -46,7 +46,7 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
-                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange.");
+                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExecuteCoreAsyncDatabaseClient);
             if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)SqlProtocolMessageType.ResultComplete)
             {
                 throw new ProtocolException(ErrorMessages.DiagnosticsOrderInvalid);
@@ -91,7 +91,7 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
                     throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 }
                 default:
-                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in a Sql execute exchange.");
+                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteCoreAsyncDatabaseClient2, frame.Type));
             }
         }
     }

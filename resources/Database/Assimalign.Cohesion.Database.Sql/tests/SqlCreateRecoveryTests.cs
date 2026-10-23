@@ -69,7 +69,7 @@ public sealed class SqlCreateRecoveryTests
 
         // Act
         var failure = await Should.ThrowAsync<DatabaseException>(() => first.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE041");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06041");
         failure.InnerException.ShouldBeOfType<IOException>().Message.ShouldBe("Injected create interruption.");
         await using var next = SqlDatabaseEngine.Create("next", new SqlDatabaseEngineOptions { StorageStrategy = crashed.ShouldNotBeNull() });
         var recovered = await next.CreateDatabaseAsync("sales", CancellationToken.None);
@@ -241,7 +241,7 @@ public sealed class SqlCreateRecoveryTests
             var database = await engine.CreateDatabaseAsync("sales", Collation.CaseInsensitive, CancellationToken.None);
 
             // Assert
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03401");
             refusal.Message.ShouldContain("CreateDatabaseAsync", Case.Sensitive);
             database.Catalog.DefaultCollation.ShouldBe(Collation.CaseInsensitive);
             database.Catalog.Namespaces.ShouldHaveSingleItem().Name.ShouldBe("dbo");
@@ -284,7 +284,7 @@ public sealed class SqlCreateRecoveryTests
             var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
             // Assert
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03401");
             File.Exists(Path.Combine(directory, "catalog.dat")).ShouldBeFalse();
             foreach (var image in images) { File.ReadAllBytes(image.Key).ShouldBe(image.Value); }
         }
@@ -370,7 +370,7 @@ public sealed class SqlCreateRecoveryTests
         var recovered = await engine.OpenDatabaseAsync("sales", CancellationToken.None);
 
         // Assert
-        refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLC001");
+        refusal.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03401");
         refusal.Message.ShouldContain("restore the complete database", Case.Sensitive);
         recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
     }

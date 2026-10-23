@@ -127,7 +127,7 @@ public sealed class SqlSystemViewProtocolTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldBe("COHSQLE021: System view 'INFORMATION_SCHEMA.TABLES' is read-only.");
+        error.Message.ShouldBe("CS04021: System view 'INFORMATION_SCHEMA.TABLES' is read-only.");
 
         var rows = await QueryAsync(client,
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'users'");

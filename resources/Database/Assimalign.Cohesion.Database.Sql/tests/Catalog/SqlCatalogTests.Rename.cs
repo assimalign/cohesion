@@ -78,7 +78,7 @@ public partial class SqlCatalogTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<SqlCatalogException>(async () => await catalog.RenameTableAsync(original, "u", new Dictionary<string, string>(), CancellationToken.None));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE064");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04064");
         catalog.DdlGeneration.ShouldBe(generation);
         harness.Reopen().TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         table.Columns.Count.ShouldBe(2);

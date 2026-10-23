@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A persisted definition bound as unresolved: it calls a function the engine that opened the
 /// database does not register, or whose registration no longer accepts the call (owner decision 65
 /// of 2026-10-09; the design's §4.10). The database opens and its reads proceed; every write that
-/// would evaluate the definition fails with <c>COHSQLE009</c>, and an engine build that declares the
+/// would evaluate the definition fails with <c>CS01009</c>, and an engine build that declares the
 /// database fails with it before the engine accepts work.
 /// </summary>
 /// <remarks>

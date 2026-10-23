@@ -58,7 +58,7 @@ public sealed partial class SqlCatalog
             {
                 if (existing.Value.ContentHash != contentHash || existing.Value.StatementCount != statementCount || existing.Value.SchemaHash != schemaHash)
                 {
-                    throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptIdentityChanged);
+                    throw new SqlCatalogException("CS03201", ErrorMessages.ScriptIdentityChanged);
                 }
                 return ValueTask.FromResult(existing.Value);
             }
@@ -114,7 +114,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (state.Generation != _ddlGeneration || state.ContentHash.Length != 64 || !state.ContentHash.All(Uri.IsHexDigit))
             {
-                throw new SqlCatalogException("Invalid script-set reconciliation marker.");
+                throw new SqlCatalogException(ErrorMessages.CatalogSaveScriptStateAsyncSqlCatalog);
             }
             using var transaction = _storage.BeginTransaction();
             var record = new DatabaseKeyWriter().AppendInt32(13).AppendString(state.ContentHash, Collation.Binary).AppendInt64((long)state.Generation).ToArray();
@@ -133,13 +133,13 @@ public sealed partial class SqlCatalog
             existing.Value.StatementCount != receipt.StatementCount || existing.Value.BaseGeneration != receipt.BaseGeneration ||
             existing.Value.CompletedStatements > receipt.CompletedStatements))
         {
-            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptPrefixRegressed);
+            throw new SqlCatalogException("CS03201", ErrorMessages.ScriptPrefixRegressed);
         }
         var record = new DatabaseKeyWriter().AppendInt32(12)
             .AppendString(JsonSerializer.Serialize(receipt, SqlCatalogJsonContext.Default.SqlCatalogScript), Collation.Binary).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize)
         {
-            throw new SqlCatalogException("COHSQLE042", ErrorMessages.ScriptReceiptTooLarge);
+            throw new SqlCatalogException("CS05042", ErrorMessages.ScriptReceiptTooLarge);
         }
         return new DefinitionSlot<SqlCatalogScript>(receipt, UpsertRecord(transaction, existing?.Location, record));
     }
@@ -154,7 +154,7 @@ public sealed partial class SqlCatalog
             previous is not null && (previous.Name != publication.Name || previous.ContentHash != publication.ContentHash ||
                 previous.StatementCount != publication.StatementCount || previous.SchemaHash != publication.SchemaHash))
         {
-            throw new SqlCatalogException("COHSQLS001", ErrorMessages.ScriptPublicationMismatch);
+            throw new SqlCatalogException("CS03201", ErrorMessages.ScriptPublicationMismatch);
         }
     }
 

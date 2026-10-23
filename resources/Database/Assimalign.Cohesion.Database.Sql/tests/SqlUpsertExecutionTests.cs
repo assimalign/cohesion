@@ -216,7 +216,7 @@ public sealed class SqlUpsertExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT INTO legacy VALUES (1) " + clause));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE035");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03035");
         failure.Message.ShouldContain(reason, Case.Sensitive);
         (await RowsAsync(session, "SELECT id FROM legacy")).ShouldBeEmpty();
     }
@@ -260,7 +260,7 @@ public sealed class SqlUpsertExecutionTests
             $"INSERT INTO t AS {alias} VALUES (1, 2) ON CONFLICT (id) DO UPDATE SET age = {expression}"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01015");
         (await RowsAsync(session, "SELECT * FROM t")).ShouldBeEmpty();
     }
 
@@ -417,14 +417,14 @@ public sealed class SqlUpsertExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: invalid arbiters and ambiguous scope fail before writing")]
-    [InlineData("ON CONFLICT (age) DO NOTHING", "COHSQLE035")]
-    [InlineData("ON CONFLICT (missing) DO NOTHING", "COHSQLE035")]
-    [InlineData("ON CONFLICT ON CONSTRAINT missing DO NOTHING", "COHSQLE035")]
-    [InlineData("ON CONFLICT ON CONSTRAINT positive DO NOTHING", "COHSQLE035")]
-    [InlineData("ON CONFLICT ON CONSTRAINT fk DO NOTHING", "COHSQLE035")]
-    [InlineData("ON CONFLICT DO UPDATE SET age = EXCLUDED.age", "COHSQLE035")]
-    [InlineData("ON CONFLICT (id) DO UPDATE SET age = age + 1", "COHSQLE015")]
-    [InlineData("ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age WHERE age = 1", "COHSQLE015")]
+    [InlineData("ON CONFLICT (age) DO NOTHING", "CS03035")]
+    [InlineData("ON CONFLICT (missing) DO NOTHING", "CS03035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT missing DO NOTHING", "CS03035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT positive DO NOTHING", "CS03035")]
+    [InlineData("ON CONFLICT ON CONSTRAINT fk DO NOTHING", "CS03035")]
+    [InlineData("ON CONFLICT DO UPDATE SET age = EXCLUDED.age", "CS03035")]
+    [InlineData("ON CONFLICT (id) DO UPDATE SET age = age + 1", "CS01015")]
+    [InlineData("ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age WHERE age = 1", "CS01015")]
     public async Task ExecuteAsync_InvalidTargetOrScope_ShouldPreserveTable(string clause, string code)
     {
         // Arrange
@@ -460,7 +460,7 @@ public sealed class SqlUpsertExecutionTests
             "INSERT INTO t VALUES (1, 20), (1, 30) ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE036");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05036");
         failure.Message.ShouldContain("cannot affect a row a second time", Case.Sensitive);
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), existing ? [[1, 10]] : []);
         (await session.ExecuteAsync("INSERT INTO t VALUES (2, 20), (2, 30) ON CONFLICT DO NOTHING")).AffectedCount.ShouldBe(1);
@@ -548,7 +548,7 @@ public sealed class SqlUpsertExecutionTests
         CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1, "a", 3], [4, "b", 40]]);
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             "INSERT INTO t (name) VALUES ('a') ON CONFLICT (name) DO UPDATE SET id = DEFAULT"));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE025");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03025");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: materialized SELECT and DEFAULT VALUES share arbitration")]

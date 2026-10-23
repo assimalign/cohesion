@@ -61,7 +61,7 @@ public sealed class SqlReferentialActionTests
         if (always)
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE025");
+            failure.Diagnostics.Single().Code.ShouldBe("CS03025");
             (await Rows(session, "SELECT id FROM c")).Single()[0].ShouldBe(1);
             (await Rows(session, "SELECT id FROM p WHERE id = 1")).Single()[0].ShouldBe(1);
         }
@@ -333,7 +333,7 @@ public sealed class SqlReferentialActionTests
         if (required)
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DELETE FROM p", cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE024");
+            failure.Diagnostics.Single().Code.ShouldBe("CS03024");
             failure.Message.ShouldBe("Column 'pid' does not allow NULL and has no default.");
             (await Rows(session, "SELECT id FROM p ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
             (await Rows(session, "SELECT pid FROM c ORDER BY pid")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });

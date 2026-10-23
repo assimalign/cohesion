@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// argument count matches, a variadic overload taking any number from its fixed parameters up. A
 /// call <c>name(*)</c> matches only an aggregate without parameters, which nothing else calls:
 /// <c>COUNT()</c> is not <c>COUNT(*)</c>, as in PostgreSQL. A call no candidate accepts by count is
-/// <c>COHSQLE006</c>, the message naming the counts the function accepts and its call forms, as
+/// <c>CS01006</c>, the message naming the counts the function accepts and its call forms, as
 /// before typed signatures.
 /// </para>
 /// <para>
@@ -32,7 +32,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// literal, a NULL parameter — matches any parameter for nothing; a grouping key or aggregate
 /// result has its type over the input row. Every
 /// <see cref="SqlType.AnyElement"/> argument of one candidate must have one type. The unique
-/// cheapest candidate wins; none is <c>COHSQLE006</c>, several are <c>COHSQLE008</c> (SQLSTATE
+/// cheapest candidate wins; none is <c>CS01006</c>, several are <c>CS01008</c> (SQLSTATE
 /// 42725). When the candidates by count are a single overload over <see cref="SqlType.Any"/> and at
 /// most one <see cref="SqlType.AnyElement"/>, as every standard-library scalar is, no type is needed
 /// and none is computed, so resolving a deep nest of built-in calls stays linear.
@@ -53,7 +53,7 @@ internal static class SqlFunctionResolver
     /// <param name="name">The function name as written.</param>
     /// <param name="overloads">The name's overloads.</param>
     /// <param name="arguments">The call's arguments.</param>
-    /// <exception cref="SqlEvaluationException">No overload accepts them (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">No overload accepts them (<c>CS01006</c>).</exception>
     internal static void CheckArity(string name, SqlFunction[] overloads, IReadOnlyList<SqlExpression> arguments)
     {
         foreach (var overload in overloads)
@@ -130,7 +130,7 @@ internal static class SqlFunctionResolver
     /// </param>
     /// <returns>The overload.</returns>
     /// <exception cref="SqlEvaluationException">
-    /// No overload accepts the argument types (<c>COHSQLE006</c>), or several accept them equally well (<c>COHSQLE008</c>).
+    /// No overload accepts the argument types (<c>CS01006</c>), or several accept them equally well (<c>CS01008</c>).
     /// </exception>
     internal static SqlFunction Choose(string name, SqlFunction[] overloads, IReadOnlyList<SqlExpression> arguments, ReadOnlySpan<DatabaseType> types)
     {
@@ -260,7 +260,7 @@ internal static class SqlFunctionResolver
     /// <param name="function">The function, for the message.</param>
     /// <param name="index">The argument's position, for the message.</param>
     /// <returns>The converted argument; CHAR always applies its declared width, even when the storage type already matches.</returns>
-    /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>COHSQLE002</c>.</exception>
+    /// <exception cref="OverflowException">An integer does not fit the parameter's type; the evaluator codes it <c>CS02002</c>.</exception>
     /// <exception cref="DatabaseException">The value's type does not convert to the parameter's.</exception>
     internal static SqlValue Coerce(in SqlValue value, DatabaseType target, SqlFunction function, int index)
     {
@@ -305,8 +305,7 @@ internal static class SqlFunctionResolver
             catch (OverflowException exception)
             {
                 throw new OverflowException(
-                    $"{SqlType.NameOf(value.Type)} {number.ToString(CultureInfo.InvariantCulture)} does not fit argument {index + 1} " +
-                    $"of function '{function.Name}', which is {SqlType.NameOf(target)}.", exception);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionResolverCoerceOverflow, SqlType.NameOf(value.Type), number.ToString(CultureInfo.InvariantCulture), index + 1, function.Name, SqlType.NameOf(target)), exception);
             }
         }
         else if (value.Type == DatabaseType.Decimal && target == DatabaseType.Float64)
@@ -319,7 +318,7 @@ internal static class SqlFunctionResolver
         }
 
         throw new DatabaseException(
-            $"Function '{function.Name}' takes {function.ParameterAt(index).Name} for argument {index + 1}, but the value is {SqlType.NameOf(value.Type)}.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionResolverCoerceDatabase, function.Name, function.ParameterAt(index).Name, index + 1, SqlType.NameOf(value.Type)));
     }
 
     /// <summary>

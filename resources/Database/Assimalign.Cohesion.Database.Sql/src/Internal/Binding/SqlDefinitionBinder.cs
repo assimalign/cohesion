@@ -16,9 +16,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Declaration admission, dependency identity and reopen binding for SQL definitions.</summary>
 internal static class SqlDefinitionBinder
 {
-    internal const string DefinitionCode = "COHSQLD001";
-    internal const string DependencyCode = "COHSQLD002";
-    internal const string NativeCode = "COHSQLD003";
+    internal const string DefinitionCode = "CS03301";
+    internal const string DependencyCode = "CS03302";
+    internal const string NativeCode = "CS03303";
 
     internal static SqlPlanningException Refuse(string message, Location? location = null)
         => new(DefinitionCode, message, location);
@@ -65,7 +65,7 @@ internal static class SqlDefinitionBinder
 
     internal static SqlType ResolveType(string name, SqlFunctionEnvironment environment, Location? location = null)
         => environment.Types.Resolve(name, out string? error) is { } type && error is null
-            ? type : throw Refuse($"Type '{name}' does not resolve: {error ?? "unknown type"}.", location ?? FragmentLocation(name));
+            ? type : throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderResolveTypeSqlPlanning, name, error ?? "unknown type"), location ?? FragmentLocation(name));
 
     internal static SqlCatalogFunction Declare(SqlCreateFunctionExpression create, SqlFunctionEnvironment environment, Collation collation, string? schema)
     {
@@ -81,7 +81,7 @@ internal static class SqlDefinitionBinder
         string signature = Signature(create.Name, types);
         if (create.Parameters.Select(parameter => parameter.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != types.Length)
         {
-            throw Refuse($"Function '{create.Name}' repeats a parameter name.", create.Location);
+            throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareFunctionSqlPlanning, create.Name), create.Location);
         }
         SqlFunctionVolatility volatility = Volatility(create.Volatility, create.Location);
         var placeholder = new SqlExpressionFunction(create.Name, types, result, volatility, create.IsStrict, new SqlBoundConstant(null));
@@ -104,7 +104,7 @@ internal static class SqlDefinitionBinder
         }
         if (dependencies.Contains("F:" + signature))
         {
-            throw Refuse($"Recursive SQL function '{create.Name}' is not supported.", create.Body.Location ?? create.Location);
+            throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareFunctionSqlPlanning2, create.Name), create.Body.Location ?? create.Location);
         }
         string body = SqlPersistedExpression.Canonicalize(create.Body, $"Function '{create.Name}'");
         return new SqlCatalogFunction(create.Name, signature, create.Parameters.Select(parameter => parameter.Name).ToArray(),
@@ -124,12 +124,12 @@ internal static class SqlDefinitionBinder
     {
         if (environment.Types.Find(create.Name) is not null)
         {
-            throw Refuse($"Type '{create.Name}' already exists; native and SQL domains share one namespace.", create.Location);
+            throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareDomainSqlPlanning, create.Name), create.Location);
         }
         var type = ResolveType(create.BaseType, environment, create.Location);
         if (type.IsDomain || type.IsPseudo)
         {
-            throw Refuse($"Domain '{create.Name}' must have a built-in base type.", create.Location);
+            throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareDomainSqlPlanning2, create.Name), create.Location);
         }
         // The SQL factory preserves type and reserved-name checks for delimited SQL names.
         _ = SqlType.CreateSqlDomain(create.Name, type, null, null, false);
@@ -138,7 +138,7 @@ internal static class SqlDefinitionBinder
         {
             if (!SqlPersistedExpression.IsDefaultLiteral(value))
             {
-                throw Refuse($"Domain '{create.Name}' requires a literal DEFAULT.", value.Location ?? create.Location);
+                throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareDomainSqlPlanning3, create.Name), value.Location ?? create.Location);
             }
             literal = SqlPersistedExpression.Canonicalize(value, $"DEFAULT of domain '{create.Name}'");
             if (value is not SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
@@ -195,7 +195,7 @@ internal static class SqlDefinitionBinder
             }
             if (!active.Add(key))
             {
-                throw Refuse($"Recursive SQL definition dependency at '{key}'.", functions.TryGetValue(key, out var recursive)
+                throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDefinitionBinderLoadSqlPlanning, key), functions.TryGetValue(key, out var recursive)
                     ? FragmentLocation(recursive.Body) : FragmentLocation(domains[key].CheckExpression ?? domains[key].BaseType));
             }
             functions.TryGetValue(key, out var function);
@@ -213,7 +213,7 @@ internal static class SqlDefinitionBinder
                 var domain = domains[key];
                 if (environment.Types.Find(domain.Name) is not null)
                 {
-                    throw Refuse($"SQL domain '{domain.Name}' conflicts with an engine-registered type.", FragmentLocation(domain.CheckExpression ?? domain.BaseType));
+                    throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDefinitionBinderLoadSqlPlanning2, domain.Name), FragmentLocation(domain.CheckExpression ?? domain.BaseType));
                 }
                 var type = Bind(domain, environment, collation, cancellationToken);
                 environment = new SqlFunctionEnvironment(environment.Catalog, native.Database,
@@ -232,7 +232,7 @@ internal static class SqlDefinitionBinder
         var result = ResolveType(function.ReturnType, environment, location);
         if (types.Length != function.ParameterNames.Count || Signature(function.Name, types) != function.Signature)
         {
-            throw Refuse($"Malformed persisted signature of '{function.Name}'.", location);
+            throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDefinitionBinderBindSqlPlanning, function.Name), location);
         }
         var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
         string? unavailableDomain = types.Append(result).Select(UnresolvedDomainReason).FirstOrDefault(reason => reason is not null);
@@ -324,7 +324,7 @@ internal static class SqlDefinitionBinder
     {
         int position = 0;
         Visit(expression);
-        if (position != identities.Count) { throw Refuse("Persisted function-call identities do not match the expression.", expression.Location); }
+        if (position != identities.Count) { throw Refuse(ErrorMessages.DefinitionBinderPinCallsSqlPlanning, expression.Location); }
 
         void Visit(SqlExpression node)
         {
@@ -333,7 +333,7 @@ internal static class SqlDefinitionBinder
             {
                 if (position == identities.Count || !identities[position].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal))
                 {
-                    throw Refuse($"Persisted function-call identity is missing or mismatched for '{call.FunctionName}'.", call.Location);
+                    throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefinitionBinderPinCallsSqlPlanning2, call.FunctionName), call.Location);
                 }
                 scope.PinFunction(call, identities[position++]);
             }
@@ -363,7 +363,7 @@ internal static class SqlDefinitionBinder
                 var function = scope.ResolveFunction(call) ?? throw MissingFunction(call.FunctionName, call.Location);
                 if (function.Kind != SqlFunctionKind.Scalar || function.Volatility < volatility)
                 {
-                    throw Refuse($"Function '{function.Name}' is not a scalar of volatility {volatility} or stronger.", call.Location);
+                    throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDependenciesSqlPlanning, function.Name, volatility), call.Location);
                 }
                 if (function is SqlExpressionFunction { Unresolved: { } reason })
                 {
@@ -423,7 +423,7 @@ internal static class SqlDefinitionBinder
         "IMMUTABLE" => SqlFunctionVolatility.Immutable,
         "STABLE" => SqlFunctionVolatility.Stable,
         "VOLATILE" => SqlFunctionVolatility.Volatile,
-        _ => throw Refuse($"Invalid volatility '{value}'.", location ?? FragmentLocation(value)),
+        _ => throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefinitionBinderVolatilitySqlPlanning, value), location ?? FragmentLocation(value)),
     };
 
     private static SqlFunctionCatalog MergeFunctions(SqlFunctionCatalog existing, SqlFunction function, Location? location = null)

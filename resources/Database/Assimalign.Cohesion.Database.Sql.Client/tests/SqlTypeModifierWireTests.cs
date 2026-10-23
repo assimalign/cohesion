@@ -138,7 +138,7 @@ public sealed class SqlTypeModifierWireTests
             var scriptBuilder = SqlDatabaseEngine.CreateBuilder("invalid-script-wire");
             scriptBuilder.AddDatabase("app", database => database.Script("001", $"CREATE TABLE scripted (value {type})"));
             var scriptError = await Should.ThrowAsync<DatabaseParseException>(async () => await scriptBuilder.BuildAsync(CancellationToken.None));
-            scriptError.Message.ShouldContain("SQL0005", Case.Sensitive);
+            scriptError.Message.ShouldContain("CS00005", Case.Sensitive);
             scriptError.Message.ShouldContain("Column 'value'", Case.Sensitive);
             return;
         }
@@ -195,7 +195,7 @@ public sealed class SqlTypeModifierWireTests
                     await connection.ExecuteAsync(sql, cancellationToken: timeout.Token));
                 error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
                 error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-                error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                error.Message.ShouldContain("CS00005", Case.Sensitive);
                 error.Message.ShouldContain(subject, Case.Sensitive);
                 if (type == "FLOAT(0)") { error.Message.ShouldContain("at least 1 bit", Case.Sensitive); }
                 if (type is "FLOAT(54)" or "FLOAT(2147483647)") { error.Message.ShouldContain("less than 54 bits", Case.Sensitive); }

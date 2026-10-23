@@ -285,13 +285,12 @@ public sealed class SqlType : IEquatable<SqlType>
         if (baseType.IsPseudo)
         {
             throw new ArgumentException(
-                $"Domain '{name}' cannot be over the pseudo-type {baseType.Name}: a domain's base type is a storage type.", nameof(baseType));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument, name, baseType.Name), nameof(baseType));
         }
         if (baseType.IsDomain)
         {
             throw new ArgumentException(
-                $"Domain '{name}' cannot be over domain '{baseType.Name}': a domain's base type is a built-in type in this iteration. " +
-                $"Declare it over {baseType.BaseType!.Name}, with a check that tests both conditions.", nameof(baseType));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument2, name, baseType.Name, baseType.BaseType!.Name), nameof(baseType));
         }
 
         if (check is not null)
@@ -299,19 +298,17 @@ public sealed class SqlType : IEquatable<SqlType>
             if (!check.AcceptsCount(1) || !SqlFunctionResolver.AcceptsType(check.ParameterAt(0), baseType.Storage.Type))
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, must take one argument of the domain's base type {baseType.Name}.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument3, name, check, baseType.Name), nameof(check));
             }
             if (check.ReturnType.IsPseudo || check.ReturnType.Storage.Type != DatabaseType.Boolean)
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, must return BOOLEAN, but it returns {check.ReturnType.Name}.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument4, name, check, check.ReturnType.Name), nameof(check));
             }
             if (check.Volatility != SqlFunctionVolatility.Immutable)
             {
                 throw new ArgumentException(
-                    $"The check of domain '{name}', {check}, is {check.Volatility.ToString().ToUpperInvariant()}; a domain's check must be " +
-                    "IMMUTABLE, as a CHECK constraint's functions must (owner decision 64), so a value it accepted once is accepted again. " +
-                    "Create it with SqlFunctionVolatility.Immutable.", nameof(check));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCreateDomainCoreArgument5, name, check, check.Volatility.ToString().ToUpperInvariant()), nameof(check));
             }
         }
 
@@ -354,7 +351,7 @@ public sealed class SqlType : IEquatable<SqlType>
             }
         }
 
-        throw new ArgumentException($"Storage type {storage.Type} is not a SQL type.", nameof(storage));
+        throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeForStorageArgument, storage.Type), nameof(storage));
     }
 
     /// <inheritdoc />

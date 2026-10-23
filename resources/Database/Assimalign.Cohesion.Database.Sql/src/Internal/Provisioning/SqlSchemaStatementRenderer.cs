@@ -102,16 +102,16 @@ internal static class SqlSchemaStatementRenderer
                 {
                     CompiledSchemaReferentialAction.Restrict => "RESTRICT",
                     CompiledSchemaReferentialAction.Cascade => "CASCADE",
-                    _ => throw new DatabaseException($"Constraint '{constraint.Name}' has an unsupported delete action."),
+                    _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererAppendConstraintDatabase, constraint.Name)),
                 });
                 break;
             case CompiledSchemaConstraintKind.Check:
                 string expression = constraint.Expression?.CanonicalText
-                    ?? throw new DatabaseException($"Check constraint '{constraint.Name}' has no expression.");
+                    ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererAppendConstraintDatabase2, constraint.Name));
                 builder.Append("CHECK (").Append(expression).Append(')');
                 break;
             default:
-                throw new DatabaseException($"Constraint '{constraint.Name}' has an unsupported kind.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererAppendConstraintDatabase3, constraint.Name));
         }
     }
 
@@ -205,7 +205,7 @@ internal static class SqlSchemaStatementRenderer
             if (!SqlTypeRules.TrySplit(declared, out string name, out int? first, out int? second) ||
                 !SqlTypeModifiers.IsTypeName(name) || (second is not null && first is null))
             {
-                throw new DatabaseException($"Column '{column.Name}' is declared with '{declared}', which is not a SQL type name.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererTypeNameDatabase, column.Name, declared));
             }
 
             return first is null
@@ -237,7 +237,7 @@ internal static class SqlSchemaStatementRenderer
             DatabaseType.Json => "JSON",
             DatabaseType.JsonBinary => "JSONB",
             _ => throw new DatabaseException(
-                $"Column '{column.Name}' uses database type '{column.Type}', which cannot be emitted as SQL DDL."),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererTypeNameDatabase2, column.Name, column.Type)),
         };
     }
 
@@ -246,7 +246,7 @@ internal static class SqlSchemaStatementRenderer
         if (column.Scale is not null && column.Precision is null)
         {
             throw new DatabaseException(
-                $"Column '{column.Name}' declares a decimal scale without a precision.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererDecimalTypeNameDatabase, column.Name));
         }
 
         if (column.Precision is null)
@@ -274,7 +274,7 @@ internal static class SqlSchemaStatementRenderer
 
         if (value.IndexOfAny(['\0', '"']) >= 0)
         {
-            throw new DatabaseException($"Schema identifier '{value}' contains a null character or embedded double quote unsupported by the SQL dialect.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementRendererIdentifierDatabase, value));
         }
 
         bool requiresQuotes = !(char.IsLetter(value[0]) || value[0] == '_');

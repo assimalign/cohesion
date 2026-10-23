@@ -38,7 +38,7 @@ internal sealed class SqlDeclaredScript
             var request = SqlQueryRequest.FromSql(text, null, options);
             if (request.Statement.SqlExpression is SqlTransactionExpression)
             {
-                throw new DatabaseException("COHSQLS003: Declared scripts own statement transactions; transaction-control statements are not allowed.");
+                throw new DatabaseException(ErrorMessages.SqlDeclaredScriptDatabase);
             }
             statements.Add(request);
         }

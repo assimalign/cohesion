@@ -152,7 +152,7 @@ public sealed class SqlT1TemporalTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT {expression} FROM t;", cancellationToken: CancellationToken.None).AsTask());
-        failure.Diagnostics[0].Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics[0].Code.ShouldBe("CS02003");
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal operands: interval columns and parameters share literal arithmetic and coded range faults")]
@@ -177,7 +177,7 @@ public sealed class SqlT1TemporalTests
         {
             parameters["duration"] = TimeSpan.MinValue;
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"SELECT {expression} FROM t;", parameters, CancellationToken.None).AsTask());
-            failure.Diagnostics[0].Code.ShouldBe("COHSQLE002");
+            failure.Diagnostics[0].Code.ShouldBe("CS02002");
         }
     }
 

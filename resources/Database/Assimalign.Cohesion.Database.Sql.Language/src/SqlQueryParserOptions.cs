@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Language;
 /// The limit bounds two things, each at <see cref="ExpressionNestingLimit"/> levels: the depth of
 /// the expression tree, in which a chain of <c>AND</c> (or <c>OR</c>) terms is one level however
 /// many terms it has, and the nesting of grouping parentheses. Text past either is
-/// <c>SQL0006</c>. A SQL engine passes its own configured limit to the parser it executes
+/// <c>CS00006</c>. A SQL engine passes its own configured limit to the parser it executes
 /// statement text with; the documented rule is in the dialect's "Expression nesting limit".
 /// </remarks>
 public sealed class SqlQueryParserOptions : QueryParserOptions
@@ -51,7 +51,7 @@ public sealed class SqlQueryParserOptions : QueryParserOptions
         if (limit is < MinimumExpressionNestingLimit or > MaximumExpressionNestingLimit)
         {
             throw new ArgumentOutOfRangeException(paramName, limit,
-                $"The expression nesting limit must be between {MinimumExpressionNestingLimit} and {MaximumExpressionNestingLimit} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserOptionsValidateFailure, MinimumExpressionNestingLimit, MaximumExpressionNestingLimit));
         }
 
         return limit;

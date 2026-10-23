@@ -107,7 +107,7 @@ public sealed class SqlOrderByParserTests
         query.OrderBy[0].NullPlacement.ShouldBe(expected);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: malformed NULL placement reports SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: malformed NULL placement reports CS00003")]
     [InlineData("NULLS")]
     [InlineData("NULLS MIDDLE")]
     public void Parse_MalformedNullPlacement_ShouldReportSyntaxError(string suffix)
@@ -115,7 +115,7 @@ public sealed class SqlOrderByParserTests
         // Arrange / Act
         var statement = new SqlQueryParser().Parse($"SELECT a FROM t ORDER BY a {suffix};");
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 

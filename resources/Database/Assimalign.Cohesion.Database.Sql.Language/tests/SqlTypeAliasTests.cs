@@ -96,19 +96,19 @@ public sealed class SqlTypeAliasTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Type aliases: rejected spellings name a reason and replacement")]
-    [InlineData("TIME WITH TIME ZONE", "SQL0005", "no shared storage type", "TIME WITHOUT TIME ZONE")]
-    [InlineData("BIT", "SQL0005", "bit strings", "BOOLEAN")]
-    [InlineData("BIT(3)", "SQL0005", "bit strings", "BOOLEAN")]
-    [InlineData("SMALLDATETIME", "SQL0005", "minute precision", "TIMESTAMP")]
+    [InlineData("TIME WITH TIME ZONE", "CS00005", "no shared storage type", "TIME WITHOUT TIME ZONE")]
+    [InlineData("BIT", "CS00005", "bit strings", "BOOLEAN")]
+    [InlineData("BIT(3)", "CS00005", "bit strings", "BOOLEAN")]
+    [InlineData("SMALLDATETIME", "CS00005", "minute precision", "TIMESTAMP")]
     [InlineData("INT[]", "CK00001", "Array types", "scalar")]
     [InlineData("INTEGER ARRAY", "CK00001", "Array types", "scalar")]
     [InlineData("DATETIME2(7)", "CK00001", "Temporal precision", "modifier")]
     [InlineData("DATETIMEOFFSET(7)", "CK00001", "Temporal precision", "modifier")]
     [InlineData("TIMESTAMP(6) WITH TIME ZONE", "CK00001", "Temporal precision", "modifier")]
     [InlineData("TIME(7) WITHOUT TIME ZONE", "CK00001", "Temporal precision", "modifier")]
-    [InlineData("UNIQUEIDENTIFIER(16)", "SQL0005", "does not accept", "arguments")]
-    [InlineData("NCHAR(MAX)", "SQL0005", "unsigned integer", "arguments")]
-    [InlineData("NVARCHAR(MAX,1)", "SQL0005", "unsigned integer", "arguments")]
+    [InlineData("UNIQUEIDENTIFIER(16)", "CS00005", "does not accept", "arguments")]
+    [InlineData("NCHAR(MAX)", "CS00005", "unsigned integer", "arguments")]
+    [InlineData("NVARCHAR(MAX,1)", "CS00005", "unsigned integer", "arguments")]
     public void Parse_RejectedAlias_ShouldExplainAtEverySite(string type, string code, string reason, string replacement)
     {
         // Arrange

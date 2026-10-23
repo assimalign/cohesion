@@ -80,7 +80,7 @@ public sealed class SqlDatabase : DatabaseInstance
         var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);
         if (!string.Equals(schema.Hash, pending.ContentHash, StringComparison.Ordinal))
         {
-            throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: pending migration target hash is invalid.");
+            throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResumeProvisioningAsyncFailure, SqlProvisioningCodes.PolicyRefused));
         }
         var declaration = _engine.FindDeclaration(Name);
         if (declaration?.Mode == SqlProvisioningMode.Verify)
@@ -91,8 +91,7 @@ public sealed class SqlDatabase : DatabaseInstance
         {
             if (declaration?.Schema is { } declared && !string.Equals(declared.Hash, schema.Hash, StringComparison.Ordinal))
             {
-                throw new SqlSchemaMigrationException($"{SqlProvisioningCodes.PolicyRefused}: database '{Name}' has a different pending schema. " +
-                    "Finish its recorded migration before replacing the declaration.");
+                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResumeProvisioningAsyncFailure2, SqlProvisioningCodes.PolicyRefused, Name));
             }
             await _schemaProvisioner.ApplyAsync(schema, cancellationToken, declaration?.RunMigrationsInline != true).ConfigureAwait(false);
         }
@@ -161,7 +160,7 @@ public sealed class SqlDatabase : DatabaseInstance
         }
         catch (DatabaseException exception)
         {
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception.Diagnostics, exception);
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseDatabase, name, exception.Message), exception.Diagnostics, exception);
         }
 
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage),
@@ -213,8 +212,7 @@ public sealed class SqlDatabase : DatabaseInstance
             // open before recovery writes anything, never a read later.
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             throw new SqlDataStorageFormatException(
-                $"Database '{name}' uses data-storage format {_catalog.RecordSpaceFormatVersion}, but one of its index trees " +
-                $"does not: {exception.Message}", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseFailure, name, _catalog.RecordSpaceFormatVersion, exception.Message), exception);
         }
         TableReclamation = new SqlTableReclamation(this);
         _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
@@ -280,19 +278,14 @@ public sealed class SqlDatabase : DatabaseInstance
         // means a creation that stopped before the stamp or a pre-release build.
         string remedy = version switch
         {
-            1 => "It has no format marker: its creation was interrupted, or it predates format markers. " +
-                 "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
-                 "create it again, exporting any data first with the engine that wrote it " +
-                 "(on-disk format upgrades are tracked by assimalign/cohesion#1152).",
+            1 => ErrorMessages.ThrowIfFormatIsNotCurrentFailure2,
             _ when version < current =>
-                 "This engine does not upgrade databases written in an older format: export its data with the " +
-                 "engine that wrote it, drop the database (DropDatabaseAsync) and create it again with this engine, " +
-                 "then reload the data (on-disk format upgrades are tracked by assimalign/cohesion#1152).",
-            _ => "The database was written by a newer engine; open it with that engine.",
+                 ErrorMessages.ThrowIfFormatIsNotCurrentFailure3,
+            _ => ErrorMessages.ThrowIfFormatIsNotCurrentFailure4,
         };
 
         throw new SqlDataStorageFormatException(
-            $"Database '{name}' uses data-storage format {version}, but this engine supports only format {current}. {remedy}");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfFormatIsNotCurrentFailure, name, version, current, remedy));
     }
 
     /// <summary>
@@ -309,9 +302,7 @@ public sealed class SqlDatabase : DatabaseInstance
         if (_catalog.RecordSpaceFormatVersion != 1 || _catalog.Tables.Count != 0)
         {
             throw new DatabaseException(
-                $"Database '{Name}' cannot be created: its catalog storage already holds data-storage format " +
-                $"{_catalog.RecordSpaceFormatVersion} and {_catalog.Tables.Count} table(s). " +
-                "SqlStorageStrategy.CreateStorage must return new, empty storage.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseStampNewCatalogDatabase, Name, _catalog.RecordSpaceFormatVersion, _catalog.Tables.Count));
         }
 
         // Synchronous over the ValueTask by design: catalog writes complete
@@ -403,7 +394,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHSQLT004";
+    internal const string OfflineCode = "CS04004";
 
     /// <summary>
     /// Gets whether a failed durable flush of either file set took the database offline.
@@ -494,7 +485,7 @@ public sealed class SqlDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHSQLE041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CS06041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -515,14 +506,14 @@ public sealed class SqlDatabase : DatabaseInstance
     {
         if (error is DatabaseException { Diagnostics: [{ Code: "CK06003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLT005" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CS04005" }, ..] }) { return error; }
         var translated = TranslateOffline(error, selfCommitted);
         if (!ReferenceEquals(translated, error)) { return translated; }
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHSQLE041" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CS06041" }, ..] }) { return error; }
         return error switch
         {
             _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHSQLE041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CS06041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
             _ => error,
         };
     }
@@ -544,7 +535,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the session was created.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     public new async ValueTask<SqlDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (SqlDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -589,7 +580,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="schema"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHSQLT004</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CS04004</c>, #1243).</exception>
     /// <exception cref="DatabaseObjectLockedException">
     /// The engine's builder declared the database with another schema: the declaration owns the
     /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
@@ -598,10 +589,10 @@ public sealed class SqlDatabase : DatabaseInstance
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// The schema targets another database, declares what the engine has no DDL for (principals),
-    /// declares a domain the engine does not register with that base type (<c>COHSQLP005</c>: an
+    /// declares a domain the engine does not register with that base type (<c>CS03105</c>: an
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
-    /// (<c>COHSQLP005</c>), needs a destructive step it does not allow (<c>COHSQLP005</c>), or a step
-    /// failed (<c>COHSQLP004</c>, after the completed reversible steps were compensated).
+    /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or a step
+    /// failed (<c>CS03104</c>, after the completed reversible steps were compensated).
     /// </exception>
     /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     /// <remarks>
@@ -626,8 +617,7 @@ public sealed class SqlDatabase : DatabaseInstance
                 Name,
                 Name,
                 "APPLY SCHEMA",
-                $"SQL engine '{_engine.Name}' declares database '{Name}' with a schema (SqlDatabaseBuilder.Schema), so " +
-                "ApplySchemaAsync refuses another one: change the declaration and rebuild the engine instead.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseApplySchemaAsyncFailure, _engine.Name, Name));
         }
 
         return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
@@ -641,7 +631,7 @@ public sealed class SqlDatabase : DatabaseInstance
     /// <param name="schema">The declared schema.</param>
     /// <param name="cancellationToken">Observed before the comparison.</param>
     /// <returns>The result, which is always already applied.</returns>
-    /// <exception cref="SqlSchemaMigrationException">The database drifted from the schema (<c>COHSQLP003</c>).</exception>
+    /// <exception cref="SqlSchemaMigrationException">The database drifted from the schema (<c>CS03103</c>).</exception>
     /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     internal ValueTask<SqlSchemaMigrationResult> VerifySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken)
     {
@@ -724,6 +714,6 @@ public sealed class SqlDatabase : DatabaseInstance
         }
 
         throw new DatabaseException(
-            $"Transaction {context.Sequence} has no statement bracket applying on this database.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence));
     }
 }

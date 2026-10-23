@@ -21,7 +21,7 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
     }
 
     /// <inheritdoc />
-    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>COHSQLE002</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The BIGINT minimum has no positive counterpart (<c>CS02002</c>).</exception>
     /// <exception cref="DatabaseException">The value is not a number.</exception>
     protected override SqlValue InvokeCore(scoped in SqlArguments arguments)
     {
@@ -37,7 +37,7 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
             case DatabaseType.Int64:
                 long number = value.AsInt64();
                 return number == long.MinValue
-                    ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {number.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                    ? throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlAbsFunctionInvokeCoreSqlEvaluation, number.ToString(CultureInfo.InvariantCulture)))
                     : SqlValue.FromInt64(Math.Abs(number));
             case DatabaseType.Float32:
                 return SqlValue.FromSingle(Math.Abs(value.AsSingle()));
@@ -46,7 +46,7 @@ internal sealed class SqlAbsFunction : SqlScalarFunction
             case DatabaseType.Decimal:
                 return SqlValue.FromDecimal(Math.Abs(value.AsDecimal()));
             default:
-                throw new DatabaseException("ABS requires a numeric argument.");
+                throw new DatabaseException(ErrorMessages.SqlAbsFunctionInvokeCoreDatabase);
         }
     }
 }

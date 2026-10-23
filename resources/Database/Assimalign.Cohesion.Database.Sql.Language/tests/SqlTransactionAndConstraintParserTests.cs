@@ -63,10 +63,10 @@ public sealed class SqlTransactionAndConstraintParserTests
                 statement.SqlExpression.ShouldBeOfType<SqlTransactionExpression>().CommandType.ShouldBe(command);
                 if (terminator.Length == 0)
                 {
-                    // SQL0100 uniformly reports an omitted terminator for every SQL statement.
+                    // CS00100 uniformly reports an omitted terminator for every SQL statement.
                     statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error || diagnostic.Severity == DiagnosticSeverity.Warning);
                     var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-                    diagnostic.Code.ShouldBe("SQL0100");
+                    diagnostic.Code.ShouldBe("CS00100");
                     diagnostic.Severity.ShouldBe(DiagnosticSeverity.Information);
                 }
                 else
@@ -78,36 +78,36 @@ public sealed class SqlTransactionAndConstraintParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Transactions: malformed and excluded forms retain their diagnostic code")]
-    [InlineData("START", "SQL0003")]
-    [InlineData("START WORK", "SQL0003")]
-    [InlineData("BEGIN SAVEPOINT marker", "SQL0003")]
-    [InlineData("ROLLBACK TO marker", "SQL0003")]
-    [InlineData("BEGIN WORK TRANSACTION", "SQL0003")]
-    [InlineData("COMMIT WORK WORK", "SQL0003")]
-    [InlineData("END WORK", "SQL0003")]
-    [InlineData("END TRANSACTION", "SQL0003")]
-    [InlineData("BEGIN TRAN", "SQL0003")]
-    [InlineData("BEGIN TRANSACTION named", "SQL0003")]
-    [InlineData("END IF", "SQL0003")]
-    [InlineData("COMMIT PREPARED 'x'", "SQL0003")]
-    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0003")]
-    [InlineData("START TRANSACTION READ ONLY", "SQL0003")]
-    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "SQL0003")]
-    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "SQL0003")]
-    [InlineData("COMMIT AND NO CHAIN", "SQL0003")]
-    [InlineData("COMMIT AND CHAIN", "SQL0003")]
-    [InlineData("ROLLBACK AND NO CHAIN", "SQL0003")]
-    [InlineData("END AND NO CHAIN", "SQL0003")]
-    [InlineData("ABORT", "SQL0002")]
-    [InlineData("ABORT WORK", "SQL0002")]
-    [InlineData("ABORT TRANSACTION", "SQL0002")]
-    [InlineData("SAVEPOINT a", "SQL0002")]
-    [InlineData("RELEASE SAVEPOINT a", "SQL0002")]
-    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "SQL0002")]
-    [InlineData("PREPARE TRANSACTION 'x'", "SQL0002")]
-    [InlineData("\"START\" TRANSACTION", "SQL0002")]
-    [InlineData("START \"TRANSACTION\"", "SQL0003")]
-    [InlineData("BEGIN \"WORK\"", "SQL0003")]
+    [InlineData("START", "CS00003")]
+    [InlineData("START WORK", "CS00003")]
+    [InlineData("BEGIN SAVEPOINT marker", "CS00003")]
+    [InlineData("ROLLBACK TO marker", "CS00003")]
+    [InlineData("BEGIN WORK TRANSACTION", "CS00003")]
+    [InlineData("COMMIT WORK WORK", "CS00003")]
+    [InlineData("END WORK", "CS00003")]
+    [InlineData("END TRANSACTION", "CS00003")]
+    [InlineData("BEGIN TRAN", "CS00003")]
+    [InlineData("BEGIN TRANSACTION named", "CS00003")]
+    [InlineData("END IF", "CS00003")]
+    [InlineData("COMMIT PREPARED 'x'", "CS00003")]
+    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00003")]
+    [InlineData("START TRANSACTION READ ONLY", "CS00003")]
+    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "CS00003")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "CS00003")]
+    [InlineData("COMMIT AND NO CHAIN", "CS00003")]
+    [InlineData("COMMIT AND CHAIN", "CS00003")]
+    [InlineData("ROLLBACK AND NO CHAIN", "CS00003")]
+    [InlineData("END AND NO CHAIN", "CS00003")]
+    [InlineData("ABORT", "CS00002")]
+    [InlineData("ABORT WORK", "CS00002")]
+    [InlineData("ABORT TRANSACTION", "CS00002")]
+    [InlineData("SAVEPOINT a", "CS00002")]
+    [InlineData("RELEASE SAVEPOINT a", "CS00002")]
+    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00002")]
+    [InlineData("PREPARE TRANSACTION 'x'", "CS00002")]
+    [InlineData("\"START\" TRANSACTION", "CS00002")]
+    [InlineData("START \"TRANSACTION\"", "CS00003")]
+    [InlineData("BEGIN \"WORK\"", "CS00003")]
     public void Parse_UnsupportedTransactionForm_ShouldReportExpectedCode(string sql, string code)
     {
         // Act
@@ -133,7 +133,7 @@ public sealed class SqlTransactionAndConstraintParserTests
 
     [Fact]
     public void TransactionKeyword_RequiresAControlCommand() =>
-        Parse("TRANSACTION;").Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0002");
+        Parse("TRANSACTION;").Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00002");
 
     [Fact]
     public void CreateTable_NormalizesNamedAndUnnamedColumnAndTableConstraints()

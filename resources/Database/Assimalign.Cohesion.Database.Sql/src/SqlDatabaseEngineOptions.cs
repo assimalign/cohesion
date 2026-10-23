@@ -100,7 +100,7 @@ public sealed class SqlDatabaseEngineOptions
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>
     /// <remarks>
-    /// An offline database refuses every operation with <c>COHSQLT004</c> until it is reopened
+    /// An offline database refuses every operation with <c>CS04004</c> until it is reopened
     /// (<see cref="SqlDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work ends the streak, and the window starts
@@ -185,7 +185,7 @@ public sealed class SqlDatabaseEngineOptions
     /// Gets or sets how many levels a SQL expression may nest in a statement this engine executes
     /// (#1151): the deepest expression tree, in which a chain of <c>AND</c> (or <c>OR</c>) terms is
     /// one level however many terms it has, and the deepest grouping parentheses. Deeper text is a
-    /// parse failure (<c>SQL0006</c>) before anything executes. Defaults to
+    /// parse failure (<c>CS00006</c>) before anything executes. Defaults to
     /// <see cref="SqlQueryParserOptions.DefaultExpressionNestingLimit"/> (256) and must lie within
     /// <see cref="SqlQueryParserOptions.MinimumExpressionNestingLimit"/> (32) and
     /// <see cref="SqlQueryParserOptions.MaximumExpressionNestingLimit"/> (4096), which
@@ -199,7 +199,7 @@ public sealed class SqlDatabaseEngineOptions
     /// <see cref="SqlQueryRequest.FromSql(string, System.Collections.Generic.IReadOnlyDictionary{string, object?}?, SqlQueryParserOptions?)"/>
     /// or a <see cref="SqlQueryParser"/> of its own. A higher limit admits deeper
     /// statements but not more stack: a statement within the limit that needs more stack than the
-    /// executing thread has left fails with <c>COHSQLE004</c> (ISO SQLSTATE 54001), never a crash.
+    /// executing thread has left fails with <c>CS05004</c> (ISO SQLSTATE 54001), never a crash.
     /// Definitions the engine persists are read back at the highest limit, so a database written
     /// under one limit opens under any other.
     /// </remarks>

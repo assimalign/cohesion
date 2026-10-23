@@ -27,7 +27,7 @@ internal sealed class SqlCountFunction : SqlAggregateFunction
         private long _count;
 
         /// <inheritdoc />
-        /// <exception cref="SqlEvaluationException">The count passed BIGINT (<c>COHSQLE002</c>).</exception>
+        /// <exception cref="SqlEvaluationException">The count passed BIGINT (<c>CS02002</c>).</exception>
         protected override void AddCore(scoped in SqlArguments arguments)
         {
             try
@@ -37,7 +37,7 @@ internal sealed class SqlCountFunction : SqlAggregateFunction
             catch (OverflowException exception)
             {
                 throw SqlEvaluationException.NumericValueOutOfRange(
-                    "COUNT overflowed; the aggregate cannot be represented as a decimal or count.", exception);
+                    ErrorMessages.AccumulatorAddCoreSqlEvaluation, exception);
             }
         }
 

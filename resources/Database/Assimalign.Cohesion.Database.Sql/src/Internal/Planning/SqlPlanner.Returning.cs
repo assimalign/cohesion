@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
         {
             if (ContainsAggregate(column.Expression))
             {
-                throw new SqlPlanningException("COHSQLE017", ErrorMessages.ReturningAggregate, column.Expression.Location);
+                throw new SqlPlanningException("CS05017", ErrorMessages.ReturningAggregate, column.Expression.Location);
             }
         }
         // INSERT SELECT's input namespace is deliberately absent here, as in PostgreSQL

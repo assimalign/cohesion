@@ -162,7 +162,7 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// The engine checks what a function returns against its declaration, which plans, result
     /// metadata and outer calls rely on: a value of a type that widens to the declared one is
     /// converted; another type, a NULL from a function that declares it never returns one, and an
-    /// ANYELEMENT result of another type than its arguments fail the statement as <c>COHSQLE007</c>,
+    /// ANYELEMENT result of another type than its arguments fail the statement as <c>CS05007</c>,
     /// naming the function, whether it is called by a statement or directly.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a result is checked against the declaration")]
@@ -356,11 +356,11 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <summary>
     /// The engine's one-argument entry points convert the argument before the coded call, so an
     /// argument that does not fit or does not convert is the engine's fault and never a
-    /// <c>COHSQLE007</c> that blames the function: the scalar's overflow reaches the evaluator,
-    /// which codes it <c>COHSQLE002</c>; the accumulator's is <c>COHSQLE002</c> already; a type that
+    /// <c>CS05007</c> that blames the function: the scalar's overflow reaches the evaluator,
+    /// which codes it <c>CS02002</c>; the accumulator's is <c>CS02002</c> already; a type that
     /// does not convert is a plain database exception; and only what the function itself throws is
-    /// <c>COHSQLE007</c>. SQL cannot reach the faults (the planner types literals and parameters, and
-    /// refuses a mismatch as <c>COHSQLE006</c>), so without this an edit that moved the conversion
+    /// <c>CS05007</c>. SQL cannot reach the faults (the planner types literals and parameters, and
+    /// refuses a mismatch as <c>CS01006</c>), so without this an edit that moved the conversion
     /// inside the coded call would pass every statement test.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a one-argument conversion fault is the engine's, not the function's")]
@@ -401,7 +401,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         scalarMismatch.Message.ShouldBe("Function 'small_echo' takes SMALLINT for argument 1, but the value is TEXT.");
         scalarFailure.ShouldHaveMessage($"{FunctionFailed}: Function 'small_failing' failed: no echo");
         aggregateOverflow.ShouldHaveMessage(
-            "COHSQLE002: Numeric value out of range: BIGINT 40000 does not fit argument 1 of function 'small_sum', which is SMALLINT.");
+            "CS02002: Numeric value out of range: BIGINT 40000 does not fit argument 1 of function 'small_sum', which is SMALLINT.");
         aggregateOverflow.InnerException.ShouldBeOfType<OverflowException>();
         aggregateMismatch.ShouldBeOfType<DatabaseException>();
         aggregateMismatch.Message.ShouldBe("Function 'small_sum' takes SMALLINT for argument 1, but the value is TEXT.");
@@ -413,7 +413,7 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// A call of no arguments, a shape only an application's function has, takes the path every call
     /// takes, from a frame of its own as <c>COUNT(*)</c> adds through one: with no argument to be
     /// NULL a strict function is called on every row, an immutable one folds to one call, a result of
-    /// another type fails the check, and what the function throws is <c>COHSQLE007</c>.
+    /// another type fails the check, and what the function throws is <c>CS05007</c>.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a call of no arguments is made, checked and coded as every call is")]
     public async Task ExecuteAsync_NoArgumentCall_ShouldTakeThePathEveryCallTakes()

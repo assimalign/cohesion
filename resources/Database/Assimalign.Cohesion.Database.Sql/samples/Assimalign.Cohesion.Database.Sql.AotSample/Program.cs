@@ -204,7 +204,7 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE native_namespace.t(id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO native_namespace.t DEFAULT VALUES", cancellationToken: CancellationToken.None);
         CheckFailure("in process: DROP SCHEMA RESTRICT", await FailureAsync(() => session.ExecuteAsync(
-            "DROP SCHEMA native_namespace", cancellationToken: CancellationToken.None).AsTask()), "COHSQLE030");
+            "DROP SCHEMA native_namespace", cancellationToken: CancellationToken.None).AsTask()), "CS03030");
         await session.ExecuteAsync("DROP SCHEMA native_namespace CASCADE", cancellationToken: CancellationToken.None);
         Check("in process: DROP SCHEMA CASCADE", await RowsAsync(session,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), []);
@@ -253,8 +253,8 @@ internal static class Program
         Check("in process: public function timestamp (#1373)",
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
-        CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "COHSQLE003");
-        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "COHSQLE003");
+        CheckFailure("in process: non-Boolean WHERE (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE 1")), "CS02003");
+        CheckFailure("in process: mixed Boolean alternatives (#1190)", await FailureAsync(() => RowsAsync(session, "SELECT 1 WHERE COALESCE(TRUE, 1)")), "CS02003");
         Check("in process: Boolean string literal (#1190)", await RowsAsync(session, "SELECT 1 WHERE 'YeS'"), [[1L]]);
         Check("in process: Boolean UNKNOWN (#1190)", await RowsAsync(session, "SELECT NULL AND TRUE, NULL OR FALSE, CASE WHEN NULL THEN 1 END"), [[null, null, null]]);
         Check("in process: FROM-less aggregate (#1373)", await RowsAsync(session, "SELECT COUNT(*) WHERE FALSE"), [[0L]]);
@@ -271,9 +271,9 @@ internal static class Program
             "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
             "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1"), [[true, true, true, true, false, true]]);
         CheckFailure("in process: invalid ESCAPE", await FailureAsync(() => RowsAsync(session,
-            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "COHSQLE034");
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers")), "CS02034");
         CheckFailure("in process: invariant LIKE work limit", await FailureAsync(() => RowsAsync(session,
-            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1")), "CS05040");
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
@@ -332,11 +332,11 @@ internal static class Program
             "SELECT CAST('1:02' AS TIME), CAST('13:45:00.' AS TIME), CAST('10:00Z' AS TIME), CAST('1 2 hours' AS INTERVAL), CAST('@ 1 day 2 hours ago' AS INTERVAL)"),
             [[new TimeOnly(1, 2), new TimeOnly(13, 45), new TimeOnly(10, 0), TimeSpan.FromHours(26), TimeSpan.FromHours(-26)]]);
         CheckFailure("in process: temporal assignment diagnostics", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "COHSQLE048");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(t) VALUES ('25:00')", cancellationToken: CancellationToken.None)), "CS02048");
         CheckFailure("in process: floating assignment grouping", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "COHSQLE022");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1,000')", cancellationToken: CancellationToken.None)), "CS02022");
         CheckFailure("in process: floating assignment overflow", await FailureAsync(async () =>
-            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "COHSQLE002");
+            await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "CS02002");
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
         Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
@@ -401,12 +401,12 @@ internal static class Program
         CheckFailure("in process: the declared CHECK refuses a row",
             await FailureAsync(() => session.ExecuteAsync(RefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
-        CheckFailure("in process: a throwing function is COHSQLE007",
+        CheckFailure("in process: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(session, "SELECT clamp(1, 5, 0) FROM customers")),
-            "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
-        CheckFailure("in process: a CAST no cast performs is COHSQLE011 while planning",
+            "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("in process: a CAST no cast performs is CS02011 while planning",
             await FailureAsync(() => RowsAsync(session, CannotCast)),
-            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
+            "CS02011: Cannot CAST type BOOLEAN to DATE");
     }
 
     // A row whose name slugifies to nothing, which the declared CHECK refuses.
@@ -435,7 +435,7 @@ internal static class Program
         Check("over the wire: CREATE SCHEMA and SCHEMATA", await RowsAsync(connection,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'wire_namespace'", timeout.Token), [["wire_namespace"]]);
         CheckFailure("over the wire: DROP SCHEMA RESTRICT", await FailureAsync(async () =>
-            await connection.ExecuteAsync("DROP SCHEMA wire_namespace RESTRICT", cancellationToken: timeout.Token)), "COHSQLE030");
+            await connection.ExecuteAsync("DROP SCHEMA wire_namespace RESTRICT", cancellationToken: timeout.Token)), "CS03030");
         await connection.ExecuteAsync("DROP SCHEMA wire_namespace CASCADE", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO namespace_external VALUES (99)", cancellationToken: timeout.Token);
         Check("over the wire: CASCADE retains external tables", await RowsAsync(connection,
@@ -456,7 +456,7 @@ internal static class Program
         await connection.ExecuteAsync("CREATE TABLE identity_wire (id INT IDENTITY(10,2))", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO identity_wire DEFAULT VALUES", cancellationToken: timeout.Token);
         CheckFailure("over the wire: ALWAYS IDENTITY rejects explicit values", await FailureAsync(async () =>
-            await connection.ExecuteAsync("INSERT INTO identity_wire VALUES (1)", cancellationToken: timeout.Token)), "COHSQLE025");
+            await connection.ExecuteAsync("INSERT INTO identity_wire VALUES (1)", cancellationToken: timeout.Token)), "CS03025");
         var returned = await connection.QueryAsync("INSERT INTO returning_native DEFAULT VALUES RETURNING *", cancellationToken: timeout.Token);
         Check("over the wire: RETURNING affected count", returned.AffectedCount, 1L);
         Check("over the wire: RETURNING identity", returned[0].GetInt32(0), 2);
@@ -490,9 +490,9 @@ internal static class Program
             "RPAD('a', 200000, 'a') COLLATE invariant LIKE 'abc%', " +
             "RPAD('a', 200000, 'a') COLLATE invariant NOT LIKE '%b' FROM customers WHERE Id = 1", timeout.Token), [[true, true, true, true, false, true]]);
         CheckFailure("over the wire: invalid ESCAPE", await FailureAsync(() => RowsAsync(connection,
-            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "COHSQLE034");
+            "SELECT Name LIKE 'x!' ESCAPE '!' FROM customers", timeout.Token)), "CS02034");
         CheckFailure("over the wire: invariant LIKE work limit", await FailureAsync(() => RowsAsync(connection,
-            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "COHSQLE040");
+            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM customers WHERE Id = 1", timeout.Token)), "CS05040");
         Check("over the wire: parameter ESCAPE", await RowsAsync(connection,
             "SELECT '50%' LIKE '50!%' ESCAPE @e FROM customers WHERE Id = 1", timeout.Token,
             new Dictionary<string, object?> { ["e"] = "!" }), [[true]]);
@@ -531,12 +531,12 @@ internal static class Program
         CheckFailure("over the wire: the declared CHECK refuses a row",
             await FailureAsync(() => connection.ExecuteAsync(RefusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
-        CheckFailure("over the wire: a throwing function is COHSQLE007",
+        CheckFailure("over the wire: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(connection, "SELECT clamp(1, 5, 0) FROM customers", timeout.Token)),
-            "COHSQLE007: Function 'clamp' failed: '5' cannot be greater than 0.");
-        CheckFailure("over the wire: a CAST no cast performs is COHSQLE011 while planning",
+            "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
+        CheckFailure("over the wire: a CAST no cast performs is CS02011 while planning",
             await FailureAsync(() => RowsAsync(connection, CannotCast, timeout.Token)),
-            "COHSQLE011: Cannot CAST type BOOLEAN to DATE");
+            "CS02011: Cannot CAST type BOOLEAN to DATE");
         Check("over the wire: the parameterized call folds",
             await RowsAsync(connection, "SELECT slugify(@text) AS s FROM customers WHERE Id = 1", timeout.Token,
                 new Dictionary<string, object?> { ["text"] = " Hello, World " }),

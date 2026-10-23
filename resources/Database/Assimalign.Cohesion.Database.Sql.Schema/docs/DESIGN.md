@@ -225,7 +225,7 @@ This package does not parse SQL, so it neither validates the predicate nor knows
 functions exist: the SQL engine's build parses the text as exactly one expression and binds
 it to its frozen function catalog and the table's declared columns before it touches any
 file, refusing an unknown column or function, a call no overload accepts, or a function that
-is not `IMMUTABLE` (`COHSQLP001`). The arguments are meant to be constant strings, so the
+is not `IMMUTABLE` (`CS03101`). The arguments are meant to be constant strings, so the
 `Sdk.Database` build task extracts the same constraint without running the program and its
 document and hash equal the runtime compiler's.
 
@@ -340,7 +340,7 @@ SQL type text accepts FLOAT(p) for 1..53 bits. The engine resolves 1..24 as Floa
 Float64 and verifies that it matches the member's CLR storage; the compiled declaration retains
 its SQL text. Temporal precision is recognized but unsupported: the existing UnsupportedType
 exception carries CK00001 and names the table/column and modifier, for builders and raw compiled
-CustomType metadata alike. Invalid FLOAT precision retains SQL0005 in the validation detail.
+CustomType metadata alike. Invalid FLOAT precision retains CS00005 in the validation detail.
 
 INTERVAL field qualifiers use the shared PostgreSQL field/range grammar, including SECOND(p).
 Builders and raw CustomType metadata report UnsupportedType with CK00001 naming table/column
@@ -366,3 +366,13 @@ artifact, applied marker or pending target is refused by InvalidDocument at sche
 before hashes are compared. Opening an earlier catalog is refused too: export with its writing
 engine, recreate, and reapply the rebuilt declaration. There is no upgrade or compatibility
 reader (#1152). Raw defaults and their typed equivalents share the v8 document and hash.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

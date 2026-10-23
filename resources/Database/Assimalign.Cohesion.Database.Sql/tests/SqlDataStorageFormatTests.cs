@@ -349,7 +349,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
                     {
                         if (incompleteHeader)
                         {
-                            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLC001");
+                            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03401");
                             failure.Message.ShouldContain("CreateDatabaseAsync", Case.Sensitive);
                         }
                         database = await reopened.CreateDatabaseAsync(TestDatabase, CancellationToken.None);

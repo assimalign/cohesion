@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>Verifies declared column modifiers at every assignment boundary, including the production client.</summary>
 public sealed class SqlColumnBoundsTests
 {
-    private const string stringTooLong = "COHSQLE012";
-    private const string numericOverflow = "COHSQLE002";
+    private const string stringTooLong = "CS02012";
+    private const string numericOverflow = "CS02002";
 
     /// <summary>Values accepted through every assignment path, with their stored representations.</summary>
     public static IEnumerable<object?[]> AcceptedAssignments()

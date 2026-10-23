@@ -268,8 +268,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// data-scaling SQL migration steps to the engine's worker. The parameterless root
     /// <see cref="IDatabaseApplicationBuilder.Build"/> forwards here without a token; callers that
     /// need cancellation retain the concrete builder. A factory's
-    /// exception, for example a SQL schema migration failure led by <c>COHSQLP001</c> to
-    /// <c>COHSQLP005</c>, propagates unchanged after the products built before it are disposed.
+    /// exception, for example a SQL schema migration failure led by <c>CS03101</c> to
+    /// <c>CS03105</c>, propagates unchanged after the products built before it are disposed.
     /// </remarks>
     public DatabaseApplication Build(CancellationToken cancellationToken = default)
     {

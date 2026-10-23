@@ -263,7 +263,7 @@ public sealed partial class SqlViewTests
         var error = await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, "ROLLBACK");
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04003");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Views: persisted definitions survive file-backed restart")]

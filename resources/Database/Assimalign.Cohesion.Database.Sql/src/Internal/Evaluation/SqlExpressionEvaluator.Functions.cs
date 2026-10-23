@@ -17,7 +17,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <param name="call">The call.</param>
     /// <returns>The overload; null when the catalog has no function of the call's name.</returns>
     /// <exception cref="SqlEvaluationException">
-    /// No overload accepts the call (<c>COHSQLE006</c>), or several accept it equally well (<c>COHSQLE008</c>).
+    /// No overload accepts the call (<c>CS01006</c>), or several accept it equally well (<c>CS01008</c>).
     /// </exception>
     internal SqlFunction? ResolveFunction(SqlFunctionCallExpression call)
     {
@@ -75,7 +75,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             overloads = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Where(_functions.Catalog.GetOverloads(call.FunctionName), function =>
                 SqlDefinitionBinder.Key(function).Equals(identity, StringComparison.OrdinalIgnoreCase)));
-            if (overloads.Length == 0) { throw new SqlPlanningException("COHSQLE009", ErrorMessages.ViewFunctionMissing, call.Location); }
+            if (overloads.Length == 0) { throw new SqlPlanningException("CS01009", ErrorMessages.ViewFunctionMissing, call.Location); }
             return true;
         }
         return _functions.Catalog.TryGetOverloads(call.FunctionName, out overloads!);
@@ -86,7 +86,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// grammar takes them (ISO requires two; one operand is the operand itself).
     /// </summary>
     /// <param name="call">The call to <c>COALESCE</c>.</param>
-    /// <exception cref="SqlEvaluationException">The call passes no operand or a <c>*</c> (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">The call passes no operand or a <c>*</c> (<c>CS01006</c>).</exception>
     internal static void CheckEvaluatorForm(SqlFunctionCallExpression call)
     {
         var arguments = call.Arguments;

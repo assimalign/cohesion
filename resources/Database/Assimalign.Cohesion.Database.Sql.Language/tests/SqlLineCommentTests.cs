@@ -52,10 +52,10 @@ public sealed class SqlLineCommentTests
 
     /// <summary>
     /// Text after the comment that does not continue the statement is leftover text, so it
-    /// reports SQL0003 where it starts instead of disappearing into the comment.
+    /// reports CS00003 where it starts instead of disappearing into the comment.
     /// </summary>
     /// <param name="terminator">The line terminator, by name.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Comments: leftover text after a line comment reports SQL0003 at every terminator")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Comments: leftover text after a line comment reports CS00003 at every terminator")]
     [InlineData("LF")]
     [InlineData("CR")]
     [InlineData("CRLF")]
@@ -72,7 +72,7 @@ public sealed class SqlLineCommentTests
 
         // Assert
         var error = errors.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(sql.LastIndexOf("DELETE", StringComparison.Ordinal));
     }
 
@@ -104,7 +104,7 @@ public sealed class SqlLineCommentTests
     /// <c>//</c> is not a comment in the dialect: <c>/</c> is division, so the text after it is
     /// neither hidden nor executed.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Comments: // is not a comment and reports SQL0003")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Comments: // is not a comment and reports CS00003")]
     public void Parse_DoubleSolidus_ShouldReportSyntaxError()
     {
         // Act
@@ -112,7 +112,7 @@ public sealed class SqlLineCommentTests
 
         // Assert
         errors.ShouldNotBeEmpty();
-        errors.ShouldAllBe(error => error.Code == "SQL0003");
+        errors.ShouldAllBe(error => error.Code == "CS00003");
     }
 
     /// <summary>The line terminators by name, so no invisible character sits in the test source.</summary>

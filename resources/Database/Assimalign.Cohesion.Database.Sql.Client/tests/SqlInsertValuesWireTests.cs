@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlInsertValuesWireTests
 {
-    private const string ColumnReferenceNotAllowed = "COHSQLE005";
+    private const string ColumnReferenceNotAllowed = "CS01005";
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - DEFAULT: VALUES, DEFAULT VALUES and UPDATE share defaults over both transports")]
     [InlineData(false)]
@@ -51,10 +51,10 @@ public sealed class SqlInsertValuesWireTests
         updated.ShouldBe(1);
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldBe("COHSQLE024: Column 'id' does not allow NULL.");
+        failure.Message.ShouldBe("CS03024: Column 'id' does not allow NULL.");
         failure.ConnectionUsable.ShouldBeTrue();
         invalid.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        invalid.Message.ShouldContain("SQL0003", Case.Sensitive);
+        invalid.Message.ShouldContain("CS00003", Case.Sensitive);
         invalid.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id, label, note FROM defaults ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
@@ -88,8 +88,8 @@ public sealed class SqlInsertValuesWireTests
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldBe(missingDefault
-            ? "COHSQLE024: Column 'id' does not allow NULL and has no default."
-            : "COHSQLE024: Column 'id' does not allow NULL.");
+            ? "CS03024: Column 'id' does not allow NULL and has no default."
+            : "CS03024: Column 'id' does not allow NULL.");
         failure.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id FROM n", cancellationToken: SqlClientTestHarness.Timeout());
         rows.ShouldHaveSingleItem()["id"].ShouldBe(1);

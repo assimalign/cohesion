@@ -18,6 +18,6 @@ internal sealed class SqlCollationFailureTerm : SqlCollationTerm
     internal override SqlCollationCandidate Resolve(SqlSubqueryValues? subqueries)
     {
         _raise();
-        throw new InvalidOperationException("A collation that failed to bind resolved on a later attempt.");
+        throw new InvalidOperationException(ErrorMessages.SqlCollationFailureTermResolveFailure);
     }
 }

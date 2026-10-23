@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Tests;
 public class DatabaseOfflineExceptionTests
 {
     [Theory(DisplayName = "Cohesion Test [Database] - Unconfirmed commit: every model retains its code and cause (#1350)")]
-    [InlineData("COHSQLT004")]
+    [InlineData("CS04004")]
     [InlineData("COHDBK002")]
     [InlineData("COHDBD002")]
     [InlineData("COHDBG012")]
@@ -38,7 +38,7 @@ public class DatabaseOfflineExceptionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database] - Offline: every model code is exposed through diagnostics (#1350)")]
-    [InlineData("COHSQLT004")]
+    [InlineData("CS04004")]
     [InlineData("COHDBK002")]
     [InlineData("COHDBD002")]
     [InlineData("COHDBG012")]

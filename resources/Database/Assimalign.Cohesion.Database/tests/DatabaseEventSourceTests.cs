@@ -531,7 +531,7 @@ public sealed class DatabaseEventSourceTests
         var coded = sessionEvents[9];
         var diagnostic = failed.Diagnostics!.First(d => d.Severity == DiagnosticSeverity.Error);
         coded.EventId.ShouldBe(28);
-        diagnostic.Code.ShouldBe("COHSQLT002");
+        diagnostic.Code.ShouldBe("CS04002");
         Payload(coded, "code").ShouldBe(diagnostic.Code);
         Payload(coded, "exceptionType").ShouldBe(string.Empty);
         Payload(sessionEvents[11], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
@@ -615,9 +615,9 @@ public sealed class DatabaseEventSourceTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT 1 / 0"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(d => d.Code == "COHSQLE001");
+        failure.Diagnostics.ShouldContain(d => d.Code == "CS02001");
         var failed = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldHaveSingleItem();
-        Payload(failed, "code").ShouldBe("COHSQLE001");
+        Payload(failed, "code").ShouldBe("CS02001");
         Payload(failed, "exceptionType").ShouldBe(failure.GetType().FullName);
         failed.Payload!.ShouldNotContain(failure.Message);
     }

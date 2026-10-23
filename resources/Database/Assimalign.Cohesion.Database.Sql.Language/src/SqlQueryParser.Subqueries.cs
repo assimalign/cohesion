@@ -38,14 +38,14 @@ public sealed partial class SqlQueryParser
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                $"SQL subqueries in {_paginationClause} expressions are not supported.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid, _paginationClause));
         }
 
         if (_subqueryDepth >= MaximumSubqueryDepth)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                $"SQL subquery nesting exceeds the supported limit of {MaximumSubqueryDepth} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid2, MaximumSubqueryDepth));
 
             // Skip this query iteratively, leaving its closing parenthesis to the
             // caller. Never recurse into input beyond the declared depth limit.

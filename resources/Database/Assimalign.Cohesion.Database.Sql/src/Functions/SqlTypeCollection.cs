@@ -77,15 +77,13 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         if (!type.IsDomain)
         {
             throw new ArgumentException(
-                $"Type {type.Name} is not a domain: the built-in types are registered already, and an application adds domains " +
-                "(SqlType.CreateDomain); other base types stay closed in this iteration (owner decision 68).", nameof(type));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddArgument, type.Name), nameof(type));
         }
 
         if (Find(type.Name) is { } registered)
         {
             throw new InvalidOperationException(
-                $"Domain '{type.Name}' cannot be added: {(ReferenceEquals(registered, type) ? "it is" : $"domain '{registered.Name}' is")} " +
-                "registered already. A domain cannot be replaced.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddFailure, type.Name, (ReferenceEquals(registered, type) ? "it is" : $"domain '{registered.Name}' is")));
         }
 
         _types.Add(type);
@@ -113,7 +111,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
             if (end.IsDomain && !ReferenceEquals(Find(end.Name), end))
             {
                 throw new InvalidOperationException(
-                    $"Cast {cast} names domain '{end.Name}', which this collection does not register; add the domain (Types.Add) before a cast to or from it.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddCastFailure, cast, end.Name));
             }
         }
 
@@ -122,8 +120,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
             bool builtIn = _casts.Exists(registered => SqlStandardCasts.Contains(registered)
                 && SqlTypeCatalog.CastKey(registered.Source, registered.Target).Equals(SqlTypeCatalog.CastKey(cast.Source, cast.Target)));
             throw new InvalidOperationException(
-                $"A cast from {cast.Source.Name} to {cast.Target.Name} is already registered{(builtIn ? " by the standard library" : string.Empty)}; " +
-                "a cast cannot be replaced.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddCastFailure2, cast.Source.Name, cast.Target.Name, (builtIn ? " by the standard library" : string.Empty)));
         }
 
         _casts.Add(cast);

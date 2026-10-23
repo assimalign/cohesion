@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// session of the server with it. Only genuine nesting counts now: an AND/OR chain of any length
 /// is one level and executes, text nested deeper than the engine's configured limit (256 by
 /// default) is a parse failure, a statement within the limit that runs out of stack fails with
-/// <c>COHSQLE004</c>, and in every case the session, and the server, keep serving.
+/// <c>CS05004</c>, and in every case the session, and the server, keep serving.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -59,7 +59,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// stays near 3 MB, under the protocol's 16 MB frame.
     /// </summary>
     private const int HostileOnAnyThread = 1_000_000;
-    private const string StatementTooComplex = "COHSQLE004";
+    private const string StatementTooComplex = "CS05004";
 
     /// <summary>The depth of the trees the near-stack-limit walks use: well inside the runtime's reserve.</summary>
     private const int WalkDepth = 128;
@@ -102,7 +102,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     /// <summary>One level past the limit and the adversarial 200,000 terms are parse failures on both session seams.</summary>
     /// <param name="terms">The number of terms in a <c>1 + 1 + ...</c> chain.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an expression past the limit is SQL0006 before anything executes")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an expression past the limit is CS00006 before anything executes")]
     [InlineData(Limit)]
     [InlineData(Hostile)]
     public async Task ExecuteAsync_PastLimit_ShouldFailToParseAndKeepTheSession(int terms)
@@ -117,8 +117,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest((SqlQueryStatement)new SqlQueryParser().Parse(sql))).AsTask());
 
         // Assert
-        text.Message.ShouldStartWith("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.", Case.Sensitive);
-        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
+        text.Message.ShouldStartWith("SQL parse error CS00006: Expression nesting exceeds the supported limit of 256 levels.", Case.Sensitive);
+        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "CS00006");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
     }
 
@@ -152,7 +152,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         });
 
         // Assert
-        failure.Message.ShouldStartWith("SQL parse error SQL0006:", Case.Sensitive);
+        failure.Message.ShouldStartWith("SQL parse error CS00006:", Case.Sensitive);
         after.ShouldBe(1);
     }
 
@@ -263,7 +263,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         guardedOr.ShouldBe(2L);
         foreach (var fault in new[] { guardAfter, unknownAnd, unknownOr, faultFirst })
         {
-            fault.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE001");
+            fault.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02001");
         }
     }
 
@@ -325,12 +325,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
         // Assert
         atLimit.ShouldBe(32L);
-        pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 32 levels.");
+        pastLimit.Message.ShouldBe("SQL parse error CS00006: Expression nesting exceeds the supported limit of 32 levels.");
         typedAtLimit.ShouldBe(32L);
         foreach (var (result, depth) in new[] { (typedPastLimit, 40), (typedParentheses, 33) })
         {
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("SQL0006");
+            diagnostic.Code.ShouldBe("CS00006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
         }
         flat.ShouldBe(1L);
@@ -362,7 +362,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         foreach (var (result, depth) in new[] { (whole, 42), (extracted, 41) })
         {
             var diagnostic = result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("SQL0006");
+            diagnostic.Code.ShouldBe("CS00006");
             diagnostic.Message.ShouldBe($"Expression nesting of {Number(depth)} levels exceeds this engine's limit of 32 levels.");
         }
         withinLimit.ShouldBe(1);
@@ -394,16 +394,16 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Assert
         text.ShouldBe(400L);
         typed.ShouldBe(400L);
-        defaultLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 256 levels.");
+        defaultLimit.Message.ShouldBe("SQL parse error CS00006: Expression nesting exceeds the supported limit of 256 levels.");
         outOfRange.ParamName.ShouldBe("options");
     }
 
     /// <summary>
     /// A high limit admits deeper statements, not more stack. Where the thread has room the
-    /// statement runs; where it does not, the statement fails with COHSQLE004, whether it ran out
+    /// statement runs; where it does not, the statement fails with CS05004, whether it ran out
     /// while parsing or while planning and evaluating, and the session keeps serving.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: under a high limit a statement runs or fails with COHSQLE004, never a crash")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: under a high limit a statement runs or fails with CS05004, never a crash")]
     public async Task Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex()
     {
         // Arrange
@@ -424,7 +424,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         AssertStatementTooComplex(walkOut.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull());
         var parseFailure = parseOut.Failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
         AssertStatementTooComplex(parseFailure);
-        parseFailure.InnerException!.Message.ShouldStartWith("SQL parse error SQL0007:", Case.Sensitive);
+        parseFailure.InnerException!.Message.ShouldStartWith("SQL parse error CS00007:", Case.Sensitive);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
     }
 
@@ -491,7 +491,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Assert
         builder.Options.ExpressionNestingLimit.ShouldBe(limit);
         withinLimit.ShouldBe((long)SqlQueryParserOptions.MinimumExpressionNestingLimit);
-        pastLimit.Message.ShouldBe($"SQL parse error SQL0006: Expression nesting exceeds the supported limit of {Number(limit)} levels.");
+        pastLimit.Message.ShouldBe($"SQL parse error CS00006: Expression nesting exceeds the supported limit of {Number(limit)} levels.");
     }
 
     /// <summary>
@@ -556,20 +556,20 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         unset.ShouldBe(Limit);
         builder.Options.ExpressionNestingLimit.ShouldBe(40);
         atLimit.ShouldBe(40L);
-        pastLimit.Message.ShouldBe("SQL parse error SQL0006: Expression nesting exceeds the supported limit of 40 levels.");
+        pastLimit.Message.ShouldBe("SQL parse error CS00006: Expression nesting exceeds the supported limit of 40 levels.");
         var diagnostic = typedPastLimit.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("SQL0006");
+        diagnostic.Code.ShouldBe("CS00006");
         diagnostic.Message.ShouldBe($"Expression nesting of {Number(41)} levels exceeds this engine's limit of 40 levels.");
     }
 
     /// <summary>
-    /// A statement whose walk runs out of stack fails as that statement, with COHSQLE004 and the
+    /// A statement whose walk runs out of stack fails as that statement, with CS05004 and the
     /// exhausted-stack signal inside, and none of it takes effect; the same statement then runs
     /// with ample stack. Every stack check leads here: a deeply backtracking LIKE, a statement
     /// within a high limit, or a statement run on a thread created with a small stack.
     /// </summary>
     /// <param name="sql">A statement whose predicate or value nests exactly 128 levels once <c>{0}</c> is filled.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement that runs out of stack fails with COHSQLE004 and keeps the session")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement that runs out of stack fails with CS05004 and keeps the session")]
     [InlineData("SELECT COUNT(*) FROM t WHERE id < {0}")]
     [InlineData("UPDATE t SET name = 'z' WHERE id < {0}")]
     [InlineData("DELETE FROM t WHERE id < {0}")]
@@ -601,7 +601,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>Inside BEGIN the failure follows the rule for any failed statement: the transaction stays open.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: COHSQLE004 inside a transaction keeps it open for COMMIT")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: CS05004 inside a transaction keeps it open for COMMIT")]
     public async Task ExecuteAsync_StackExhaustedInTransaction_ShouldKeepTransactionOpen()
     {
         // Arrange
@@ -623,7 +623,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>A CHECK whose DDL runs out of stack creates nothing; with ample stack the same DDL creates it.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a DDL that runs out of stack fails with COHSQLE004 and changes nothing")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a DDL that runs out of stack fails with CS05004 and changes nothing")]
     public async Task ExecuteAsync_StackExhaustedDdl_ShouldChangeNothing()
     {
         // Arrange: 126 signs over a column, compared: 128 levels.
@@ -762,7 +762,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         });
 
         // Assert
-        refused.Message.ShouldContain("SQL0006", Case.Sensitive);
+        refused.Message.ShouldContain("CS00006", Case.Sensitive);
         canonical.ShouldStartWith("-(-(-(", Case.Sensitive);
         canonical.Count(character => character == '(').ShouldBe(Limit - 3);
         reopened.ShouldBe(canonical);
@@ -830,10 +830,10 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// Binding a table version on a thread too small for its CHECK fails differently for the two
     /// callers (#1151 review): the open says to open the database on a thread with a larger stack,
     /// while binding on first use, which runs inside a statement, raises the exhausted-stack
-    /// signal itself, which the session reports as COHSQLE004 like any walk out of stack (see
+    /// signal itself, which the session reports as CS05004 like any walk out of stack (see
     /// the statement tests above), never advice about opening the database.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: binding out of stack fails the open with advice and a statement with COHSQLE004")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: binding out of stack fails the open with advice and a statement with CS05004")]
     public async Task Bind_OnSmallStack_ShouldAdviseOnlyTheOpen()
     {
         // Arrange: a stored CHECK of 128 levels.
@@ -863,7 +863,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// <summary>
     /// Every walk after the parse (planning, binding the bound expression tree, evaluation) needs
     /// less stack per level than the parser, so the parser is what limits how deeply a statement
-    /// nests on a thread: the first depth a thread cannot run fails in the parser (SQL0007), never in
+    /// nests on a thread: the first depth a thread cannot run fails in the parser (CS00007), never in
     /// a later walk. A binder that kept every case of its walk in one recursive frame once refused
     /// statements 10 to 23% shallower than the parser had read them (E1 review). The thread is 1 MB,
     /// where an optimized build nests about a thousand levels; the debug build's parser frames are
@@ -914,7 +914,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         deepest.ShouldBeLessThan(SqlQueryParserOptions.MaximumExpressionNestingLimit - 2);
         var tooComplex = failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull();
         AssertStatementTooComplex(tooComplex);
-        tooComplex.InnerException!.Message.ShouldStartWith("SQL parse error SQL0007:", Case.Sensitive,
+        tooComplex.InnerException!.Message.ShouldStartWith("SQL parse error CS00007:", Case.Sensitive,
             $"Depth {deepest + 1} ran out of stack after the parse: {tooComplex.InnerException}");
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
     }
@@ -957,8 +957,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// Over the wire the hostile statement is refused: a ParseFailure (SQL0006) where the
-    /// server's thread reaches the limit, which a release build always does, or COHSQLE004 where
+    /// Over the wire the hostile statement is refused: a ParseFailure (CS00006) where the
+    /// server's thread reaches the limit, which a release build always does, or CS05004 where
     /// the thread runs out of stack first, as 256 parentheses can in a debug build. Either way the
     /// server stays up, the session that sent it stays ready on the same connection, and other
     /// connections are unaffected.
@@ -985,7 +985,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         if (statement == "chain" || error.Code == ProtocolErrorCode.ParseFailure)
         {
             error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-            error.Message.ShouldContain("SQL0006", Case.Sensitive);
+            error.Message.ShouldContain("CS00006", Case.Sensitive);
         }
         else
         {
@@ -1020,12 +1020,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     /// <summary>
     /// Over the wire, a statement within a high configured limit runs where the server's thread
-    /// has the stack for it, and where it does not, it is COHSQLE004, an ExecutionFailure, not a
+    /// has the stack for it, and where it does not, it is CS05004, an ExecutionFailure, not a
     /// ParseFailure: the text is valid, the thread ran out. 4,000 nested parentheses need a few MB
     /// to parse: more than the 1.5 MB a .NET thread has by default on Windows and macOS, less than
     /// the 8 MB it has on Linux. Either way the session stays ready.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a statement within a high limit runs, or is COHSQLE004 over the wire")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Nesting: a statement within a high limit runs, or is CS05004 over the wire")]
     public async Task Wire_ParseOutOfStack_ShouldRunOrReturnStatementTooComplex()
     {
         // Arrange

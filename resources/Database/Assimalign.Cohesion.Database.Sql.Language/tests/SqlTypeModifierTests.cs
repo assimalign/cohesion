@@ -30,7 +30,7 @@ public sealed class SqlTypeModifierTests
 
             // Assert
             errors.ShouldNotBeEmpty();
-            errors.ShouldAllBe(error => error.Code == "SQL0003");
+            errors.ShouldAllBe(error => error.Code == "CS00003");
         }
     }
 
@@ -67,7 +67,7 @@ public sealed class SqlTypeModifierTests
 
             // Assert
             var error = errors.ShouldHaveSingleItem();
-            error.Code.ShouldBe("SQL0005");
+            error.Code.ShouldBe("CS00005");
             error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
             error.Message.ShouldContain(reason, Case.Sensitive);
         }
@@ -127,7 +127,7 @@ public sealed class SqlTypeModifierTests
             else
             {
                 var error = errors.ShouldHaveSingleItem(sql);
-                error.Code.ShouldBe("SQL0005", sql);
+                error.Code.ShouldBe("CS00005", sql);
                 error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
             }
         }

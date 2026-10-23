@@ -21,8 +21,8 @@ internal sealed partial class SqlPlanner
         var projections = InsertSourceProjections(plan);
         if (projections.Count != targetOrdinals.Count)
         {
-            throw new SqlPlanningException("COHSQLE013",
-                $"INSERT SELECT has {projections.Count} source columns but {targetOrdinals.Count} target columns.", source.Location);
+            throw new SqlPlanningException("CS05013",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertSelectWidth, projections.Count, targetOrdinals.Count), source.Location);
         }
         for (int i = 0; i < projections.Count; i++)
         {
@@ -30,8 +30,8 @@ internal sealed partial class SqlPlanner
             var sourceType = projections[i].Type;
             if (!CanAssignInsertType(sourceType, target.Type.Type))
             {
-                throw new SqlPlanningException("COHSQLE013",
-                    $"INSERT SELECT source column {i + 1} of type {sourceType} is incompatible with target column '{target.Name}' of type {target.Type.Type}.", source.Location);
+                throw new SqlPlanningException("CS05013",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanInsertSelectSqlPlanning, i + 1, sourceType, target.Name, target.Type.Type), source.Location);
             }
         }
         return new SqlInsertSelectPlan(table, targetOrdinals, plan);

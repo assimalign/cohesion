@@ -406,7 +406,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         var none = Array.Empty<SqlDeclaredDatabase>();
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _declaredDatabases, declarations, none), none))
         {
-            throw new InvalidOperationException($"SQL engine '{Name}' already declares its databases.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDatabaseEngineDeclareFailure, Name));
         }
     }
 
@@ -500,7 +500,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         // (SqlEngineContractTests pins the order).
         if (name.IsEmpty)
         {
-            throw new ArgumentException("A database name is required.", nameof(name));
+            throw new ArgumentException(ErrorMessages.EngineCreateDatabaseAsyncArgument, nameof(name));
         }
 
         ArgumentNullException.ThrowIfNull(defaultCollation);
@@ -579,7 +579,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } corruption)
         {
             throw DatabaseCorruptionException.Create(name, corruption, [new Diagnostic
-            { Code = "COHSQLE041", Message = error.Message, Severity = DiagnosticSeverity.Error }]);
+            { Code = "CS06041", Message = error.Message, Severity = DiagnosticSeverity.Error }]);
         }
         catch (Exception error) when (error is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
             && StorageCorruptionException.Find(error) is null && StorageOfflineException.Find(error) is { } offline)
@@ -593,7 +593,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreationFailed, name, error.Message);
             throw new DatabaseException(message, [new Diagnostic
-            { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }], error);
+            { Code = "CS06041", Message = message, Severity = DiagnosticSeverity.Error }], error);
         }
     }
 
@@ -674,7 +674,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
         {
             var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Diagnostic
-            { Code = "COHSQLE041", Message = exception.Message, Severity = DiagnosticSeverity.Error }]);
+            { Code = "CS06041", Message = exception.Message, Severity = DiagnosticSeverity.Error }]);
             throw refusal;
         }
         catch (Exception exception) when (exception is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
@@ -691,7 +691,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.DatabaseOpenFailed, name, exception.Message);
             throw new DatabaseException(message, [new Diagnostic
-            { Code = "COHSQLE041", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            { Code = "CS06041", Message = message, Severity = DiagnosticSeverity.Error }], exception);
         }
     }
 
@@ -723,7 +723,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
             if (!_strategy.StorageExists(name, catalog: false))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenDatabaseFilesFailure, name));
             }
 
             string catalogLabel = SqlStorageStrategy.GetLabel(name, catalog: true);
@@ -743,7 +743,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 if (dataProbe is { Length: >= Page.Size, HasSidecars: false } || catalogProbe is { Length: >= Page.Size, HasSidecars: false })
                 {
                     throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                        ErrorMessages.CreationSidecarMissing, name), "COHSQLC001");
+                        ErrorMessages.CreationSidecarMissing, name), "CS03401");
                 }
                 bool shortData = dataProbe is { Length: < Page.Size };
                 bool shortCatalog = catalogProbe is { Length: < Page.Size };
@@ -935,13 +935,13 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     }
 
     private static SqlDataStorageFormatException RefuseIncompleteCreation(string name)
-        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationHeaderMissing, name), "COHSQLC001");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationHeaderMissing, name), "CS03401");
 
     private static SqlDataStorageFormatException RefuseIncompleteState(string name)
-        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationStateIncomplete, name), "COHSQLC001");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationStateIncomplete, name), "CS03401");
 
     private static SqlDataStorageFormatException RefuseMissingCatalog(string name)
-        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationCatalogMissing, name), "COHSQLC001");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationCatalogMissing, name), "CS03401");
 
     // The format marker's tuple has remained (kind, version), using kind 4 before
     // format 4 and the downgrade-fenced kind 8 thereafter. Read that stable metadata
@@ -1011,7 +1011,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// <param name="storageName">The file set's storage name.</param>
     /// <param name="exception">The storage's refusal.</param>
     private static SqlDataStorageFormatException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
-        => new($"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}", exception);
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineRefuseStorageFormatFailure, name, role, storageName, exception.Message), exception);
 
     // The area's one name rule, in the create, open and drop cores, after the base's checks of an
     // empty name, disposal and the token: a database's files live in a directory named for it under
@@ -1153,7 +1153,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more SQL databases failed to close.", failures);
+            throw new AggregateException(ErrorMessages.EngineDisposeAsyncCoreAggregate, failures);
         }
     }
 

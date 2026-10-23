@@ -139,7 +139,7 @@ public sealed class SqlSystemRelationJoinTests
             cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.Single().Code.ShouldBe("COHSQLE015");
+        error.Diagnostics.Single().Code.ShouldBe("CS01015");
         error.Message.ShouldContain("Ambiguous column");
     }
 

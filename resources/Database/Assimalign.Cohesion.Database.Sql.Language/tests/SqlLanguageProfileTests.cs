@@ -128,7 +128,7 @@ public class SqlLanguageProfileTests
         diagnostic.Message.ShouldNotBeNull();
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Message.ShouldContain("SQL");
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Fact]

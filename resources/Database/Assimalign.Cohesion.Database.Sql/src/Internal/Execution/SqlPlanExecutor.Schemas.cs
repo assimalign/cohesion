@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
         if (SqlNamespaces.Find(_catalog, plan.Name) is not null)
         {
             if (plan.IfNotExists && statement.ScriptReceipt is null) { return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0); }
-            throw new SqlPlanningException("COHSQLE029", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceExists, plan.Name));
+            throw new SqlPlanningException("CS03029", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceExists, plan.Name));
         }
         // Declared scripts retain their compiled ownership identity. It does not select the
         // namespace of code-first tables, which continue to be provisioned exclusively in dbo.
@@ -35,16 +35,16 @@ internal sealed partial class SqlPlanExecutor
     {
         if (plan.Name.Equals(SqlNamespaces.DefaultName, StringComparison.OrdinalIgnoreCase))
         {
-            throw new SqlPlanningException("COHSQLE031", ErrorMessages.DefaultNamespaceProtected);
+            throw new SqlPlanningException("CS03031", ErrorMessages.DefaultNamespaceProtected);
         }
         var snapshot = _catalog.CaptureSnapshot();
         var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var contents = ObjectsInNamespace(snapshot, plan.Name);
         if (!plan.Cascade && contents.Views.Length != 0)
-        { throw new SqlPlanningException("COHSQLD002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
+        { throw new SqlPlanningException("CS03302", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
         if (!plan.Cascade && contents.Tables.Length != 0)
         {
-            throw new SqlPlanningException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, plan.Name));
+            throw new SqlPlanningException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, plan.Name));
         }
         // Definition DDL must never wait for transaction locks under its metadata lease:
         // a deferred migration owns table reservations and waits for that lease between steps.
@@ -66,7 +66,7 @@ internal sealed partial class SqlPlanExecutor
         {
             // The statement's ordinary cleanup releases its complete lock set. Never publish
             // by name using locks and ownership checks for a previous namespace image.
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceChanged, plan.Name));
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceChanged, plan.Name));
         }
         if (schema is null)
         {

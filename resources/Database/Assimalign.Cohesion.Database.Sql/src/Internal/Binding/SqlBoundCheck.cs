@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <param name="Bound">
 /// The predicate bound to the table version's columns, once (<see cref="SqlExpressionEvaluator.Bind(SqlExpression)"/>).
 /// Every session writing the version evaluates this one tree, which is immutable. For an unresolved
-/// predicate, a failure that raises <c>COHSQLE009</c> whatever the row.
+/// predicate, a failure that raises <c>CS01009</c> whatever the row.
 /// </param>
 /// <param name="Unresolved">
 /// The call the predicate makes that the engine's function catalog does not resolve, when the

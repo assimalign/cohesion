@@ -61,9 +61,9 @@ including GQL; it is not an ISO GQL or openCypher spelling.
 | OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
 | GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps, WHERE and RETURN (#1138, #1141) |
 
-SQL uses `SQL0003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
+SQL uses `CS00003`, OQL `OQL0002` and GQL `GQL0002` for unsupported forms.
 `QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
-parameters carry `COHSQLE020`, normalized-key collisions `COHSQLE023`; OQL uses
+parameters carry `CS01020`, normalized-key collisions `CS01023`; OQL uses
 `COHDOC005` and `COHDOC009` respectively, through `DatabaseException.Diagnostics`. GQL uses `COHDBG001` for unbound references and
 `COHDBG014` for collisions; unsupported scalar values use `COHDBG003`.
 The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
@@ -149,7 +149,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   is `Unrecognized` too; `char.IsDigit` used to lex it as an integer that the engines could not
   convert. Inside a name such a digit stays part of the identifier. `Unrecognized` is appended
   after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
-  syntax code at the character's span: `SQL0003`, `OQL0002` or `GQL0002`. The message is
+  syntax code at the character's span: `CS00003`, `OQL0002` or `GQL0002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
   statement then binds nothing. OQL and GQL stop before syntax parsing for these characters,
   except `?`: they defer its rejection until syntax parsing can distinguish an operand from a

@@ -13,29 +13,29 @@ internal static class SqlProvisioningCodes
     /// that does not compile, declares a principal, declares a domain that conflicts with a type the
     /// engine registers, or declares a column of a type the engine's catalog does not resolve.
     /// </summary>
-    internal const string DeclarationRefused = "COHSQLP001";
+    internal const string DeclarationRefused = "CS03101";
 
     /// <summary>
     /// An existing database whose default collation is not the declared one: a key's collation id
     /// is persisted in it and cannot change.
     /// </summary>
-    internal const string CollationMismatch = "COHSQLP002";
+    internal const string CollationMismatch = "CS03102";
 
     /// <summary>
     /// A database declared in <see cref="SqlProvisioningMode.Verify"/> mode that does not exist or
     /// does not hold exactly the declared schema.
     /// </summary>
-    internal const string Drift = "COHSQLP003";
+    internal const string Drift = "CS03103";
 
     /// <summary>
     /// A step of a schema apply failed; the completed reversible steps were compensated.
     /// </summary>
-    internal const string StepFailed = "COHSQLP004";
+    internal const string StepFailed = "CS03104";
 
     /// <summary>
     /// An apply refused before any step runs: its plan needs a destructive step the schema does
     /// not allow or a change the planner cannot make, or the schema would adopt a table or index it
     /// did not create.
     /// </summary>
-    internal const string PolicyRefused = "COHSQLP005";
+    internal const string PolicyRefused = "CS03105";
 }

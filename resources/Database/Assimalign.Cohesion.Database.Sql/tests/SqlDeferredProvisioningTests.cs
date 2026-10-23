@@ -252,8 +252,8 @@ public sealed partial class SqlDeferredProvisioningTests
 
         // Assert: the code and durable intent survive, and the engine still serves another database.
         database.IsOffline.ShouldBeTrue();
-        database.OfflineError.ShouldNotBeNull().Message.ShouldContain("COHSQLP004");
-        database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("COHSQLP004");
+        database.OfflineError.ShouldNotBeNull().Message.ShouldContain("CS03104");
+        database.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03104");
         var healthy = await engine.OpenDatabaseAsync("healthy", timeout.Token);
         await using var session = await healthy.CreateSessionAsync(timeout.Token);
         await session.ExecuteAsync("CREATE TABLE live (Id INT)", cancellationToken: timeout.Token);

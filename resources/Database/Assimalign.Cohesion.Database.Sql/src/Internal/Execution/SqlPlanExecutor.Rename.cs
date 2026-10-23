@@ -23,7 +23,7 @@ internal sealed partial class SqlPlanExecutor
             string.Equals(view.Schema, plan.Table.Schema, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(view.Name, plan.NewName, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new SqlPlanningException("COHSQLE021", $"System view '{plan.Table.Schema}.{plan.NewName}' is read-only.");
+            throw new SqlPlanningException("CS04021", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorExecuteRenameAsyncSqlPlanning, plan.Table.Schema, plan.NewName));
         }
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE RENAME", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
@@ -33,13 +33,13 @@ internal sealed partial class SqlPlanExecutor
             FindColumnOrdinal(plan.Table, plan.ColumnName);
             if (plan.Table.FindColumn(plan.NewName) is not null)
             {
-                throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.RenameColumnCollision, plan.NewName, plan.Table.Name));
             }
         }
         else if (_catalog.TryGetTable(plan.Table.Schema, plan.NewName, out _) || _catalog.TryGetView(plan.Table.Schema, plan.NewName, out _))
         {
-            throw new SqlPlanningException("COHSQLE013", string.Format(CultureInfo.CurrentCulture,
+            throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.RenameTableCollision, plan.Table.Schema, plan.NewName));
         }
         if (plan.ColumnName is null)
@@ -51,7 +51,7 @@ internal sealed partial class SqlPlanExecutor
             var dependent = _catalog.Scripts.FirstOrDefault(script => script.Objects.Any(claims.Contains));
             if (dependent is not null)
             {
-                throw new SqlPlanningException("COHSQLD002", $"Table '{plan.Table.Name}' cannot be renamed because declared script '{dependent.Name}' retains a dependent object target.");
+                throw new SqlPlanningException("CS03302", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorExecuteRenameAsyncSqlPlanning2, plan.Table.Name, dependent.Name));
             }
         }
 

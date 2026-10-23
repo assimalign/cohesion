@@ -95,7 +95,7 @@ public sealed class SqlAlterTableRecoveryTests
             // Assert
             var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await waiting);
             failure.Diagnostics.Count.ShouldBe(1);
-            failure.Diagnostics[0].Code.ShouldBe("COHSQLT006");
+            failure.Diagnostics[0].Code.ShouldBe("CS04006");
         }
         finally
         {
@@ -229,7 +229,7 @@ public sealed class SqlAlterTableRecoveryTests
         else
         {
             var error = await Should.ThrowAsync<DatabaseException>(() => SqlAlterTableExecutionTests.ExecuteAsync(writer, "ALTER TABLE t ALTER COLUMN c VARCHAR(5)"));
-            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE012");
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02012");
             error.Message.ShouldContain("Column 'c': frozen missing value", Case.Sensitive);
         }
 
@@ -310,8 +310,8 @@ public sealed class SqlAlterTableRecoveryTests
                 catch (DatabaseException error) when (join && error.Message.Contains("changed while the statement was waiting", StringComparison.Ordinal))
                 {
                     // Joins recheck after taking Shared locks. A rename that won that wait
-                    // requires retry; an unknown index key (COHSQLE015) must never escape.
-                    error.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHSQLE015");
+                    // requires retry; an unknown index key (CS01015) must never escape.
+                    error.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS01015");
                 }
                 if (Volatile.Read(ref renames) > before) { Interlocked.Increment(ref overlaps); }
             }
@@ -407,7 +407,7 @@ public sealed class SqlAlterTableRecoveryTests
             failure = await selecting.JoinAsync();
         }
 
-        // Assert: the mixed plan's COHSQLE015 is discarded and a fresh binding produces the row.
+        // Assert: the mixed plan's CS01015 is discarded and a fresh binding produces the row.
         failure.ShouldBeNull();
         gate.Calls.ShouldBeGreaterThanOrEqualTo(2);
         rows.ShouldNotBeNull().ShouldHaveSingleItem().ShouldBe(new object?[] { 1, 1 });

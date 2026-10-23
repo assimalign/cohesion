@@ -224,49 +224,48 @@ internal static class SqlStandardLibrary
     {
         if (!sqlDefined && (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_')))
         {
-            throw new ArgumentException($"Function name '{name}' is not an identifier: it must start with a letter or an underscore.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument, name), nameof(name));
         }
         foreach (char character in name)
         {
             if (!sqlDefined && !(char.IsLetterOrDigit(character) || character == '_'))
             {
-                throw new ArgumentException($"Function name '{name}' is not an identifier: it may hold only letters, digits and underscores.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument2, name), nameof(name));
             }
         }
         foreach (string form in _specialForms)
         {
             if (string.Equals(form, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is a SQL special form, not a function, and cannot be registered.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument3, name), nameof(name));
             }
         }
         foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
         {
             if (string.Equals(keyword, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is a SQL keyword and cannot name a function.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument4, name), nameof(name));
             }
         }
         foreach (string reserved in _reservedWords)
         {
             if (string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is reserved by the SQL dialect and cannot name a function.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument5, name), nameof(name));
             }
         }
         if (_functions.Any(function => function is SqlBuiltinScalarFunction && string.Equals(function.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new ArgumentException($"'{name}' is reserved for a SQL built-in function and cannot be registered by an application.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument6, name), nameof(name));
         }
         if (SqlTypeNames.TryResolve(name, out _))
         {
-            throw new ArgumentException($"'{name}' is a SQL type name and cannot name a function.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument7, name), nameof(name));
         }
         if (!IsStandardName(name) && IsDeclaredName(name))
         {
             throw new ArgumentException(
-                $"'{name}' is reserved for a built-in function of the SQL dialect that does not execute yet, and cannot be registered by an application. " +
-                "Register the function under another name.", nameof(name));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StandardLibraryValidateNameArgument8, name), nameof(name));
         }
     }
 

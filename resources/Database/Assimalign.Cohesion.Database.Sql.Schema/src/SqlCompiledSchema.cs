@@ -149,7 +149,7 @@ public sealed class SqlCompiledSchema
         {
             throw SqlCompiledSchemaValidator.InvalidDocument(
                 declaration,
-                "The compiled schema collection cannot be null.");
+                ErrorMessages.SqlCompiledSchemaSnapshotFailure);
         }
 
         var copy = new T[values.Count];
@@ -159,7 +159,7 @@ public sealed class SqlCompiledSchema
             {
                 throw SqlCompiledSchemaValidator.InvalidDocument(
                     $"{declaration}[{index}]",
-                    "The compiled schema collection cannot contain a null entry.");
+                    ErrorMessages.SqlCompiledSchemaSnapshotFailure2);
             }
 
             copy[index] = normalize is null ? values[index] : normalize(values[index]);

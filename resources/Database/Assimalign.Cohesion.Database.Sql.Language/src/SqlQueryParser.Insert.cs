@@ -232,7 +232,7 @@ public sealed partial class SqlQueryParser
 
         if (lexer.Current.Type == TokenType.RightParen)
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected a value in the VALUES row; an empty row is not allowed.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSingleValueRowVoid);
         }
         else
         {

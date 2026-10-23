@@ -38,7 +38,7 @@ public sealed class SqlPrincipalBuilder
         ArgumentNullException.ThrowIfNull(objects);
         if (objects.Length == 0)
         {
-            throw new ArgumentException("At least one schema object is required.", nameof(objects));
+            throw new ArgumentException(ErrorMessages.SqlPrincipalBuilderGrantArgument, nameof(objects));
         }
 
         foreach (string schemaObject in objects)

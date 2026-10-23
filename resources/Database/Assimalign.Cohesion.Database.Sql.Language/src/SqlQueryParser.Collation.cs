@@ -22,7 +22,7 @@ public sealed partial class SqlQueryParser
     {
         if (IsAtEnd(ref lexer) || !IsNameToken(ref lexer))
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected a collation name after COLLATE.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCollationNameVoid);
             return string.Empty;
         }
 

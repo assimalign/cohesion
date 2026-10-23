@@ -28,7 +28,7 @@ internal sealed class SqlMaterializedRow : DatabaseRow
     {
         null => ReadOnlyMemory<byte>.Empty,
         byte[] bytes => bytes,
-        _ => throw new DatabaseException($"Field {ordinal} is not binary."),
+        _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlMaterializedRowGetBytesDatabase, ordinal)),
     };
 
     /// <inheritdoc />
@@ -56,5 +56,5 @@ internal sealed class SqlMaterializedRow : DatabaseRow
     public override object? GetValue(int ordinal) => SqlCharacter.Output(_values[ordinal]);
 
     private object RequireValue(int ordinal)
-        => SqlCharacter.Output(_values[ordinal]) ?? throw new DatabaseException($"Field {ordinal} is NULL.");
+        => SqlCharacter.Output(_values[ordinal]) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
 }

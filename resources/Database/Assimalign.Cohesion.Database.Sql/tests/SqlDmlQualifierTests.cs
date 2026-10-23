@@ -63,7 +63,7 @@ public sealed class SqlDmlQualifierTests
         // Assert: preserve SELECT's location and span for a qualified reference.
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
         var selected = selectFailure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE015");
+        diagnostic.Code.ShouldBe("CS01015");
         diagnostic.Code.ShouldBe(selected.Code);
         diagnostic.Start.ShouldBe(statement.IndexOf(reference, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + selected.End - selected.Start);
@@ -132,7 +132,7 @@ public sealed class SqlDmlQualifierTests
             : await Should.ThrowAsync<SqlPlanningException>(() => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == (assignment ? "CK00001" : "COHSQLE015") && diagnostic.Start.HasValue);
+        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == (assignment ? "CK00001" : "CS01015") && diagnostic.Start.HasValue);
         transaction.State.ShouldBe(TransactionState.Active);
         (await ReadAsync(session)).ShouldBe(new[] { 1 });
     }

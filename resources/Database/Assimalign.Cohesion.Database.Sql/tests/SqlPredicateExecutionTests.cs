@@ -174,7 +174,7 @@ public sealed class SqlPredicateExecutionTests
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT " + expression + " FROM empty_rows"));
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE034");
+        diagnostic.Code.ShouldBe("CS02034");
         diagnostic.Start.ShouldBe(8 + expression.IndexOf(" LIKE ", StringComparison.Ordinal));
         error.Message.ShouldContain("ESCAPE", Case.Sensitive);
         (await RowsAsync(session, "SELECT 1" + oneRow)).ShouldHaveSingleItem()[0].ShouldBe(1);
@@ -197,7 +197,7 @@ public sealed class SqlPredicateExecutionTests
             new Dictionary<string, object?> { ["p"] = 1 }, CancellationToken.None));
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE003");
+        diagnostic.Code.ShouldBe("CS02003");
         diagnostic.Start.ShouldBe(8 + expression.IndexOf(" IS ", StringComparison.Ordinal));
     }
 
@@ -257,16 +257,16 @@ public sealed class SqlPredicateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Predicate walkers: hidden columns, calls, stars and aggregate levels are validated")]
-    [InlineData("SELECT -'1' COLLATE binary FROM t", "COHSQLE003")]
-    [InlineData("SELECT absent IS TRUE FROM t", "COHSQLE015")]
-    [InlineData("SELECT flag IS DISTINCT FROM absent FROM t", "COHSQLE015")]
-    [InlineData("SELECT name LIKE pattern ESCAPE absent FROM t", "COHSQLE015")]
-    [InlineData("SELECT name LIKE pattern ESCAPE NO_SUCH_FUNCTION() FROM t", "COHSQLE016")]
-    [InlineData("SELECT * IS TRUE FROM t", "COHSQLE013")]
-    [InlineData("SELECT 1 IS DISTINCT FROM * FROM t", "COHSQLE013")]
-    [InlineData("SELECT name LIKE pattern ESCAPE * FROM t", "COHSQLE013")]
-    [InlineData("SELECT COUNT(*) FROM t WHERE COUNT(*) IS DISTINCT FROM 0", "COHSQLE017")]
-    [InlineData("SELECT COUNT(*) FROM t WHERE (COUNT(*) = 1) IS TRUE", "COHSQLE017")]
+    [InlineData("SELECT -'1' COLLATE binary FROM t", "CS02003")]
+    [InlineData("SELECT absent IS TRUE FROM t", "CS01015")]
+    [InlineData("SELECT flag IS DISTINCT FROM absent FROM t", "CS01015")]
+    [InlineData("SELECT name LIKE pattern ESCAPE absent FROM t", "CS01015")]
+    [InlineData("SELECT name LIKE pattern ESCAPE NO_SUCH_FUNCTION() FROM t", "CS01016")]
+    [InlineData("SELECT * IS TRUE FROM t", "CS05013")]
+    [InlineData("SELECT 1 IS DISTINCT FROM * FROM t", "CS05013")]
+    [InlineData("SELECT name LIKE pattern ESCAPE * FROM t", "CS05013")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE COUNT(*) IS DISTINCT FROM 0", "CS05017")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE (COUNT(*) = 1) IS TRUE", "CS05017")]
     public async Task Execute_InvalidNestedOperand_ShouldFailAdmissionAsync(string sql, string code)
     {
         // Arrange
@@ -374,7 +374,7 @@ public sealed class SqlPredicateExecutionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT " + expression + oneRow + ";"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Views: functions used only by predicate operands retain dependencies")]
@@ -391,7 +391,7 @@ public sealed class SqlPredicateExecutionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP FUNCTION " + name + "()"));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLD002");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03302");
         (await RowsAsync(session, "SELECT matched FROM v")).ShouldHaveSingleItem()[0].ShouldBe(true);
     }
 
@@ -450,7 +450,7 @@ public sealed class SqlPredicateExecutionTests
         // Act
         var error = Should.Throw<DatabaseException>(() => pattern.Match(input, Collation.Invariant, CancellationToken.None, out work));
         // Assert: comparison lengths as well as transitions consume the same finite budget.
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05040");
         work.ShouldBeGreaterThan(0);
         work.ShouldBeLessThanOrEqualTo(pattern.WorkLimit(length));
         pattern.WorkLimit(length).ShouldBe(64L * (length + 1) * (3 * wildcards + 2));
@@ -795,9 +795,9 @@ public sealed class SqlPredicateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Predicates: runtime operand failures retain their source location")]
-    [InlineData("distinct", "COHSQLE003")]
-    [InlineData("boolean", "COHSQLE003")]
-    [InlineData("escape", "COHSQLE034")]
+    [InlineData("distinct", "CS02003")]
+    [InlineData("boolean", "CS02003")]
+    [InlineData("escape", "CS02034")]
     public void Evaluate_InvalidRuntimeOperand_ShouldRetainLocation(string kind, string code)
     {
         // Arrange

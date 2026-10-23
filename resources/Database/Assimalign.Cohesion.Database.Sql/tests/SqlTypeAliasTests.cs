@@ -117,11 +117,11 @@ public sealed class SqlTypeAliasTests
                             var error = await Should.ThrowAsync<SqlClientException>(() => ExecuteAsync(sql));
                             error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
                             error.ConnectionUsable.ShouldBeTrue();
-                            error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                            error.Message.ShouldContain("CS00005", Case.Sensitive);
                         }
                         else
                         {
-                            (await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(sql))).Message.ShouldContain("SQL0005", Case.Sensitive);
+                            (await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(sql))).Message.ShouldContain("CS00005", Case.Sensitive);
                         }
                     }
                     await ExecuteAsync("INSERT INTO aliases (s) VALUES ('after failures')");

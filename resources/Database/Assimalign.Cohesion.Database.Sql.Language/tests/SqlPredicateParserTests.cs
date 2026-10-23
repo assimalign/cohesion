@@ -91,7 +91,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(sql.LastIndexOf(token, System.StringComparison.Ordinal));
     }
 
@@ -131,7 +131,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse("SELECT a<-1;");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(8);
         error.End.ShouldBe(10);
     }
@@ -159,7 +159,7 @@ public sealed class SqlPredicateParserTests
         // Act
         var statement = parser.Parse(text);
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("SQL0006");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS00006");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: nonassociative rungs refuse the second operator once")]
@@ -176,7 +176,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(sql.LastIndexOf(second, System.StringComparison.Ordinal));
         error.End.ShouldBe(error.Start + second.Length);
     }
@@ -204,7 +204,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse("SELECT a NOT NULL FROM t;");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message.ShouldNotBeNull().ShouldContain("write IS NOT NULL", Case.Sensitive);
     }
 

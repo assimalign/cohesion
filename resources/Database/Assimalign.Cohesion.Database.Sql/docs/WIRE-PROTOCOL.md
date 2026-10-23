@@ -31,7 +31,7 @@ Result failures precede any committed write or result frame and roll back only t
 Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery. A late result failure
 ends even a partial exchange with ExecutionFailure; the client discards partial columns and rows.
 Both paths keep the connection and explicit transaction usable on result failures.
-COHSQLE045 identifies uncoded result failures and size refusals; already-coded failures retain
+CS05045 identifies uncoded result failures and size refusals; already-coded failures retain
 their diagnostics. Size refusals correspond to SQLSTATE 54000 and report encoded bytes and
 ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB) for each header/row. Neither path has an
 aggregate result cap. Writes retain their prepared payloads for delivery without re-encoding;
@@ -39,24 +39,24 @@ reads retain only the current encoded frame. Diagnostics, when negotiated, immed
 Error. A transport failure during delivery is terminal; a committed write is never reported as
 an ordinary statement failure (#1651).
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
-sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
-`COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more
+sign over a non-numeric operand carry messages that begin with `CS02001:`,
+`CS02002:` and `CS02003:`, and a statement whose parse or walk needs more
 stack than the server's thread has left, such as one within a high configured
 nesting limit or a `LIKE` match that backtracks through more wildcards than the
-stack holds, carries `COHSQLE004:` (see the dialect's diagnostics table). A
+stack holds, carries `CS05004:` (see the dialect's diagnostics table). A
 statement nested deeper than the engine's expression nesting limit (256 levels by
 default, configured per engine within 32..4096) is a ParseFailure whose message
-carries `SQL0006`; it is refused before anything executes. A chain of `AND` or `OR`
+carries `CS00006`; it is refused before anything executes. A chain of `AND` or `OR`
 terms counts one level however long it is, so a 10,000-term predicate executes (see
 the dialect's expression nesting limit, #1151).
 A column reference in an `INSERT ... VALUES` row or a `LIMIT` or `OFFSET` count,
-a subquery's included, is an ExecutionFailure carrying `COHSQLE005:`, raised while
+a subquery's included, is an ExecutionFailure carrying `CS01005:`, raised while
 planning, so nothing executes and the session stays ready (#1165; a reference to a
 target column in VALUES used to end the session with `Internal`, and one in a
 subquery's count carried `CK00001:`).
 A function call whose arguments its function does not accept, such as `ABS(1, 2)`,
 `UPPER()`, `COALESCE()` or `COUNT(a, b)`, is an ExecutionFailure carrying
-`COHSQLE006:`, raised while planning in every expression position, so nothing
+`CS01006:`, raised while planning in every expression position, so nothing
 executes and the session stays ready (#1189; such a call used to return NULL, and a
 CHECK built on one was stored and never fired).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
@@ -156,7 +156,7 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00100, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
@@ -205,8 +205,8 @@ Int64 estimated_rows/actual_rows values in the already nullable count columns. D
 exact probes, incomplete lower bounds and heuristic join estimates; actual counts describe
 candidate work before residuals. A parent's count excludes correlated descendants; repeated child
 invocations accumulate on the child's nodes. No new message type, frame shape or startup version is added.
-Data-changing analysis normally fails COHSQLE057 (0A000); the earlier read-only catalog check
-retains COHSQLE021 for system-relation mutations. Hash-build grant exhaustion fails COHSQLE067
+Data-changing analysis normally fails CS05057 (0A000); the earlier read-only catalog check
+retains CS04021 for system-relation mutations. Hash-build grant exhaustion fails CS05067
 (53200) through the ordinary diagnostic carrier; the resx message contains no repeated code prefix.
 No standalone ANALYZE maintenance, persisted statistic or hash spill is introduced.
 
@@ -236,3 +236,13 @@ Shared-kernel diagnostic identities use the `CK` prefix and five decimal digits;
 allocations are in the [Database registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md).
 This changes string identities only. Diagnostic severity, SQLSTATE meanings, numeric wire error
 kinds, protocol version and frame layouts retain their existing definitions.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

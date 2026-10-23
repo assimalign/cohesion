@@ -51,7 +51,7 @@ public sealed class SqlPredicateWireTests
             error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
             error.ConnectionUsable.ShouldBeTrue();
             var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHSQLE003");
+            diagnostic.Code.ShouldBe("CS02003");
             diagnostic.Start.ShouldNotBeNull();
         }
         await connection.ExecuteAsync("COMMIT", cancellationToken: SqlClientTestHarness.Timeout());
@@ -91,10 +91,10 @@ public sealed class SqlPredicateWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Predicates: planning and escape failures leave data and connection usable")]
-    [InlineData("DELETE FROM users WHERE score IS TRUE", "COHSQLE003")]
-    [InlineData("SELECT name LIKE 'a%' ESCAPE 'long' FROM users", "COHSQLE034")]
-    [InlineData("SELECT name LIKE 'a!' ESCAPE '!' FROM users", "COHSQLE034")]
-    [InlineData("SELECT name LIKE 'a!' ESCAPE name FROM users", "COHSQLE034")]
+    [InlineData("DELETE FROM users WHERE score IS TRUE", "CS02003")]
+    [InlineData("SELECT name LIKE 'a%' ESCAPE 'long' FROM users", "CS02034")]
+    [InlineData("SELECT name LIKE 'a!' ESCAPE '!' FROM users", "CS02034")]
+    [InlineData("SELECT name LIKE 'a!' ESCAPE name FROM users", "CS02034")]
     public async Task QueryAsync_InvalidPredicate_ShouldReturnExecutionFailureAndKeepConnectionAsync(string sql, string code)
     {
         // Arrange
@@ -124,7 +124,7 @@ public sealed class SqlPredicateWireTests
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE040");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05040");
         error.Diagnostics[0].Start.ShouldNotBeNull();
         (await connection.QueryAsync("SELECT id FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout())).ShouldHaveSingleItem()[0].ShouldBe(1);
     }

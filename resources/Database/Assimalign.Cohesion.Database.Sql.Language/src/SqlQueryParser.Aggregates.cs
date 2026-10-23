@@ -14,7 +14,7 @@ public sealed partial class SqlQueryParser
         {
             int start = lexer.Current.Position;
             AddUnsupportedSurfaceDiagnostic(start, end,
-                "The empty SQL grouping set GROUP BY () is not supported; use an ungrouped aggregate.");
+                ErrorMessages.ParserParseGroupingExpressionVoid);
             Advance(ref lexer);
             Advance(ref lexer);
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, end));
@@ -34,7 +34,7 @@ public sealed partial class SqlQueryParser
         if (numeric is not null)
         {
             AddUnsupportedSurfaceDiagnostic(expression.Location?.Start ?? 0, numeric.Location?.End ?? 0,
-                "SQL select-list ordinals in GROUP BY are not supported; use the source grouping expression. Ordinals are supported only in ORDER BY.");
+                ErrorMessages.ParserParseGroupingExpressionVoid2);
         }
         return expression;
     }

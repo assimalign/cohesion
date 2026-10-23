@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A stored column whose domain the engine that opened the database does not resolve (phase E3):
 /// the catalog keeps the domain's name, and the engine registers no domain of the name, or one over
 /// another storage type. As owner decision 65 has it for a function a CHECK calls, the database
-/// opens, its reads proceed and each write to the column fails with <c>COHSQLE010</c>.
+/// opens, its reads proceed and each write to the column fails with <c>CS02010</c>.
 /// </summary>
 /// <param name="Table">The schema-qualified table, for example <c>dbo.contacts</c>.</param>
 /// <param name="Column">The column.</param>

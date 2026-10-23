@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlUnaryPlusWireTests
 {
-    private const string InvalidOperandType = "COHSQLE003";
+    private const string InvalidOperandType = "CS02003";
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Unary plus: values keep their type over the wire")]
     public async Task QueryAsync_UnaryPlus_ShouldReturnOperandUnchanged()

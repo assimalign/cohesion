@@ -197,7 +197,7 @@ public sealed class SqlBindingConcurrencyTests
                     else
                     {
                         failure.ShouldBeAssignableTo<DatabaseException>();
-                        failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE004");
+                        failure.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05004");
                     }
                 }
                 else { failure.ShouldBeAssignableTo<OperationCanceledException>(); }

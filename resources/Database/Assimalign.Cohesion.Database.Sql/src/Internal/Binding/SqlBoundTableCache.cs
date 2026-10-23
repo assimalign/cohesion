@@ -128,7 +128,7 @@ internal sealed class SqlBoundTableCache
     /// <exception cref="InsufficientExecutionStackException">
     /// The calling thread has too little stack left to read a definition back
     /// (<see cref="SqlPersistedExpression.OutOfStack"/>); inside a statement the session reports it
-    /// as <c>COHSQLE004</c>.
+    /// as <c>CS05004</c>.
     /// </exception>
     internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken = default)
     {
@@ -361,7 +361,7 @@ internal sealed class SqlBoundTableCache
     /// Binds a stored column's domain against the engine's type catalog (phase E3): its check as a call
     /// over the column's value, or, when the engine registers no domain of the name, or one over another
     /// storage type or another length, precision or scale than the column stores, an unresolved
-    /// binding that fails each write to the column with <c>COHSQLE010</c> while the table opens and its
+    /// binding that fails each write to the column with <c>CS02010</c> while the table opens and its
     /// reads proceed, as owner decision 65 has it for a function. A column keeps the bound it was
     /// created with, so a domain whose base type changed would otherwise bound the column's writes and
     /// a <c>CAST</c> to the domain differently.
@@ -405,7 +405,7 @@ internal sealed class SqlBoundTableCache
 
     /// <summary>
     /// Binds one persisted CHECK: its tree when every call resolves, or an unresolved binding that
-    /// fails each write with <c>COHSQLE009</c> (owner decision 65) when a call names a function the
+    /// fails each write with <c>CS01009</c> (owner decision 65) when a call names a function the
     /// engine's catalog does not resolve, or an application function whose registered result no
     /// longer fits where the predicate uses it (a BOOLEAN predicate, a comparison, an arithmetic
     /// operand). Anything else that does not bind is a damaged catalog.
@@ -430,7 +430,7 @@ internal sealed class SqlBoundTableCache
 
         // A call the engine's catalog does not resolve is an application change, not damage: the
         // predicate binds as unresolved, the table opens and its reads proceed, and each write that
-        // would evaluate the predicate fails with COHSQLE009. Looked for only once binding failed, so
+        // would evaluate the predicate fails with CS01009. Looked for only once binding failed, so
         // a predicate that binds costs nothing more.
         var unresolved = FindUnresolvedCall(table, predicate, subject, constraint.CheckFunctionCalls, functions);
         if (unresolved is null && failure is SqlFunctionResultMismatchException mismatch)
@@ -453,14 +453,12 @@ internal sealed class SqlBoundTableCache
             // format-4 catalog can hold such a predicate, which never had a value. Format 4 is
             // unreleased and carries no such definition forward (#1152); the open fails, coded.
             throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' calls a function with " +
-                $"arguments the function does not accept ({failure.Message}). {SqlPersistedExpression.UncheckedCallHint}",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableCacheBindCheckDatabase, subject, constraint.CheckExpression, failure.Message, SqlPersistedExpression.UncheckedCallHint),
                 SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
         }
 
         throw new DatabaseException(
-            $"{subject} cannot be loaded: its persisted definition '{constraint.CheckExpression}' does not bind to the table " +
-            $"({failure.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlBoundTableCacheBindCheckDatabase2, subject, constraint.CheckExpression, failure.Message, SqlPersistedExpression.DamagedCatalogHint),
             SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
     }
 

@@ -83,7 +83,7 @@ public sealed class SqlSchemaParsingTests
         var result = Parse(sql);
 
         // Assert
-        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
         result.SqlExpression.ShouldNotBeOfType<SqlCreateTableExpression>();
         result.SqlExpression.ShouldNotBeOfType<SqlDropTableExpression>();
     }

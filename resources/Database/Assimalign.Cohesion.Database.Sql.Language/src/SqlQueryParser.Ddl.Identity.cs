@@ -49,14 +49,14 @@ public sealed partial class SqlQueryParser
                 {
                     if (IsWord(ref lexer, "START"))
                     {
-                        if (start is not null) { AddSyntaxDiagnostic(ref lexer, "Duplicate IDENTITY START option."); }
+                        if (start is not null) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid); }
                         Advance(ref lexer);
                         if (IsWord(ref lexer, "WITH")) { Advance(ref lexer); }
                         start = ParseIdentityInteger(ref lexer);
                     }
                     else if (IsWord(ref lexer, "INCREMENT"))
                     {
-                        if (sawIncrement) { AddSyntaxDiagnostic(ref lexer, "Duplicate IDENTITY INCREMENT option."); }
+                        if (sawIncrement) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid2); }
                         sawIncrement = true;
                         Advance(ref lexer);
                         if (IsWord(ref lexer, "BY")) { Advance(ref lexer); }
@@ -72,7 +72,7 @@ public sealed partial class SqlQueryParser
                     }
                     else
                     {
-                        AddSyntaxDiagnostic(ref lexer, "Expected IDENTITY START or INCREMENT option.");
+                        AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid3);
                         SkipToColumnDefinitionEnd(ref lexer);
                         if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
                         return new SqlIdentityDefinition(always, start ?? 1, increment);
@@ -106,7 +106,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             return value;
         }
-        AddSyntaxDiagnostic(start, lexer.Current.Position + lexer.Current.Value.Length, "IDENTITY requires a signed 64-bit integer literal.");
+        AddSyntaxDiagnostic(start, lexer.Current.Position + lexer.Current.Value.Length, ErrorMessages.QueryParserParseIdentityIntegerVoid);
         if (!IsAtEnd(ref lexer) && lexer.Current.Type is not (TokenType.RightParen or TokenType.Comma or TokenType.Semicolon)) { Advance(ref lexer); }
         return 0;
     }

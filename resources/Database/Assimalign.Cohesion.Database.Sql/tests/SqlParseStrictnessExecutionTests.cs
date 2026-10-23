@@ -25,10 +25,10 @@ public sealed class SqlParseStrictnessExecutionTests
     /// <summary>
     /// A stray character used to lex as a one-character identifier: SELECT * FROM t ? read
     /// ? as an alias and returned every row, and DELETE FROM t ? deleted them. Each reports
-    /// SQL0003 at the character and changes nothing.
+    /// CS00003 at the character and changes nothing.
     /// </summary>
     /// <param name="sql">A statement with a character outside the dialect.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports SQL0003 and nothing executes")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports CS00003 and nothing executes")]
     [InlineData("SELECT * FROM t ?;")]
     [InlineData("SELECT * FROM t #;")]
     [InlineData("SELECT * FROM t ^;")]
@@ -52,7 +52,7 @@ public sealed class SqlParseStrictnessExecutionTests
     // A stray character before the statement, such as a byte order mark.
     [InlineData("﻿DELETE FROM t;")]
     public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "SQL0003");
+        => await AssertRejectedAsync(sql, "CS00003");
 
     /// <summary>
     /// ~ used to parse as bitwise NOT, whose evaluator returned NULL for a NULL operand and

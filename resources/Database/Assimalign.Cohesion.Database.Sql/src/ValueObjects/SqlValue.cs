@@ -365,7 +365,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNullCompared(bool leftIsNull)
-        => throw new ArgumentException("NULL has no place in the order; test IsNull first.", leftIsNull ? "left" : "right");
+        => throw new ArgumentException(ErrorMessages.SqlValueThrowNullComparedArgument, leftIsNull ? "left" : "right");
 
     /// <summary>
     /// Converts a value of the engine's row representation: <see langword="null"/> or a boxed value
@@ -434,7 +434,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         uint number => FromInt64(number),
         ulong number => FromDecimal(number),
         char character => FromString(character.ToString()),
-        _ => throw new DatabaseException($"A value of CLR type '{value.GetType().Name}' has no SQL type a function can take."),
+        _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueFromOtherObjectDatabase, value.GetType().Name)),
     };
 
     /// <summary>
@@ -482,7 +482,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
             DatabaseType.DateTimeOffset => Read<DateTimeOffset>(),
             DatabaseType.TimeSpan => Read<TimeSpan>(),
             DatabaseType.Guid => Read<Guid>(),
-            _ => throw new InvalidOperationException($"A {_type} value has no row representation."),
+            _ => throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueBoxFailure, _type)),
         };
     }
 
@@ -518,6 +518,6 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     private void ThrowMismatch(DatabaseType requested) => throw Mismatch(requested);
 
     private InvalidCastException Mismatch(DatabaseType requested) => _type == DatabaseType.Null
-        ? new InvalidCastException($"The value is NULL, not {SqlType.NameOf(requested)}.")
-        : new InvalidCastException($"The value is {SqlType.NameOf(_type)}, not {SqlType.NameOf(requested)}; read it with the accessor of its type.");
+        ? new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast, SqlType.NameOf(requested)))
+        : new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast2, SqlType.NameOf(_type), SqlType.NameOf(requested)));
 }

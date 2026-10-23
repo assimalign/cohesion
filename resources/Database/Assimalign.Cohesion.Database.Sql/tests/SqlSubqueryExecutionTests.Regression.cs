@@ -104,7 +104,7 @@ public sealed partial class SqlSubqueryExecutionTests
         else
         {
             var error = await Should.ThrowAsync<SqlPlanningException>(() => RowsAsync(session, sql));
-            error.Diagnostics.ShouldContain(d => d.Code == "COHSQLE017" && d.Message!.Contains("Outer column", StringComparison.Ordinal));
+            error.Diagnostics.ShouldContain(d => d.Code == "CS05017" && d.Message!.Contains("Outer column", StringComparison.Ordinal));
         }
     }
 
@@ -176,7 +176,7 @@ public sealed partial class SqlSubqueryExecutionTests
         lateral.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "CK00001" && d.Message!.Contains("LATERAL", StringComparison.Ordinal));
         var unknown = await Should.ThrowAsync<SqlPlanningException>(() => RowsAsync(session,
             "SELECT (SELECT 1 FROM u, (SELECT missing FROM v) d) FROM t GROUP BY t.g"));
-        unknown.Diagnostics.ShouldContain(d => d.Code == "COHSQLE015");
+        unknown.Diagnostics.ShouldContain(d => d.Code == "CS01015");
         (await RowsAsync(session, "SELECT (SELECT d.g FROM u, (SELECT u.g FROM v) d) FROM t u GROUP BY u.g"))
             .ShouldHaveSingleItem()[0].ShouldBe(1);
     }
@@ -196,7 +196,7 @@ public sealed partial class SqlSubqueryExecutionTests
             "SELECT s.id FROM sales s WHERE EXISTS (SELECT 1 FROM labels s WHERE s.amount = 4)"));
 
         // Assert
-        error.Diagnostics.ShouldContain(d => d.Code == "COHSQLE015" && d.Message!.Contains("s.amount", StringComparison.Ordinal));
+        error.Diagnostics.ShouldContain(d => d.Code == "CS01015" && d.Message!.Contains("s.amount", StringComparison.Ordinal));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Correlation: self-referencing DML reads the complete pre-statement snapshot")]

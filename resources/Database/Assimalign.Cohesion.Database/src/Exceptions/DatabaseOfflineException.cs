@@ -39,7 +39,7 @@ namespace Assimalign.Cohesion.Database;
 /// The commit whose flush failed is reported to its caller as
 /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>; this exception is what every
 /// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
-/// <c>COHSQLT004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
+/// <c>CS04004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
 /// <c>COHDBG012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
 /// <c>CK06002</c> error is the inner exception.
 /// </para>

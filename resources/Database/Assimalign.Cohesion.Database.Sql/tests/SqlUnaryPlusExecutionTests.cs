@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlUnaryPlusExecutionTests
 {
-    private const string InvalidOperandType = "COHSQLE003";
+    private const string InvalidOperandType = "CS02003";
 
     private const string CreateValues =
         "CREATE TABLE v (id INT, tiny TINYINT, small SMALLINT, whole INT, big BIGINT, single REAL, approximate DOUBLE, " +
@@ -72,7 +72,7 @@ public sealed class SqlUnaryPlusExecutionTests
     }
 
     /// <summary>
-    /// A sign over an operand the plan types as non-numeric fails planning with COHSQLE003, so an
+    /// A sign over an operand the plan types as non-numeric fails planning with CS02003, so an
     /// empty table fails exactly like a populated one. Unary minus follows the same rule.
     /// </summary>
     /// <param name="expression">The projected expression.</param>

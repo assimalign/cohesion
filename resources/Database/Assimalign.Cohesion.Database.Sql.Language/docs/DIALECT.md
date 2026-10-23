@@ -2,13 +2,13 @@
 
 Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
 `a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
-An escaped final quote without a closing delimiter is SQL0003 (#1235).
+An escaped final quote without a closing delimiter is CS00003 (#1235).
 
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
-execution support report `CK00001`; unknown commands report `SQL0002`; text the
-parser did not consume reports `SQL0003`, so nothing executes a truncated statement
+execution support report `CK00001`; unknown commands report `CS00002`; text the
+parser did not consume reports `CS00003`, so nothing executes a truncated statement
 (see [Statement completeness](#statement-completeness-1068)). Extending
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
@@ -20,7 +20,7 @@ A read that detects storage corruption fails with `CK06003`, naming the database
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
 The error is an execution failure over the wire; the connection remains usable.
 StorageException subclasses (including slot, journal and storage-transaction failures),
-IndexException and IOException become COHSQLE041; I/O has SQLSTATE 58030. Classification
+IndexException and IOException become CS06041; I/O has SQLSTATE 58030. Classification
 searches wrappers and aggregate branches. Attached-index corruption instead retains
 CK06102 alongside the common CK06003 and model diagnostic. CK06003 maps to
 XX001. Either failure aborts an explicit transaction, whose caller must roll back before
@@ -39,23 +39,23 @@ contextual and usable as unquoted column names. Identity adds one advertised cla
 
 Identity requires a built-in integer type, implies NOT NULL, allows one column per table,
 and excludes DEFAULT. Explicit NULL conflicts with NOT NULL, PRIMARY KEY or IDENTITY in either
-order, including table primary keys and CREATE/ADD/ALTER column definitions; `SQL0003` names
+order, including table primary keys and CREATE/ADD/ALTER column definitions; `CS00003` names
 the column. START must fit the generator bounds; INCREMENT must be a nonzero signed Int64.
 Absent START, the first value is 1 for ascending generation and -1 for descending generation.
 Ascending bounds are 1 through the type maximum; descending bounds are the type minimum
 through -1, following PostgreSQL `src/backend/commands/sequence.c:1462,1494,1529`.
 Generation never cycles.
-Definition errors use `COHSQLE025`, naming the column, before catalog mutation. ADD identity
+Definition errors use `CS03025`, naming the column, before catalog mutation. ADD identity
 checks for no live rows under the existing DDL lock; deleted historical versions do not prevent it.
 Typed schema-owned tables refuse identity metadata with `SqlSchemaMigrationException` /
-`COHSQLP005` and "Nothing was changed." because compiled schemas cannot represent it;
+`CS03105` and "Nothing was changed." because compiled schemas cannot represent it;
 SQL script-created tables retain their SQL definitions.
 
 Omitted INSERT columns, DEFAULT VALUES, and whole-item DEFAULT allocate one value per row,
 including INSERT SELECT. BY DEFAULT accepts explicit non-null values without advancing its
 counter; a generated collision then uses the existing primary-key/unique violation.
 An explicit NULL fails NOT NULL. ALWAYS rejects explicit INSERT values and every UPDATE
-assignment, including DEFAULT, with `COHSQLE025`. BY DEFAULT UPDATE SET id = DEFAULT
+assignment, including DEFAULT, with `CS03025`. BY DEFAULT UPDATE SET id = DEFAULT
 allocates a new value. Range exhaustion fails the whole statement without partial row writes.
 
 Allocation reserves up to 32 values durably before returning any, independently of the data
@@ -77,7 +77,7 @@ only a bare OVERRIDING token in clause position is refused. CREATE SEQUENCE, OVE
 MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
 expressions also report named `CK00001`. Sequences, restart, overriding and populated-table
 identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Full-definition ALTER COLUMN already refuses identity type changes,
-nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with COHSQLE025 (#1122).
+nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with CS03025 (#1122).
 
 ## RETURNING contract (#1117)
 
@@ -113,8 +113,8 @@ bare output alias is reserved for OUTPUT detection: `DELETE FROM t output WHERE 
 reports CK00001; use `AS output` to spell that alias. RETURNING subqueries report
 CK00001 naming SUBQUERY in
 RETURNING, even after an INSERT SELECT or a supported DML WHERE subquery. Windows also
-remain CK00001; aggregates fail planning with COHSQLE017. Modifying CTE bodies retain
-CK00001 and perform no writes. Empty lists and SELECT ... RETURNING report SQL0003.
+remain CK00001; aggregates fail planning with CS05017. Modifying CTE bodies retain
+CK00001 and perform no writes. Empty lists and SELECT ... RETURNING report CS00003.
 ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped proposals (#1118).
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
 INSERT SELECT, UPDATE and DELETE without applying the write or evaluating the projection.
@@ -153,18 +153,18 @@ count is inserted plus updated rows.
 
 A column target infers **every unique index whose column set equals the target set**;
 column order does not matter, and duplicate inference names collapse to that set. No matching
-unique index reports COHSQLE035 naming the target and table. ON CONSTRAINT accepts any
+unique index reports CS03035 naming the target and table. ON CONSTRAINT accepts any
 unique index name on this table, including a user constraint name, a generated primary-key
 name read from INFORMATION_SCHEMA.TABLE_CONSTRAINTS, and a standalone CREATE UNIQUE INDEX
 name: the catalog reports all of them as constraints. Unknown names, CHECK and FOREIGN KEY
-names, and a legacy primary-key declaration without an index report COHSQLE035; the legacy
+names, and a legacy primary-key declaration without an index report CS03035; the legacy
 case names its absent index explicitly. DO UPDATE requires a target and reports this at
-planning time with COHSQLE035. Untargeted DO NOTHING arbitrates on all unique indexes; with
+planning time with CS03035. Untargeted DO NOTHING arbitrates on all unique indexes; with
 no unique indexes it inserts normally. Conflicts outside an explicit target still fail
 ordinary unique enforcement. If index-only DDL creates, drops or replaces unique indexes while the
 statement waits for its table intent lock, the bound arbiter set is invalidated and the
 transaction aborts retryably. A fresh execution binds the current indexes; an explicit target
-whose index was dropped then reports COHSQLE035.
+whose index was dropped then reports CS03035.
 
 Arbiter keys use the index's collation and temporal normalization, so case_insensitive
 'ADA' conflicts with 'Ada'. **NULL conflicts with NULL** in a unique key, including a
@@ -174,10 +174,10 @@ PostgreSQL's default NULL-distinct behavior.
 DO UPDATE expressions see the original target row (qualified by its alias, or table name
 when there is no alias) and EXCLUDED. An alias hides the base table name. EXCLUDED contains
 the proposed stored values after coercion, defaults, expression defaults and identity
-allocation. An unqualified column common to both relations is ambiguous (COHSQLE015).
+allocation. An unqualified column common to both relations is ambiguous (CS01015).
 A target named or aliased excluded makes that qualifier ambiguous too. SET expressions
 all read the original target plus proposed row; SET c = DEFAULT uses the normal UPDATE
-default resolver. ALWAYS identity assignments retain COHSQLE025. Identity values allocated
+default resolver. ALWAYS identity assignments retain CS03025. Identity values allocated
 for conflicting proposals are consumed, including skipped proposals. Each proposal and
 its conflict projection consume defaults before the next proposal (PostgreSQL
 src/backend/executor/nodeModifyTable.c:4497,2980); for example identity proposals 2 and 4
@@ -193,7 +193,7 @@ CHECK, foreign keys and incoming-reference UPDATE RESTRICT. All writes, index ch
 RETURNING evaluations share one statement bracket; a failure rolls them all back.
 
 DO NOTHING discards duplicate proposed arbiter keys. DO UPDATE cannot affect a row a second
-time (COHSQLE036), whether the first effect inserted or updated it. An earlier DO UPDATE
+time (CS05036), whether the first effect inserted or updated it. An earlier DO UPDATE
 rekey releases its old arbiter key in pending statement state: a later proposal may insert
 that released key, matching PostgreSQL's source-order behavior. Keys introduced by an
 earlier effect still count as reaching that affected row twice. A false/UNKNOWN filter
@@ -254,7 +254,7 @@ row, preventing an endless hand-off between contenders. Cancellation is checked 
 restart. No lock wait runs inside the apply gate.
 Any exception before apply begins releases this statement's new grants, including rows kept
 by completed waits and arbiter keys, while an explicit transaction stays active. This includes
-cancellation during or after a wait, COHSQLE036, CHECK/NOT NULL violations and an unhandled
+cancellation during or after a wait, CS05036, CHECK/NOT NULL violations and an unhandled
 deadlock. Locks from earlier transaction work and their upgrades remain held. Once apply starts,
 this cleanup never releases locks, even if apply fails; transaction-duration locking applies.
 The gated [arbitration conformance cases](../../Assimalign.Cohesion.Database.Sql/tests/SqlUpsertArbitrationConformanceTests.cs)
@@ -268,7 +268,7 @@ EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports CK00001, 
 a real target table or alias is named excluded, which stays referenceable (PostgreSQL).
 MySQL ON DUPLICATE KEY UPDATE and SQLite INSERT OR IGNORE/REPLACE report one CK00001
 suggesting ON CONFLICT and execute nothing. These spellings and CONFLICT, DO, NOTHING,
-EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains SQL0002.
+EXCLUDED remain contextual, so stored identifier quoting is unchanged. MERGE remains CS00002.
 
 ## Statement matrix
 
@@ -301,11 +301,11 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
-| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `COHSQLE057` (0A000), retaining the earlier `COHSQLE021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
-| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, normally fail `CS05057` (0A000), retaining the earlier `CS04021` read-only catalog refusal where applicable. DDL, transaction control and nested EXPLAIN report `CK00001`. Standalone ANALYZE remains unsupported. |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `CS01005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
-| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
-| `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active |
+| `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
+| `DELETE` | Supported | optional `WHERE`, including correlated and uncorrelated subqueries; aggregates outside a child query are rejected; qualified references use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `CS01015` before any write and leave an explicit transaction active |
 | `CREATE TABLE` | Supported | Identity columns use GENERATED ALWAYS/BY DEFAULT AS IDENTITY or the SQL Server IDENTITY alias (see identity contract above). `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <expression>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` accepts nullability, length and precision changes that preserve storage type, scale, collation, domain and DEFAULT; tightening and every CHAR length change check existing live values and refuse changes requiring a rewrite. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE and TYPE ... USING remain unsupported. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
@@ -319,7 +319,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], CROSS and comma joins over stored/system/derived sources. INNER/LEFT require ON or USING; CROSS accepts neither. RIGHT/FULL, NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. Grouping extensions, windows, and other ordered-set aggregates report `CK00001`. |
-| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `SQL0006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Quantified comparisons and subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
 | DML `RETURNING` | Supported subset, measured | Written-row SELECT list and affected count; see the RETURNING contract below |
@@ -329,18 +329,18 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Recognized, not supported | `CK00001` at RECURSIVE |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `CK00001` |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`COHSQLE006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational SQL0100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its COHSQLT002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay SQL0003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay SQL0002 (#1012); TRANSACTION alone is not a statement. |
-| `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
+| `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
 
 CREATE UNIQUE INDEX and UNIQUE/PRIMARY KEY constraint backing builds construct the whole
 tree before checking adjacent live keys for duplicates. This also applies to deferred index
-and constraint builds. An oversized encoded key (COHSQLE042) encountered during construction
-can take precedence over a duplicate (COHSQLE037) that occurs earlier in storage order.
+and constraint builds. An oversized encoded key (CS05042) encountered during construction
+can take precedence over a duplicate (CS03037) that occurs earlier in storage order.
 
 Inline CREATE UNIQUE INDEX reports the smallest duplicated live key in encoded index order,
 rather than the first duplicate in storage order. A safe scalar offending value, when included,
@@ -356,7 +356,7 @@ canonical SELECT or set-operation body. A body can have its own non-recursive WI
 subqueries, joins and grouping. Projection `*` is expanded at every query level,
 including derived queries, CTEs and set operands, so later ADD COLUMN does not
 change the view. Every input column reference is stored with its bound qualifier;
-rebind rejects a changed C: identity with COHSQLE033. An explicit column list must match the output count exactly
+rebind rejects a changed C: identity with CS03033. An explicit column list must match the output count exactly
 (the ISO rule); output names must be unique. Parameters are refused at CREATE.
 Bodies receive the same SELECT-subset diagnostics as standalone queries.
 
@@ -394,25 +394,25 @@ the original exception; it never blocks open, unrelated reads, metadata enumerat
 OperationCanceledException, InsufficientExecutionStackException, OutOfMemoryException,
 StorageException (every subtype, including offline, format, journal and slotted-page failures),
 and IOException propagate, including through inner exceptions and aggregates. At open, stack
-exhaustion retains the larger-stack advisory; reads report COHSQLE004 and StatementTooComplex.
+exhaustion retains the larger-stack advisory; reads report CS05004 and StatementTooComplex.
 
 INSERT, UPDATE, DELETE, ALTER TABLE, CREATE INDEX and DROP TABLE require a table
 and refuse a view, naming its kind. DROP VIEW refuses a table, including IF EXISTS.
 DROP TABLE and DROP FUNCTION/DOMAIN refuse dependent views; DROP COLUMN and
 RENAME COLUMN refuse columns a view reads. ALTER COLUMN also refuses type, length,
-precision and scale changes on those columns (COHSQLD002). RENAME TABLE also refuses dependents
+precision and scale changes on those columns (CS03302). RENAME TABLE also refuses dependents
 because canonical bodies retain textual relation names. DROP SCHEMA RESTRICT
 counts views. DROP SCHEMA CASCADE removes contained views and external views
 that depend on its tables or views. DROP VIEW [IF EXISTS] defaults to RESTRICT;
-CASCADE removes dependent views. Dependency failures name the view (COHSQLD002).
-View-specific declaration/replacement failures and oversized records carry structured COHSQLE033
+CASCADE removes dependent views. Dependency failures name the view (CS03302).
+View-specific declaration/replacement failures and oversized records carry structured CS03033
 diagnostics in process and over the wire; ordinary query binding diagnostics still apply,
-including COHSQLE013 for a column-list count mismatch.
+including CS05013 for a column-list count mismatch.
 
 Views appear in TABLES (`TABLE_TYPE = 'VIEW'`), COLUMNS, VIEWS and OBJECT_OWNERSHIP.
 VIEWS returns canonical VIEW_DEFINITION, CHECK_OPTION `NONE` and IS_UPDATABLE `NO`.
 Session-created views are Adhoc; declared scripts use Schema ownership and atomic
-`V:` publication/absence receipts. View DDL requires auto-commit (COHSQLT003 inside
+`V:` publication/absence receipts. View DDL requires auto-commit (CS04003 inside
 an explicit transaction). SQL record-space format **23** adds catalog kind **17**;
 older formats are refused without an upgrade reader. The complete encoded record,
 including text, columns and dependencies, is limited to **8,092 bytes**; CREATE
@@ -427,31 +427,31 @@ is included by the owner ruling for this item, superseding the original T2 exclu
 
 A SQL schema is a namespace, independent of the compiled code-first schema that owns
 provisioned objects. Every new database persists `dbo` as an ordinary Adhoc namespace;
-SQL refuses its removal with `COHSQLE031` because code-first provisioning remains pinned
+SQL refuses its removal with `CS03031` because code-first provisioning remains pinned
 to `dbo`. Sql.Schema builders have no target-namespace setting. Creating another namespace
 does not redirect compiled tables, constraints, indexes, domains or declared migration SQL.
 
 `CREATE TABLE s.t`, unguarded `DROP TABLE s.t`, `ALTER TABLE s.t` and table-qualified
 `CREATE INDEX ... ON s.t` / `DROP INDEX ... ON s.t` require an existing namespace
-(`COHSQLE028`, PostgreSQL SQLSTATE 3F000). `DROP TABLE IF EXISTS missing.t` succeeds as a
+(`CS01028`, PostgreSQL SQLSTATE 3F000). `DROP TABLE IF EXISTS missing.t` succeeds as a
 no-op, retaining its declared-script absence receipt. Reads and ordinary DML of `missing.t`
-retain the missing-relation `COHSQLE014` (42P01). Unqualified table names
+retain the missing-relation `CS01014` (42P01). Unqualified table names
 use `dbo`; an unqualified REFERENCES target uses its child table's namespace. A table created
 as `Sales.t` after `CREATE SCHEMA sales` reports `sales` in TABLES and SCHEMATA.
 INFORMATION_SCHEMA and COHESION_SCHEMA are reserved virtual namespaces: CREATE/DROP SCHEMA
-and CREATE TABLE in either receive `COHSQLE021`, including existence guards.
+and CREATE TABLE in either receive `CS04021`, including existence guards.
 
-Duplicate namespaces receive `COHSQLE029` unless IF NOT EXISTS is supplied. RESTRICT on a
-nonempty namespace receives `COHSQLE030`: it cannot be dropped because other objects depend
+Duplicate namespaces receive `CS03029` unless IF NOT EXISTS is supplied. RESTRICT on a
+nonempty namespace receives `CS03030`: it cannot be dropped because other objects depend
 on it. CASCADE removes every contained table/index and each external incoming FK in one
 catalog transaction; external tables and their rows survive. Tables referencing an external
 parent disappear without changing that parent. Namespace, table and index compiled ownership
 and external child ownership are checked before commit using the existing ownership diagnostic
 with operation `DROP SCHEMA`. Both schema statements are self-committing DDL and receive
-`COHSQLT003` inside an explicit transaction.
+`CS04003` inside an explicit transaction.
 
 DROP SCHEMA acquires table locks before its definition metadata lease and revalidates the
-namespace contents before publication. A changed set receives `COHSQLE013` with a retry remedy.
+namespace contents before publication. A changed set receives `CS05013` with a retry remedy.
 Deferred typed migration steps wait cancellably for definition metadata leases; overlapping
 schema DDL cannot fail a migration merely by holding that lease.
 
@@ -520,7 +520,7 @@ validate outgoing references against current parents after a lock wait, includin
 committed by the child writer. SET DEFAULT with no default
 supplies NULL; each expression default uses the delete transaction's clock. Unique NULLs
 remain equal. SET DEFAULT uses the ordinary assignment
-path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its COHSQLE025
+path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its CS03025
 UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
 report CK00001. Schema-owned typed foreign
 keys retain RESTRICT/CASCADE only. SQL record-space format 20 gates the new persisted
@@ -530,7 +530,7 @@ referential-action values; format 19 and earlier are refused with the recreate r
 
 A request carries exactly one statement, and the parser either consumes all of
 it or reports what it could not. One terminating `;` is optional, and comments
-may follow it. Any other text after a complete statement reports `SQL0003` at the
+may follow it. Any other text after a complete statement reports `CS00003` at the
 first token the parser did not consume, and nothing executes: the text-execute
 seam throws `DatabaseParseException` (`ParseFailure` on the wire), and a typed
 request returns an error result carrying the diagnostics. Until #1068 the parser
@@ -540,7 +540,7 @@ checked for leftover tokens only after `CREATE TABLE`, `ALTER TABLE` and
 
 Required tokens are required. A missing closing `)`, `THEN`, `END`, the `AND` of
 `BETWEEN`, the `BY` of `ORDER BY`, the `SET` of `UPDATE`, the `=` of an
-assignment, a table, index or column name, or a `VALUES` row reports `SQL0003`
+assignment, a table, index or column name, or a `VALUES` row reports `CS00003`
 where it was expected. A clause keyword in a name position means the name is
 missing: `SET a = 1, WHERE id = 1` reports the trailing comma instead of
 assigning `(id = 1)` to a column named `WHERE`. `IF NOT EXISTS` (CREATE) and
@@ -551,9 +551,9 @@ with an error.
 Lexical errors are reported too. A string literal, quoted identifier or block
 comment without its closing delimiter would otherwise run to the end of the text
 as one token and swallow the clauses after it: `DELETE FROM t /* WHERE id = 1;`
-deleted every row. Each reports `SQL0003` at its opening delimiter. A character
+deleted every row. Each reports `CS00003` at its opening delimiter. A character
 outside the dialect, such as `?`, `#`, `^`, `§`, a backtick or a zero-width space,
-lexes as `TokenType.Unrecognized` and reports one `SQL0003` at the character
+lexes as `TokenType.Unrecognized` and reports one `CS00003` at the character
 (#1101). It used to lex as a one-character identifier, so `SELECT * FROM t ?` bound
 `?` as an alias and ran, and `SELECT ? FROM t` returned a column named `?`. The
 statement now keeps only its command type: no alias, column or `NULL` placeholder
@@ -566,9 +566,9 @@ cleanly and then fail at execution with an uncoded `FormatException`. A stray
 character before the statement, such as a byte order mark that was not stripped,
 is reported once, and the statement after it is not reported as an unknown
 command. A numeric literal whose exponent has no digits, such as `1e` or `2.5E-`,
-reports `SQL0003` at the literal; it also used to fail only at execution.
+reports `CS00003` at the literal; it also used to fail only at execution.
 
-| Written | Reported as `SQL0003` | Diagnostic starts at |
+| Written | Reported as `CS00003` | Diagnostic starts at |
 |---|---|---|
 | `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
 | `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
@@ -599,7 +599,7 @@ comment: `/` is the division operator, so `//` is a syntax error.
 A recognized clause outside the profile keeps its `CK00001`, for example
 `WINDOW`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
-it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
+it reached the clause still reports `CS00003`: `DELETE FROM t WHRE id = 1
 WINDOW w AS ()` reports both, so fixing `WINDOW` does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
@@ -620,33 +620,33 @@ BIGINT) and propagates NULL. Both signs require a numeric operand. When the plan
 already knows the operand is not a number (a string or Boolean literal, a
 string, Boolean, date/time or other non-numeric column, a predicate, `||`,
 `UPPER`/`LOWER`, a CAST to a non-numeric type, or a scalar subquery of such a
-type), the statement fails before it reads a row, with `COHSQLE003` (see the
+type), the statement fails before it reads a row, with `CS02003` (see the
 [arithmetic contract](#arithmetic-and-numeric-faults-1069)): `+'abc'`, `+TRUE`
 and `-name` fail over an empty table exactly as over a populated one. A sign
 directly over a parameter is checked against the value the statement binds, also
-before any row is read: `+@p` with `@p = 'abc'` fails with `COHSQLE003` whether or
+before any row is read: `+@p` with `@p = 'abc'` fails with `CS02003` whether or
 not the table has rows, and a NULL value propagates. An operand whose type only a
 row's value reveals, such as a `CASE` that returns a string, fails with the same
 code when the row is evaluated. `+a` and `+(1 + 2)` reported
-`SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
+`CS00003` before unary plus existed. `~` is not a sign of the dialect; see
 [Expressions](#expressions).
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]`,
 `DROP CONSTRAINT`, full-definition `ALTER COLUMN`, RENAME and ALTER column default/nullability actions parse.
 TYPE/SET DATA TYPE, SET SCHEMA, RENAME CONSTRAINT and comma-separated action lists report named `CK00001`.
 Other unknown or incomplete actions such as MODIFY, ALTER c INT, ALTER c SET/DROP,
-ALTER CONSTRAINT, bare SET, SET TABLESPACE and SET LOGGED report `SQL0003` at parse time.
+ALTER CONSTRAINT, bare SET, SET TABLESPACE and SET LOGGED report `CS00003` at parse time.
 SET SCHEMA is named only when SCHEMA follows SET; syntax diagnostics list all supported actions.
 The statement then carries no action node. It used to carry a placeholder
 `DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
-column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
+column name or constraint name also reports `CS00003`; `ADD` or `DROP` directly
 after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
-`ALTER VIEW` and other `ALTER <object>` forms report `SQL0003` naming the object.
+`ALTER VIEW` and other `ALTER <object>` forms report `CS00003` naming the object.
 
 **Unknown functions.** A call to a name outside the engine's function catalog (the
 standard library and the functions the application registered on the engine, see
 [Builtin functions](#builtin-functions)), the executable profile and the recognized-unsupported
-vocabulary fails at plan time with `COHSQLE016` and `Unknown function '<name>'.`, a `DatabaseException`
+vocabulary fails at plan time with `CS01016` and `Unknown function '<name>'.`, a `DatabaseException`
 (`ExecutionFailure` on the wire). The planner checks every expression position
 before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
@@ -660,7 +660,7 @@ with one named `CK00001` and are absent from the executable profile (#1103).
 of arguments its signature accepts (the table under
 [Builtin functions](#builtin-functions)): `UPPER`, `LOWER`, `LENGTH` and `ABS` take
 exactly one, `COALESCE` one or more, COUNT/SUM/AVG/MIN/MAX exactly one, STRING_AGG two, LISTAGG one or two, and only `COUNT`
-accepts `*`. Any other call fails while planning with `COHSQLE006`, a
+accepts `*`. Any other call fails while planning with `CS01006`, a
 `DatabaseException` (`ExecutionFailure` on the wire), in every position the
 unknown-function check covers: projections, `VALUES`, `UPDATE ... SET`, predicates
 (`WHERE`, `JOIN ... ON`, `HAVING`), grouping, ordering, `LIMIT`/`OFFSET`,
@@ -670,10 +670,10 @@ way over an empty table as over a populated one. The message names the function 
 written, the counts it accepts, what the call passed and the accepted call forms:
 
 ```text
-COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).
-COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).
-COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).
-COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).
+CS01006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).
+CS01006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).
+CS01006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).
+CS01006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).
 ```
 
 A call passes `'*'` only when `*` is its sole argument; the parser also accepts `*`
@@ -686,13 +686,13 @@ the arguments' types fit best: an exact type, then an implicit widening along IN
 INT16 → INT32 → INT64 → DECIMAL → DOUBLE (nothing converts to or from text, and REAL does
 not widen), then a polymorphic overload. An integer literal has the smallest of INTEGER
 and BIGINT that holds it; a NULL literal, a NULL parameter and a grouped value match any
-type. A call no overload's types accept also reports `COHSQLE006`, and one that several
-accept equally well reports `COHSQLE008` (SQLSTATE 42725); a `CAST` on an argument
+type. A call no overload's types accept also reports `CS01006`, and one that several
+accept equally well reports `CS01008` (SQLSTATE 42725); a `CAST` on an argument
 chooses. Both are raised while planning:
 
 ```text
-COHSQLE006: Function 'SUM' has no overload that accepts argument types (TEXT). Accepted: SUM(numeric).
-COHSQLE008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well. Cast an argument to choose one.
+CS01006: Function 'SUM' has no overload that accepts argument types (TEXT). Accepted: SUM(numeric).
+CS01008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well. Cast an argument to choose one.
 ```
 
 The engine resolves a call's arguments before the call itself, as PostgreSQL's parse
@@ -762,7 +762,7 @@ canonical form, so reapplying an unchanged schema stays a no-op. Before the engi
 build touches any file it parses that text as exactly one expression and binds it to
 the engine's functions and the table's declared columns, applying the same rules
 `CREATE TABLE` applies (only `IMMUTABLE` functions among them), and refuses the
-declaration with `COHSQLP001` when it does not bind.
+declaration with `CS03101` when it does not bind.
 
 **Size.** A table's whole definition, including canonical CHECK/DEFAULT text and the
 resolved function identities (consecutive repeats are compacted), is one catalog record
@@ -787,7 +787,7 @@ table and the constraint or column (`CHECK constraint 'ck_qty' on table
 'dbo.orders' cannot be loaded: ...`). It never surfaces later as a failure of
 every write to that table. A CHECK whose call names an application function the
 opening engine no longer registers is not damage and does not fail the open: its
-writes fail with `COHSQLE009` instead (see Builtin functions, "A stored CHECK whose
+writes fail with `CS01009` instead (see Builtin functions, "A stored CHECK whose
 function is gone"). Canonical storage is part of data-storage format 4;
 text from earlier formats is not migrated, and a database on an earlier format
 whose catalog holds a CHECK or DEFAULT fails the open with a format error that
@@ -810,14 +810,14 @@ error and the constraint's name, and sends the operator to the build that stored
 rather than to a backup, which holds the same definition:
 
 ```text
-Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'COALESCE() IS NULL' calls a function with arguments the function does not accept (COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
+Database 'shop' cannot be opened. CHECK constraint 'ck1' on table 'dbo.t' cannot be loaded: its persisted definition 'COALESCE() IS NULL' calls a function with arguments the function does not accept (CS01006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).). An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.
 ```
 
 That holds for the special form `COALESCE`. A stored call of a function name with an
 argument count no built-in takes, `ABS(c, 1)`, can only come from an application's
 overload of the name since E2 lets an application add one for another arity, so it is a
 function the engine no longer registers: the database opens and writes fail with
-`COHSQLE009` (see [Builtin functions](#builtin-functions)).
+`CS01009` (see [Builtin functions](#builtin-functions)).
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -869,7 +869,7 @@ placement. `STRING_AGG(name, ',' ORDER BY x NULLS LAST)` and
 `LISTAGG(name, ',') WITHIN GROUP (ORDER BY x NULLS LAST)` execute.
 NULLS, FIRST and LAST stay unreserved identifiers; NULLS becomes a modifier only
 when followed by FIRST/LAST after an ordering key. `ORDER BY a NULLS` and
-`ORDER BY a NULLS MIDDLE` report SQL0003. Rendering retains explicit placement,
+`ORDER BY a NULLS MIDDLE` report CS00003. Rendering retains explicit placement,
 including one equal to the default, and emits nothing for omitted placement.
 NULLS remains quoted as an identifier; FIRST and LAST remain unquoted.
 The grammar follows PostgreSQL `src/backend/parser/gram.y:8493-8495`; its explicit
@@ -893,7 +893,7 @@ and ALTER [COLUMN] c SET DEFAULT value, DROP DEFAULT, SET NOT NULL or DROP NOT N
 RENAME and TO remain contextual identifiers. Rename targets are unqualified and stay in the
 same schema; SET SCHEMA, RENAME CONSTRAINT, TYPE/SET DATA TYPE and action lists are excluded.
 Existing names and read-only system relation names cannot be overwritten.
-After the ownership check, a table name retained by a declared script object claim is refused with COHSQLD002 naming
+After the ownership check, a table name retained by a declared script object claim is refused with CS03302 naming
 the script; historical targets are forward-only and cannot be silently rewritten.
 
 Renames preserve object IDs, physical column ordinals, row versions and index trees. Index
@@ -909,7 +909,7 @@ the published names and facets immediately. A query using an old name reports an
 
 SET DEFAULT accepts the same literal and variable-free expression forms as
 CREATE TABLE on this base. Function result types must satisfy INSERT assignment compatibility
-(COHSQLE013 naming the column, before any metadata change; PostgreSQL heap.c:3409). Literal
+(CS05013 naming the column, before any metadata change; PostgreSQL heap.c:3409). Literal
 conversion and bounds are checked before publication; expression defaults also execute (#1121).
 DROP DEFAULT re-inherits a domain default, and SET DEFAULT NULL persists an explicit NULL override
 when the domain has a default (rewriteHandler.c:1305-1313; heap.c:2466-2475).
@@ -926,7 +926,7 @@ with a coded error naming the column. This is PostgreSQL's separate missing attr
 SET NOT NULL scans current live rows under the Exclusive table lock, including synthesized
 missing fields, and refuses a NULL naming the column without changing metadata. DROP NOT NULL
 allows future NULL writes but refuses a primary-key column. SET/DROP DEFAULT and DROP NOT NULL
-refuse identity columns with COHSQLE025; PostgreSQL checks identity at tablecmds.c:7858-7863
+refuse identity columns with CS03025; PostgreSQL checks identity at tablecmds.c:7858-7863
 and :8226-8233. A column already satisfying the requested facet still publishes an immutable
 replacement, so queued DML retries consistently.
 
@@ -936,9 +936,9 @@ DML bound before a same-name change fails with "changed while the statement was 
 a queued writer behind RENAME TO reports the old table does not exist. Lock-free SELECT planning
 checks the DDL generation around table and index binding, including joins; an overlapping
 publication discards the plan or binding error and retries before execution.
-Name collisions report COHSQLE013 naming the conflicting table or column; PK DROP NOT NULL
-reports SQL0003 naming the column. Every action retains
-schema ownership checks and is refused with COHSQLT003 inside an explicit transaction; that
+Name collisions report CS05013 naming the conflicting table or column; PK DROP NOT NULL
+reports CS00003 naming the column. Every action retains
+schema ownership checks and is refused with CS04003 inside an explicit transaction; that
 failure leaves the transaction usable. SQL record-space format 17 and table extension 6 persist
 the split. Earlier formats are refused; there is no compatibility reader or upgrade path.
 
@@ -966,8 +966,8 @@ current committed rows; historical row versions visible only to an older row
 snapshot retain a missing NULL field when such an addition has no default.
 
 Column defaults admit variable-free scalar expressions: arithmetic, unary signs, parentheses, function calls, niladic datetime forms and CAST. The top-level restricted grammar admits comparisons and IS [NOT] DISTINCT FROM (`DEFAULT 1 = 1` and `DEFAULT 1 IS DISTINCT FROM 2 NOT NULL` retain their expression and following constraint), and leaves NOT/AND/OR, truth tests, LIKE/IN and following column constraints unconsumed. Columns, parameters, aggregates and subqueries are excluded. Immutable expressions are evaluated at DDL time, including division-by-zero and conversion errors. Catalog open and table rebinds resolve DEFAULT trees without evaluating them; a changed function implementation fails only a write assigning its default. Stable and volatile defaults evaluate per assigned row, using the transaction-start clock. A call to a name outside the engine's catalog, executable profile and recognized-unsupported vocabulary fails
-first, with `COHSQLE016` and `Unknown function '<name>'.`,
-and so does a call whose arguments its function does not accept, with `COHSQLE006`
+first, with `CS01016` and `Unknown function '<name>'.`,
+and so does a call whose arguments its function does not accept, with `CS01006`
 (`DEFAULT ABS(1, 2)`; see [Statement completeness](#statement-completeness-1068)),
 and a parameter such as `:x` is a parse error. Defaults must
 convert to the declared storage type and fit its bounds, including string length
@@ -976,16 +976,16 @@ before publication. `CREATE TABLE` applies the same check to every column
 `DEFAULT` before it publishes the table (`INT DEFAULT 'abc'` fails the DDL, not
 each later INSERT that omits the column). The assignment rules in
 [Declared bounds on writes](#declared-bounds-on-writes-1418) apply: excess ASCII spaces
-may be discarded, other excess characters report `COHSQLE012`, and NUMERIC rounds
-to its scale before checking precision (`COHSQLE002`). The code still leads a
+may be discarded, other excess characters report `CS02012`, and NUMERIC rounds
+to its scale before checking precision (`CS02002`). The code still leads a
 DEFAULT failure's message.
 Approximate floating-point defaults use normal IEEE conversion rounding, but
 nonfinite declaration results (literal, immutable expression, or stable ADD COLUMN missing value)
-report COHSQLE002; nonzero values that underflow to zero are rejected. Volatile DEFAULT
+report CS02002; nonzero values that underflow to zero are rejected. Volatile DEFAULT
 results follow ordinary per-row assignment, which permits NaN and infinities for DOUBLE.
 Declaration validates storage type and bounds independently of NOT NULL. A NULL-producing
 expression is legal on a NOT NULL column; an INSERT or UPDATE assigning it fails with
-COHSQLE024. ADD COLUMN accepts it on an empty table and rejects it against live rows.
+CS03024. ADD COLUMN accepts it on an empty table and rejects it against live rows.
 `COLLATE` on an added string column controls its comparisons and indexes without
 changing the bounded text, just as for CREATE TABLE.
 
@@ -1001,7 +1001,7 @@ are not pinned to BEGIN. The separate INFORMATION_SCHEMA snapshot contract below
 is unchanged.
 
 DDL remains self-committing and is rejected inside an explicit transaction with
-`COHSQLT003`; it cannot be undone by a later ROLLBACK. ALTER against a code-owned
+`CS04003`; it cannot be undone by a later ROLLBACK. ALTER against a code-owned
 table (`DatabaseObjectOwner.Schema`) remains refused unless performed by its
 owning schema deployment.
 
@@ -1105,10 +1105,10 @@ such as t.* keep CK00001. Derived comma inputs, FROM t, (SELECT ...) d, execute.
 
 JOIN binds more tightly than comma: in FROM a, b JOIN c ON ..., ON can see b and c,
 but cannot see a. It also cannot reference a later input. Unknown/hidden qualifiers
-and ambiguous columns report located COHSQLE015 before rows are read; duplicate aliases
-report COHSQLE019. An explicit alias hides the base name in every join form and in DML.
+and ambiguous columns report located CS01015 before rows are read; duplicate aliases
+report CS01019. An explicit alias hides the base name in every join form and in DML.
 New CHECK declarations likewise reject a qualifier that does not name the constrained table
-or its schema with located COHSQLE015, for CREATE TABLE, ADD CONSTRAINT and ADD COLUMN.
+or its schema with located CS01015, for CREATE TABLE, ADD CONSTRAINT and ADD COLUMN.
 Bare column names, table.column and schema.table.column are valid. Previously persisted
 CHECKs keep their original binding behavior when reopened. SqlQualifierConformanceTests
 covers stored-table query clauses and the CHECK declaration/reopen contract (#1191).
@@ -1155,7 +1155,7 @@ CROSS and comma multiply cardinalities; either empty input yields a typed empty
 product. Row order without ORDER BY is unspecified.
 
 USING requires each listed name exactly once on each input; missing, repeated or
-ambiguous names fail binding with COHSQLE015. Its equality uses ordinary ON collation
+ambiguous names fail binding with CS01015. Its equality uses ordinary ON collation
 precedence, including column overrides. The merged output uses PostgreSQL's common-type
 selection through implicit casts within the same type category. INT/DECIMAL produces DECIMAL
 and INT/BIGINT produces BIGINT in either order, including arithmetic and function overloads.
@@ -1163,7 +1163,7 @@ LEFT preserves the coerced left value and its nullability; INNER prefers an unch
 of the common type when available. Length, precision and scale remain only when both input
 types and modifiers agree; CHAR(3)/VARCHAR(10) clears the length. Qualified references retain
 their own types and modifiers; right qualified references become nullable under LEFT.
-Pairs with no common type fail planning with COHSQLE015, even on empty inputs.
+Pairs with no common type fail planning with CS01015, even on empty inputs.
 Identical domains retain their domain identity; differing domains or a domain/base pair
 resolve through their base types (PostgreSQL parse_coerce.c:1360-1387).
 Unqualified merged names are unambiguous; qualified left.id and right.id still bind.
@@ -1183,7 +1183,7 @@ copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
 one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
-remains SQL0002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
+remains CS00002; DELETE ... USING and CREATE INDEX ... USING are syntax errors.
 
 ## Value comparison (#1029)
 
@@ -1333,7 +1333,7 @@ Decimal arithmetic through the runtime floating-point conversion, as before
 (about 7 significant digits for REAL and 15 for DOUBLE). A nonzero REAL or
 DOUBLE smaller in magnitude than Decimal's smallest step (1e-28) converts to 0
 like any other digit the conversion drops, so `@tiny + 1` is `1`. As a divisor
-it has no Decimal quotient and reports `COHSQLE002`, not a division by zero.
+it has no Decimal quotient and reports `CS02002`, not a division by zero.
 
 An arithmetic fault fails the statement. No operator result wraps, saturates, or
 becomes NULL. A sign applied to a value that is not a number is a fault of the
@@ -1341,12 +1341,12 @@ same kind, with its own code:
 
 | Code | ISO SQLSTATE | Raised when |
 |---|---|---|
-| `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
-| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; a value does not fit the integer or `DECIMAL` column it is stored into; or a NUMERIC/DECIMAL value exceeds its declared precision or cannot be represented exactly as `System.Decimal` in assignment, DEFAULT or CAST, after rounding to the declared scale when there is one. |
-| `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known or the operand is a parameter bound to a non-number, so it fails over an empty table too, and while evaluating when only a row's value reveals it. See Signs under [Statement completeness](#statement-completeness-1068). |
+| `CS02001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
+| `CS02002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; a value does not fit the integer or `DECIMAL` column it is stored into; or a NUMERIC/DECIMAL value exceeds its declared precision or cannot be represented exactly as `System.Decimal` in assignment, DEFAULT or CAST, after rounding to the declared scale when there is one. |
+| `CS02003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known or the operand is a parameter bound to a non-number, so it fails over an empty table too, and while evaluating when only a row's value reveals it. See Signs under [Statement completeness](#statement-completeness-1068). |
 
 The code leads the message, for example
-`COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
+`CS02001: Division by zero: the right operand of '/' is zero.` In process the
 statement throws a `DatabaseException` with that message. Over the wire the server
 reports `ExecutionFailure` with the same text, and the SQL client raises
 `SqlClientException` with `Kind = ExecutionFailure` and `ConnectionUsable = true`.
@@ -1364,7 +1364,7 @@ the value order cannot compare (`Cannot compare values of types ...`).
   earlier statements' work, and both `COMMIT` and `ROLLBACK` remain available.
 - **Evaluation point:** faults are raised where an expression is evaluated. A
   predicate over an empty table evaluates nothing and raises nothing. The one
-  exception is `COHSQLE003` for a sign whose operand type the plan already knows,
+  exception is `CS02003` for a sign whose operand type the plan already knows,
   or whose operand is a parameter bound to a non-number, which is raised while
   planning. A constant
   comparand that faults during index-seek planning is not used for the seek, and
@@ -1382,14 +1382,14 @@ the value order cannot compare (`Cannot compare values of types ...`).
   argument, and `IN` stops at the first list value that matches. Every other
   operator and function evaluates all of its operands.
 - **Store assignment:** a value an integer or `DECIMAL` column cannot hold, such as
-  `UPDATE t SET i = i + 1` on an `INT` at 2147483647, reports `COHSQLE002`
+  `UPDATE t SET i = i + 1` on an `INT` at 2147483647, reports `CS02002`
   (`value '2147483648' does not fit column 'i' of type Int32.`). A value that is not
   a number at all keeps the uncoded `Cannot convert value ...` error, and a REAL
   column stores a finite DOUBLE beyond REAL's range as an infinity.
 - **CAST:** arithmetic inside a CAST operand keeps its own code
-  (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). NUMERIC modifier overflow, or a built-in
+  (`CAST(1 / 0 AS INT)` reports `CS02001`). NUMERIC modifier overflow, or a built-in
   text-to-NUMERIC result that cannot fit `System.Decimal` exactly after any declared-scale
-  rounding, reports `COHSQLE002`. Other source conversion failures keep
+  rounding, reports `CS02002`. Other source conversion failures keep
   their `CAST ... failed` message under the conversion contract below.
 
 ## Pagination (#1107)
@@ -1401,7 +1401,7 @@ its count is omitted; FIRST and NEXT, and ROW and ROWS, have identical semantics
 FIRST remains contextual and unreserved.
 
 FETCH counts follow PostgreSQL's primary-expression (`c_expr`) or signed numeric
-constant grammar: bare `1+1` receives SQL0003, while `(1+1)` is accepted and renders
+constant grammar: bare `1+1` receives CS00003, while `(1+1)` is accepted and renders
 as `(1 + 1)`. Names, parameters, function calls and CASE expressions are primary
 expressions; signs on other operands and infix operators require parentheses.
 
@@ -1413,7 +1413,7 @@ Without ORDER BY, the count still applies but the choice of rows has no ordering
 
 Each SELECT accepts one limit spelling and one OFFSET. LIMIT and OFFSET can appear in
 either order, including PostgreSQL FETCH before OFFSET; rendering uses ISO OFFSET before FETCH. LIMIT with FETCH, TOP with LIMIT/OFFSET/FETCH,
-duplicate limits/offsets, or FETCH without ONLY receive SQL0003. PERCENT, WITH TIES
+duplicate limits/offsets, or FETCH without ONLY receive CS00003. PERCENT, WITH TIES
 and INSERT/UPDATE/DELETE TOP receive CK00001 naming the form. A paging clause cannot mask
 a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
 
@@ -1422,7 +1422,7 @@ children, derived/CTE bodies and INSERT SELECT sources, retaining the existing
 ordinary derived-output ordering rules. Subqueries used as counts remain
 CK00001 naming LIMIT, OFFSET, FETCH or TOP. Counts use the existing single
 EvaluateCount validator and Limit/Offset plan fields; negative or noninteger values
-receive COHSQLE018 naming the written clause. SqlSelectExpression.LimitSyntaxKind
+receive CS02018 naming the written clause. SqlSelectExpression.LimitSyntaxKind
 records Limit, Fetch or Top (null without a limit). Canonical rendering preserves that
 family: LIMIT before OFFSET, FETCH FIRST n ROWS ONLY, and TOP (n).
 PERCENT and TIES remain ordinary identifiers outside paging suffixes; canonical
@@ -1488,12 +1488,12 @@ forbids a column reference in an INSERT's table value constructor. `LIMIT`, `OFF
 `FETCH` and parenthesized `TOP` counts are evaluated once too, while planning. Their expressions are
 literals, parameters, and operators, signs, `CAST`, `COLLATE`, `CASE`, predicates
 and scalar functions over them. A column reference anywhere in one of them,
-qualified or not and however deeply nested, reports `COHSQLE005` (ISO SQLSTATE
+qualified or not and however deeply nested, reports `CS01005` (ISO SQLSTATE
 class 42, syntax error or access rule violation) while planning, so nothing
 executes:
 
 ```text
-COHSQLE005: Column reference 'id' is not allowed in INSERT ... VALUES, which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.
+CS01005: Column reference 'id' is not allowed in INSERT ... VALUES, which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.
 ```
 
 For a count the clause is `LIMIT`, `OFFSET`, `FETCH` or `TOP` and the message ends after
@@ -1510,7 +1510,7 @@ either way). A subquery's count follows the same rule as the top level's at ever
 nesting level, whether the reference names the subquery's own columns or the outer
 query's: ISO SQL's fetch-first count is a simple value specification, so no column
 of any scope is visible to it. An explicit outer qualifier there, as in
-`(SELECT id FROM w LIMIT v.a)`, parses and fails while planning with `COHSQLE005`,
+`(SELECT id FROM w LIMIT v.a)`, parses and fails while planning with `CS01005`,
 just like local and unqualified columns. To insert table values, use `INSERT ... SELECT`.
 
 The same clauses reject an aggregate (`Aggregate functions are not allowed in
@@ -1518,7 +1518,7 @@ INSERT ... VALUES.`, and likewise for `LIMIT` and `OFFSET`) and a bare `*` (`'*'
 not allowed in INSERT ... VALUES.`, likewise for `LIMIT` and `OFFSET`, where it used
 to report `Expression 'SqlStarExpression' is not supported by the executor yet.`)
 while planning, and a sign over an operand the plan already knows is not a number
-reports `COHSQLE003` there too. A column reference is reported first, so
+reports `CS02003` there too. A column reference is reported first, so
 `VALUES (SUM(a))` and `VALUES (-a)` name the column.
 
 `DEFAULT` as a whole VALUES item uses the target column's catalog default, exactly
@@ -1535,7 +1535,7 @@ evaluation; DEFAULT declaration expressions follow the #1121 contract.
 
 DEFAULT is contextually typed syntax, not a scalar operand: `VALUES (DEFAULT + 1)`,
 `VALUES (COALESCE(DEFAULT, 1))`, `VALUES ((DEFAULT))` and `SET c = 1 + DEFAULT`
-report SQL0003. Bare DEFAULT in any scalar position also reports SQL0003, including
+report CS00003. Bare DEFAULT in any scalar position also reports CS00003, including
 SELECT lists, WHERE, function arguments, operator operands and INSERT ... SELECT.
 It never binds to a column named `"DEFAULT"`; the quoted spelling still binds.
 Qualified names `t.default` and `t."default"` are column references, including in SET
@@ -1553,14 +1553,14 @@ column-list requirement. These DEFAULT forms add no named clause (+0); see the [
 `CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `LOCALTIME` and `LOCALTIMESTAMP`
 parse as niladic function nodes and execute using the transaction-start clock (#1120).
 `NOW()` executes with the same clock. Quoted datetime names and qualified references
-remain column references and receive `COHSQLE005` in these clauses.
+remain column references and receive `CS01005` in these clauses.
 
-Repeated UPDATE SET targets fail planning with COHSQLE019, even when no row matches;
+Repeated UPDATE SET targets fail planning with CS01019, even when no row matches;
 DEFAULT counts as an assignment. PRIMARY KEY, UNIQUE and FOREIGN KEY child and referenced column lists
 must not repeat a column (case-insensitive); CREATE TABLE and ALTER TABLE ADD CONSTRAINT
-report COHSQLE019 naming the column and constraint. A table may declare one PRIMARY KEY:
+report CS01019 naming the column and constraint. A table may declare one PRIMARY KEY:
 a second inline or table declaration, or ALTER ADD CONSTRAINT / ADD COLUMN PRIMARY KEY over an existing key, reports
-COHSQLE019 naming the constraint and table. Repeated PRIMARY KEY clauses on one column
+CS01019 naming the constraint and table. Repeated PRIMARY KEY clauses on one column
 also fail, including ADD COLUMN. Composite keys remain supported. The live
 SqlInvalidStatementConformanceTests corpus exercises these refusals in process and over the wire.
 CREATE TABLE IF NOT EXISTS succeeds without validating key declarations when the table already
@@ -1594,7 +1594,7 @@ the same way over an empty table as over a populated one and changes no row. Unt
 the #1189 review it succeeded over an empty table and failed per row over a
 populated one, with an uncoded `... is not supported by the executor yet.` message.
 A wrong argument count is checked first, so `UPDATE t SET a = SUM()` reports
-`COHSQLE006`. Aggregates inside UPDATE/DELETE WHERE subqueries execute in the child's
+`CS01006`. Aggregates inside UPDATE/DELETE WHERE subqueries execute in the child's
 scope (#1113); subqueries in UPDATE SET retain `CK00001`.
 
 | Aggregate | NULL and empty-input behavior | Result type |
@@ -1620,7 +1620,7 @@ original spelling in the result.
 arguments are converted to `System.Decimal` before accumulation; approximate
 inputs follow the runtime floating-point-to-Decimal conversion. Non-numeric
 arguments, non-finite approximate values, and numeric overflow are errors;
-the last two report `COHSQLE002` (see the arithmetic fault contract above).
+the last two report `CS02002` (see the arithmetic fault contract above).
 `SUM` always returns Decimal. `AVG` divides the Decimal sum by the non-NULL
 Int64 count using `System.Decimal` division: the nearest representable Decimal,
 with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
@@ -1641,14 +1641,14 @@ argument's collation and the exact numeric equality used by SELECT DISTINCT and 
 Thus Int64 1 and Decimal 1.0 share a class, and NaNs share one class. Strict aggregates
 skip NULL arguments before deduplication. Explicit `ALL` means the default. Distinct
 state grows with the number of distinct values per group. Quantifiers cannot accompany
-`*` (SQL0003); COUNT with several arguments still fails with COHSQLE006.
+`*` (CS00003); COUNT with several arguments still fails with CS01006.
 
 Every aggregate accepts an inner `ORDER BY`, including SUM whose result does not depend
 on ordering. Keys bind over the source row, may contain prepared subqueries, and use
 ordinary expression rules: an integer is a constant, never a select-list ordinal.
 Sorting is stable, with NULL first in ASC and last in DESC. With DISTINCT, each key must
-structurally match an argument after column binding (COHSQLE032 otherwise). Quantifiers
-and inner ordering on a scalar call also fail with COHSQLE032. The parser accepts these
+structurally match an argument after column binding (CS05032 otherwise). Quantifiers
+and inner ordering on a scalar call also fail with CS05032. The parser accepts these
 modifiers without knowing which names the catalog makes aggregates.
 Input and outer sorting observe statement cancellation during key evaluation and comparisons,
 checking at most every 32 operations and preserving cancellation through runtime sort wrappers.
@@ -1656,17 +1656,17 @@ checking at most every 32 operations and preserving cancellation through runtime
 STRING_AGG(value, delimiter [ORDER BY keys]) uses PostgreSQL spelling; ISO LISTAGG(value
 [, delimiter]) WITHIN GROUP (ORDER BY keys) executes through the same accumulator.
 LISTAGG permits DISTINCT, requires WITHIN GROUP, and cannot also have an inner ORDER BY
-(SQL0003), including when its name is written as the quoted lower-case `"listagg"`, which
+(CS00003), including when its name is written as the quoted lower-case `"listagg"`, which
 names the same function. Any other quoted spelling, such as `"LISTAGG"`, is an ordinary call:
 it may parse, but the planner refuses it without WITHIN GROUP keys. An omitted LISTAGG delimiter is empty. The delimiter must be a string literal,
 NULL literal, or parameter known at plan time; a column/expression delimiter is CK00001.
 Both arguments must be String or Character; CHAR is trimmed on conversion to text.
-JSON and other types fail with COHSQLE006 and require CAST(... AS TEXT). NULL values are
+JSON and other types fail with CS01006 and require CAST(... AS TEXT). NULL values are
 skipped; a NULL delimiter contributes nothing. Empty/all-NULL input returns NULL; a
 single value has no leading/trailing delimiter. The nullable String result takes its
 collation from the value alone, independently of the delimiter and ordering keys.
 
-STRING_AGG/LISTAGG use StringBuilder and fail with COHSQLE002 as soon as the output would
+STRING_AGG/LISTAGG use StringBuilder and fail with CS02002 as soon as the output would
 exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorting. Ordered
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
@@ -1695,19 +1695,19 @@ GROUP BY and SELECT DISTINCT. Spelling of a collation-equivalent surviving row i
 INTERSECT binds tighter than UNION and EXCEPT; UNION and EXCEPT associate left to right.
 Parenthesized operands may carry their own ORDER BY, LIMIT, OFFSET or FETCH. Without
 parentheses those clauses belong to the combined result; placing them before another
-operator is SQL0003. TOP stays on its SELECT operand, so
+operator is CS00003. TOP stays on its SELECT operand, so
 `SELECT id FROM t UNION SELECT TOP 1 id FROM u OFFSET 1` skips a combined row.
 Combined ORDER BY accepts first-operand output names (implicit names included) and positive
 one-based ordinals only. Expressions, qualified names, absent output names and invalid ordinals
-fail planning with COHSQLE018; ambiguous names use COHSQLE019. Combined OFFSET/FETCH shares
+fail planning with CS02018; ambiguous names use CS01019. Combined OFFSET/FETCH shares
 the ordinary Int64 count validation. Explicit NULLS FIRST/LAST follows the ordinary ordering contract.
 
-Both inputs must have the same column count (COHSQLE013 names both counts).
+Both inputs must have the same column count (CS05013 names both counts).
 Types are checked before reading any row. The USING common-type rule selects a category-compatible
 type with implicit registry casts, retaining the left candidate when conversions work in both
 directions. Numeric one-way widening makes INTEGER with BIGINT produce Int64 values and metadata,
 and DECIMAL with DOUBLE produce Double. Untyped NULL and string literals are unknown and take the other input's type; an all-unknown
-pair becomes TEXT. Explicit CAST to TEXT remains typed and cannot match INTEGER. Type mismatches use COHSQLE003, naming the one-based position and both types.
+pair becomes TEXT. Explicit CAST to TEXT remains typed and cannot match INTEGER. Type mismatches use CS02003, naming the one-based position and both types.
 Length, precision and scale survive only when both input types and modifiers agree. A domain
 survives only when every input has the identical domain and modifiers. Values convert before
 duplicate comparison: TEXT combined with CHAR trims the latter through its registered text cast,
@@ -1735,7 +1735,7 @@ writes, and retain existing INSERT atomicity and scalar-cardinality checks.
 Compatible same-quantifier UNION chains flatten to one N-way materialization with O(total input)
 time and memory before sorting; no accumulated prefix is copied per link. Other set nodes
 materialize both operands and a hash membership/count table in O(L+R). Every remaining recursive
-execution level checks the stack and reports COHSQLE004. Sorting adds O(N log N); streaming
+execution level checks the stack and reports CS05004. Sorting adds O(N log N); streaming
 and spilling remain excluded.
 CORRESPONDING (including BY forms) remains T2 and reports one contextual CK00001.
 Nested/recursive WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
@@ -1754,7 +1754,7 @@ format is unchanged. Persisted-text drift tests pin these four spellings.
 WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN, truth tests
 (IS TRUE/FALSE/UNKNOWN) and operands of AND, OR and NOT require BOOLEAN. A known non-Boolean type, including arithmetic,
 CASE or aggregate results and supplied parameters, fails planning before rows are read
-with COHSQLE003 / SQLSTATE 42804, naming the construct. Runtime checks enforce the same
+with CS02003 / SQLSTATE 42804, naming the construct. Runtime checks enforce the same
 rule for values whose types were unknown. An untyped NULL is UNKNOWN and retains SQL
 three-valued logic; CAST(NULL AS INT) is a non-Boolean typed expression and is refused.
 Only TRUE admits a row or selects a searched CASE arm. Boolean AND/OR keep their
@@ -1764,12 +1764,12 @@ Every CASE result and COALESCE alternative in a Boolean position must be Boolean
 or a valid Boolean input string literal, even when short-circuiting skips it. Boolean
 string literals accept `t`, `true`, `f`, `false`, `yes`, `no`, `on`, `off`, `1`, `0`, `y`
 and `n`, case-insensitively (PostgreSQL src/backend/utils/adt/bool.c:37-109). Other strings
-fail with COHSQLE003; text columns and text parameters do not acquire this literal coercion.
-Table CHECK and domain CHECK use COHSQLE003 / 42804 for every non-Boolean position.
+fail with CS02003; text columns and text parameters do not acquire this literal coercion.
+Table CHECK and domain CHECK use CS02003 / 42804 for every non-Boolean position.
 
 Opening a database binds stored SQL function bodies without reapplying declaration-only
 Boolean-position validation. An invalid legacy operand or an application function whose
-result is no longer Boolean fails when the stored body is invoked with COHSQLE003;
+result is no longer Boolean fails when the stored body is invoked with CS02003;
 it does not prevent the database from opening.
 
 ## Subqueries and query-source inserts (#1021)
@@ -1784,7 +1784,7 @@ ORDER BY, LIMIT, and OFFSET surface, including nested queries and wire execution
 A SELECT without FROM reads one implicit row (#1373), so SELECT 1 and SELECT f(1)
 return one row. WHERE FALSE or NULL and LIMIT 0/OFFSET 1 can remove it; aggregates,
 ordering, DISTINCT, set operands, derived tables and views use ordinary query semantics.
-A wildcard without FROM fails with COHSQLE013. Scalar and IN queries must return
+A wildcard without FROM fails with CS05013. Scalar and IN queries must return
 exactly one column; EXISTS accepts any valid select list.
 
 | Form | Result semantics |
@@ -1815,7 +1815,7 @@ inserted rows cannot feed back into the source query.
 Names resolve in the innermost FROM/JOIN scope first, then through enclosing
 query scopes, including references two or more levels out. Local names and aliases
 shadow outer ones; a matching local qualifier with a missing column does not fall
-back outward. Ambiguity within any one scope reports located `COHSQLE015`.
+back outward. Ambiguity within any one scope reports located `CS01015`.
 Correlated children execute in SELECT lists, WHERE, HAVING, JOIN ON, ordering,
 grouping expressions and UPDATE/DELETE WHERE. Each outer row independently follows
 the NULL, empty-set and scalar cardinality rules above, including repeated and NULL
@@ -1825,14 +1825,14 @@ another outer row's results. Retained BYTEA results detach on every delivery.
 
 In a grouped outer query, a child evaluated over completed groups may reference
 grouping-key columns only. A reference to any other outer column reports
-`COHSQLE017`, naming the column. Subqueries within aggregate arguments, WHERE and
+`CS05017`, naming the column. Subqueries within aggregate arguments, WHERE and
 ON evaluate over source rows. Aggregate levels follow the lowest variable or
 aggregate dependency, descending into nested query bodies and adjusting levels.
 An aggregate belonging to an outer level reports `CK00001` before grouped-column
 validation, with explicit, implicit or absent outer grouping. Relocating it to an
 enclosing query is outside this subset. A mixed aggregate with a local dependency
 executes at its own level. A count expression still has no column scope: local and
-outer columns in LIMIT/OFFSET report `COHSQLE005` (#1165).
+outer columns in LIMIT/OFFSET report `CS01005` (#1165).
 PostgreSQL's reference implementation searches parent namespaces in
 `src/backend/parser/parse_relation.c:151-179`, and rejects ungrouped outer columns in
 `parse_agg.c:1545-1564`; its aggregate level analysis is at `parse_agg.c:646-690,762,850`.
@@ -1869,22 +1869,22 @@ table; a schema-qualified name bypasses that scope. A non-recursive self-referen
 resolves the stored table, as does a name matching a later sibling when a stored
 table exists. A CTE has no schema-qualified column identity: `t.id` or an alias
 can name its output, while `dbo.t.id` requires a stored FROM entry or an enclosing
-stored relation through correlation (otherwise COHSQLE015, missing FROM-clause
+stored relation through correlation (otherwise CS01015, missing FROM-clause
 entry). A CTE and a stored relation with the same unaliased name conflict
-(COHSQLE019); alias one to distinguish them. DML targets always resolve through the catalog, so
+(CS01019); alias one to distinguish them. DML targets always resolve through the catalog, so
 `WITH t AS (SELECT 1 AS id) DELETE FROM t` deletes from stored t. A target naming
 only a CTE fails as an unknown table. Scalar and aggregate SELECT bodies may omit
 FROM and operate on one implicit row; a wildcard still requires a relation.
 This implicit row applies to every FROM-less SELECT, including set-operation operands,
 subqueries and derived tables nested in that body (#1373). Constant bodies run the same planning checks, including
-COHSQLE017 for aggregates in WHERE even when the definition is unused.
+CS05017 for aggregates in WHERE even when the definition is unused.
 FROM-less top-level and nested queries use the same implicit row (#1373).
 
 Every definition is bound before execution, including unused definitions. Duplicate
-names and unresolved references to later siblings use `COHSQLE026` before any row
+names and unresolved references to later siblings use `CS01026` before any row
 is read; a same-named stored table is resolved before the forward-reference hint.
-An empty output column list is `SQL0003`; a supplied list must have exactly the
-body's output width (`COHSQLE013`). Names use the catalog's case-insensitive rules.
+An empty output column list is `CS00003`; a supplied list must have exactly the
+body's output width (`CS05013`). Names use the catalog's case-insensitive rules.
 Column renaming preserves types, bounds, nullability, domains and collations.
 
 Every reachable definition materializes once per statement through the derived
@@ -1902,8 +1902,8 @@ EXPLAIN includes WITH, materialization and constant-source operators without run
 
 `WITH RECURSIVE`, WITH inside subqueries or derived tables, INSERT/UPDATE/DELETE
 bodies (including DELETE RETURNING), `AS [NOT] MATERIALIZED` and SEARCH/CYCLE
-report `CK00001`. RECURSIVE has one error at its token and no SQL0002.
-A WITH list followed by another command kind reports `SQL0003`.
+report `CK00001`. RECURSIVE has one error at its token and no CS00002.
+A WITH list followed by another command kind reports `CS00003`.
 Capability scanning continues through advertised WITH lists, so an excluded OVER,
 NATURAL JOIN or WINDOW still reports its own clause.
 
@@ -1912,12 +1912,12 @@ NATURAL JOIN or WINDOW still reports its own clause.
 `FROM (SELECT ...) AS d`, `(SELECT ...) d (a, b)`, JOIN targets and comma items
 are query relations. An alias is required; an optional column list must name
 every output exactly once by position (its length must equal the output width).
-Both shorter and longer lists fail during planning with `COHSQLE013`; unlike
+Both shorter and longer lists fail during planning with `CS05013`; unlike
 PostgreSQL, a partial list does not fill remaining names from the target list.
-Empty or whitespace-only output names also fail with `COHSQLE013`, preserving
+Empty or whitespace-only output names also fail with `CS05013`, preserving
 the session and any open transaction.
 The alias hides all underlying names; an unknown or hidden qualifier reports
-located `COHSQLE015`. Duplicate output names remain ambiguous when referenced.
+located `CS01015`. Duplicate output names remain ambiguous when referenced.
 Output storage types, length/precision/scale, nullability, shared domains and collation provenance survive
 materialization, including empty results. WHERE, GROUP BY/HAVING, ORDER BY and
 LIMIT/OFFSET inside the body apply before the enclosing query reads its rows.
@@ -1933,7 +1933,7 @@ System relations in these predicates and in derived bodies request the same one
 statement catalog snapshot as ordinary SELECT children.
 
 A derived reference that binds to a sibling FROM item receives `CK00001` naming LATERAL at that reference.
-Typos and nonexistent or hidden qualifiers retain located `COHSQLE015`.
+Typos and nonexistent or hidden qualifiers retain located `CS01015`.
 An enclosing-query reference from a derived table nested in a subquery resolves
 through the ordinary outer scope chain and executes for that outer row. Independent
 derived bodies retain one materialization per statement. Set operations inside derived
@@ -1993,7 +1993,7 @@ a **stack check as the backstop** for whatever the limit admits.
   the chain, and three-valued logic gives the result the nested binary operators
   gave (see Short-circuit under [Arithmetic and numeric faults](#arithmetic-and-numeric-faults-1069)).
 
-Deeper text reports `SQL0006` at the token where the limit was crossed: the link of
+Deeper text reports `CS00006` at the token where the limit was crossed: the link of
 a chain that made it too deep, the operand that would be one level too deep, the
 operator of an `AND`/`OR` chain that would be one level too deep, or the first `(`
 past the limit. The message names the limit (`Expression nesting exceeds the
@@ -2014,7 +2014,7 @@ its own limit, which covers every statement a wire client sends. A typed request
 parsed by its caller, perhaps with a higher limit, so the parser records how deep
 each statement nests (`SqlQueryStatement.ExpressionNestingDepth`, the greater of its
 deepest tree and its deepest parentheses), and the engine refuses a request that
-nests deeper than its limit with an error result carrying `SQL0006`
+nests deeper than its limit with an error result carrying `CS00006`
 (`Expression nesting of 300 levels exceeds this engine's limit of 256 levels.`),
 exactly what parsing the text itself would have decided. A request over a query the
 parser did not return as a statement, such as a subquery taken out of a parsed
@@ -2027,13 +2027,13 @@ typed path accepts exactly what the engine accepts as text.
 | Written | Levels | Result under the default limit |
 |---|---|---|
 | `1 + 1 + ... + 1`, 256 terms | 256 | Parses and executes |
-| `1 + 1 + ... + 1`, 257 terms | 257 | `SQL0006` at the 256th `+` |
+| `1 + 1 + ... + 1`, 257 terms | 257 | `CS00006` at the 256th `+` |
 | `- - ... - a`, 255 signs | 256 | Parses and executes |
-| `ABS(ABS(... 1 ...))`, 256 calls | 257 | `SQL0006` at the innermost `1` |
+| `ABS(ABS(... 1 ...))`, 256 calls | 257 | `CS00006` at the innermost `1` |
 | `((( ... 1 ... )))`, 256 pairs | 1 | Parses and executes |
-| `((( ... 1 ... )))`, 257 pairs | 1 | `SQL0006` at the 257th `(` |
+| `((( ... 1 ... )))`, 257 pairs | 1 | `CS00006` at the 257th `(` |
 | `a = 1 AND a = 2 AND ...`, 10,000 comparisons | 3 | Parses and executes |
-| `a = 1 OR (a = 2 OR (... OR (a = 256)))`, 256 comparisons | 257 | `SQL0006` at the 255th `OR` |
+| `a = 1 OR (a = 2 OR (... OR (a = 256)))`, 256 comparisons | 257 | `CS00006` at the 255th `OR` |
 | `a IN (1, 2, ..., 10000)` | 2 | Parses and executes |
 
 **Compared with SQL Server and PostgreSQL.**
@@ -2042,8 +2042,8 @@ typed path accepts exactly what the engine accepts as text.
 |---|---|---|---|
 | Long `AND`/`OR` chains | Thousands of terms; an expression holds at most 65,535 identifiers and constants (error 8632) | One n-ary `BoolExpr` per chain, bounded by the stack alone | One n-ary `SqlLogicalExpression` per chain, one level of the limit |
 | Fixed construct limits | `CASE` nests at most 10 levels (error 125); subqueries at most 32 | None | Subqueries at most 32 (`CK00001`); every other construct only by the expression limit |
-| Expression nesting | No documented limit; a statement too deep for the server's stack fails (error 8631) | None beyond `max_stack_depth` (2 MB by default) | A documented limit, 256 by default, configurable within 32..4096 (`SQL0006`) |
-| Stack backstop | Error 8631 | `check_stack_depth()`: SQLSTATE 54001, stack depth limit exceeded | Stack checks in the parser and every walker: `COHSQLE004`, SQLSTATE 54001 |
+| Expression nesting | No documented limit; a statement too deep for the server's stack fails (error 8631) | None beyond `max_stack_depth` (2 MB by default) | A documented limit, 256 by default, configurable within 32..4096 (`CS00006`) |
+| Stack backstop | Error 8631 | `check_stack_depth()`: SQLSTATE 54001, stack depth limit exceeded | Stack checks in the parser and every walker: `CS05004`, SQLSTATE 54001 |
 
 From SQL Server the dialect takes a fixed, documented limit that a client can rely
 on and an operator can tune; from PostgreSQL it takes n-ary chains, which make long
@@ -2059,13 +2059,13 @@ calls, parses on a 1 MB thread, and a default .NET thread has more (1.5 MB on
 Windows); a debug build needs about 3 MB for it. A higher configured limit admits
 text no default thread can parse: 4,000 nested parentheses need several MB. Wherever
 the stack runs out first, the statement fails instead of the process. The parser
-checks the stack each time it recurses and reports `SQL0007` (the text is within
+checks the stack each time it recurses and reports `CS00007` (the text is within
 the dialect and parses on a thread with more stack). An engine reports a statement
-whose parse, or any later walk, runs out of stack as `COHSQLE004` (ISO SQLSTATE
+whose parse, or any later walk, runs out of stack as `CS05004` (ISO SQLSTATE
 54001, statement too complex): a `DatabaseException` in process, `ExecutionFailure`
 on the wire, with the session and any open transaction intact as for any failed
 statement. A statement within the limit therefore executes or fails with
-`COHSQLE004`; it never ends the process.
+`CS05004`; it never ends the process.
 
 **Persisted definitions stay openable.** `CREATE TABLE` and `ALTER TABLE` parse
 with the engine's limit, so a stored `CHECK` or `DEFAULT` is never deeper than the
@@ -2084,13 +2084,13 @@ before chains were n-ary reads back to the same chain and renders unchanged. A
 database opened on a thread too small to read its deepest definition back fails to
 open with an error that says so, that the catalog is not damaged, and to open it on
 a thread with a larger stack. A statement that reads a definition back on such a
-thread, such as a DDL proving its canonical text, fails with `COHSQLE004` instead.
+thread, such as a DDL proving its canonical text, fails with `CS05004` instead.
 
 **The engine checks its stack too.** Every recursive walk over a statement (the
 session's system-relation scan, planning, evaluation, CHECK validation, and
 binding a persisted definition) checks the stack before it descends, and recurses
 once per level of the tree, never once per term of an `AND`/`OR` chain, whose terms
-it iterates. A statement that runs any walk out of stack fails with `COHSQLE004` as
+it iterates. A statement that runs any walk out of stack fails with `CS05004` as
 described above. `LIKE` matching is iterative (#1111): its pattern length no
 longer consumes stack per wildcard. Long matches observe statement cancellation.
 
@@ -2189,8 +2189,8 @@ DATE +/- integer produces DATE; DATE - DATE produces INTEGER days. INTERVAL supp
 operands are unsupported, including INTERVAL times a number. Literal, column and
 parameter operands behave alike. TIMESTAMPTZ arithmetic checks range on the UTC
 instant; it preserves the written offset when representable, otherwise uses +00:00.
-Every other temporal arithmetic pair fails planning (COHSQLE003), including empty
-inputs; values outside years 1..9999 fail evaluation with COHSQLE002.
+Every other temporal arithmetic pair fails planning (CS02003), including empty
+inputs; values outside years 1..9999 fail evaluation with CS02002.
 
 DATE compares with TIMESTAMP/TIMESTAMPTZ at midnight; a zone-less TIMESTAMP reads
 as +00:00 when meeting TIMESTAMPTZ, using #1110's normalization rule. Equal temporal
@@ -2203,15 +2203,15 @@ the same captured instant as residual predicates and projections.
 
 Parameters follow the [shared parameter contract](../../Assimalign.Cohesion.Database.Language/docs/DESIGN.md#parameter-contract-1102).
 `$name`, `@name`, `$_x`, `$1` and `@1` are accepted. The name is an identifier or
-only ASCII digits; a bare sigil, `$1a`, `$١`, `@١` or `$1١` is SQL0003 at the whole
+only ASCII digits; a bare sigil, `$1a`, `$١`, `@١` or `$1١` is CS00003 at the whole
 reference. Sigils are interchangeable and caller
 keys may have one leading sigil. Matching is ordinal and case-sensitive, regardless
 of the caller dictionary's comparer. `$01` binds key `01`, not key `1`. Unused keys
-are ignored; normalized duplicates fail with COHSQLE023, including on BEGIN, COMMIT
+are ignored; normalized duplicates fail with CS01023, including on BEGIN, COMMIT
 and ROLLBACK, before transaction state changes. Unbound references fail
-with COHSQLE020 before any row is read or written, including empty inputs. SQL
+with CS01020 before any row is read or written, including empty inputs. SQL
 GROUP BY compares parameter references by bare name. Operand `?` and `:name`
-report one SQL0003 at their complete span and name the supported forms; a trailing
+report one CS00003 at their complete span and name the supported forms; a trailing
 stray `?` keeps its generic message. SQL `::` reports CK00001 naming CAST(x AS type).
 ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
 these rules without changing SQL request payloads.
@@ -2245,13 +2245,13 @@ column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Correlated and uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. Arithmetic result
-types and the `COHSQLE001`/`COHSQLE002`/`COHSQLE003` faults follow the arithmetic
+types and the `CS02001`/`CS02002`/`CS02003` faults follow the arithmetic
 contract above.
 `IS [NOT] DISTINCT FROM`, `IS [NOT] TRUE/FALSE/UNKNOWN`, and `[NOT] LIKE ... ESCAPE`
 execute as specified below. An expression nests at most 256
 levels by default (configurable per engine within 32..4096), and its parentheses at
 most as many pairs; a chain of `AND` (or `OR`) terms is one level however long, and
-deeper text reports `SQL0006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
+deeper text reports `CS00006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
 
 `~` is recognized but not part of the dialect, and is rejected at parse time with
 one `CK00001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
@@ -2287,7 +2287,7 @@ index exists; they are not extracted as seek comparisons.
 | NULL | FALSE | TRUE | FALSE | TRUE | TRUE | FALSE |
 
 Truth tests require BOOLEAN or NULL. A statically non-Boolean operand, including
-a supplied parameter, fails before rows are read with COHSQLE003, even on empty
+a supplied parameter, fails before rows are read with CS02003, even on empty
 tables. All predicates participate in projections, WHERE, JOIN ON, HAVING, CASE,
 ORDER BY, GROUP BY and correlated subqueries. CHECK rejects only FALSE, so
 `CHECK (flag IS TRUE)` rejects NULL while `CHECK (flag)` accepts NULL.
@@ -2304,7 +2304,7 @@ PostgreSQL and OQL. These intentionally depart from ISO's lack of an implicit
 escape and refusal of an empty escape. An escape may precede any scalar (including
 an ordinary letter), also following PostgreSQL. A nonempty escape must contain
 exactly one Unicode scalar; a longer string or trailing pattern escape raises
-COHSQLE034 (SQLSTATE 22025), naming ESCAPE. Constant and supplied-parameter
+CS02034 (SQLSTATE 22025), naming ESCAPE. Constant and supplied-parameter
 patterns/escapes, including their concatenations, are validated during binding,
 before any row, and compiled once. Dynamic operands are validated when evaluated.
 A NULL escape is checked before escape-length validation. Eager constant escape
@@ -2333,7 +2333,7 @@ UTF-16 length + 1), computed with checked 64-bit arithmetic. Each search transit
 linguistic comparison/search additionally costs the sum of its span lengths (at least
 one unit); successful anchors charge only through the matched prefix, and an independent
 prefix failure after boundary analysis charges the literal extent. Each zero-initialized 32-bit visited-state word costs one unit, charged
-before allocation. Exhaustion raises located COHSQLE040 as an ExecutionFailure and leaves
+before allocation. Exhaustion raises located CS05040 as an ExecutionFailure and leaves
 the connection usable; LIKE and NOT LIKE both fail rather than returning an estimate.
 This is a deliberate resource limit on linguistic matching (#1166). Other collations
 keep their O(input × pattern) search. The iterative matcher observes the executing
@@ -2361,7 +2361,7 @@ TO are recognized positionally and report one CK00001; ordinary identifiers
 `ilike` and `similar` retain their canonical spelling. Binary `&`, `|`, `<<`, `>>`,
 `::` casts (use CAST(x AS type)), IS JSON, IS OF and IS NORMALIZED likewise report
 one CK00001 at the operator. Missing FROM/comparands or ESCAPE operands remain
-SQL0003 at the offending or missing token. Adjacent `<-` retains SQL0003.
+CS00003 at the offending or missing token. Adjacent `<-` retains CS00003.
 
 ## Literals
 
@@ -2394,7 +2394,7 @@ column/alias interpretation. Whitespace between delimited identifiers remains si
 
 Typed literals execute in every scalar position, including predicates, IN, CASE, VALUES,
 UPDATE and literal DEFAULTs. The parser validates their text and stores canonical values;
-invalid contents report SQL0008 over the complete literal. A bare date, time or interval
+invalid contents report CS00008 over the complete literal. A bare date, time or interval
 remains a column reference. X and N prefixes must touch the quote: `X '00'` is not a literal.
 X is the ISO binary string form; PostgreSQL instead treats X as a bit-string form.
 
@@ -2432,7 +2432,7 @@ text is optional minus, PT, total seconds and S. Year/month fields in every spel
 P1Y2M, P0001-02-03T04:05:06 and the basic P00010203T040506) report CK00001;
 PT1M is one minute. Field precision, temporal precision,
 numeric/UUID/JSON/BYTEA typed strings and B/E/U& string prefixes also report CK00001.
-TIME WITH TIME ZONE is recognized but refused: SQL0005 in declarations and CAST
+TIME WITH TIME ZONE is recognized but refused: CS00005 in declarations and CAST
 (see [Type names](#type-names-the-sqltypenames-table)), CK00001 as a typed literal.
 INTERVAL arithmetic and unary minus on INTERVAL execute under the #1120 contract below.
 
@@ -2443,7 +2443,7 @@ Unqualified PostgreSQL clock forms accept `1 day 02:03:04`, `1 02:03:04` and
 makes it minutes/seconds (`2:03.5` is 123.5 seconds). Clock hours may exceed 23;
 minutes are 0..59 and seconds 0..60, following DecodeTimeCommon
 (datetime.c:2656-2740). The complete duration must fit TimeSpan, including both endpoints;
-overflow is SQL0008. Empty minute/second fields mean zero and a seconds fraction may omit its integer or
+overflow is CS00008. Empty minute/second fields mean zero and a seconds fraction may omit its integer or
 fractional digits (`02::04`, `02:03:.5`, `02:03:04.`), as those PostgreSQL readers allow.
 The pure day-time ISO form `P1DT2H` is supported, as PostgreSQL's
 DecodeISO8601Interval supports day and time designators (datetime.c:3990-4026, 4126-4138).
@@ -2459,7 +2459,7 @@ at their source. Result materialization adds no blanket binary copy.
 The engine infers and evaluates an integer literal as INTEGER when it fits, otherwise BIGINT,
 and a fractional or exponent
 literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
-hold reports `COHSQLE002` and names itself, for example
+hold reports `CS02002` and names itself, for example
 `integer literal 9223372036854775808 exceeds BIGINT.`: an integer literal above
 9223372036854775807 (write `12345678901234567890.0` for a larger exact value), or
 a fractional literal Decimal cannot hold exactly, with more than 28 decimal places
@@ -2510,9 +2510,9 @@ TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spe
 
 | Rejected spelling | Diagnostic and reason; replacement |
 | --- | --- |
-| TIME WITH TIME ZONE | SQL0005: no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE |
-| BIT, BIT(n) | SQL0005: PostgreSQL bit-string meaning wins under D1; use BOOLEAN for truth values |
-| SMALLDATETIME | SQL0005: range and minute precision cannot be honored; use TIMESTAMP |
+| TIME WITH TIME ZONE | CS00005: no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE |
+| BIT, BIT(n) | CS00005: PostgreSQL bit-string meaning wins under D1; use BOOLEAN for truth values |
+| SMALLDATETIME | CS00005: range and minute precision cannot be honored; use TIMESTAMP |
 | SERIAL, BIGSERIAL, SMALLSERIAL | CK00001: use GENERATED BY DEFAULT AS IDENTITY; these names cannot declare user domains either |
 | INT[], INTEGER ARRAY (and other scalar array forms) | CK00001: arrays are unsupported; use a scalar type |
 | INTERVAL field qualifiers | CK00001: field restrictions are not enforced; use bare INTERVAL |
@@ -2530,7 +2530,7 @@ layer: a SQL engine resolves it against its type catalog, where an application
 registers domains (`SqlType.CreateDomain`, `SqlDatabaseEngineBuilder.Types`). DDL
 (`CREATE TABLE`, `ALTER TABLE ADD COLUMN`) and `CAST` read a built-in name from this
 table first and fall back to the engine's domains for any other name; a domain takes
-no type arguments. A name neither resolves fails while planning with `COHSQLE010`
+no type arguments. A name neither resolves fails while planning with `CS02010`
 (SQLSTATE 42704), the same over an empty table as over a populated one. A column of
 a domain stores its base type and keeps the domain's name in the catalog; every
 write that assigns the column, its INSERT default included, and every `CAST` to the
@@ -2572,7 +2572,7 @@ refusal in src/backend/parser/parse_type.c:358-365.
 
 FLOAT follows PostgreSQL's storage selection (src/backend/parser/gram.y:14991-15016).
 FLOAT(0) reports that precision must be at least 1 bit; FLOAT(54) and greater report that
-precision must be less than 54 bits. Both are SQL0005 and name the declaration or CAST target.
+precision must be less than 54 bits. Both are CS00005 and name the declaration or CAST target.
 The catalog reports the resolved type; binary precision is not retained as a decimal modifier.
 REAL/FLOAT4 and DOUBLE/FLOAT8 do not take arguments. Function overloads use the resolved storage
 type, so FLOAT(24) is a REAL signature and FLOAT(53) is a DOUBLE signature.
@@ -2583,7 +2583,7 @@ object and precision modifier, including in CAST and declared scripts. The engin
 implement fractional-second rounding and never silently ignores a precision. PostgreSQL admits
 these modifiers (gram.y:15146-15181 and timestamp.c:1051-1110), and reduces precision above six
 with a warning (date.c:57-81; timestamp.c:110-132). A single unsigned Int32 precision above six
-is therefore also unsupported here. Malformed argument lists remain SQL0005, including empty,
+is therefore also unsupported here. Malformed argument lists remain CS00005, including empty,
 negative, nonnumeric and excess arguments before WITH TIME ZONE. Declarations and CAST report
 only the modifier error for those lists; the temporal suffix never adds an unsupported-WITH
 diagnostic. A well-formed precision still reports CK00001 with or without that suffix. Typed declarations
@@ -2598,17 +2598,17 @@ PostgreSQL accepts these forms (`src/backend/parser/gram.y:15197-15267`); Cohesi
 implement their field restriction/truncation or precision rounding. Every declaration site and
 CAST therefore reports CK00001 naming the object and complete qualifier, with or without
 precision. The same refusal reaches declared scripts, typed SQL names and SDK extraction.
-Malformed arguments remain SQL0005; invalid ranges such as YEAR TO DAY remain SQL0003 in SQL.
+Malformed arguments remain CS00005; invalid ranges such as YEAR TO DAY remain CS00003 in SQL.
 Delimited domain names such as `"INTERVAL DAY"` remain identifiers, not field qualifiers.
 
-Invalid modifiers produce SQL0005 before execution, naming the column, domain, function
+Invalid modifiers produce CS00005 before execution, naming the column, domain, function
 parameter or return type, or CAST target. In process the text execution API throws
-DatabaseParseException; Database.Sql.Client receives ParseFailure with SQL0005 and the
+DatabaseParseException; Database.Sql.Client receives ParseFailure with CS00005 and the
 same object name in its message, and ConnectionUsable stays true. Malformed surrounding
-statement syntax remains SQL0003. Declared scripts are parsed during engine Build before
-any database is opened, and preserve SQL0005. Typed schema builders and compiled schema
+statement syntax remains CS00003. Declared scripts are parsed during engine Build before
+any database is opened, and preserve CS00005. Typed schema builders and compiled schema
 validation use SqlSchemaValidationException with UnsupportedType and the table/column
-or domain name; Sdk.Database uses COHDBSDK106 at the source location. COHSQLS001-005 are
+or domain name; Sdk.Database uses COHDBSDK106 at the source location. CS03201-005 are
 script receipt/ownership codes, not the typed-schema validation enum.
 
 Raw compiled decimal columns and domains with precision but no scale normalize to scale zero
@@ -2636,7 +2636,7 @@ lengths can compare equal under the index's collation.
 - **VARCHAR(n), CHAR(n), CHARACTER(n), TEXT(n):** length counts Unicode scalar
   values, so a supplementary character is one character. If a value is longer than
   n, assignment accepts it only when everything past n is an ASCII space (U+0020),
-  discarding those spaces. Other excess characters fail with `COHSQLE012`, SQLSTATE
+  discarding those spaces. Other excess characters fail with `CS02012`, SQLSTATE
   22001 (`value too long for type character varying(n)`). Explicit CAST truncates to
   n characters instead. PostgreSQL makes the same assignment/explicit distinction
   in `varchar()` and `bpchar()` (`src/backend/utils/adt/varchar.c:264-268`,
@@ -2701,7 +2701,7 @@ lengths can compare equal under the index's collation.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
   CHARACTER VARYING is accepted as VARCHAR; bpchar, :: casts and character typed-string prefixes
   remain excluded. See [Type names](#type-names-the-sqltypenames-table) and [Literals](#literals).
-  The overflow code is COHSQLE012/22001; its shared message still names character varying(n).
+  The overflow code is CS02012/22001; its shared message still names character varying(n).
   PostgreSQL anchors: varchar.c:130 (input), :219 (padded output), :271 (explicit coercion),
   :673-712 (trimmed LENGTH versus padded octet length), :746, :912, :933, :991 (comparison,
   sorting and hashing), :1112-1119 (pattern ordering); pg_cast.dat:318-325 and pg_proc.dat:1178
@@ -2710,7 +2710,7 @@ lengths can compare equal under the index's collation.
   src/include/catalog, src/backend/commands and src/backend/parser respectively.
 - **NUMERIC(p,s), DECIMAL(p,s):** round to s fractional digits, with midpoint ties
   away from zero, then reject a rounded magnitude of `10^(p-s)` or more with
-  `COHSQLE002`, SQLSTATE 22003 (`numeric field overflow`). NUMERIC(p) and DECIMAL(p)
+  `CS02002`, SQLSTATE 22003 (`numeric field overflow`). NUMERIC(p) and DECIMAL(p)
   mean scale zero. For NUMERIC(3,2), `1.235` becomes `1.24`, `-1.235` becomes `-1.24`,
   and `9.995` fails because it rounds to `10.00`. CAST uses the same numeric rule.
   Text is rounded directly from all its digits before conversion to `System.Decimal`,
@@ -2725,7 +2725,7 @@ lengths can compare equal under the index's collation.
   `round_var` at `:11720-11748`. Bare NUMERIC/DECIMAL requires text to fit the existing
   `System.Decimal` representation exactly, without rounding. An unrepresentable
   unscaled value, or a rounded value that still cannot fit Decimal exactly, fails
-  with `COHSQLE002` too. Numeric text follows CAST's grammar: surrounding whitespace
+  with `CS02002` too. Numeric text follows CAST's grammar: surrounding whitespace
   and a leading `+` or `-` are accepted; exponent notation such as `'1.5e2'`,
   grouping, and a decimal point without digits on both sides are rejected.
   Unquoted SQL numeric literals retain their separate lexical rules.
@@ -2746,7 +2746,7 @@ now truncates character values, and all four paths round NUMERIC to its scale.
 A target that is a built-in type name resolves through `SqlTypeNames` into
 `DatabaseTypeInfo`, with the shared declaration modifier checks: every built-in
 type is a valid target. Any other name is left to the engine's type catalog (a
-domain, or `COHSQLE010` while planning). Which conversions exist is the engine's
+domain, or `CS02010` while planning). Which conversions exist is the engine's
 **cast registry** (phase E3), PostgreSQL's `pg_cast` (`castfunc`, `castcontext`): the
 engine's own conversions and an application's casts, to and from its domains and
 between built-in types the engine does not convert, are entries of the same
@@ -2787,7 +2787,7 @@ BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
 | CHAR | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 Identity conversions still apply target bounds. A pair without a conversion fails
-with COHSQLE011, naming CAST and both SQL types. When the source is static (a
+with CS02011, naming CAST and both SQL types. When the source is static (a
 column, typed literal, nested CAST, predicate, resolved call, scalar subquery, or a
 CASE, COALESCE, unary-sign or arithmetic result the binder can infer), planning rejects
 the pair before reading any rows, including empty input and NULL-valued columns.
@@ -2830,7 +2830,7 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   NUMERIC-to-REAL parses the exact Decimal text directly to Single, without an intermediate
   DOUBLE conversion (PostgreSQL src/backend/utils/adt/numeric.c:4691-4696).
   Float to integer requires a finite whole number in range, without rounding or
-  truncation. NaN and either infinity to any integer target fail with COHSQLE002/22003
+  truncation. NaN and either infinity to any integer target fail with CS02002/22003
   (src/backend/utils/adt/float.c:1267-1270). Float to NUMERIC parses its shortest round-trip text (including an
   exponent when present) exactly as Decimal before applying declared scale/precision;
   non-finite values and values Decimal cannot represent fail.
@@ -2883,11 +2883,11 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
   bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and
   `0 <= s <= p`. The value rounds to s fractional digits, with midpoint ties away
-  from zero, then must satisfy `abs(value) < 10^(p-s)` or it fails with `COHSQLE002`
+  from zero, then must satisfy `abs(value) < 10^(p-s)` or it fails with `CS02002`
   (22003). Text rounds directly to the target scale before Decimal conversion,
   avoiding a second rounding caused by Decimal's own precision limit. If the rounded
   text still cannot fit Decimal exactly, or unscaled text cannot fit it exactly,
-  conversion fails with the same `COHSQLE002` code.
+  conversion fails with the same `CS02002` code.
   The output does not promise padding to the declared scale.
 - **Strings:** CHAR/CHARACTER and VARCHAR/TEXT permit an optional length
   n from 1 through 10485760; bare CHAR is CHAR(1), while bare VARCHAR/TEXT have no CAST length limit.
@@ -2895,19 +2895,19 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   binary aliases permit the same optional length in bytes. Other targets follow the
   shared [type-modifier rules](#type-modifiers-at-declaration-1438); domains take no parameters.
 - **Diagnostics and metadata:** a name that is not a built-in type and that the
-  engine does not register as a domain fails while planning with `COHSQLE010`
-  (`SQL0004` is retired: the parser no longer knows which names exist); invalid
-  target arguments produce `SQL0005`; recognized but unsupported temporal precision
-  produces `CK00001`; malformed CAST syntax produces `SQL0003`.
-  A pair no registered cast converts is `COHSQLE011` (SQLSTATE 42846). A conversion
+  engine does not register as a domain fails while planning with `CS02010`
+  (`CS00004` is retired: the parser no longer knows which names exist); invalid
+  target arguments produce `CS00005`; recognized but unsupported temporal precision
+  produces `CK00001`; malformed CAST syntax produces `CS00003`.
+  A pair no registered cast converts is `CS02011` (SQLSTATE 42846). A conversion
   that fails on the value (a `FormatException`, `OverflowException` or
   `InvalidCastException`, the only failures the built-in casts throw, an
   application's alike) throws `DatabaseException` naming CAST and its target, with
   the original as the inner exception, surfaced as a query error over the wire.
   A built-in NUMERIC conversion's representation failure or modifier overflow
-  instead carries `COHSQLE002` (22003), after rounding to its declared scale when
+  instead carries `CS02002` (22003), after rounding to its declared scale when
   present. A cast that throws anything else, a cancellation the statement did not ask for
-  included, fails with `COHSQLE007` (`Cast TEXT AS cents failed: ...`), as a
+  included, fails with `CS05007` (`Cast TEXT AS cents failed: ...`), as a
   function does, and the connection stays usable; a `DatabaseException` it throws
   passes unchanged. A value a domain target's check refuses is the
   `SqlConstraintViolationException` of kind `DOMAIN` a write raises. The AST
@@ -2930,7 +2930,7 @@ COUNT/SUM/AVG/MIN/MAX/STRING_AGG/LISTAGG and CAST. COALESCE, NULLIF, CASE, CAST 
 evaluator special forms, outside the catalog calling convention (owner decision 66).
 SUBSTRING, TRIM and POSITION grammar normalizes to calls; directional TRIM becomes
 LTRIM or RTRIM. Applications and built-ins use the same reflection-free catalog.
-Arity and argument-type errors report COHSQLE006 while planning, including empty
+Arity and argument-type errors report CS01006 while planning, including empty
 inputs; the message names the accepted signatures. UPPER/LOWER no longer pass
 non-text values through, and LENGTH no longer stringifies them.
 
@@ -3004,13 +3004,13 @@ This departs from PostgreSQL's separate day/time components (DAY 0, HOUR 36).
 EPOCH always returns the full duration in seconds.
 DATE_TRUNC accepts year/quarter/month/week/day/hour/minute/second/millisecond/
 microsecond; TIME and INTERVAL admit day and finer units. Invalid field values
-fail with COHSQLE006. There is no session time zone.
+fail with CS01006. There is no session time zone.
 
 The five bare CURRENT_*/LOCAL* forms require no parentheses: empty parentheses
-report SQL0003. A precision argument on CURRENT_TIME, CURRENT_TIMESTAMP,
+report CS00003. A precision argument on CURRENT_TIME, CURRENT_TIMESTAMP,
 LOCALTIME or LOCALTIMESTAMP reports CK00001 naming the precision argument,
 including in DEFAULT grammar. NOW is written NOW(). Missing separators, unknown
-EXTRACT fields and missing closing parentheses report SQL0003.
+EXTRACT fields and missing closing parentheses report CS00003.
 
 All six clock forms read the instant captured at transaction start: BEGIN or
 BeginTransactionAsync for explicit transactions, statement start for auto-commit.
@@ -3023,13 +3023,13 @@ seam remains internal (owner decision 42); DEFAULT
 expression defaults use this carrier for omitted columns, explicit DEFAULT and referential SET DEFAULT (#1121). Stable ADD COLUMN defaults freeze the ALTER instant for missing fields; volatile defaults require an empty table.
 
 Numeric domain errors, nonfinite finite-input results, negative SUBSTRING lengths,
-numeric overflow and temporal range overflow use COHSQLE002; MOD by zero uses
-COHSQLE001. String-producing scalars limit results and Unicode work buffers to 1,048,576
+numeric overflow and temporal range overflow use CS02002; MOD by zero uses
+CS02001. String-producing scalars limit results and Unicode work buffers to 1,048,576
 UTF-16 code units (2 MiB of character data). LPAD/RPAD conservatively budget two
 UTF-16 units per requested Unicode scalar; REPLACE checks its expanded length and
 CONCAT/CONCAT_WS check binary-to-hex expansion and joined length before allocation.
 UPPER/LOWER use the same cap; LENGTH/CHAR_LENGTH count without allocating a rune buffer. Oversized requests raise
-COHSQLE002 (requested length too large); long loops observe statement cancellation. CHECK accepts only immutable functions, so clocks and random UUIDs are
+CS02002 (requested length too large); long loops observe statement cancellation. CHECK accepts only immutable functions, so clocks and random UUIDs are
 refused before mutation. Volatile calls never become seek bounds.
 
 Every scalar position uses these rules, including JOIN ON, grouping/HAVING,
@@ -3053,7 +3053,7 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
 Window functions remain recognized-unsupported (CK00001). LOG(base, x), trig,
-regex functions, TO_CHAR and other unknown names remain COHSQLE016.
+regex functions, TO_CHAR and other unknown names remain CS01016.
 
 PostgreSQL implementation references (local reference clone):
 `src/backend/parser/gram.y:16249-16371,17203` (special grammar),
@@ -3080,11 +3080,11 @@ so a function registered with the default `VOLATILE` volatility is refused there
 volatility; one returning BOOLEAN is a predicate by itself, and DDL refuses a CHECK that
 compares an application function's result with a value of a type it does not compare with,
 or uses one that is not a number in arithmetic. What a function throws fails the statement
-as `COHSQLE007`, which names it, and so does a result of another type than the function
+as `CS05007`, which names it, and so does a result of another type than the function
 declares (a type that widens to the declared one is converted); the statement writes
 nothing and an explicit transaction stays usable, as for every coded failure. A sign over a
 constant is itself a constant, so `ABS(-5)` is computed once too. An application function's
-`OperationCanceledException` is also `COHSQLE007` unless the statement's own token is
+`OperationCanceledException` is also `CS05007` unless the statement's own token is
 canceled, regardless of the exception's token. This applies to every aggregate phase and
 to engine/SQL domain checks and application calls inside SQL functions, including LIMIT/OFFSET,
 seek-bound evaluation and constant folding during planning. Actual cancellation stops folding
@@ -3103,14 +3103,14 @@ its volatility from Immutable, or register a result type that no longer fits whe
 CHECK uses it (a BOOLEAN predicate, a comparison). Another overload never replaces it.
 The database still opens and
 its reads proceed; every write that would evaluate the CHECK (an `INSERT`, an `UPDATE`, or a
-DDL backfill over existing rows) fails with `COHSQLE009`, naming the constraint, the table and
+DDL backfill over existing rows) fails with `CS01009`, naming the constraint, the table and
 the call as the CHECK makes it, on a session or connection that stays usable. A `DELETE`, an
 unrelated `DROP COLUMN` and `ALTER TABLE ... DROP CONSTRAINT` still run, and dropping the
 constraint lets the table's writes through again. An engine that declares the database (its
 builder's `AddDatabase`) fails its build with the same code instead, before it accepts work:
 
 ```text
-COHSQLE009: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this engine does not register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.
+CS01009: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', which this engine does not register, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.
 ```
 
 Native, built-in and SQL calls all reload by recorded identity. Special forms such as
@@ -3119,7 +3119,7 @@ Native, built-in and SQL calls all reload by recorded identity. Special forms su
 fails the open.
 
 A call found in neither the engine catalog nor the profile's executable and recognized-
-unsupported lists fails at plan time with `COHSQLE016`, `Unknown function '<name>'.`
+unsupported lists fails at plan time with `CS01016`, `Unknown function '<name>'.`
 before any row is read (#1068). Recognized unsupported functions fail at parse time with
 exactly one `CK00001` naming the function, even over an empty table (#1103):
 the nine window functions ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE,
@@ -3141,61 +3141,61 @@ pin in the same change.
 | Code | Severity | Meaning |
 |---|---|---|
 | `CK00001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
-| `SQL0001` | Error | Empty query text |
-| `SQL0002` | Error | Unknown command (recognized unsupported clauses use `CK00001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an incomplete or malformed IS predicate; `NOT` after an operand without a recognized predicate; an incomplete LIKE ESCAPE; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
-| `SQL0004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `COHSQLE010` |
-| `SQL0005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use CK00001 |
-| `SQL0006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
-| `SQL0007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `COHSQLE004` (#1151) |
-| `SQL0008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use CK00001 |
-| `SQL0100` | Information | Statement does not end with `;` |
-| `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
-| `COHSQLE002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
-| `COHSQLE003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
-| `COHSQLE004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
-| `COHSQLE005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
-| `COHSQLE006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
-| `COHSQLE007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
-| `COHSQLE008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
-| `COHSQLE009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
-| `COHSQLE010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`COHSQLE006`, `COHSQLE009`); whether to split it is an open owner question |
-| `COHSQLE011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
-| `COHSQLE012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
-| `COHSQLE013` | Error | Invalid statement, expression, DDL or query shape for the executor |
-| `COHSQLE014` | Error | Table does not exist |
-| `COHSQLE015` | Error | Unknown or ambiguous column |
-| `COHSQLE016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary (SQLSTATE 42883, undefined_function) |
-| `COHSQLE017` | Error | Invalid aggregate placement or grouping expression |
-| `COHSQLE018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
-| `COHSQLE019` | Error | Duplicate target column, key constraint column, PRIMARY KEY declaration, table binding or ambiguous output alias |
-| `COHSQLE020` | Error | No value supplied for a parameter; rejected before rows are read or written |
-| `COHSQLE023` | Error | Caller parameter keys collide after one leading sigil is stripped |
-| `COHSQLE027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |
-| `COHSQLE028` | Error | SQL namespace does not exist for schema/table/index DDL (PostgreSQL SQLSTATE 3F000); DROP TABLE IF EXISTS remains a no-op |
-| `COHSQLE029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
-| `COHSQLE030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
-| `COHSQLE031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
-| `COHSQLE032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
-| `COHSQLE033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
-| `COHSQLE040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
-| `COHSQLE041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
-| `COHSQLE042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
-| `COHSQLE043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
-| `COHSQLE044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as COHSQLE043 (#1231) |
-| `COHSQLE045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
-| `COHSQLE034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
-| `COHSQLE035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
-| `COHSQLE036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
-| `COHSQLE037` | Error | UNIQUE, PRIMARY KEY or unique-index violation, including a second unique index during ON CONFLICT DO UPDATE (SQLSTATE 23505, unique_violation) |
-| `COHSQLE038` | Error | Table CHECK or domain-check violation, including writes, CAST to a domain and function domain arguments/results (SQLSTATE 23514, check_violation) |
-| `COHSQLE039` | Error | FOREIGN KEY violation: missing parent on INSERT/UPDATE, or referenced key protected by RESTRICT/NO ACTION on DELETE/UPDATE, including final-row checks (SQLSTATE 23503, foreign_key_violation) |
+| `CS00001` | Error | Empty query text |
+| `CS00002` | Error | Unknown command (recognized unsupported clauses use `CK00001`) |
+| `CS00003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an incomplete or malformed IS predicate; `NOT` after an operand without a recognized predicate; an incomplete LIKE ESCAPE; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `CS00004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `CS02010` |
+| `CS00005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use CK00001 |
+| `CS00006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
+| `CS00007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `CS05004` (#1151) |
+| `CS00008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use CK00001 |
+| `CS00100` | Information | Statement does not end with `;` |
+| `CS02001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
+| `CS02002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
+| `CS02003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
+| `CS05004` | Error | Statement too complex: parsing it or a walk over it needs more stack than the executing thread has left, which a statement within a high configured nesting limit or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `CS01005` | Error | Column reference in a clause with no columns in scope: an `INSERT ... VALUES` row or a `LIMIT`/`OFFSET` count, raised while planning (ISO SQLSTATE class 42, #1165) |
+| `CS01006` | Error | Function call whose arguments no overload of its function accepts: a count outside every overload's (`ABS(1, 2)`, `UPPER()`, `COALESCE()`, `COUNT(a, b)`, `SUM()`), `*` for a function other than a parameterless aggregate such as `COUNT`, or argument types no overload takes (`SUM(name)` over text). Raised while planning, in every expression position, `CHECK` and `DEFAULT` included; by the evaluator for a call that reaches it unplanned; and by opening a database whose catalog stores a CHECK holding `COALESCE` with no operand (ISO SQLSTATE class 42; PostgreSQL's 42883, undefined function, #1189) |
+| `CS05007` | Error | A function threw while the statement ran: anything but a `DatabaseException`, cancellation of the statement itself or an exhausted stack or memory, which is the inner exception; or a `CAST`'s registered cast threw anything but those and a value's fault (`FormatException`, `OverflowException`, `InvalidCastException`), a cancellation the statement did not ask for included (`Cast TEXT AS cents failed: ...`, E3); or a function returned a value of another type than it declares (one that widens to the declared type is converted), or NULL when it declares it never returns NULL. The message names the function (ISO SQLSTATE 38000, external routine exception; E2) |
+| `CS01008` | Error | A function call that more than one overload accepts equally well, such as an overloaded function over a NULL literal. Raised while planning; a `CAST` on an argument chooses (ISO SQLSTATE 42725, ambiguous function; E2) |
+| `CS01009` | Error | A write would evaluate a stored CHECK that calls a function the engine does not register, registers as an aggregate, registers with no overload, or more than one, that accepts the stored call, or registers with a result that no longer fits where the CHECK uses it. The database opens and its reads proceed; the message names the constraint, the table and the call. An engine build that declares the database fails with it (ISO SQLSTATE 42883, undefined function, as PostgreSQL raises at use for a missing implementation; E2, owner decision 65) |
+| `CS02010` | Error | A type name that is neither a built-in type nor a domain in the merged engine/SQL type environment: a column type in DDL or a `CAST` target, raised while planning; or a write that assigns a stored column whose domain the opening engine cannot resolve, or resolves over another storage type, length, precision or scale than the column stores. The database opens and its reads, and writes that do not assign the column, proceed; an engine build that declares the database fails with it (ISO SQLSTATE 42704, undefined object, PostgreSQL's "type ... does not exist"; E3, decision 65's rule applied to domains). The one code names both causes, an unknown name while planning and a stored column's unregistered domain, where E2 split a function's two (`CS01006`, `CS01009`); whether to split it is an open owner question |
+| `CS02011` | Error | A `CAST` whose operand's type no registered cast converts to the target, nor is of its storage type: raised while planning when the plan knows the operand's type, the same over an empty table as over a populated one, and while evaluating for a parameter, whose type only its value reveals (ISO SQLSTATE 42846, cannot coerce, PostgreSQL's "cannot cast type ... to ..."; E3) |
+| `CS02012` | Error | Character value exceeds its destination's declared length and the excess is not entirely ASCII spaces: INSERT, INSERT ... SELECT, UPDATE, DEFAULT or ADD COLUMN backfill, for plain columns and domain base types. Explicit CAST truncates instead (ISO SQLSTATE 22001, string data right truncation; #1418) |
+| `CS05013` | Error | Invalid statement, expression, DDL or query shape for the executor |
+| `CS01014` | Error | Table does not exist |
+| `CS01015` | Error | Unknown or ambiguous column |
+| `CS01016` | Error | Unknown function, absent from executable and recognized-unsupported vocabulary (SQLSTATE 42883, undefined_function) |
+| `CS05017` | Error | Invalid aggregate placement or grouping expression |
+| `CS02018` | Error | Invalid ordering ordinal, row count or CAST target declaration |
+| `CS01019` | Error | Duplicate target column, key constraint column, PRIMARY KEY declaration, table binding or ambiguous output alias |
+| `CS01020` | Error | No value supplied for a parameter; rejected before rows are read or written |
+| `CS01023` | Error | Caller parameter keys collide after one leading sigil is stripped |
+| `CS03027` | Error | ADD COLUMN with a volatile DEFAULT on a table with live rows requires a rewrite; names the column (#1121, #1447) |
+| `CS01028` | Error | SQL namespace does not exist for schema/table/index DDL (PostgreSQL SQLSTATE 3F000); DROP TABLE IF EXISTS remains a no-op |
+| `CS03029` | Error | CREATE SCHEMA names an existing namespace without IF NOT EXISTS (PostgreSQL SQLSTATE 42P06) |
+| `CS03030` | Error | DROP SCHEMA RESTRICT finds dependent objects; the message offers CASCADE (PostgreSQL SQLSTATE 2BP01) |
+| `CS03031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
+| `CS05032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
+| `CS03033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
+| `CS05040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
+| `CS06041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
+| `CS05042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
+| `CS05043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
+| `CS04044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as CS05043 (#1231) |
+| `CS05045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
+| `CS02034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
+| `CS03035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
+| `CS05036` | Error | ON CONFLICT DO UPDATE cannot affect a row a second time (PostgreSQL 21000) |
+| `CS03037` | Error | UNIQUE, PRIMARY KEY or unique-index violation, including a second unique index during ON CONFLICT DO UPDATE (SQLSTATE 23505, unique_violation) |
+| `CS03038` | Error | Table CHECK or domain-check violation, including writes, CAST to a domain and function domain arguments/results (SQLSTATE 23514, check_violation) |
+| `CS03039` | Error | FOREIGN KEY violation: missing parent on INSERT/UPDATE, or referenced key protected by RESTRICT/NO ACTION on DELETE/UPDATE, including final-row checks (SQLSTATE 23503, foreign_key_violation) |
 
 Each SqlConstraintViolationException carries exactly one Error diagnostic. Its message names
 the constraint and table (no table for a domain CAST), without raw unique keys or unrelated
 row values. The enclosing statement span is attached when available. SQLSTATE mappings
 follow PostgreSQL `src/backend/utils/errcodes.txt:237-240`; SQLSTATE is not a separate field
-in the diagnostic carrier. NOT NULL remains COHSQLE024 (23502). The live constraint corpus
+in the diagnostic carrier. NOT NULL remains CS03024 (23502). The live constraint corpus
 in SqlLanguageConformanceTests and both-transport SqlConstraintDiagnosticWireTests pin the
 codes, locations, statement rollback and continued use of the session/transaction.
 
@@ -3224,7 +3224,7 @@ index builds. CREATE/DROP FUNCTION and DOMAIN finish binding after self-commit w
 cancellation again. SqlTimeoutConformanceTests and SqlTimeoutRegressionTests are the executable conformance corpus for
 these engine-visible limits; no grammar/profile clause count changes.
 
-A refusal carries COHSQLE042 / SQLSTATE 54000, naming the table, actual byte size and limit.
+A refusal carries CS05042 / SQLSTATE 54000, naming the table, actual byte size and limit.
 The failure leaves the session usable and an explicit transaction active, with earlier statements
 intact. Failed upsert preparation releases its new key and row grants, including a row retained
 after waiting, while preserving earlier transaction locks. SQLSTATE is a documented mapping,
@@ -3271,12 +3271,12 @@ Text factories and sessions throw `DatabaseParseException` containing every stat
 diagnostic, ordered by start offset. A parsed typed request with errors throws the same
 exception with the same complete list; no recovery AST executes. The first-error message
 retains its existing `SQL parse error CODE: message` spelling.
-While planning, the engine raises `COHSQLE003` for a sign over an operand it knows
-is not a number, `COHSQLE005` for a column reference where no columns are in
-scope, `COHSQLE006` for a function call whose arguments no overload of its function
-accepts, and `COHSQLE008` for one several accept equally well; a `LIMIT`/`OFFSET` count
+While planning, the engine raises `CS02003` for a sign over an operand it knows
+is not a number, `CS01005` for a column reference where no columns are in
+scope, `CS01006` for a function call whose arguments no overload of its function
+accepts, and `CS01008` for one several accept equally well; a `LIMIT`/`OFFSET` count
 is evaluated while planning, so its arithmetic
-faults (`COHSQLE001`, `COHSQLE002`) surface there too, and `COHSQLE004` can come
+faults (`CS02001`, `CS02002`) surface there too, and `CS05004` can come
 from any planner walk. Comparison-literal coercion for an access path falls back
 to residual evaluation if the value fails the destination's declared bounds.
 
@@ -3284,15 +3284,15 @@ The `COHSQLE` codes are engine diagnostics, not parser diagnostics. They are str
 in process, with source offsets when planning has an offending AST location; a runtime
 failure without a source location leaves its offsets null. The wire's
 `ExecutionFailure` text leads with the code. The arithmetic fault contract above
-defines when each of `COHSQLE001`–`COHSQLE003` is raised, the expression
-nesting limit when `COHSQLE004` is, the column-scope rule for VALUES and
-counts when `COHSQLE005` is, the function-argument and overload rules under Statement
-completeness when `COHSQLE006` and `COHSQLE008` are, and the registered-function rules
-under Builtin functions when `COHSQLE007` and `COHSQLE009` are, the type and cast rules
-under Explicit conversion when `COHSQLE010` and `COHSQLE011` are, and Declared bounds
-on writes when `COHSQLE012` is. The engine's transaction-state codes,
-`COHSQLT001`–`COHSQLT003`, its offline-database code, `COHSQLT004`, and its aborted-transaction
-code, `COHSQLT005`, are documented in the SQL engine design.
+defines when each of `CS02001`–`CS02003` is raised, the expression
+nesting limit when `CS05004` is, the column-scope rule for VALUES and
+counts when `CS01005` is, the function-argument and overload rules under Statement
+completeness when `CS01006` and `CS01008` are, and the registered-function rules
+under Builtin functions when `CS05007` and `CS01009` are, the type and cast rules
+under Explicit conversion when `CS02010` and `CS02011` are, and Declared bounds
+on writes when `CS02012` is. The engine's transaction-state codes,
+`CS04001`–`CS04003`, its offline-database code, `CS04004`, and its aborted-transaction
+code, `CS04005`, are documented in the SQL engine design.
 
 ## Code-first literal defaults (B2)
 
@@ -3355,7 +3355,7 @@ Every persisted function call in table/domain CHECKs, column/domain DEFAULTs and
 records its normalized name and resolved parameter signature beside canonical SQL. A later
 overload never rebinds these calls, including after reopen with different engine registrations.
 DROP dependencies use the same identities. A missing recorded identity or a native signature
-whose volatility has weakened below the persisted use's requirement follows COHSQLE009. The
+whose volatility has weakened below the persisted use's requirement follows CS01009. The
 database opens and stored rows remain readable; affected writes fail, including through SQL
 wrappers and domain CHECKs, including domains in casts and function parameter/result types.
 Reopening with the original compatible registration restores use.
@@ -3369,23 +3369,23 @@ bounds and NOT NULL apply on writes and CAST. SQL definitions persist as canonic
 DROP refuses dependencies in other function/domain bodies, CHECK, DEFAULT, casts and domain
 columns. Ordinary DDL cannot drop Schema-owned objects. Engine registrations cannot be dropped.
 DROP FUNCTION checks the requested normalized signature: an engine-registered overload is
-COHSQLD003; an absent overload is COHSQLE009 (42883) even when the engine registers another overload
+CS03303; an absent overload is CS01009 (42883) even when the engine registers another overload
 with the same name. Type aliases and function-name casing do not change that identity.
 
-Column defaults admit variable-free scalar expressions with Immutable, Stable or Volatile calls. Domain, typed DefaultSql and SDK defaults remain literal-only. ADD COLUMN freezes a nonvolatile expression once into the independent missing-value literal; volatile defaults on live rows report COHSQLE027 naming the column because table rewrites are tracked by #1447. SET/DROP DEFAULT changes only the insert default. Canonical expression text and resolved call identities survive reopen through the persisted-definition ceiling parser.
+Column defaults admit variable-free scalar expressions with Immutable, Stable or Volatile calls. Domain, typed DefaultSql and SDK defaults remain literal-only. ADD COLUMN freezes a nonvolatile expression once into the independent missing-value literal; volatile defaults on live rows report CS03027 naming the column because table rewrites are tracked by #1447. SET/DROP DEFAULT changes only the insert default. Canonical expression text and resolved call identities survive reopen through the persisted-definition ceiling parser.
 
 | Code | Meaning |
 | --- | --- |
-| COHSQLD001 | Invalid, recursive or volatility-incompatible SQL definition; absent domain requested by DROP. Duplicate functions use COHSQLE065 (42723); missing/unresolved functions use COHSQLE009 (42883). |
-| COHSQLD002 | A persisted definition or column depends on the object being dropped. |
-| COHSQLD003 | SQL attempted to drop an engine-registered function/type. |
-| COHSQLS001 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
-| COHSQLS002 | Verify requires a complete receipt with the declared checksum. |
-| COHSQLS003 | Transaction control inside a declared script; the runner owns transactions. |
-| COHSQLS004 | A script statement failed or attempted to adopt an existing table or index. |
-| COHSQLS005 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
+| CS03301 | Invalid, recursive or volatility-incompatible SQL definition; absent domain requested by DROP. Duplicate functions use CS03065 (42723); missing/unresolved functions use CS01009 (42883). |
+| CS03302 | A persisted definition or column depends on the object being dropped. |
+| CS03303 | SQL attempted to drop an engine-registered function/type. |
+| CS03201 | A script checksum, identity, completed target or object claim is inconsistent, or publication does not match the actual mutation and exact preceding receipt/generation. |
+| CS03202 | Verify requires a complete receipt with the declared checksum. |
+| CS03203 | Transaction control inside a declared script; the runner owns transactions. |
+| CS03204 | A script statement failed or attempted to adopt an existing table or index. |
+| CS03205 | A script attempts ALTER TABLE, DROP TABLE or DROP INDEX against an object declared by the typed schema; declare the change in the typed schema. |
 
-Definition-binding COHSQLD001 rejections carry the code separately from their message in
+Definition-binding CS03301 rejections carry the code separately from their message in
 DatabaseException.Diagnostics. The span identifies the offending expression, or the statement
 when a parameter/type has no separate token location. Binding retained catalog metadata uses its
 canonical expression/type fragment when the original declaration is unavailable. In particular,
@@ -3404,7 +3404,7 @@ DDL generation. Outside the unchanged digest/generation O(1) skip, Apply and Ver
 completed statement's target and created-object claims against the declared SQL. Function receipts
 retain the CREATE definition's or bound DROP request's parameter type spellings together with the
 actual signature, so removed or redefined domains do not prevent validation of completed statements.
-An inconsistency is `COHSQLS001`; Verify still requires every declared script to be complete.
+An inconsistency is `CS03201`; Verify still requires every declared script to be complete.
 The typed schema exclusively owns its declared tables and indexes. Script ALTER TABLE and DROP
 TABLE against a typed table, and DROP INDEX against a typed index (including its primary key),
 are refused before Build opens or changes the database. Scripts may create and later alter their
@@ -3432,18 +3432,18 @@ quoted names to match uppercase vocabulary entries.
 
 | Code | Meaning | PostgreSQL SQLSTATE |
 | --- | --- | --- |
-| `COHSQLE015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
-| `COHSQLE021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
-| `COHSQLE022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
-| `COHSQLE024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
-| `COHSQLE025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
-| `COHSQLE026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
-| `COHSQLE003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
+| `CS01015` | Unknown column, including a DDL column reference | 42703 (`undefined_column`) |
+| `CS04021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
+| `CS02022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
+| `CS03024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
+| `CS03025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
+| `CS01026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
+| `CS02003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 
 NOT NULL failures carry one error diagnostic naming the column and the executing statement's
 span when source text is available. The existing missing-default and explicit-NULL message texts are unchanged.
 PostgreSQL raises the same constraint category in `src/backend/executor/execMain.c:2268-2274`.
-Execution-time diagnostic work #1653 now treats NOT NULL as done; `COHSQLE023` belongs to #1102.
+Execution-time diagnostic work #1653 now treats NOT NULL as done; `CS01023` belongs to #1102.
 
 Execution and DDL diagnostic completion (#1653) uses the following additional mappings.
 Codes are separate from in-process message text; wire errors compose `CODE: message` once.
@@ -3458,35 +3458,35 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 
 | Code | Meaning | PostgreSQL SQLSTATE |
 | --- | --- | --- |
-| `COHSQLE046` | Scalar subquery returns more than one row | 21000 (`cardinality_violation`) |
-| `COHSQLE047` | Malformed temporal text in assignment, DEFAULT or CAST | 22007 (`invalid_datetime_format`) |
-| `COHSQLE048` | Calendar, clock or offset field out of range in assignment, DEFAULT or CAST | 22008 (`datetime_field_overflow`) |
-| `COHSQLE049` | Table or index name already exists, including provisioning collisions | 42P07 (`duplicate_table`) |
-| `COHSQLE050` | Constraint or non-function SQL definition name already exists | 42710 (`duplicate_object`) |
-| `COHSQLE051` | Missing table during execution/DDL | 42P01 (`undefined_table`) |
-| `COHSQLE052` | Missing constraint, index, collation or other catalog object; missing schemas retain COHSQLE028 / 3F000 | 42704 (`undefined_object`) |
-| `COHSQLE053` | Invalid table definition, including nullable primary key or dropping the last column | 42P16 (`invalid_table_definition`) |
-| `COHSQLE054` | Invalid FOREIGN KEY column lists or referenced key is not unique | 42830 (`invalid_foreign_key`) |
-| `COHSQLE055` | Incompatible store value, DEFAULT, FOREIGN KEY column type, CHECK function result or compared values | 42804 (`datatype_mismatch`) |
-| `COHSQLE056` | DDL refused because constraints or indexes depend on the object; namespace RESTRICT retains COHSQLE030 | 2BP01 (`dependent_objects_still_exist`) |
-| `COHSQLE057` | Unsupported execution/DDL operation, including a subquery encountered by CHECK admission | 0A000 (`feature_not_supported`) |
-| `COHSQLE058` | Damaged or incompatible loaded persisted expression or missing-value literal | XX001 (`data_corrupted`) |
-| `COHSQLE059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
-| `COHSQLE060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
-| `COHSQLE061` | Column already exists | 42701 (`duplicate_column`) |
-| `COHSQLE062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
-| `COHSQLE063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
-| `COHSQLE064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
-| `COHSQLE065` | Function signature already exists | 42723 (`duplicate_function`) |
-| `COHSQLE066` | Compiled-schema ownership refuses session DDL | 42501 (`insufficient_privilege`) |
+| `CS02046` | Scalar subquery returns more than one row | 21000 (`cardinality_violation`) |
+| `CS02047` | Malformed temporal text in assignment, DEFAULT or CAST | 22007 (`invalid_datetime_format`) |
+| `CS02048` | Calendar, clock or offset field out of range in assignment, DEFAULT or CAST | 22008 (`datetime_field_overflow`) |
+| `CS03049` | Table or index name already exists, including provisioning collisions | 42P07 (`duplicate_table`) |
+| `CS03050` | Constraint or non-function SQL definition name already exists | 42710 (`duplicate_object`) |
+| `CS01051` | Missing table during execution/DDL | 42P01 (`undefined_table`) |
+| `CS01052` | Missing constraint, index, collation or other catalog object; missing schemas retain CS01028 / 3F000 | 42704 (`undefined_object`) |
+| `CS03053` | Invalid table definition, including nullable primary key or dropping the last column | 42P16 (`invalid_table_definition`) |
+| `CS03054` | Invalid FOREIGN KEY column lists or referenced key is not unique | 42830 (`invalid_foreign_key`) |
+| `CS02055` | Incompatible store value, DEFAULT, FOREIGN KEY column type, CHECK function result or compared values | 42804 (`datatype_mismatch`) |
+| `CS03056` | DDL refused because constraints or indexes depend on the object; namespace RESTRICT retains CS03030 | 2BP01 (`dependent_objects_still_exist`) |
+| `CS05057` | Unsupported execution/DDL operation, including a subquery encountered by CHECK admission | 0A000 (`feature_not_supported`) |
+| `CS06058` | Damaged or incompatible loaded persisted expression or missing-value literal | XX001 (`data_corrupted`) |
+| `CS03059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
+| `CS05060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
+| `CS03061` | Column already exists | 42701 (`duplicate_column`) |
+| `CS02062` | INTERVAL duration overflow in assignment, DEFAULT or CAST | 22015 (`interval_field_overflow`) |
+| `CS02063` | FOREIGN KEY columns have incompatible collations | 42P21 (`collation_mismatch`) |
+| `CS04064` | A bound table was replaced while DDL waited; retry the statement | 40001 (`serialization_failure`) |
+| `CS03065` | Function signature already exists | 42723 (`duplicate_function`) |
+| `CS03066` | Compiled-schema ownership refuses session DDL | 42501 (`insufficient_privilege`) |
 
-Definition dependency refusals retain `COHSQLD002` (2BP01), and engine-registered
-function/type drops retain `COHSQLD003` (0A000), now carried as structured diagnostics.
+Definition dependency refusals retain `CS03302` (2BP01), and engine-registered
+function/type drops retain `CS03303` (0A000), now carried as structured diagnostics.
 The mappings follow PostgreSQL `src/backend/utils/errcodes.txt:119,157,166-179,206,280,346-398,499-500`.
 
-Numeric CAST range/precision faults use existing `COHSQLE002` (22003), division/remainder by zero
-uses `COHSQLE001` (22012), and operand-type errors including NOT and binary arithmetic
-use `COHSQLE003` (42804). Unsupported evaluator nodes/operators use `COHSQLE013`.
+Numeric CAST range/precision faults use existing `CS02002` (22003), division/remainder by zero
+uses `CS02001` (22012), and operand-type errors including NOT and binary arithmetic
+use `CS02003` (42804). Unsupported evaluator nodes/operators use `CS05013`.
 The carrier retains an available expression span at runtime and during LIMIT/OFFSET
 planning. Column-scope failures use the offending column span, including INSERT VALUES.
 PostgreSQL's corresponding data exception codes are declared in
@@ -3500,27 +3500,27 @@ On negotiated protocol 2.1 with the diagnostics capability, Warning and Error di
 
 Before reading rows, DML refreshes adjacent foreign-key definitions changed during an
 object-lock wait, including ADD COLUMN and removal of a child table or constraint. A
-changed target table invalidates its already-bound plan: structured code `COHSQLT006`
+changed target table invalidates its already-bound plan: structured code `CS04006`
 is a retryable transaction abort; retry the statement in a fresh transaction.
 
 ### Text conversion diagnostics and persisted defaults (#1422)
 
-Temporal assignment, DEFAULT and CAST use one reader classification: COHSQLE047 / 22007 for
-bad format, COHSQLE048 / 22008 for calendar, clock or offset fields outside range, and
-COHSQLE062 / 22015 for interval duration overflow. The reader records the reason explicitly;
+Temporal assignment, DEFAULT and CAST use one reader classification: CS02047 / 22007 for
+bad format, CS02048 / 22008 for calendar, clock or offset fields outside range, and
+CS02062 / 22015 for interval duration overflow. The reader records the reason explicitly;
 SQL does not infer it from a CLR exception type. This follows PostgreSQL datetime.c:4247-4290.
-REAL and DOUBLE text retain COHSQLE022 / 22P02 for malformed input and COHSQLE002 / 22003
+REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
 Catalog format 26 and compiled-schema v8 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
-'2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries COHSQLE041;
+'2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,
 recreate, rebuild and reapply the declaration (#1152); no compatibility reader is provided.
 
 Unknown COLLATE names are syntactically valid identifiers and fail during binding with
-COHSQLE052 / 42704, including declarations with DEFAULT context. A missing collation in loaded
-persisted text retains COHSQLE058 / XX001. Culture-aware and user-defined collation creation
+CS01052 / 42704, including declarations with DEFAULT context. A missing collation in loaded
+persisted text retains CS06058 / XX001. Culture-aware and user-defined collation creation
 remain unsupported. Quoted names use the ordinary delimited-identifier decoding.
 
 ## DDL workspace verification (#1444)
@@ -3576,7 +3576,7 @@ residuals, duplicate keys, NULL and LEFT semantics remain. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. Budget exhaustion reports
-`COHSQLE067` (53200, out_of_memory). It does not cap result materialization or transient planning.
+`CS05067` (53200, out_of_memory). It does not cap result materialization or transient planning.
 SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
 returns the existing eight-column plan description. `actual_rows` counts candidates before
 residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and
@@ -3584,3 +3584,13 @@ probe/heuristic qualifications appear in access and JoinStep nodes. Plain EXPLAI
 wrapped statement and has NULL actual counts. Unmeasured counts remain NULL in either form.
 Repeated correlated invocations accumulate on the child nodes. A parent's candidate count
 excludes descendant work, while statement-wide physical-work totals include every invocation.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

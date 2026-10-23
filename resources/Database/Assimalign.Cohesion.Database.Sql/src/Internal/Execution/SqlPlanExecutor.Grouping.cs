@@ -444,7 +444,7 @@ internal sealed partial class SqlPlanExecutor
         catch (OverflowException exception)
         {
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"{Convert.ToString(value, CultureInfo.InvariantCulture)} does not fit the {type} result type.", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NormalizeGroupValueSqlEvaluation, Convert.ToString(value, CultureInfo.InvariantCulture), type), exception);
         }
     }
 }

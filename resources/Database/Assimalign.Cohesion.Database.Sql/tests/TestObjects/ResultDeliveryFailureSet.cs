@@ -42,7 +42,7 @@ internal sealed class ResultDeliveryFailureSet : DatabaseResultSet
         if (_failure == "enumeration")
         {
             throw new DatabaseException("Injected enumeration failure.",
-                [new Diagnostic { Code = "COHSQLE041", Message = "Injected enumeration failure.", Severity = DiagnosticSeverity.Error }]);
+                [new Diagnostic { Code = "CS06041", Message = "Injected enumeration failure.", Severity = DiagnosticSeverity.Error }]);
         }
         if (_failure == "uncoded") { throw new DatabaseException("Injected uncoded failure."); }
         if (_failure == "dispose") { yield break; }

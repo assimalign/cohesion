@@ -16,11 +16,11 @@ public sealed class SqlParseStrictnessTests
 {
     /// <summary>
     /// A stray character used to lex as a one-character identifier, so <c>SELECT * FROM t ?</c>
-    /// bound <c>?</c> as an alias of <c>t</c> and ran. It is now one SQL0003 at the character,
+    /// bound <c>?</c> as an alias of <c>t</c> and ran. It is now one CS00003 at the character,
     /// and the statement keeps only its command type: no alias, column or placeholder.
     /// </summary>
     /// <param name="marked">The statement; the stray character sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a stray character is one SQL0003 at its span and binds nothing")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a stray character is one CS00003 at its span and binds nothing")]
     [InlineData("SELECT * FROM t «?»")]
     [InlineData("SELECT * FROM t «#»")]
     [InlineData("SELECT * FROM t «^»")]
@@ -48,7 +48,7 @@ public sealed class SqlParseStrictnessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         if (parameterForm)
@@ -62,17 +62,17 @@ public sealed class SqlParseStrictnessTests
         }
         statement.SqlExpression.GetType().ShouldBe(typeof(SqlQueryExpression));
         statement.SqlExpression.CommandType.ShouldNotBe(SqlQueryCommandType.Unknown);
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS00002");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Strictness: text of stray characters only is one SQL0003 and no unknown command")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Strictness: text of stray characters only is one CS00003 and no unknown command")]
     public void Parse_OnlyStrayCharacters_ShouldReportOnlyTheCharacter()
     {
         // Act
         var statement = Parse("?;");
 
         // Assert
-        Errors(statement).ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        Errors(statement).ShouldHaveSingleItem().Code.ShouldBe("CS00003");
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Unknown);
     }
 
@@ -81,7 +81,7 @@ public sealed class SqlParseStrictnessTests
     /// a raw FormatException naming no code or span.
     /// </summary>
     /// <param name="marked">The statement; the literal sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a numeric literal whose exponent has no digits is one SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a numeric literal whose exponent has no digits is one CS00003")]
     [InlineData("SELECT «1e» FROM t;")]
     [InlineData("SELECT «1E+» FROM t;")]
     [InlineData("SELECT a FROM t WHERE a = «2.5e-»;")]
@@ -94,7 +94,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"Malformed numeric literal '{sql[start..end]}': the exponent has no digits.");
@@ -180,7 +180,7 @@ public sealed class SqlParseStrictnessTests
 
     /// <summary>
     /// PostgreSQL's pattern-match operators built on <c>~</c> are one operator each. They used to
-    /// report two diagnostics, or a generic SQL0003 at the <c>!</c>.
+    /// report two diagnostics, or a generic CS00003 at the <c>!</c>.
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="meaning">The match the message names.</param>

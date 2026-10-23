@@ -54,7 +54,7 @@ public sealed class SqlDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE015");
+        diagnostic.Code.ShouldBe("CS01015");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(13);
@@ -80,7 +80,7 @@ public sealed class SqlDiagnosticTests
 
         // Assert
         failure.ShouldNotBeOfType<DatabaseParseException>();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE016");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01016");
         failure.Message.ShouldBe("Unknown function 'FOO'.");
     }
 

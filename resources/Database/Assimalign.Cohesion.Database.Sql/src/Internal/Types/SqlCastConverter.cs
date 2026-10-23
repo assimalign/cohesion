@@ -26,8 +26,8 @@ internal static class SqlCastConverter
     /// conversion threw passes unchanged.
     /// </exception>
     /// <exception cref="SqlEvaluationException">
-    /// No cast converts the value's type (<c>COHSQLE011</c>), or the conversion's code failed
-    /// (<c>COHSQLE007</c>).
+    /// No cast converts the value's type (<c>CS02011</c>), or the conversion's code failed
+    /// (<c>CS05007</c>).
     /// </exception>
     /// <exception cref="SqlConstraintViolationException">The value violates the domain target's check.</exception>
     internal static object? Convert(object? value, SqlBoundCast cast, CancellationToken cancellationToken, bool copySharedBinary = false)
@@ -62,7 +62,7 @@ internal static class SqlCastConverter
                 }
                 else
                 {
-                    throw new InvalidCastException("Unsupported source/target pair.");
+                    throw new InvalidCastException(ErrorMessages.SqlCastConverterConvertInvalidCast);
                 }
 
                 if (converted is not null)
@@ -81,7 +81,7 @@ internal static class SqlCastConverter
             catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
             {
                 // The value's fault, the built-ins' only failures: the conversion contract's message.
-                throw SqlEvaluationException.CastValueFailed($"CAST from {SqlType.NameOf(source)} to {cast.TargetText} failed: {exception.Message}", exception);
+                throw SqlEvaluationException.CastValueFailed(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastConverterConvertSqlEvaluation, SqlType.NameOf(source), cast.TargetText, exception.Message), exception);
             }
             catch (Exception exception) when (registered is not null && SqlEvaluationException.IsCastFailure(exception, cancellationToken))
             {
@@ -162,7 +162,7 @@ internal static class SqlCastConverter
                 }
                 return text;
             case byte[] bytes when target.MaxLength is int length && bytes.Length > length:
-                throw new InvalidCastException($"Binary length exceeds {length}; truncation is not supported.");
+                throw new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConverterApplyModifiersInvalidCast, length));
             case decimal number when target.Type == DatabaseType.Decimal:
                 int? scale = NumericScale(target);
                 // PostgreSQL numeric.c:7693-7750 rounds before checking the integer digits;
@@ -179,7 +179,7 @@ internal static class SqlCastConverter
                     if (number <= -limit || number >= limit)
                     {
                         throw SqlEvaluationException.NumericValueOutOfRange(
-                            $"numeric field overflow: Value exceeds precision {precision} and scale {scale ?? 0}.");
+                            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConverterApplyModifiersSqlEvaluation, precision, scale ?? 0));
                     }
                 }
                 return number;
@@ -247,7 +247,7 @@ internal static class SqlCastConverter
         int? scale = target.Scale ?? (target.Precision is null ? null : 0);
         if (target.Precision is < 1 || scale is < 0 || scale > target.Precision)
         {
-            throw new SqlPlanningException("COHSQLE018", "Invalid decimal precision or scale.");
+            throw new SqlPlanningException("CS02018", ErrorMessages.CastConverterNumericScaleSqlPlanning);
         }
         return scale;
     }
@@ -273,13 +273,13 @@ internal static class SqlCastConverter
         if (source.Length == 0 || source == "." ||
             (!allowLiteralSyntax && (point == 0 || point == source.Length - 1)))
         {
-            throw new FormatException("Expected signed fixed-point numeric text.");
+            throw new FormatException(ErrorMessages.CastConverterParseExactDecimalFormat);
         }
         for (int i = 0; i < source.Length; i++)
         {
             if (source[i] is < '0' or > '9' && i != point)
             {
-                throw new FormatException("Expected signed fixed-point numeric text without grouping or exponent.");
+                throw new FormatException(ErrorMessages.CastConverterParseExactDecimalFormat2);
             }
         }
 
@@ -319,7 +319,7 @@ internal static class SqlCastConverter
         digits = significant;
         if (scale > 28 || digits.Length > 29 || digits.Length - scale > 29)
         {
-            throw new OverflowException("Text cannot be represented exactly as System.Decimal.");
+            throw new OverflowException(ErrorMessages.ConverterParseExactDecimalOverflow);
         }
 
         // Parse only the integer coefficient: this cannot silently round.

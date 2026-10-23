@@ -112,8 +112,8 @@ public sealed class SqlReturningWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - RETURNING: evaluation and planning failures retain coded usable exchanges")]
-    [InlineData("INSERT INTO t VALUES (3, 1), (4, 0) RETURNING 1 / age", "COHSQLE001")]
-    [InlineData("UPDATE t SET age = 1 RETURNING COUNT(*)", "COHSQLE017")]
+    [InlineData("INSERT INTO t VALUES (3, 1), (4, 0) RETURNING 1 / age", "CS02001")]
+    [InlineData("UPDATE t SET age = 1 RETURNING COUNT(*)", "CS05017")]
     public async Task QueryAsync_ReturningFailure_ShouldLeaveConnectionUsable(string sql, string code)
     {
         // Arrange

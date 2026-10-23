@@ -508,7 +508,7 @@ public sealed class SqlUpsertArbitrationConformanceTests
         });
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Upsert arbitration: preparation failures release waited rows and keys while the transaction stays open")]
-    [InlineData("COHSQLE036")]
+    [InlineData("CS05036")]
     [InlineData("CHECK")]
     [InlineData("NOT NULL")]
     [InlineData("Cancellation")]
@@ -554,10 +554,10 @@ public sealed class SqlUpsertArbitrationConformanceTests
                 {
                     await Should.ThrowAsync<OperationCanceledException>(async () => await pending);
                 }
-                else if (failureKind == "COHSQLE036")
+                else if (failureKind == "CS05036")
                 {
                     var failure = await Should.ThrowAsync<DatabaseException>(async () => await pending);
-                    failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE036");
+                    failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05036");
                 }
                 else
                 {
@@ -728,7 +728,7 @@ public sealed class SqlUpsertArbitrationConformanceTests
                 var failure = await Should.ThrowAsync<SqlEvaluationException>(async () => await pending);
 
                 // Assert: only the failed statement's grants are released, before transaction end.
-                failure.Code.ShouldBe("COHSQLE042");
+                failure.Code.ShouldBe("CS05042");
                 Volatile.Read(ref grants).ShouldBe(1);
                 upsert.State.ShouldBe(TransactionState.Active);
                 locks.TryAcquire(probe.Sequence, row, LockMode.Exclusive).ShouldBeTrue();

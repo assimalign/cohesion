@@ -114,7 +114,7 @@ public sealed class SqlIdentityParserTests
         foreach (string sql in statements)
         {
             var errors = new SqlQueryParser().Parse(sql).Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ToArray();
-            errors.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+            errors.ShouldHaveSingleItem().Code.ShouldBe("CS00003");
             errors[0].Message.ShouldBe("Conflicting NULL/NOT NULL declarations for column 'id'.");
         }
     }
@@ -129,7 +129,7 @@ public sealed class SqlIdentityParserTests
             .Where(item => item.Severity == DiagnosticSeverity.Error).ToArray();
 
         // Assert
-        errors.ShouldHaveSingleItem().Code.ShouldBe("SQL0003");
+        errors.ShouldHaveSingleItem().Code.ShouldBe("CS00003");
         errors[0].Message.ShouldBe("Conflicting NULL/NOT NULL declarations for column 'id'.");
     }
 }

@@ -68,16 +68,16 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             arguments.Context.CancellationToken.ThrowIfCancellationRequested();
             return SqlValue.FromObject(Compute(in arguments));
         }
-        catch (OutOfMemoryException exception) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " requested length is too large.", exception); }
+        catch (OutOfMemoryException exception) { throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScalarFunctionInvokeCoreSqlEvaluation, Name), exception); }
         catch (ArithmeticException exception) { throw SqlEvaluationException.FromArithmetic(exception); }
-        catch (ArgumentOutOfRangeException exception) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " result is out of range.", exception); }
+        catch (ArgumentOutOfRangeException exception) { throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScalarFunctionInvokeCoreSqlEvaluation2, Name), exception); }
     }
 
     private object? Compute(scoped in SqlArguments args)
     {
         if (Volatility == SqlFunctionVolatility.Stable && args.Context.TransactionStart is null)
         {
-            throw new SqlPlanningException("CK00001", "Datetime value functions require an executing SQL transaction; datetime DEFAULT expressions are not supported yet.");
+            throw new SqlPlanningException("CK00001", ErrorMessages.ScalarFunctionComputeSqlPlanning);
         }
         switch (Name)
         {
@@ -130,7 +130,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
                     if (args.Count == 3)
                     {
                         length = args.GetInt64(2);
-                        if (length < 0) { throw SqlEvaluationException.NumericValueOutOfRange("SUBSTRING length must not be negative."); }
+                        if (length < 0) { throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.ScalarFunctionComputeSqlEvaluation); }
                         if (count < 1)
                         {
                             long omitted = count < 1 - long.MaxValue ? long.MaxValue : 1 - count;
@@ -179,7 +179,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
         double y = args.Count > 1 ? Convert.ToDouble(args[1].ToObject(), CultureInfo.InvariantCulture) : 0;
         if (Name is "SQRT" or "LN" or "LOG10" && (Name == "SQRT" ? x < 0 : x <= 0) || Name == "POWER" && x == 0 && y < 0)
         {
-            throw SqlEvaluationException.NumericValueOutOfRange(Name + " argument is outside its domain.");
+            throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScalarFunctionNumericSqlEvaluation, Name));
         }
         if (Name == "MOD" && y == 0) { throw SqlEvaluationException.DivisionByZero("MOD"); }
         if (Name == "SIGN") { return (long)Math.Sign(x); }
@@ -201,7 +201,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             if (first is float && Name != "MOD" && !(Name == "POWER" && args[1].Type is DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64))
             {
                 float single = (float)result;
-                if (!float.IsFinite(single)) { throw SqlEvaluationException.NumericValueOutOfRange(Name + " overflowed REAL."); }
+                if (!float.IsFinite(single)) { throw SqlEvaluationException.NumericValueOutOfRange(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ScalarFunctionNumericSqlEvaluation2, Name)); }
                 return single;
             }
             return result;
@@ -241,7 +241,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
         if (scale < -28)
         {
             if (scale == -29 && decimal.Abs(value) >= 50000000000000000000000000000m)
-            { throw SqlEvaluationException.NumericValueOutOfRange("ROUND result exceeds DECIMAL."); }
+            { throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.ScalarFunctionRoundExactSqlEvaluation); }
             return 0m;
         }
         decimal factor = 1;
@@ -258,7 +258,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             : scale < -308 ? 0 : Math.Round(value / Math.Pow(10, -scale), MidpointRounding.ToEven) * Math.Pow(10, -scale);
 
     private static double Finite(double value) => double.IsFinite(value) ? value
-        : throw SqlEvaluationException.NumericValueOutOfRange("Function result is not finite.");
+        : throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.ScalarFunctionFiniteSqlEvaluation);
 
     internal static SqlValue ChangeCase(scoped in SqlArguments arguments, bool upper)
     {
@@ -273,13 +273,13 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             return SqlValue.FromString(upper ? text.ToUpperInvariant() : text.ToLowerInvariant());
         }
         catch (OutOfMemoryException exception)
-        { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large.", exception); }
+        { throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.ScalarFunctionChangeCaseSqlEvaluation, exception); }
     }
 
     internal static void CheckLength(long length)
     {
         if (length > MaximumStringLength)
-        { throw SqlEvaluationException.NumericValueOutOfRange("Requested string length is too large (maximum 1048576 UTF-16 code units)."); }
+        { throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.FunctionCheckLengthSqlEvaluation); }
     }
 
     private static void ObserveCancellation(int index, CancellationToken cancellationToken)

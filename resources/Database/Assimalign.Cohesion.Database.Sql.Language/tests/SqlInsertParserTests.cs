@@ -22,7 +22,7 @@ public class SqlInsertParserTests
         var statement = _parser.Parse("INSERT INTO t VALUES (1) " + clause + ";");
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 

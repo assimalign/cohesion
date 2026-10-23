@@ -17,6 +17,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
+
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
+
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
         object?[] OldValues, object?[] NewValues, HashSet<int> Assigned)
@@ -341,7 +345,7 @@ internal sealed partial class SqlPlanExecutor
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementTableChanged, expected.Schema, expected.Name);
             throw new DatabaseTransactionAbortedException(message,
-                [new Diagnostic { Code = "COHSQLT006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
         }
     }
 
@@ -512,7 +516,7 @@ internal sealed partial class SqlPlanExecutor
     /// Checks the values a write assigns to columns of a domain (phase E3): each domain's check is
     /// evaluated on its column's value as a column CHECK is, so only FALSE refuses the row, and a
     /// column whose domain the engine does not register refuses any write that assigns it with
-    /// <c>COHSQLE010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
+    /// <c>CS02010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
     /// INSERT for every column, its default included, and on UPDATE for the columns it sets
     /// (<c>ExecEvalConstraintCheck</c>, <c>src/backend/executor/execExprInterp.c</c>).
     /// </summary>
@@ -521,7 +525,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="evaluator">The statement's evaluator.</param>
     /// <param name="ordinals">The columns the write assigns; null for every column.</param>
     /// <exception cref="SqlConstraintViolationException">A domain's check returned FALSE.</exception>
-    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>COHSQLE010</c>), or a check failed (<c>COHSQLE007</c>).</exception>
+    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>CS02010</c>), or a check failed (<c>CS05007</c>).</exception>
     private static void CheckDomains(SqlBoundTable bound, object?[] values, SqlExpressionEvaluator evaluator, int[]? ordinals = null)
     {
         if (bound.Domains.Count == 0)
@@ -879,24 +883,21 @@ internal sealed partial class SqlPlanExecutor
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version that was rolled back after the walk found it, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
         }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
         {
             throw new StorageCorruptionException(
                 location.PageId,
-                $"The row record in slot {location.SlotIndex} of page {(long)location.PageId} of table '{table.Schema}.{table.Name}' holds " +
-                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsureSnapshotSeesCascadeRowFailure2, location.SlotIndex, (long)location.PageId, table.Schema, table.Name, record.Length, SqlRowCodec.StampHeaderSize));
         }
 
         var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version written by transaction {writer}, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
         }
     }
 
@@ -1255,7 +1256,7 @@ internal sealed partial class SqlPlanExecutor
                  qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
             {
                 string name = string.Join('.', new[] { qualifiedColumn.SchemaName, qualifiedColumn.TableAlias, qualifiedColumn.ColumnName }.Where(part => part is not null));
-                throw new SqlPlanningException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.MissingFromClauseEntry, name), qualifiedColumn.Location);
             }
 
