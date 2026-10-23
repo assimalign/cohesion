@@ -266,3 +266,32 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDBB004 | CB06004 | Storage/durability |
 | COHDBB005 | CB06005 | Storage/durability |
 | COHDBB006 | CB06006 | Storage/durability |
+
+## KeyValuePair migration
+
+| Previous code | Code | Category |
+|---|---|---|
+| COHKV001 | CV00001 | Language/syntax |
+| COHKV003 | CV00003 | Language/syntax |
+| COHKV004 | CV00004 | Language/syntax |
+| COHKV005 | CV00005 | Language/syntax |
+| COHKV006 | CV00006 | Language/syntax |
+| COHKV007 | CV00007 | Language/syntax |
+| COHKV008 | CV00008 | Language/syntax |
+| COHKV009 | CV00009 | Language/syntax |
+| COHKV010 | CV00010 | Language/syntax |
+| COHKV011 | CV00011 | Language/syntax |
+| COHKV016 | CV00016 | Language/syntax |
+| COHKV018 | CV00018 | Language/syntax |
+| COHKV017 | CV01017 | Binding/names |
+| COHKV012 | CV02012 | Values/types |
+| COHKV013 | CV02013 | Values/types |
+| COHKV014 | CV02014 | Values/types |
+| COHKV015 | CV02015 | Values/types |
+| COHKV002 | CV03002 | Schema/constraints |
+| COHKV019 | CV04019 | Transactions/locking |
+| COHDBK001 | CV04101 | Transactions/locking |
+| COHDBK002 | CV06102 | Storage/durability |
+| COHDBK004 | CV06104 | Storage/durability |
+| COHDBK005 | CV06105 | Storage/durability |
+| COHDBK006 | CV06106 | Storage/durability |

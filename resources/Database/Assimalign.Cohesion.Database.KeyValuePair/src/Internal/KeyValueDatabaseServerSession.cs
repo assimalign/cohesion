@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// </remarks>
 internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 {
+    private static readonly string _errorDatabaseServerSessionAbortFailure = ErrorMessages.DatabaseServerSessionAbortFailure;
+
     private readonly KeyValueDatabaseServer _server;
     private readonly IDuplexConnection _connection;
     private readonly KeyValueDatabaseServerOptions _options;
@@ -117,7 +119,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         try
         {
             _lifetimeSource.Cancel();
-            _connection.Abort(new ConnectionAbortedException("The server is shutting down."));
+            _connection.Abort(new ConnectionAbortedException(_errorDatabaseServerSessionAbortFailure));
         }
         catch (ObjectDisposedException)
         {
@@ -173,7 +175,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             // cancels that final handshake flush, the authenticated peer still needs its
             // terminal notice, just as one already inside the ready loop does.
             _closeReason = KeyValueDatabaseEventSource.CloseReason.Shutdown;
-            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.DatabaseServerSessionAbortFailure).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -192,7 +194,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             // The peer gets an internal error frame only; the event carries the failure.
             _closeReason = KeyValueDatabaseEventSource.CloseReason.Faulted;
             KeyValueDatabaseEventSource.Log.SessionFaulted(this, exception);
-            await TryWriteErrorAsync(ProtocolErrorCode.Internal, "An unexpected server error terminated the session.").ConfigureAwait(false);
+            await TryWriteErrorAsync(ProtocolErrorCode.Internal, ErrorMessages.ServerSessionRunAsyncValueTask).ConfigureAwait(false);
         }
         finally
         {
@@ -347,14 +349,14 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
                 {
                     // Graceful drain: the session was idle at the frame boundary.
                     _closeReason = KeyValueDatabaseEventSource.CloseReason.Shutdown;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The server is shutting down.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.DatabaseServerSessionAbortFailure).ConfigureAwait(false);
                     return;
                 }
                 catch (OperationCanceledException) when (!_lifetimeSource.IsCancellationRequested)
                 {
                     // Idle timeout eviction.
                     _closeReason = KeyValueDatabaseEventSource.CloseReason.IdleTimeout;
-                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, "The session was closed after exceeding the idle timeout.").ConfigureAwait(false);
+                    await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, ErrorMessages.ServerSessionReadyLoopAsyncValueTask).ConfigureAwait(false);
                     return;
                 }
             }
@@ -407,7 +409,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
                 {
                     // A malformed parameter component is a wire violation, not a
                     // statement failure.
-                    throw new ProtocolException($"Malformed component encoding for parameter '{name}'.", exception);
+                    throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncProtocol, name), exception);
                 }
             }
         }
@@ -436,7 +438,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         {
             // The database is offline (#1243): every command is refused, with the coded reason,
             // until it is reopened; the session stays ready to report it.
-            await WriteErrorAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", cancellationToken).ConfigureAwait(false);
+            await WriteErrorAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionFormatErrorValueTask, exception.Code, exception.Message), cancellationToken).ConfigureAwait(false);
             return;
         }
         catch (DatabaseException exception)
@@ -482,8 +484,8 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         if (result.Status != DatabaseResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? $"{diagnostics[0].Code ?? "COHKV019"}: {diagnosticMessage}"
-                : $"COHKV019: The statement completed with status {result.Status}.";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionFormatErrorValueTask, diagnostics[0].Code ?? "CV04019", diagnosticMessage)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, result.Status);
 
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
             return;
@@ -534,10 +536,10 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Code is { } code)
             {
-                return message.StartsWith(code + ":", StringComparison.Ordinal) ? message : $"{code}: {message}";
+                return message.StartsWith(code + ":", StringComparison.Ordinal) ? message : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionFormatErrorValueTask, code, message);
             }
         }
-        return $"COHKV019: {message}";
+        return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionFormatErrorValueTask2, message);
     }
 
     private ValueTask WriteErrorAsync(ProtocolErrorCode code, string message, CancellationToken cancellationToken)
@@ -594,7 +596,7 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
     /// </summary>
     private ValueTask RejectUnexpectedFrameAsync(ProtocolMessageType type)
     {
-        string violation = $"Unexpected {type} frame in the ready state.";
+        string violation = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RejectUnexpectedFrameAsyncValueTask, type);
         _closeReason = KeyValueDatabaseEventSource.CloseReason.ProtocolViolation;
         KeyValueDatabaseEventSource.Log.SessionProtocolViolation(this, violation);
         return TryWriteErrorAsync(ProtocolErrorCode.ProtocolViolation, violation);

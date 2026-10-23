@@ -141,7 +141,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         catch (IndexFormatException exception)
         {
             _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            string message = $"Database '{name}' cannot be opened. {exception.Message}";
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueDatabaseDatabase, name, exception.Message);
             throw new DatabaseException(message, [new Types.Diagnostic
             { Code = IndexFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
@@ -254,13 +254,11 @@ public sealed class KeyValueDatabase : DatabaseInstance
         }
 
         string remedy = version < current
-            ? "This engine does not upgrade databases written in an older format: export its data with the engine that " +
-              "wrote it, drop the database (DropDatabaseAsync) and create it again with this engine, then reload the data " +
-              "(on-disk format upgrades are tracked by assimalign/cohesion#1152)."
-            : "The database was written by a newer engine; open it with that engine.";
+            ? ErrorMessages.ThrowIfFormatIsNotCurrentDatabase
+            : ErrorMessages.ThrowIfFormatIsNotCurrentDatabase2;
 
         throw new DatabaseException(
-            $"Database '{name}' uses entry-space format {version}, but this engine supports only format {current}. {remedy}");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfFormatIsNotCurrentDatabase3, name, version, current, remedy));
     }
 
     /// <summary>
@@ -373,7 +371,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHDBK002";
+    internal const string OfflineCode = "CV06102";
 
     /// <summary>
     /// Gets whether a failed durable flush of either file set took the database offline.
@@ -454,7 +452,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CV06105", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -473,14 +471,14 @@ public sealed class KeyValueDatabase : DatabaseInstance
     {
         if (error is DatabaseException { Diagnostics: [{ Code: "CK06003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK001" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CV04101" }, ..] }) { return error; }
         var translated = TranslateOffline(error);
         if (!ReferenceEquals(translated, error)) { return translated; }
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK005" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CV06105" }, ..] }) { return error; }
         return error switch
         {
             _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+            { Code = "CV06105", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
             _ => error,
         };
     }
@@ -502,7 +500,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     public new async ValueTask<KeyValueDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (KeyValueDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -528,8 +526,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>The entry, or null when the key has no visible, live entry.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>CV04101</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     public async ValueTask<KeyValueEntry?> GetAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueGetRequest(key), cancellationToken).ConfigureAwait(false);
@@ -557,8 +555,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>The write outcome: whether it applied, and the new (or current) etag.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>CV04101</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
     /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
@@ -577,7 +575,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             }
         }
 
-        throw new DatabaseException("The put command returned no outcome row.");
+        throw new DatabaseException(ErrorMessages.KeyValueDatabasePutAsyncDatabase);
     }
 
     /// <summary>
@@ -590,8 +588,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>True when an entry was deleted; false when none was visible or the condition did not hold.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>CV04101</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">Thrown when a concurrently committed transaction changed the key (first-updater-wins; retryable).</exception>
     /// <exception cref="DatabaseTransactionDeadlockException">The command was chosen as a deadlock victim (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An auto-commit command's commit record could not be confirmed durable.</exception>
@@ -610,8 +608,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <returns>True when the key has a visible entry; otherwise false.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>CV04101</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     public async ValueTask<bool> ExistsAsync(KeyValueDatabaseSession session, ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueExistsRequest(key), cancellationToken).ConfigureAwait(false);
@@ -638,8 +636,8 @@ public sealed class KeyValueDatabase : DatabaseInstance
     /// <exception cref="ArgumentNullException"><paramref name="session"/> is null.</exception>
     /// <exception cref="ArgumentException">At the first <c>MoveNextAsync</c>, <paramref name="options"/> combines a non-empty prefix with non-empty start/end bounds, or carries a negative limit.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>COHDBK001</c>).</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBK002</c>, #1243).</exception>
+    /// <exception cref="DatabaseException">The session does not belong to this database, the session is closed, or its transaction refuses commands (<c>CV04101</c>).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CV06102</c>, #1243).</exception>
     public async IAsyncEnumerable<KeyValueEntry> ScanAsync(KeyValueDatabaseSession session, KeyValueScanOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var result = await RequireOwnSession(session).ExecuteAsync(new KeyValueScanRequest(options), cancellationToken).ConfigureAwait(false);
@@ -663,7 +661,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         if (!ReferenceEquals(session.Database, this))
         {
-            throw new DatabaseException("The session does not belong to this key-value database.");
+            throw new DatabaseException(ErrorMessages.DatabaseRequireOwnSessionDatabase);
         }
 
         return session;
@@ -748,6 +746,6 @@ public sealed class KeyValueDatabase : DatabaseInstance
         }
 
         throw new DatabaseException(
-            $"Transaction {context.Sequence} has no statement bracket applying on this database.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence));
     }
 }

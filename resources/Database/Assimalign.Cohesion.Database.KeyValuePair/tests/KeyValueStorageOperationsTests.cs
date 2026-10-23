@@ -32,7 +32,7 @@ public sealed class KeyValueStorageOperationsTests
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a command, BEGIN, COMMIT and ROLLBACK of an open
-    /// transaction, over the wire too — is refused with COHDBK002, and nothing reaches either file
+    /// transaction, over the wire too — is refused with CV06102, and nothing reaches either file
     /// set, through the workers' passes and the sessions' close included. The root bases' checks
     /// come first (concrete-types plan §6.4): BEGIN on the session holding the open transaction is
     /// refused as already active, a canceled token is refused before the offline refusal, and the
@@ -105,7 +105,7 @@ public sealed class KeyValueStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBK002.
+        // BEGIN. Before the bases, each of these was refused with CV06102.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
@@ -144,17 +144,17 @@ public sealed class KeyValueStorageOperationsTests
 
         // Assert: the coded refusals, everywhere.
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBK002");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CV06102");
         unconfirmed.Message.ShouldStartWith("Database 'kv' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBK002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBK002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CV06102" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CV06102" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
         closedState.ShouldBe(TransactionState.Faulted);
         commandError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        commandError.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
+        commandError.Message.ShouldStartWith("CV06102", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBK002", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CV06102", Case.Sensitive);
         harness.Engine.State.ShouldBe(EngineState.Running);
 
         // Assert: nothing reached either file set after the failure, from the workers or the close.
@@ -266,7 +266,7 @@ public sealed class KeyValueStorageOperationsTests
         dataOfflineAtOnce.ShouldBeTrue();
         dataAfterTheWorkers.Data.ShouldBe(dataAtTheFailure.Data);
         dataAfterTheWorkers.Journal.ShouldBe(dataAtTheFailure.Journal);
-        commit.Code.ShouldBe("COHDBK002");
+        commit.Code.ShouldBe("CV06102");
         engine.OfflineDatabases.ShouldBe([(DatabaseName)name]);
     }
 

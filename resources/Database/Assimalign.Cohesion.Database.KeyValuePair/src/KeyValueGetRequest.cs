@@ -19,7 +19,7 @@ public sealed class KeyValueGetRequest : KeyValueRequest
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException("The key cannot be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.KeyValueDeleteRequestArgument, nameof(key));
         }
 
         Key = key;

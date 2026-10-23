@@ -31,7 +31,7 @@ keys order by unsigned lexicographic byte comparison.
   build, never dropped while declared), and its servers (`AddServer(options => ...)` or a
   factory) and workers. `KeyValueDatabaseEngine.Create(name, options)` creates a standalone
   engine; no options type carries the engine name. Open refuses a missing catalog with
-  `COHDBK006` before opening either storage (#1238). File-system data of at most one page
+  `CV06106` before opening either storage (#1238). File-system data of at most one page
   indicates interrupted creation and requires `DropDatabaseAsync`, then `CreateDatabaseAsync`;
   longer data with a missing catalog requires preserving storage and restoring the complete
   backup. Messages are storage-neutral, including in memory. Existing catalogs are validated before the
@@ -41,15 +41,15 @@ keys order by unsigned lexicographic byte comparison.
   `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. The
-  exception is a storage, I/O or index failure (`COHDBK005`, or `CK06003` for corruption):
-  it aborts the transaction, which then refuses commands and COMMIT with `COHDBK001` naming
+  exception is a storage, I/O or index failure (`CV06105`, or `CK06003` for corruption):
+  it aborts the transaction, which then refuses commands and COMMIT with `CV04101` naming
   that cause until the caller rolls back (#1364). In autocommit the next command can run. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
   its abort record or its undo fails (an undo that fails keeps the written keys locked until
   a retry completes it: about 100 ms later, then at doubling delays up to the maintenance
   interval, #1226; a failed journal write takes the database offline instead, #1252). A
   transaction the kernel ended under its
-  caller refuses commands and COMMIT with `COHDBK001`. A rollback or a closed session ends
+  caller refuses commands and COMMIT with `CV04101`. A rollback or a closed session ends
   the transaction even under a running command, which then fails and writes nothing; a
   commit while a command runs is refused.
 - Sessions address exactly one database (A5). All five typed operations reject
@@ -68,7 +68,7 @@ keys order by unsigned lexicographic byte comparison.
   2026-07-14; see DESIGN.md for the placement history).
 - Storage operations: a failed journal or data fsync takes the database offline, both file
   sets at once, and every later operation, in process and over the server, is refused with
-  `DatabaseOfflineException` (`COHDBK002`) until `OpenDatabaseAsync` reopens it and recovery
+  `DatabaseOfflineException` (`CV06102`) until `OpenDatabaseAsync` reopens it and recovery
   decides the unconfirmed commit (#1243); `OfflineDatabases` feeds health. `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and
   `CheckpointInterval` (5 minutes) size the pool and trigger checkpoints (#1254). See
   DESIGN.md, "Storage operations".
@@ -231,3 +231,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

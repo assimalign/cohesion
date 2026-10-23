@@ -98,7 +98,7 @@ internal static class KeyValueRecordCodec
         if (record.Length < StampHeaderSize)
         {
             throw new DatabaseTypeException(
-                $"The record holds {record.Length} bytes, fewer than its {StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueRecordCodecDecodeDatabaseType, record.Length, StampHeaderSize));
         }
 
         (writer, deleter) = ReadStamps(record);
@@ -109,7 +109,7 @@ internal static class KeyValueRecordCodec
 
         if (!reader.IsAtEnd)
         {
-            throw new DatabaseTypeException("The record continues past its value component.");
+            throw new DatabaseTypeException(ErrorMessages.KeyValueRecordCodecDecodeDatabaseType2);
         }
     }
 }

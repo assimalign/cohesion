@@ -52,6 +52,14 @@ using Assimalign.Cohesion.Database.Types;
 /// </remarks>
 internal sealed class KeyValueOperationExecutor
 {
+    private static readonly string _errorExecutorEnsureLatestVersionFailure3 = ErrorMessages.ExecutorEnsureLatestVersionFailure3;
+
+    private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
+    private static readonly string _errorExecutorAcquireKeyLockAsyncFailure = ErrorMessages.ExecutorAcquireKeyLockAsyncFailure;
+
+    private static readonly string _errorExecutorExecutePutAsyncFailure = ErrorMessages.ExecutorExecutePutAsyncFailure;
+
     // Test seam: after the final PUT effect, while its statement apply is still admitted.
     internal static Action? AfterPutApplied { get; set; }
 
@@ -125,7 +133,7 @@ internal sealed class KeyValueOperationExecutor
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
             KeyValuePutRequest put => await ExecutePutAsync(put, context, cancellationToken).ConfigureAwait(false),
             KeyValueDeleteRequest delete => await ExecuteDeleteAsync(delete, context, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException($"The key-value engine has no executor for {request.GetType().Name}."),
+            _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OperationExecutorExecuteAsyncDatabase, request.GetType().Name)),
         };
     }
 
@@ -266,7 +274,7 @@ internal sealed class KeyValueOperationExecutor
             // see: a concurrently committed writer beat this command to the key.
             // The bracket has rolled back; the conflict is retryable.
             throw new TransactionAbortedException(
-                $"Write-write conflict on key '{Convert.ToHexString(request.Key.Span)}': the key was concurrently written by a committed transaction (first-updater-wins). Retry the transaction.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorExecutePutAsyncFailure, Convert.ToHexString(request.Key.Span)),
                 exception);
         }
 
@@ -337,7 +345,7 @@ internal sealed class KeyValueOperationExecutor
         {
             context.Coordinator.LockManager.ReleaseAll(owner);
             throw new TransactionAbortedException(
-                $"Transaction {owner} ended while the command waited for the key lock; the command was not applied.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorAcquireKeyLockAsyncFailure, owner));
         }
     }
 
@@ -441,15 +449,14 @@ internal sealed class KeyValueOperationExecutor
         if (!_storage.TryReadRecord(pageId, slotIndex, KeySpaceObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                "Write-write conflict: the target entry version was reclaimed by a concurrent transaction. Retry the transaction.");
+                _errorExecutorEnsureLatestVersionFailure);
         }
 
         if (record.Length < KeyValueRecordCodec.StampHeaderSize)
         {
             throw new StorageCorruptionException(
                 pageId,
-                $"The key-value entry record in slot {slotIndex} of page {(long)pageId} holds {record.Length} bytes, " +
-                $"fewer than its {KeyValueRecordCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorEnsureLatestVersionFailure2, slotIndex, (long)pageId, record.Length, KeyValueRecordCodec.StampHeaderSize));
         }
 
         var (_, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
@@ -457,7 +464,7 @@ internal sealed class KeyValueOperationExecutor
         if (deleter != TransactionSequence.None && deleter != self)
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict: the entry was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure3, deleter));
         }
     }
 

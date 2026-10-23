@@ -36,7 +36,7 @@ namespace Assimalign.Cohesion.Database;
 /// kernel's exception as the inner exception); a statement that committed by itself, or a storage
 /// bracket whose commit record was written before the flush failed
 /// (<see cref="Create(string, string, StorageOfflineException)"/>). The codes are those of
-/// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>COHDBK002</c>,
+/// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>CV06102</c>,
 /// <c>CD06102</c>, <c>CG06012</c> and <c>CB06002</c>.
 /// </para>
 /// </remarks>

@@ -409,7 +409,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
             failure = await Should.ThrowAsync<DatabaseException>(async () => await reopened.OpenDatabaseAsync("kv", TestTimeout.Token()));
         }
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBK006");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CV06106");
         failure.Message.ShouldContain("data set", Case.Sensitive);
         failure.Message.ShouldContain("catalog", Case.Sensitive);
         failure.Message.ShouldContain("restore the complete database from backup", Case.Sensitive);

@@ -28,12 +28,12 @@ public sealed class KeyValueScanRequest : KeyValueRequest
             End = options.End is { IsEmpty: true } ? null : options.End;
             if (Prefix is not null && (Start is not null || End is not null))
             {
-                throw new ArgumentException("A prefix scan cannot combine with explicit start/end bounds.", nameof(options));
+                throw new ArgumentException(ErrorMessages.KeyValueScanRequestArgument, nameof(options));
             }
 
             if (options.Limit is < 0)
             {
-                throw new ArgumentException("The scan limit cannot be negative.", nameof(options));
+                throw new ArgumentException(ErrorMessages.KeyValueScanRequestArgument2, nameof(options));
             }
 
             Limit = options.Limit;

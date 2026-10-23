@@ -44,7 +44,7 @@ public sealed record ProtocolResultHeaderMessage(IReadOnlyList<(string Name, byt
 
         if (count < 0)
         {
-            throw new ProtocolException("Malformed payload: negative column count.");
+            throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol);
         }
 
         var columns = new List<(string, byte)>(count);
@@ -55,7 +55,7 @@ public sealed record ProtocolResultHeaderMessage(IReadOnlyList<(string Name, byt
 
             if (position >= payload.Length)
             {
-                throw new ProtocolException("Malformed payload: truncated column type.");
+                throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol2);
             }
 
             columns.Add((name, payload[position++]));

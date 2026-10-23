@@ -64,9 +64,9 @@ empty when there is nothing to report (#1264). Supplied command diagnostics rema
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
-and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes.
-Attached-index damage leads with `CK06003` and retains `CK06102` and `COHDBK005`;
-other index failures use `COHDBK005`. Begin, command, commit and rollback share classification.
+and aggregate causes, use `CV06105`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `CK06003` and retains `CK06102` and `CV06105`;
+other index failures use `CV06105`. Begin, command, commit and rollback share classification.
 Create and open also code child failures before publication. Known format refusals retain their
 authored messages, source diagnostics and inner causes. A failed command aborts an explicit
 transaction after releasing admission. If that abort also fails, the exact coded exception
@@ -273,10 +273,10 @@ a different contract from Graph, Documents and Blob, deliberately:
   surfaces as the retryable `DatabaseTransactionAbortedException`; under Snapshot isolation a
   retry inside the same transaction meets the same conflict, so the caller rolls back and retries
   the transaction, as the MVCC tests do.
-- **The transaction's own end follows the #1188 contract**, with the code `COHDBK001`, and since
+- **The transaction's own end follows the #1188 contract**, with the code `CV04101`, and since
   the concrete-types plan's phase 4 (#1260) the state machine is the root `DatabaseTransaction`'s
   (below, "Concrete types"): the model supplies only its kernel calls, its exception translation,
-  its offline refusal and its `COHDBK001` error. A
+  its offline refusal and its `CV04101` error. A
   transaction that did not commit accepts any number of rollbacks (a catch-block rollback after a
   kernel-aborted commit raises nothing); a committed one refuses a rollback. A commit or rollback
   observes its cancellation token only before it starts, and one that started runs to completion:
@@ -288,7 +288,7 @@ a different contract from Graph, Documents and Blob, deliberately:
   transaction but keeps the key locks of what it wrote until the version-purge pass completes
   the undo. So the end-failure state #1225 first gave this engine, where a commit or rollback
   that failed with the context still active left the transaction `Faulted` and refusing work
-  with `COHDBK001` until a later rollback completed, is gone, as it is in Graph. The kernel still
+  with `CV04101` until a later rollback completed, is gone, as it is in Graph. The kernel still
   refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
   manager's disposal flags itself before it claims any end); the session then refuses commands
   in the ended transaction ("The session's transaction is being committed or rolled back; start
@@ -306,10 +306,10 @@ a different contract from Graph, Documents and Blob, deliberately:
   `TransactionCommitUnconfirmedException` as its inner exception; before #1272 these paths carried
   the kernel's message alone. A transaction the kernel ended under its caller (disposal's abort, or a
   commit the kernel aborted) reports `Faulted` and refuses commands (typed and text, the text
-  before it is parsed) and BEGIN with `COHDBK001` until the caller ends it. `CurrentTransaction`
+  before it is parsed) and BEGIN with `CV04101` until the caller ends it. `CurrentTransaction`
   returns the transaction until the caller ends it, and null after a commit, rollback or disposal
   (it used to return the ended transaction). Disposing the session rolls back an open
-  transaction, and a commit of that transaction afterwards fails with `COHDBK001` naming the
+  transaction, and a commit of that transaction afterwards fails with `CV04101` naming the
   closure ("The session closed before the transaction ended.").
 - **A rollback leaves no write behind, even under a running command.** The transaction can end on
   another thread while one of its commands runs: the caller's rollback, the session closing, or a
@@ -341,7 +341,7 @@ a different contract from Graph, Documents and Blob, deliberately:
   (`KeyValueTransactionFailureWireTests`, `KeyValueTransactionFailureClientTests`). A connection
   that ends disposes its engine session and so rolls the transaction back; the host's rollback
   afterwards, or racing the teardown, raises nothing, and its commit afterwards fails with
-  `COHDBK001`. A host rollback while a wire command waits for a key lock fails that command with
+  `CV04101`. A host rollback while a wire command waits for a key lock fails that command with
   `ExecutionFailure`, and nothing of it is written.
 
 `KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
@@ -614,7 +614,7 @@ no-fault checkpoints as a secondary signal; a smaller worker-wide slowdown can p
 deterministic signal that would catch it is required follow-up work, the SQL engine's DESIGN.md,
 "Engine-owned background workers"),
 and a writer queued for a key lock when the database goes offline (by any of the three device
-faults): it gets `COHDBK002` at once instead of waiting for the
+faults): it gets `CV06102` at once instead of waiting for the
 reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.
@@ -639,7 +639,7 @@ default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes i
 `JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
 is retried like any other. Either way the database goes offline through the #1243 machinery:
 the catalog file set follows through the data set's hook, every operation is refused with
-`COHDBK002`, its lock waits end, nothing more is written to it, and the engine lists it in
+`CV06102`, its lock waits end, nothing more is written to it, and the engine lists it in
 `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's application reopens it
 with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
 so a give-up that waits for a hung fsync of that database holds back none of the others, and it
@@ -731,10 +731,10 @@ failure — PostgreSQL's `PANIC` on a failed WAL fsync
 section in `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and
 `data_sync_retry` off, `src/backend/storage/file/fd.c:3966-3987`), without stopping the process.
 The command whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its
-message leading with `COHDBK002` (owner decision 24); every later operation — a new session, a
+message leading with `CV06102` (owner decision 24); every later operation — a new session, a
 typed or text command, `BeginTransactionAsync`, and the `CommitAsync` or `RollbackAsync` of a transaction open at the failure —
 is refused with `DatabaseOfflineException`, code
-`COHDBK002`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
+`CV06102`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
 command on an existing session, and a handshake for the database, with `Unavailable` and the
 coded message. The workers skip the database, and closing its sessions writes nothing. A
 storage bracket whose commit record was written before its flush failed is reported as
@@ -839,7 +839,7 @@ the invariant lower case of its name:
   `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
   now it is `catalog.*` inside the database's own directory, and a drop deletes the
   directory, both sets at once. An open whose data set exists without a catalog set
-  is refused with `COHDBK006` before either set is opened (#1238). Following Documents,
+  is refused with `CV06106` before either set is opened (#1238). Following Documents,
   file-system data of at most one page means creation stopped before both initial
   pages were flushed: the remedy is `DropDatabaseAsync`, then `CreateDatabaseAsync`.
   Longer data with no catalog requires preserving storage and restoring the complete
@@ -871,7 +871,7 @@ leak), repaired by re-bootstrapping on the next open.
 ## Error model
 
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
-diagnostic COHDBK005 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
+diagnostic CV06105 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
 The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
 member is introduced. These failures abort an explicit transaction, retain the coded cause,
@@ -910,14 +910,14 @@ when the message does not already contain that prefix.
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model
 boundary, never leaked raw; `DatabaseTransactionCommitUnconfirmedException` (not
 retryable) for a commit whose record was written but whose fsync failed, and
-`DatabaseOfflineException` (`COHDBK002`, → `Unavailable` on the wire) for every operation
+`DatabaseOfflineException` (`CV06102`, → `Unavailable` on the wire) for every operation
 after it ("Storage operations").
 
 An entry page the command cannot read fails the command. Storage reports
 StorageCorruptionException (with the page id) for checksum or slot geometry damage,
 StorageIOException for a cut-short page or a pool whose frames are all pinned, and
 IOException for device failures. The engine translates corruption to DatabaseCorruptionException
-(CK06003), and I/O to DatabaseException with COHDBK005. Every command resolves its key by a
+(CK06003), and I/O to DatabaseException with CV06105. Every command resolves its key by a
 primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
@@ -1141,7 +1141,7 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   the databases); the database base owns the disposed flag; the session base owns the
   session state, the session's transaction and the "already active" check; the
   transaction base owns the whole end state machine; the server base owns the
-  lifecycle. The model supplies its vocabulary: `COHDBK001` and `COHDBK002`, the
+  lifecycle. The model supplies its vocabulary: `CV04101` and `CV06102`, the
   kernel calls and the translation of the kernel's exceptions. It keeps its
   per-command rule for ordinary errors (the owner's 2026-10-04 decision); storage corruption
   and I/O failures abort through the base's `AbortAsync` (#1364). Commands do
@@ -1150,9 +1150,9 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   "A transaction or operation is already active on this session." (was "A transaction
   is already active on this session."), and fails that way before the Serializable and
   offline refusals; BEGIN refuses a transaction the kernel ended under its caller
-  (`COHDBK001`) before it checks the token, where a canceled token was reported first; a
+  (`CV04101`) before it checks the token, where a canceled token was reported first; a
   canceled token is refused by `CreateSessionAsync` and both execute seams before the
-  offline (`COHDBK002`) and refusing-transaction (`COHDBK001`) refusals, which were
+  offline (`CV06102`) and refusing-transaction (`CV04101`) refusals, which were
   reported first; a transaction whose session closed while its database was offline
   reports `Faulted` (was `Active`), and refuses everything either way; a closed session
   fails with "The session is closed." (was "Session is not open. Current state:
@@ -1297,20 +1297,20 @@ Model statement, parameter-name and result-header strings use that same shared s
 
 ## Shared startup negotiation (#1105)
 
-The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes COHKV001–018 and fallback COHKV019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes CV00001–018 and fallback CV04019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.
 
 ## Interrupted drop and missing sidecars (#1158)
 
 Drop explicitly deletes keyvalue.dat, then the remaining *.dat files, before recursively
 removing the directory. Open requires each existing file set's original journal and backup;
-missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
+missing sidecars receive structured CV06104 and no replacement files are created. Preserve
 all files and restore the complete backup, since a lost journal may hold acknowledged commits.
-An entirely missing catalog receives `COHDBK006` at the engine's earlier existence gate (#1238).
-Before either storage opens, file-system data of at most one page also receives `COHDBK006`,
+An entirely missing catalog receives `CV06106` at the engine's earlier existence gate (#1238).
+Before either storage opens, file-system data of at most one page also receives `CV06106`,
 with `DropDatabaseAsync` then `CreateDatabaseAsync` as the interrupted-creation remedy
 (Documents' `DocumentDatabaseEngine` creation check). Longer data with a missing catalog
 retains the restore-from-backup remedy; a missing journal or backup on longer data retains
-`COHDBK004`. The messages are storage-neutral, including on in-memory engines.
+`CV06104`. The messages are storage-neutral, including on in-memory engines.
 As with PostgreSQL's refusal of a missing database directory
 (`src/backend/utils/init/postinit.c:1198-1212`), open reports the missing durable identity
 instead of creating it. The model-specific two-file-set gate follows SQL's catalog-first open.
@@ -1589,3 +1589,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

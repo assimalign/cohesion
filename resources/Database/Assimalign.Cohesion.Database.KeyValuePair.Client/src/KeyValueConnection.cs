@@ -111,7 +111,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
         // An unconditional put always applies (a concurrent conflict surfaces as
         // an ExecutionFailure exception, never as a miss).
-        return outcome.ETag ?? throw MalformedResult(command, "an applied write must carry its new etag");
+        return outcome.ETag ?? throw MalformedResult(command, ErrorMessages.ValueConnectionPutAsyncKeyValueClient);
     }
 
     /// <summary>
@@ -210,7 +210,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
 
         if (result.Rows.Count != 1 || result.Rows[0] is not [bool exists])
         {
-            throw MalformedResult(command, "expected one boolean row");
+            throw MalformedResult(command, ErrorMessages.ConnectionExistsAsyncKeyValueClient);
         }
 
         return exists;
@@ -236,7 +236,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         {
             if (range.Prefix is { IsEmpty: false } && (range.Start is { IsEmpty: false } || range.End is { IsEmpty: false }))
             {
-                throw new ArgumentException("A prefix scan cannot combine with explicit start/end bounds.", nameof(range));
+                throw new ArgumentException(ErrorMessages.KeyValueConnectionScanAsyncArgument, nameof(range));
             }
 
             if (range.Start is { IsEmpty: false } start)
@@ -299,7 +299,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
     {
         if (row is not [byte[] key, byte[] value, long etag])
         {
-            throw MalformedResult(command, "expected [key, value, etag] rows");
+            throw MalformedResult(command, ErrorMessages.ConnectionDecodeEntryKeyValueClient);
         }
 
         return new KeyValueClientEntry(key, value, etag);
@@ -313,7 +313,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
     {
         if (result.Rows.Count != 1 || result.Rows[0] is not [bool applied, var etag] || etag is not (null or long))
         {
-            throw MalformedResult(command, "expected one [applied, etag] outcome row");
+            throw MalformedResult(command, ErrorMessages.DecodeWriteOutcomeKeyValueClient);
         }
 
         return new KeyValueWriteResult(applied, (long?)etag);
@@ -323,7 +323,7 @@ public sealed class KeyValueConnection : IAsyncDisposable
         => new(
             KeyValueClientErrorKind.MalformedResult,
             ProtocolErrorCode.Internal,
-            $"The server's result for '{command}' does not match the key-value result contract ({detail}).");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MalformedResultKeyValueClient, command, detail));
 
     /// <summary>
     /// Runs one command on the shared connection, wrapping it in telemetry and

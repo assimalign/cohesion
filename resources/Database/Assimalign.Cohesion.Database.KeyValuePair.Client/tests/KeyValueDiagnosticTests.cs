@@ -15,25 +15,25 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 public sealed class KeyValueDiagnosticTests
 {
     [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - every command parser refusal has a stable wire code")]
-    [InlineData("", 1)]
-    [InlineData("PUT KEYSPACES @v", 2)]
-    [InlineData("NOPE", 3)]
-    [InlineData("GET @empty", 4)]
-    [InlineData("PUT", 5)]
-    [InlineData("PUT @k @v WHEN ABSENT", 6)]
-    [InlineData("DELETE", 7)]
-    [InlineData("DELETE @k WHEN @etag", 8)]
-    [InlineData("SCAN FROM", 9)]
-    [InlineData("SCAN FROM @k FROM @k", 10)]
-    [InlineData("SCAN NOPE @k", 11)]
-    [InlineData("GET @wrong", 12)]
-    [InlineData("PUT @k @v IF @wrong", 13)]
-    [InlineData("SCAN LIMIT -1", 14)]
-    [InlineData("SCAN LIMIT @wrong", 15)]
-    [InlineData("GET literal", 16)]
-    [InlineData("GET @missing", 17)]
-    [InlineData("GET", 18)]
-    public async Task ExecuteAsync_ParserRefusal_ShouldReceiveCodeAndReuseSession(string statement, int code)
+    [InlineData("", "CV00001")]
+    [InlineData("PUT KEYSPACES @v", "CV03002")]
+    [InlineData("NOPE", "CV00003")]
+    [InlineData("GET @empty", "CV00004")]
+    [InlineData("PUT", "CV00005")]
+    [InlineData("PUT @k @v WHEN ABSENT", "CV00006")]
+    [InlineData("DELETE", "CV00007")]
+    [InlineData("DELETE @k WHEN @etag", "CV00008")]
+    [InlineData("SCAN FROM", "CV00009")]
+    [InlineData("SCAN FROM @k FROM @k", "CV00010")]
+    [InlineData("SCAN NOPE @k", "CV00011")]
+    [InlineData("GET @wrong", "CV02012")]
+    [InlineData("PUT @k @v IF @wrong", "CV02013")]
+    [InlineData("SCAN LIMIT -1", "CV02014")]
+    [InlineData("SCAN LIMIT @wrong", "CV02015")]
+    [InlineData("GET literal", "CV00016")]
+    [InlineData("GET @missing", "CV01017")]
+    [InlineData("GET", "CV00018")]
+    public async Task ExecuteAsync_ParserRefusal_ShouldReceiveCodeAndReuseSession(string statement, string code)
     {
         // Arrange
         await using var harness = await KeyValueClientTestHarness.StartAsync();
@@ -48,7 +48,7 @@ public sealed class KeyValueDiagnosticTests
         var error = await Should.ThrowAsync<DatabaseClientException>(async () => await connection.ExecuteAsync(new KeyValueExecuteExchange(statement, parameters), KeyValueClientTestHarness.Timeout()));
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldStartWith($"COHKV{code:000}: ");
+        error.Message.ShouldStartWith(code + ": ", Case.Sensitive);
         error.Diagnostics.ShouldBeEmpty();
         connection.ServerVersion.ShouldBe(ProtocolVersion.Current);
         connection.Capabilities.ShouldBeEmpty();

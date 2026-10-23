@@ -204,7 +204,7 @@ public sealed class KeyValueCatalog
                         break;
 
                     default:
-                        throw new KeyValueCatalogException($"Malformed catalog record of kind {kind}.");
+                        throw new KeyValueCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueCatalogLoadKeyValueCatalog, kind));
                 }
             }
             catch (Exception error) when (error is KeyValueCatalogException or DatabaseTypeException

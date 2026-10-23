@@ -44,11 +44,11 @@ public sealed class KeyValueClient : IAsyncDisposable
 
         if (options.Settings is null)
         {
-            throw new ArgumentException("Connection settings are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.KeyValueClientCreateArgument, nameof(options));
         }
         if (options.ConnectionFactory is null)
         {
-            throw new ArgumentException("A connection factory is required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.KeyValueClientCreateArgument2, nameof(options));
         }
 
         // The shared core validates the settings and factory in full (database,

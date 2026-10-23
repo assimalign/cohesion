@@ -24,13 +24,13 @@ public sealed class KeyValuePutRequest : KeyValueRequest
     {
         if (key.IsEmpty)
         {
-            throw new ArgumentException("The key cannot be empty.", nameof(key));
+            throw new ArgumentException(ErrorMessages.KeyValueDeleteRequestArgument, nameof(key));
         }
 
         if (options is { OnlyIfAbsent: true, ExpectedETag: not null })
         {
             throw new ArgumentException(
-                "OnlyIfAbsent and ExpectedETag are contradictory conditions: one expects no entry, the other expects a specific one.",
+                ErrorMessages.KeyValuePutRequestArgument,
                 nameof(options));
         }
 

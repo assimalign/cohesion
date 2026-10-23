@@ -75,7 +75,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
 
         if (!File.Exists(files.Data))
         {
-            throw new DatabaseException($"Storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
         }
 
         var catalogFiles = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog: true));
@@ -83,7 +83,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
             || (!catalog && (!File.Exists(catalogFiles.Data) || !File.Exists(catalogFiles.Journal) || !File.Exists(catalogFiles.Backup))))
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationSidecarMissing, databaseName);
-            throw new DatabaseException(message, [new Diagnostic { Code = "COHDBK004", Message = message, Severity = DiagnosticSeverity.Error }]);
+            throw new DatabaseException(message, [new Diagnostic { Code = "CV06104", Message = message, Severity = DiagnosticSeverity.Error }]);
         }
         var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 

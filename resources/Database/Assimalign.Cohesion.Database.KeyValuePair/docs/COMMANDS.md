@@ -71,8 +71,8 @@ command never reaches execution.
 For `SCAN`, a zero-length `@prefix`, `@start` or `@end` byte array means an absent
 bound (#1088). Previously, `TO @empty` returned no entries; it now means no upper bound.
 Thus `SCAN TO @empty` equals `SCAN`, and `SCAN PREFIX @p FROM @empty`
-equals `SCAN PREFIX @p`. A null operand remains a `COHKV012` parse error. An empty
-operand still counts as a clause: `FROM @empty FROM @s` is `COHKV010`.
+equals `SCAN PREFIX @p`. A null operand remains a `CV02012` parse error. An empty
+operand still counts as a clause: `FROM @empty FROM @s` is `CV00010`.
 `KeyValueScanOptions`, `KeyValueScanRange` and `KeyValueScanRequest` use the same
 zero-length-as-absent rule, including a null `byte[]` implicitly converted to
 `ReadOnlyMemory<byte>?`. The request normalizes before validating prefix conflicts;
@@ -82,32 +82,32 @@ the typed client omits empty clauses and their parameters from the wire command.
 
 Statement Error text is `CODE: message`. In-process DatabaseParseException.Message
 remains code-free and Diagnostics carries the code. These codes are append-only;
-all parser refusals use ParseFailure and keep the session ready. COHKV019 is the
+all parser refusals use ParseFailure and keep the session ready. CV04019 is the
 ExecutionFailure fallback when the engine supplies no structured error code.
 
 | Code | Refusal |
 |---|---|
-| `COHKV001` | Empty command |
-| `COHKV002` | Attempted catalog mutation |
-| `COHKV003` | Unknown command verb |
-| `COHKV004` | Request-constructor validation failed |
-| `COHKV005` | Invalid PUT arity |
-| `COHKV006` | PUT requires IF |
-| `COHKV007` | Invalid DELETE arity |
-| `COHKV008` | DELETE requires IF |
-| `COHKV009` | SCAN clause operand missing |
-| `COHKV010` | Repeated SCAN clause |
-| `COHKV011` | Unknown SCAN clause |
-| `COHKV012` | Byte operand required |
-| `COHKV013` | Integer etag required |
-| `COHKV014` | Nonnegative LIMIT literal required |
-| `COHKV015` | Nonnegative integer LIMIT parameter required |
-| `COHKV016` | Parameter reference required |
-| `COHKV017` | Parameter value missing |
-| `COHKV018` | Command arity mismatch |
-| `COHKV019` | Execution failure without an engine diagnostic |
+| `CV00001` | Empty command |
+| `CV03002` | Attempted catalog mutation |
+| `CV00003` | Unknown command verb |
+| `CV00004` | Request-constructor validation failed |
+| `CV00005` | Invalid PUT arity |
+| `CV00006` | PUT requires IF |
+| `CV00007` | Invalid DELETE arity |
+| `CV00008` | DELETE requires IF |
+| `CV00009` | SCAN clause operand missing |
+| `CV00010` | Repeated SCAN clause |
+| `CV00011` | Unknown SCAN clause |
+| `CV02012` | Byte operand required |
+| `CV02013` | Integer etag required |
+| `CV02014` | Nonnegative LIMIT literal required |
+| `CV02015` | Nonnegative integer LIMIT parameter required |
+| `CV00016` | Parameter reference required |
+| `CV01017` | Parameter value missing |
+| `CV00018` | Command arity mismatch |
+| `CV04019` | Execution failure without an engine diagnostic |
 
-Storage reads fail with structured COHDBK005 for StorageIOException/IOException (SQLSTATE
+Storage reads fail with structured CV06105 for StorageIOException/IOException (SQLSTATE
 58030), or CK06003 for corruption (XX001). The wire sends ExecutionFailure and keeps the
 session. Such a failure aborts an explicit transaction; rollback is required before another
 command. Other command errors retain their existing statement-atomic behavior (#1364).
@@ -162,7 +162,7 @@ not exist in this model, so there are no invented owner/schema columns.
 
 The surface is read-only. `PUT KEYSPACES ...` and `DELETE KEYSPACES ...` fail
 with `DatabaseParseException` (`ParseFailure` over the wire) and the stable
-wire text `COHKV002: The KEYSPACES catalog surface is read-only.` A parameter-bound key
+wire text `CV03002: The KEYSPACES catalog surface is read-only.` A parameter-bound key
 whose bytes spell `KEYSPACES` remains ordinary user data. The typed equivalent
 is `KeyValueKeySpacesRequest`, executed through the existing session interface.
 

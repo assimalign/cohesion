@@ -436,7 +436,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         failed.EventName.ShouldBe("StatementParseFailed");
         failed.Level.ShouldBe(EventLevel.Error);
         failed.PayloadNames.ShouldBe(["sessionId", "database", "code", "exceptionType", "suppressedCount"]);
-        failed.Payload!.Take(4).ShouldBe([sessionId, KeyValueServerHarness.DatabaseName, "COHKV003", typeof(DatabaseParseException).FullName]);
+        failed.Payload!.Take(4).ShouldBe([sessionId, KeyValueServerHarness.DatabaseName, "CV00003", typeof(DatabaseParseException).FullName]);
         failed.Payload![4].ShouldBeOfType<int>().ShouldBeGreaterThanOrEqualTo(0);
         failed.Payload!.OfType<string>().ShouldNotContain(error.Message, "A parse error quotes the command; the event writes its type only.");
         recorder.Events.ShouldNotContain(e => e.EventId == 0);

@@ -44,7 +44,7 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
-                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange.");
+                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExecuteCoreAsyncDatabaseClient);
             switch ((byte)frame.Type)
             {
                 case (byte)KeyValueProtocolMessageType.ResultHeader:
@@ -82,7 +82,7 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
                     throw new DatabaseClientException(error.Code, error.Message);
                 }
                 default:
-                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in a KeyValue execute exchange.");
+                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteCoreAsyncDatabaseClient2, frame.Type));
             }
         }
     }

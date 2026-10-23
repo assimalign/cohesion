@@ -17,7 +17,7 @@ public class DatabaseOfflineExceptionTests
 {
     [Theory(DisplayName = "Cohesion Test [Database] - Unconfirmed commit: every model retains its code and cause (#1350)")]
     [InlineData("CS04004")]
-    [InlineData("COHDBK002")]
+    [InlineData("CV06102")]
     [InlineData("CD06102")]
     [InlineData("CG06012")]
     [InlineData("CB06002")]
@@ -39,7 +39,7 @@ public class DatabaseOfflineExceptionTests
 
     [Theory(DisplayName = "Cohesion Test [Database] - Offline: every model code is exposed through diagnostics (#1350)")]
     [InlineData("CS04004")]
-    [InlineData("COHDBK002")]
+    [InlineData("CV06102")]
     [InlineData("CD06102")]
     [InlineData("CG06012")]
     [InlineData("CB06002")]

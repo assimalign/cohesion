@@ -73,6 +73,8 @@ using Assimalign.Cohesion.Database.Storage;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class KeyValueDatabaseEngine : DatabaseEngine
 {
+    private static readonly string _errorEngineDisposeAsyncCoreAggregate = ErrorMessages.EngineDisposeAsyncCoreAggregate;
+
     private readonly KeyValueDatabaseEngineOptions _options;
     private readonly Dictionary<string, KeyValueDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
@@ -387,7 +389,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">Creation is incomplete or the catalog is missing (<c>COHDBK006</c>), or a file set or the entry-space format of the database was refused.</exception>
+    /// <exception cref="DatabaseException">Creation is incomplete or the catalog is missing (<c>CV06106</c>), or a file set or the entry-space format of the database was refused.</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -443,7 +445,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } corruption)
         {
             throw DatabaseCorruptionException.Create(name, corruption, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CV06105", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
         catch (Exception error) when (error is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
             && StorageCorruptionException.Find(error) is null && StorageOfflineException.Find(error) is { } offline)
@@ -457,7 +459,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreationFailed, name, error.Message);
             throw new DatabaseException(message, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = message, Severity = Types.DiagnosticSeverity.Error }], error);
+            { Code = "CV06105", Message = message, Severity = Types.DiagnosticSeverity.Error }], error);
         }
     }
 
@@ -471,7 +473,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             ThrowIfDisposed();
             if (_databases.ContainsKey(name))
             {
-                throw new DatabaseException($"A database with name '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineCreateDatabaseFilesDatabase, name));
             }
 
             // The data set claims the database: the strategy refuses it when the database exists in
@@ -521,7 +523,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
         {
             var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CV06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
             throw refusal;
         }
         catch (Exception exception) when (exception is not (DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException)
@@ -538,7 +540,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
                 ErrorMessages.DatabaseOpenFailed, name, exception.Message);
             throw new DatabaseException(message, [new Types.Diagnostic
-            { Code = "COHDBK005", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+            { Code = "CV06105", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
         }
     }
 
@@ -571,7 +573,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
             if (!_strategy.StorageExists(name, catalog: false))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineOpenDatabaseFailure, name));
             }
 
             string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);
@@ -581,7 +583,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     incompleteCreation ? ErrorMessages.DatabaseCreationIncomplete : ErrorMessages.DatabaseCatalogMissing, name);
                 throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "COHDBK006", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
+                { Code = "CV06106", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
             }
 
             KeyValueStorage? storage = null;
@@ -652,7 +654,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
     /// <param name="exception">The storage's refusal.</param>
     private static DatabaseException RefuseStorageFormat(string name, string role, string storageName, StorageFormatException exception)
     {
-        string message = $"Database '{name}' cannot be opened: its {role} file set '{storageName}' was refused. {exception.Message}";
+        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineRefuseStorageFormatDatabase, name, role, storageName, exception.Message);
         return new DatabaseException(message, [new Types.Diagnostic
         { Code = StorageFormatException.ErrorCode, Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
     }
@@ -797,7 +799,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more key-value databases failed to close.", failures);
+            throw new AggregateException(_errorEngineDisposeAsyncCoreAggregate, failures);
         }
     }
 

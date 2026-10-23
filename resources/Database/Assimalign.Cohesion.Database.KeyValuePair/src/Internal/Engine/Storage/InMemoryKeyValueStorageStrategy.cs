@@ -31,12 +31,12 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
         // set of the name, in any spelling, means the database exists.
         if (!catalog && (_files.Exists(databaseName, DataFileSet) || _files.Exists(databaseName, DatabaseFileNames.CatalogFileSet)))
         {
-            throw new DatabaseException($"In-memory storage for database '{databaseName}' already exists.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase, databaseName));
         }
 
         if (!_files.TryCreate(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' already exists.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         return KeyValueStorage.Create(data, journal, backup, GetLabel(databaseName, catalog), _durability);
@@ -51,7 +51,7 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
     {
         if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException($"In-memory storage '{GetLabel(databaseName, catalog)}' does not exist.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         try
