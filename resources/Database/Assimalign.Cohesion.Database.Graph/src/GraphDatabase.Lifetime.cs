@@ -14,7 +14,6 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 public sealed partial class GraphDatabase
 {
-    private static readonly string _catalogSnapshotChangedMessage = ErrorMessages.CatalogSnapshotChanged;
 
     /// <summary>
     /// Starts one statement on a session: holds the session, admits the statement into the
@@ -183,8 +182,6 @@ public sealed partial class GraphDatabase
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(_catalogSnapshotChangedMessage,
-        [new Types.Diagnostic { Code = "CG04007", Message = _catalogSnapshotChangedMessage, Severity = Types.DiagnosticSeverity.Error }]);
 
     /// <inheritdoc />
     /// <remarks>

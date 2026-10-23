@@ -506,7 +506,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         foreach (string label in labels)
         {
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
-            if (metadata != Catalog.FindLabel(label, LatestSnapshot(operation.Context))) { ThrowConflict(); }
+            if (metadata != Catalog.FindLabel(label, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
             if (metadata is null)
             {
                 metadata = new GraphLabelMetadata(Guid.NewGuid(), label);
@@ -528,7 +528,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
-        if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { ThrowConflict(); }
+        if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
         if (metadata is null)
         {
             metadata = new GraphRelationshipTypeMetadata(Guid.NewGuid(), type);
@@ -545,7 +545,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token)
     {
         var keys = Catalog.GetPropertyKeys(definition, operation.Context.Snapshot);
-        if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { ThrowConflict(); }
+        if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
         foreach (var key in keys)
         {
             object? value = null;

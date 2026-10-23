@@ -2789,3 +2789,12 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+Catalog conflict callers use the internal static extension member
+`DatabaseTransactionAbortedException.ThrowGraphConflict()`. The root Database assembly owns the
+exception; Graph retains its cached resource and structured `CG04007` diagnostic. The message
+contains no code prefix. Exception identity, diagnostic severity and catalog conflict behavior
+are preserved, with no public API, wire, storage-format, event or counter change.
