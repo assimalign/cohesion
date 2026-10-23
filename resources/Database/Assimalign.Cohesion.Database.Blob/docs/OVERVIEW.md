@@ -223,3 +223,12 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+Catalog conflict callers use the internal static extension member
+`DatabaseTransactionAbortedException.ThrowBlobConflict()`. The root Database assembly owns the
+exception; Blob retains its existing resource and failure translation. This placement preserves
+exception identity and text, with no public API, diagnostic code, wire, storage-format, event or
+counter change. Existing snapshot-conflict and transaction-failure tests cover the behavior.

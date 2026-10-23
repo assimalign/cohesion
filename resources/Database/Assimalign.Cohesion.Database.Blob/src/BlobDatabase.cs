@@ -294,7 +294,7 @@ public sealed class BlobDatabase : DatabaseInstance
             var previous = Catalog.FindContainer(name, operation.Context.Snapshot);
             if (previous != Catalog.FindContainer(name, LatestSnapshot(operation.Context)))
             {
-                ThrowConflict();
+                DatabaseTransactionAbortedException.ThrowBlobConflict();
             }
 
             if (previous is not null)
@@ -325,7 +325,7 @@ public sealed class BlobDatabase : DatabaseInstance
                 ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name));
             if (container != Catalog.FindContainer(name, LatestSnapshot(operation.Context)))
             {
-                ThrowConflict();
+                DatabaseTransactionAbortedException.ThrowBlobConflict();
             }
             // Same authority rule as SqlPlanExecutor.EnsureCanChange. Blob has
             // no provisioning authority, so every schema-owned drop is locked.
@@ -337,7 +337,7 @@ public sealed class BlobDatabase : DatabaseInstance
             var visible = Catalog.GetBlobs(container.Id, null, operation.Context.Snapshot);
             if (!visible.SequenceEqual(Catalog.GetBlobs(container.Id, null, LatestSnapshot(operation.Context))))
             {
-                ThrowConflict();
+                DatabaseTransactionAbortedException.ThrowBlobConflict();
             }
 
             foreach (var blob in visible)
@@ -469,7 +469,6 @@ public sealed class BlobDatabase : DatabaseInstance
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(ErrorMessages.BlobDatabaseThrowConflictFailure);
     internal static BlobContentReference Content(BlobCatalogEntry entry) => new(entry.HeadLocation, entry.Length, entry.Checksum);
     internal static BlobProperties Properties(BlobCatalogEntry entry)
         => new(entry.Name, entry.Length, entry.ContentType, entry.ETag, entry.CreatedAt, entry.ModifiedAt, entry.Checksum);

@@ -100,7 +100,7 @@ public sealed class BlobContainer
             var previous = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot);
             if (previous != _database.Catalog.FindBlob(_container.Id, name, _database.LatestSnapshot(operation.Context)))
             {
-                BlobDatabase.ThrowConflict();
+                DatabaseTransactionAbortedException.ThrowBlobConflict();
             }
 
             if (previous is not null && !overwrite)
@@ -225,7 +225,7 @@ public sealed class BlobContainer
             var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot);
             if (entry != _database.Catalog.FindBlob(_container.Id, name, _database.LatestSnapshot(operation.Context)))
             {
-                BlobDatabase.ThrowConflict();
+                DatabaseTransactionAbortedException.ThrowBlobConflict();
             }
 
             if (entry is null)
@@ -318,7 +318,7 @@ public sealed class BlobContainer
 
         if (writing && current != _database.Catalog.FindContainer(Name, _database.LatestSnapshot(context)))
         {
-            BlobDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowBlobConflict();
         }
     }
 }
