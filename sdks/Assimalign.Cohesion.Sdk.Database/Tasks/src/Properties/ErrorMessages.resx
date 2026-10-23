@@ -22,4 +22,19 @@
   <data name="DecimalScaleInvalid" xml:space="preserve"><value>The decimal scale must be between 0 and precision.</value></data>
   <data name="TypeLengthInvalid" xml:space="preserve"><value>String and binary types accept one positive length argument between 1 and 10485760.</value></data>
   <data name="TypeArgumentsUnsupported" xml:space="preserve"><value>This type does not accept type arguments.</value></data>
+  <data name="MigrationOrdinalLimit" xml:space="preserve"><value>Database migration ordinals cannot exceed 9999.</value></data>
+  <data name="MigrationConstraintsUnsupported" xml:space="preserve"><value>Table '{0}' declares constraints that the SQL DDL executor does not support yet.</value></data>
+  <data name="DefaultLiteralInvalid" xml:space="preserve"><value>DEFAULT '{0}' must be exactly one supported SQL literal.</value></data>
+  <data name="MigrationTypeUnsupported" xml:space="preserve"><value>Database type '{0}' has no SQL migration representation.</value></data>
+  <data name="DecimalPrecisionMissing" xml:space="preserve"><value>Column '{0}' declares a decimal scale without a precision.</value></data>
+  <data name="SchemaIdentifierUnsupported" xml:space="preserve"><value>Schema identifier '{0}' cannot be represented by the SQL dialect.</value></data>
+  <data name="MigrationDataMissing" xml:space="preserve"><value>Migration operation '{0}' for '{1}' omitted required data.</value></data>
+  <data name="MigrationParentMissing" xml:space="preserve"><value>Migration operation '{0}' for '{1}' omitted its parent name.</value></data>
+  <data name="MigrationOperationUnsupported" xml:space="preserve"><value>SQL migration operation '{0}' for '{1}' is unsupported: {2}.</value></data>
+  <data name="RequiredColumnDefaultMissing" xml:space="preserve"><value>adding a non-nullable column requires a non-null literal default or a backfill</value></data>
+  <data name="AlterMetadataUnsupported" xml:space="preserve"><value>ALTER metadata is not implemented by the SQL DDL dialect</value></data>
+  <data name="MigrationKindUnknown" xml:space="preserve"><value>the operation kind is unknown</value></data>
+  <data name="CompiledModelUnsupported" xml:space="preserve"><value>Database model '{0}' has no model-specific compiled-schema package.</value></data>
+  <data name="CompiledClrTypeUnsupported" xml:space="preserve"><value>CLR type '{0}' is not supported by the compiled-schema contract.</value></data>
+  <data name="PortableTypeIdentityUnsupported" xml:space="preserve"><value>CLR type '{0}' has no portable metadata identity.</value></data>
 </root>

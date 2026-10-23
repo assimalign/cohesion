@@ -49,7 +49,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SqlSchemaSource);
+        File.WriteAllText(sourcePath, sqlSchemaSource);
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -74,7 +74,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SqlSchemaSource);
+        File.WriteAllText(sourcePath, sqlSchemaSource);
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "KeyValuePair", engine);
 
@@ -93,7 +93,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, PrimitiveSchemaSource);
+        File.WriteAllText(sourcePath, primitiveSchemaSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(
             directory,
@@ -148,7 +148,7 @@ public partial class CompileDatabaseSchemaTaskTests
         });
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("ParitySchema.cs");
-        File.WriteAllText(sourcePath, ParitySchemaSource);
+        File.WriteAllText(sourcePath, paritySchemaSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -174,7 +174,7 @@ public partial class CompileDatabaseSchemaTaskTests
             schema.Table<DailyTotal>("daily_totals", table => table.Key(total => total.Day)));
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Program.cs");
-        File.WriteAllText(sourcePath, EngineBuilderSource);
+        File.WriteAllText(sourcePath, engineBuilderSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -195,7 +195,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Program.cs");
-        File.WriteAllText(sourcePath, EngineBuilderSource);
+        File.WriteAllText(sourcePath, engineBuilderSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
         task.Execute().ShouldBeTrue(Errors(engine));
@@ -204,7 +204,7 @@ public partial class CompileDatabaseSchemaTaskTests
         // A consumer's own file that happens to look like an artifact, in an overridden directory.
         File.WriteAllText(directory.File("obj/cohesion/database/appsettings.schema.json"), "{}");
 
-        File.WriteAllText(sourcePath, EngineBuilderSource.Replace("\"sales\"", "\"ledger\"", StringComparison.Ordinal));
+        File.WriteAllText(sourcePath, engineBuilderSource.Replace("\"sales\"", "\"ledger\"", StringComparison.Ordinal));
         task = CreateTask(directory, sourcePath, "Sql", engine);
         task.Execute().ShouldBeTrue(Errors(engine));
 
@@ -224,7 +224,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SchemaTypes + $$"""
+        File.WriteAllText(sourcePath, schemaTypes + $$"""
 
             public static class SchemaProgram
             {
@@ -256,7 +256,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SchemaTypes + """
+        File.WriteAllText(sourcePath, schemaTypes + """
 
             public static class SchemaProgram
             {
@@ -547,7 +547,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SchemaTypes + $$"""
+        File.WriteAllText(sourcePath, schemaTypes + $$"""
 
             public static class SchemaProgram
             {
@@ -623,7 +623,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Program.cs");
-        File.WriteAllText(sourcePath, HostedSource);
+        File.WriteAllText(sourcePath, hostedSource);
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -688,7 +688,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Program.cs");
-        File.WriteAllText(sourcePath, EngineBuilderSource.Replace("\"sales\"", $"\"{name}\"", StringComparison.Ordinal));
+        File.WriteAllText(sourcePath, engineBuilderSource.Replace("\"sales\"", $"\"{name}\"", StringComparison.Ordinal));
         var engine = new RecordingBuildEngine();
         CompileDatabaseSchemaTask task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -706,7 +706,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SqlSchemaSource.Replace(
+        File.WriteAllText(sourcePath, sqlSchemaSource.Replace(
             "table.References<Order>(line => line.OrderId);",
             "table.References<MissingOrder>(line => line.OrderId);",
             StringComparison.Ordinal));
@@ -727,7 +727,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SqlSchemaSource.Replace(
+        File.WriteAllText(sourcePath, sqlSchemaSource.Replace(
             "record OrderLine(long Id, long OrderId, decimal Total)",
             "record OrderLine(long Id, string OrderId, decimal Total)",
             StringComparison.Ordinal));
@@ -748,7 +748,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SchemaTypes);
+        File.WriteAllText(sourcePath, schemaTypes);
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "Sql", engine);
 
@@ -768,7 +768,7 @@ public partial class CompileDatabaseSchemaTaskTests
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, SqlSchemaSource + $$"""
+        File.WriteAllText(sourcePath, sqlSchemaSource + $$"""
 
             public static class SecondSchema
             {
@@ -849,7 +849,7 @@ public partial class CompileDatabaseSchemaTaskTests
         return Directory.GetFiles(referenceDirectory, "*.dll", SearchOption.TopDirectoryOnly);
     }
 
-    private const string SqlSchemaSource = SchemaTypes + """
+    private const string sqlSchemaSource = schemaTypes + """
 
         public static class SchemaProgram
         {
@@ -873,7 +873,7 @@ public partial class CompileDatabaseSchemaTaskTests
         }
         """;
 
-    private const string PrimitiveSchemaSource = """
+    private const string primitiveSchemaSource = """
         using System;
         using Assimalign.Cohesion.Database;
         using Assimalign.Cohesion.Database.Sql.Schema;
@@ -928,7 +928,7 @@ public partial class CompileDatabaseSchemaTaskTests
         }
         """;
 
-    private const string ParitySchemaSource = """
+    private const string paritySchemaSource = """
         using System;
         using Assimalign.Cohesion.Database;
         using Assimalign.Cohesion.Database.Sql.Schema;
@@ -959,7 +959,7 @@ public partial class CompileDatabaseSchemaTaskTests
 
     // The engine-level composition of the extensibility design (§3.1): an inline schema anchored on
     // SqlDatabaseBuilder.Schema and a reusable SqlSchema value passed to AddDatabase(SqlSchema).
-    private const string EngineBuilderSource = """
+    private const string engineBuilderSource = """
         using System;
         using Assimalign.Cohesion.Database.Sql;
         using Assimalign.Cohesion.Database.Sql.Schema;
@@ -1002,7 +1002,7 @@ public partial class CompileDatabaseSchemaTaskTests
         }
         """;
 
-    private const string HostedSource = """
+    private const string hostedSource = """
         using System;
         using Assimalign.Cohesion.Database;
         using Assimalign.Cohesion.Database.Sql;
@@ -1032,7 +1032,7 @@ public partial class CompileDatabaseSchemaTaskTests
         }
         """;
 
-    private const string SchemaTypes = """
+    private const string schemaTypes = """
         using System;
         using Assimalign.Cohesion.Database;
         using Assimalign.Cohesion.Database.Sql.Schema;

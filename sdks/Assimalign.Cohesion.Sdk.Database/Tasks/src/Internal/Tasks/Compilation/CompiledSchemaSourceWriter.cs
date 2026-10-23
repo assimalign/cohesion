@@ -15,7 +15,7 @@ internal static class CompiledSchemaSourceWriter
         ArgumentNullException.ThrowIfNull(source);
         if (!string.Equals(modelName, "Sql", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"Database model '{modelName}' has no model-specific compiled-schema package.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CompiledModelUnsupported, modelName));
         }
 
         // A declared type is a domain named for its CLR type's simple name (phase E3), matched to a
@@ -144,7 +144,7 @@ internal static class CompiledSchemaSourceWriter
             "System.Private.CoreLib:System.DateTimeOffset" => DatabaseType.DateTimeOffset,
             "System.Private.CoreLib:System.TimeSpan" => DatabaseType.TimeSpan,
             "System.Private.CoreLib:System.Guid" => DatabaseType.Guid,
-            _ => throw new InvalidOperationException($"CLR type '{typeName}' is not supported by the compiled-schema contract.")
+            _ => throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CompiledClrTypeUnsupported, typeName))
         };
     }
 }

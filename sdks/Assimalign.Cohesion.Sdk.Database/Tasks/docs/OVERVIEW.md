@@ -94,3 +94,19 @@ The shared Types module also binds modifier-refusal templates to each consumer's
 resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
 codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
 format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+The migration-ordinal refusal uses the generated ErrorMessages accessor with its existing text
+and COHDBSDK206 reporting boundary. Assembly-local Defaults/Types bindings live under Internal
+and retain the linked owning namespaces. Private fixture constants use repository casing;
+compiler identifiers, generated artifact contents, schema format and extraction behavior are unchanged.
+
+SDK defaults and migration bookkeeping use separate item groups for each item type. This organization preserves the resource metadata and generated schema/migration artifacts.
+
+## Error message producers and catalog carriers
+
+Migration error factories and their refusal reasons, portable type-identity refusals, and
+compiled-schema source-writer refusals use generated ErrorMessages resources. Their original
+exception types/text and outer COHDBSDK compiler identities remain unchanged. Generated SQL,
+portable metadata identities and other artifact content keep their invariant spellings.

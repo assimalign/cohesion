@@ -18,10 +18,16 @@
 
 	<ItemGroup>
 		<CohesionCommand Include="database.add-database;database.add-principal" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionEndpoint Include="db" Scheme="cohesion-db" ContainerPort="5740" Public="false" />
 		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
 	</ItemGroup>
 

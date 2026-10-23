@@ -76,6 +76,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
 
+    </ItemGroup>
+    <ItemGroup>
         <!--
             Deliberately EXCLUDED from the MVP framework:
             - Database.Testing - the packaged resource-program test harness. It
