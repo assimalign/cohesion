@@ -268,7 +268,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
         if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
 
         if (previous is not null)
@@ -310,7 +310,7 @@ public sealed class DocumentDatabase : DatabaseInstance
         var previous = Catalog.FindCollection(name, operation.Context.Snapshot);
         if (previous != Catalog.FindCollection(name, LatestSnapshot(operation.Context)))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
         if (previous is not { } collection)
         {
@@ -330,7 +330,7 @@ public sealed class DocumentDatabase : DatabaseInstance
             !Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
                 .SequenceEqual(Catalog.GetIndexes(collection.Id, LatestSnapshot(operation.Context))))
         {
-            ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
 
         foreach (var document in visible)
@@ -498,7 +498,6 @@ public sealed class DocumentDatabase : DatabaseInstance
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(ErrorMessages.DocumentDatabaseThrowConflictFailure);
     internal static DocumentContentReference Content(DocumentCatalogEntry entry) => new(entry.HeadLocation, entry.Length, entry.Checksum);
     internal Document ReadDocument(DocumentCatalogEntry entry)
         => new(new DocumentId(entry.Id), new DocumentVersion(entry.Version), DataStorage.ReadContent(Content(entry)));

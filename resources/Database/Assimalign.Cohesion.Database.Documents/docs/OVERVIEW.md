@@ -233,3 +233,14 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+The model-specific snapshot-conflict throw is an internal static extension member of
+`DatabaseTransactionAbortedException`, whose defining assembly is Database. Documents owns the
+resource and the failure condition; a separate public exception/helper is unnecessary.
+`ThrowDocumentConflict()` preserves the exception type, existing message and diagnostic
+translation. Database/collection/executor callers share this member. There is no public API,
+SQLSTATE, wire, storage-format, event or counter change. Local validation predicates remain
+with the objects whose validity they check.

@@ -339,7 +339,7 @@ internal static partial class DocumentPlanExecutor
         await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
         if (collection != database.Catalog.FindCollection(collection.Name, database.LatestSnapshot(operation.Context)))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
         if (collection.Owner == DatabaseObjectOwner.Schema &&
             (absentNoOp is null || database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot).Any(index => index.Name == absentNoOp)))
@@ -349,7 +349,7 @@ internal static partial class DocumentPlanExecutor
             !database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
                 .SequenceEqual(database.Catalog.GetIndexes(collection.Id, database.LatestSnapshot(operation.Context))))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
     }
 

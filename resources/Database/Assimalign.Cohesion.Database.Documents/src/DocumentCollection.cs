@@ -198,7 +198,7 @@ public sealed class DocumentCollection
 
     private void EnsureCurrent(TransactionContext context, DocumentId id, DocumentCatalogEntry? previous, DocumentVersion? expectedVersion)
     {
-        if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DocumentDatabase.ThrowConflict(); }
+        if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DatabaseTransactionAbortedException.ThrowDocumentConflict(); }
         if (expectedVersion is not null && previous?.Version != expectedVersion.Value.Value)
         {
             throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCurrentDatabase, id, expectedVersion));
@@ -212,7 +212,7 @@ public sealed class DocumentCollection
         if (writing && (current != _database.Catalog.FindCollection(Name, _database.LatestSnapshot(context)) ||
             !_database.Catalog.GetIndexes(_collection.Id, context.Snapshot).SequenceEqual(_database.Catalog.GetIndexes(_collection.Id, _database.LatestSnapshot(context)))))
         {
-            DocumentDatabase.ThrowConflict();
+            DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
     }
 }
