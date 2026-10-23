@@ -194,7 +194,7 @@ await using SqlDatabaseEngine engine = await sql.BuildAsync(cancellationToken);
 SqlDatabase sales = await engine.OpenDatabaseAsync("sales", cancellationToken);
 ```
 
-The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded
+The `Listen` helper ships in `Database.Tcp`. Omit `AddServer` for embedded
 SQL. `SqlDatabaseEngine.Create(name, options)` also remains available for standalone use.
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.
 
@@ -356,3 +356,7 @@ statement-wide totals include all invocations. No standalone ANALYZE, persisted 
 format change or new wire message is added.
 
 Pool return now rolls back unfinished SQL/Graph transactions using negotiated server status before reusing a session; uncertified sessions are discarded (#1540).
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.

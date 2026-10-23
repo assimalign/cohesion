@@ -136,3 +136,7 @@ Deadline-dependent peers and busy test drivers use the linked Storage test helpe
 Root integration tests cover all four B-tree model engines' coordinator purge bindings and
 the current manager after catalog/store reattachment. No new root public API is introduced;
 the shared Indexing and Transactions packages own bounded pruning and its safe horizon.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.

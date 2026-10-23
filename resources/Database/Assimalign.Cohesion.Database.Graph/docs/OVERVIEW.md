@@ -200,3 +200,7 @@ counted once across operators (small leaves use conservative per-reference estim
 A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
 are discarded and disposal drops the cache. Retained values and budget ownership do not escape
 into that cache. The unchanged TCP path-allocation test guards the combined engine/client cost.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.

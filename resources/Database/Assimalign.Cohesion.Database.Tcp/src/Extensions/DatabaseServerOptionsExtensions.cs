@@ -1,15 +1,16 @@
 using System;
+using System.Globalization;
 using System.Net;
 
 using Assimalign.Cohesion.Connections.Tcp;
-namespace Assimalign.Cohesion.Database.Sql;
+namespace Assimalign.Cohesion.Database;
 
 /// <summary>
-/// Provides resource-endpoint binding for SQL database servers.
+/// Provides resource-endpoint binding for database servers.
 /// </summary>
-public static class SqlDatabaseServerOptionsExtensions
+public static class DatabaseServerOptionsExtensions
 {
-    extension(SqlDatabaseServerOptions options)
+    extension<TOptions>(TOptions options) where TOptions : DatabaseServerOptions
     {
         /// <summary>
         /// Configures the server to listen on a resolved Cohesion endpoint.
@@ -27,7 +28,7 @@ public static class SqlDatabaseServerOptionsExtensions
         /// The socket-facing host uses <see cref="Uri.IdnHost"/> by convention, which removes IPv6
         /// brackets and converts internationalized domain names to their ASCII-compatible form.
         /// </remarks>
-        public SqlDatabaseServerOptions Listen(Uri endpoint)
+        public TOptions Listen(Uri endpoint)
         {
             ArgumentNullException.ThrowIfNull(options);
             Uri.ThrowIfNotEndpoint(endpoint);
@@ -62,6 +63,6 @@ public static class SqlDatabaseServerOptionsExtensions
         }
 
         throw new InvalidOperationException(
-            $"The database endpoint host '{host}' is not a literal IP address, 'localhost', or a wildcard. DNS resolution is not performed at bind time.");
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointHostUnsupported, host));
     }
 }

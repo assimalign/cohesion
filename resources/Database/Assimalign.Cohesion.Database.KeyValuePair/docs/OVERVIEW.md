@@ -219,3 +219,7 @@ copies report the existing corruption code with page and slot. Direct catalog AP
 their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
 16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
 adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.

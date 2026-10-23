@@ -70,21 +70,11 @@ public sealed class SqlDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B1 of
         // the engine extensibility design): the sessions read the limits live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException("A connection listener is required.", nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException("The session limit must be positive.", nameof(options));
-        }
-
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -323,12 +313,6 @@ public sealed class SqlDatabaseServer : DatabaseServer
                 _rejections.TryRemove(id, out _);
             }
         }
-    }
-
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
     }
 
     internal void OnSessionCompleted(SqlDatabaseServerSession session)

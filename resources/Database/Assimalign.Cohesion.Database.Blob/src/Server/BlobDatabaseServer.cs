@@ -74,23 +74,11 @@ public sealed class BlobDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
         // the engine extensibility design): the sessions read the limits and timeouts live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException("A connection listener is required.", nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException("The session limit must be positive.", nameof(options));
-        }
-
-        ValidateTimeout(options.AuthenticationTimeout, nameof(options.AuthenticationTimeout));
-        ValidateTimeout(options.IdleTimeout, nameof(options.IdleTimeout));
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -375,20 +363,6 @@ public sealed class BlobDatabaseServer : DatabaseServer
                 _rejections.TryRemove(id, out _);
             }
         }
-    }
-
-    private static void ValidateTimeout(TimeSpan value, string name)
-    {
-        if (value != Timeout.InfiniteTimeSpan && (value <= TimeSpan.Zero || value.TotalMilliseconds > uint.MaxValue - 1))
-        {
-            throw new ArgumentOutOfRangeException(name, "A timeout must be positive or infinite.");
-        }
-    }
-
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
     }
 
     internal void OnSessionCompleted(BlobDatabaseServerSession session)

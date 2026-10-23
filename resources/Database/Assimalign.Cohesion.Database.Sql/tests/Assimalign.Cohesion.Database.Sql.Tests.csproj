@@ -52,7 +52,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the

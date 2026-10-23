@@ -269,7 +269,8 @@ public sealed class KeyValueEngineDeclarationTests : IDisposable
         // Assert
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<KeyValueDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
-        failure.Message.ShouldStartWith("A connection listener is required.", Case.Sensitive);
+        failure.ParamName.ShouldBe(nameof(KeyValueDatabaseServerOptions.Listener));
+        failure.Message.ShouldStartWith("COHDBO001: KeyValuePair server for engine 'unserved': Listener is required.", Case.Sensitive);
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

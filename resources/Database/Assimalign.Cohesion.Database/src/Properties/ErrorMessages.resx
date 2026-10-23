@@ -11,4 +11,10 @@
   <data name="DatabaseOffline" xml:space="preserve"><value>Database '{0}' is offline: {1}, so nothing more is written to it. Every operation is refused until the database is reopened (OpenDatabaseAsync); the reopen's recovery reads the journal and decides the outcome of every commit that was not confirmed.</value></data>
   <data name="OperationCommitUnconfirmed" xml:space="preserve"><value>Database '{0}' went offline while the operation was committing: {1} after the operation's work reached the journal. The operation may or may not have been applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records reached stable storage and discards it if not, and reading the data back then tells which.</value></data>
   <data name="TransactionCommitUnconfirmed" xml:space="preserve"><value>Database '{0}' went offline while a transaction was committing: {1} after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and reading the data back then tells which.</value></data>
+  <data name="ServerListenerRequired" xml:space="preserve"><value>COHDBO001: {0} server for engine '{1}': Listener is required.</value></data>
+  <data name="ServerSessionLimitInvalid" xml:space="preserve"><value>COHDBO002: {0} server for engine '{1}': MaxSessions must be positive.</value></data>
+  <data name="ServerTimeoutInvalid" xml:space="preserve"><value>COHDBO003: {0} server for engine '{1}': {2} must be {3}.</value></data>
+  <data name="ServerTimeoutPositiveFinite" xml:space="preserve"><value>positive and finite, and at most 4,294,967,294 milliseconds</value></data>
+  <data name="ServerTimeoutPositiveOrInfinite" xml:space="preserve"><value>positive and at most 4,294,967,294 milliseconds, or infinite</value></data>
+  <data name="ServerTimeoutNonnegativeOrInfinite" xml:space="preserve"><value>nonnegative and at most 4,294,967,294 milliseconds, or infinite</value></data>
 </root>

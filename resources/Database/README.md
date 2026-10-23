@@ -144,7 +144,7 @@ architecture test is deferred until implementation.
 | Model | Root project | Notes |
 |---|---|---|
 | SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its model builder verbs and a reference to Sql.Protocol for the protocol family; declared dialect in `Sql.Language`; includes its Catalog and Storage components |
-| SQL TCP composition | `Assimalign.Cohesion.Database.Sql.Tcp` | Optional `SqlDatabaseServerOptions.Listen(Uri)` endpoint convenience; references SQL and Connections.Tcp while the engine stays transport-independent |
+| TCP composition | `Assimalign.Cohesion.Database.Tcp` | Generic `Listen(Uri)` for all five model options; references Database and Connections.Tcp while engines stay transport-independent |
 | SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
 | Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, transactional index management and a database-bound wire server; includes its Catalog and Storage components |
 | Documents client | `Assimalign.Cohesion.Database.Documents.Client` | NuGet-only pooled OQL rows/documents, versioned CRUD, collection commands and coded diagnostics |

@@ -201,3 +201,7 @@ adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames
 
 Unsupported blob catalog versions retain their existing model refusal and terminal wire behavior,
 with page/slot context appended. Malformed current-format metadata uses located corruption.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.

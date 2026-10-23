@@ -212,3 +212,6 @@ identities before reading JSON; full residual filtering, ordering, snapshot and 
 remain intact. EXPLAIN names IndexSeek/IndexIntersection and labels entry estimates or bounds,
 without executing the statement. There are no persisted statistics, ANALYZE command or format
 changes. See DESIGN for probe budgets, eligibility thresholds and the limits of incomplete counts.
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
