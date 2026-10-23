@@ -68,9 +68,11 @@ node identifiers and a null parent for the root. The fixed column order is:
 | `estimated_rows` | Int64 | Yes |
 | `actual_rows` | Int64 | Yes |
 
-All eight fields are present: nullable values are NULL, never SQL++ MISSING. Both count
-columns are null in every Tier 1 row: the planners have no statistics and EXPLAIN
-never executes the described statement. A successful description changes zero records, reports
+All eight fields are present: nullable values are NULL, never SQL++ MISSING. DatabasePlanNode.EstimatedRows and ActualRows supply the two optional count columns.
+Models without measurements retain NULL. SQL bounded probes can populate estimated_rows; plain
+EXPLAIN never executes the described statement and leaves actual_rows NULL. SELECT-only SQL
+EXPLAIN ANALYZE populates measured candidate work before residuals (#1522), not final output
+cardinality. Details identify exact probes, incomplete lower bounds and heuristic join estimates. A successful description changes zero records, reports
 the ordinary row-result affected count of -1, and carries
 parser/planner diagnostics. It uses the ordinary SQL and Graph result frames. Documents encodes
 each row as a JSON document with these eight member names in its existing document stream.

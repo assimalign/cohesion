@@ -341,3 +341,14 @@ closure. Prior transaction grants/upgrades survive. An unapplied failure release
 statement grants; offline and started-apply ownership remain protected. Fixed snapshots keep
 first-updater-wins checks. The shared manager repairs avoidable queue cycles before choosing
 a hard-deadlock victim. Public APIs and wire messages are unchanged.
+
+## Probe costing and hash joins (#1522)
+
+Access selection compares bounded snapshot-visible index probes without stored statistics.
+Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
+nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
+The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
+hash builds per statement; COHSQLE067 (SQLSTATE 53200) refuses excess memory, without spill.
+Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
+executes to report candidate work in the same eight-column description; unavailable counts remain
+NULL. No standalone ANALYZE, persisted statistics, format change or new wire message is added.

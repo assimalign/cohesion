@@ -20,6 +20,10 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
 
 ## Scope
 
+Plan descriptions share the eight-column Database.Execution result contract across SQL,
+Documents and Graph. SQL's SELECT-only EXPLAIN ANALYZE can populate actual candidate counts;
+plain EXPLAIN stays nonexecuting, and the other models retain their documented syntax (#1522).
+
 - **Root bases (concrete-types plan, phases 3 and 6, #1259 and #1262)** — `DatabaseEngine`,
   `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`,
   `DatabaseServerSession` and `DatabaseEngineWorker` are the abstract bases of the area's

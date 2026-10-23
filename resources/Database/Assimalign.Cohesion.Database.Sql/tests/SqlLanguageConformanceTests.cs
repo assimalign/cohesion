@@ -595,7 +595,11 @@ public sealed class SqlLanguageConformanceTests
             async (_, result) =>
             {
                 var rows = await ReadRowsAsync(result);
-                rows.ShouldContain(row => Equals(row[2], "IndexSeek") && Equals(row[4], "by_age") && Equals(row[5], "age = 36"));
+                var seek = rows.Single(row => Equals(row[2], "IndexSeek"));
+                seek[4].ShouldBe("by_age");
+                seek[5].ShouldBe("age = 36; estimate_kind=exact_probe; probe_entries=2; probe_pages=1");
+                seek[6].ShouldBe(1L);
+                seek[7].ShouldBeNull();
             }),
         [SqlClauses.Select] = new("SELECT id, age + 1 AS next_age FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression,

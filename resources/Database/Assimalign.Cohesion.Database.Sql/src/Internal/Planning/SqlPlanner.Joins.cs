@@ -207,6 +207,7 @@ internal sealed partial class SqlPlanner
     {
         if (ViewDefinitionBinding is not null) { return null; }
         SqlJoinIndexPath? best = null;
+        var alternatives = new List<SqlJoinIndexPath>();
         foreach (int inner in firstBinding is int driver ? new[] { driver == 1 ? 0 : added }
             : maySwap ? new[] { added, 0 } : new[] { added })
         {
@@ -238,14 +239,18 @@ internal sealed partial class SqlPlanner
                     outerOrdinals.Add(outer);
                     innerColumns.Add(columns[joined]);
                 }
-                if (outerOrdinals.Count > 0 && (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
+                if (outerOrdinals.Count == 0) { continue; }
+                var path = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
+                alternatives.Add(path);
+                if (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
                     outerOrdinals.Count == best.OuterOrdinals.Count && (index.IsUnique && !best.Index.IsUnique ||
-                    index.IsUnique == best.Index.IsUnique && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0)))
+                    index.IsUnique == best.Index.IsUnique && StringComparer.OrdinalIgnoreCase.Compare(index.Name, best.Index.Name) < 0))
                 {
-                    best = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
+                    best = path;
                 }
             }
         }
+        if (best is not null && alternatives.Count > 1) { best.Alternatives = alternatives; }
         return best;
     }
 

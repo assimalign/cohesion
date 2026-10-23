@@ -815,6 +815,8 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         int start = lexer.Current.Position;
         Advance(ref lexer);
+        bool analyze = IsWord(ref lexer, "ANALYZE");
+        if (analyze) { Advance(ref lexer); }
         SqlQueryExpression statement;
         if (IsWord(ref lexer, "WITH")) { statement = ParseWith(ref lexer); }
         else if (StartsQuery(lexer, queryExpected: true)) { statement = ParseQueryExpression(ref lexer); }
@@ -828,7 +830,7 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
             statement = new SqlQueryExpression(SqlQueryCommandType.Unknown, null, null);
         }
-        return new SqlExplainExpression(statement, Location.Create(1, 1, start, _lastTokenEnd));
+        return new SqlExplainExpression(statement, Location.Create(1, 1, start, _lastTokenEnd), analyze);
     }
 
     /// <summary>
@@ -941,6 +943,7 @@ public sealed partial class SqlQueryParser : QueryParser
         out Location location)
     {
         bool withStatement = false;
+        bool explainPrefix = false;
         bool inWithDefinitions = false;
         HashSet<string>? cteNames = null;
         string? pendingExecutionClause = null;
@@ -988,7 +991,13 @@ public sealed partial class SqlQueryParser : QueryParser
             string token = CurrentText(ref lexer);
             if (firstToken is null && token.Equals("EXPLAIN", StringComparison.OrdinalIgnoreCase))
             {
+                explainPrefix = true;
                 continue; // Capability checks classify the statement being described.
+            }
+            if (firstToken is null && explainPrefix && token.Equals("ANALYZE", StringComparison.OrdinalIgnoreCase))
+            {
+                explainPrefix = false;
+                continue;
             }
             firstToken ??= token == "(" ? "SELECT" : token;
             // Namespace words stay contextual. Their dedicated grammar owns the complete

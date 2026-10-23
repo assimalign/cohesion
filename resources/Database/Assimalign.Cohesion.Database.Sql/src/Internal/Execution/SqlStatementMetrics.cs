@@ -83,16 +83,84 @@ internal sealed class SqlStatementMetrics
     internal string AccessPath
     {
         get => _accessPath is string text ? text
-            : _accessPath is IReadOnlyList<string> { Count: 1 } paths ? paths[0]
-            : string.Join("; ", (IReadOnlyList<string>)_accessPath);
-        set => _accessPath = value;
+            : _accessPath is JoinWork { Paths.Count: 0, ScalarPath: { } scalar } ? scalar
+            : JoinAccessPaths is { Count: 1 } paths ? paths[0]
+            : string.Join("; ", JoinAccessPaths);
+        set
+        {
+            if (_accessPath is JoinWork work) { work.ScalarPath = value; }
+            else { _accessPath = value; }
+        }
     }
 
     /// <summary>Gets the executed join access paths, one entry per step in written order, including empty inputs.</summary>
     internal IReadOnlyList<string> JoinAccessPaths
     {
-        get => _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
-        set => _accessPath = value;
+        get => _accessPath is JoinWork work ? work.Paths : _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
+        set
+        {
+            if (_accessPath is JoinWork work) { work.Paths = value; work.ScalarPath = null; }
+            else { _accessPath = new JoinWork(value); }
+        }
+    }
+
+    /// <summary>Actual joined candidates tested, including index-probe matches and hash collisions.</summary>
+    internal long JoinCandidatePairs => (_accessPath as JoinWork)?.CandidatePairs ?? 0;
+
+    internal void RecordJoinCandidate()
+    {
+        if (_accessPath is JoinWork work) { work.CandidatePairs++; }
+    }
+
+    internal long HashMemoryBytes => (_accessPath as JoinWork)?.MemoryBytes ?? 0;
+    internal long PeakHashMemoryBytes => (_accessPath as JoinWork)?.PeakMemoryBytes ?? 0;
+
+    internal bool IsAnalyzing => (_accessPath as JoinWork)?.Operators is not null;
+
+    internal void BeginAnalysis()
+    {
+        if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
+        work.Operators = new(ReferenceEqualityComparer.Instance);
+    }
+
+    internal SqlOperatorWork? Analysis(object operation)
+    {
+        if ((_accessPath as JoinWork)?.Operators is not { } operators) { return null; }
+        if (!operators.TryGetValue(operation, out var work)) { work = new(); operators.Add(operation, work); }
+        return work;
+    }
+
+    internal long? ActualCandidates(object operation)
+        => (_accessPath as JoinWork)?.Operators is { } operators && operators.TryGetValue(operation, out var work)
+            ? work.Candidates : null;
+
+    internal void ReserveHashMemory(long bytes, long budget)
+    {
+        if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
+        if (bytes > budget - work.MemoryBytes)
+        {
+            throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget));
+        }
+        work.MemoryBytes += bytes;
+        work.PeakMemoryBytes = Math.Max(work.PeakMemoryBytes, work.MemoryBytes);
+    }
+
+    internal void ReleaseHashMemory(long bytes)
+    {
+        if (_accessPath is JoinWork work) { work.MemoryBytes -= bytes; }
+    }
+
+    // Join-only telemetry shares the existing path slot. Scalar statements keep
+    // exactly their previous instance layout and allocate no new telemetry object.
+    private sealed class JoinWork(IReadOnlyList<string> paths)
+    {
+        internal IReadOnlyList<string> Paths { get; set; } = paths;
+        internal string? ScalarPath;
+        internal long CandidatePairs;
+        internal long MemoryBytes;
+        internal long PeakMemoryBytes;
+        internal Dictionary<object, SqlOperatorWork>? Operators;
     }
 
     /// <summary>

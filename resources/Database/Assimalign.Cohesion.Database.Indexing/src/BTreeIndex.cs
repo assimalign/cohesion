@@ -668,11 +668,67 @@ public sealed class BTreeIndex
         return purged;
     }
 
+    /// <summary>Counts a range without retaining keys, subject to physical work limits.</summary>
+    /// <param name="snapshot">Visibility of the caller's pinned statement.</param>
+    /// <param name="range">Key bounds.</param>
+    /// <param name="entryLimit">Maximum physical entries to examine, including invisible entries.</param>
+    /// <param name="pageLimit">Maximum page visits, including the descent and empty leaves.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An exact count or an explicitly incomplete lower bound.</returns>
+    public BTreeRangeCount CountRange(TransactionSnapshot snapshot, IndexKeyRange range,
+        int entryLimit = 512, int pageLimit = 32, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(entryLimit, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageLimit, 1);
+        _latch.EnterRead(cancellationToken);
+        try
+        {
+            long count = 0;
+            int entries = 0, pages = 0;
+            long current = RootPageId;
+            var lower = range.Start;
+            var position = lower is { } start
+                ? range.IsStartInclusive ? BTreeSearchKey.AtKey(start.Encoded.Span) : BTreeSearchKey.AfterKey(start.Encoded.Span)
+                : BTreeSearchKey.AtKey(default);
+            bool descending = true, firstLeaf = true;
+            while (current >= 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (pages == pageLimit) { return new(count, false, entries, pages); }
+                using var handle = _storage.PageManager.GetPage((PageId)current);
+                pages++;
+                var node = OpenNode(handle.Page.AsBodySpan(), current);
+                if (descending && !node.IsLeaf)
+                {
+                    current = node.GetChildAt(lower.HasValue ? node.FindChildSlot(position) : -1);
+                    continue;
+                }
+                descending = false;
+                int at = firstLeaf && lower.HasValue ? node.FindLowerBound(position) : 0;
+                firstLeaf = false;
+                for (; at < node.EntryCount; at++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (entries == entryLimit) { return new(count, false, entries, pages); }
+                    entries++;
+                    if (range.End is { } end)
+                    {
+                        int comparison = node.GetKey(at).SequenceCompareTo(end.Encoded.Span);
+                        if (comparison > 0 || comparison == 0 && !range.IsEndInclusive)
+                        { return new(count, true, entries, pages); }
+                    }
+                    if (IsEntryVisible(node, at, snapshot)) { count++; }
+                }
+                current = node.NextLeaf;
+            }
+            return new(count, true, entries, pages);
+        }
+        finally { _latch.ExitRead(); }
+    }
+
     /// <summary>
-    /// Copies at most one batch, re-descending strictly past the last examined identity.
-    /// No physical position survives this call: a split, erase or physical rollback can
-    /// change every page and slot between batches. Invisible entries count toward the
-    /// examination limit too; otherwise an old snapshot could starve writers.
+    /// Copies a bounded batch, re-descending strictly past the last examined identity.
+    /// Invisible entries consume the examination limit; no physical position survives a call.
     /// </summary>
     internal void ReadCursorBatch(BTreeCursor cursor, CancellationToken cancellationToken)
     {

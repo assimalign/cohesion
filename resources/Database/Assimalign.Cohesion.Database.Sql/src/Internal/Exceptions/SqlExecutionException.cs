@@ -31,6 +31,7 @@ internal sealed class SqlExecutionException : DatabaseException
     internal const string SerializationFailureCode = "COHSQLE064";
     internal const string DuplicateFunctionCode = "COHSQLE065";
     internal const string InsufficientPrivilegeCode = "COHSQLE066";
+    internal const string StatementMemoryBudgetCode = "COHSQLE067";
 
     internal SqlExecutionException(string code, string message, Exception? innerException = null, Location? location = null)
         : base(message, [new Diagnostic

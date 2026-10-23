@@ -4,4 +4,5 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed record SqlScanPath : SqlAccessPath
 {
     internal static SqlScanPath Instance { get; } = new();
+    internal SqlAccessCost? Cost { get; init; }
 }

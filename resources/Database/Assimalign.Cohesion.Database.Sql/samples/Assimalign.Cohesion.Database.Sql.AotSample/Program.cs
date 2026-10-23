@@ -352,6 +352,18 @@ internal static class Program
         Check("in process: EXPLAIN retains index and shared columns", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         await RowsAsync(session, "EXPLAIN DELETE FROM default_guard");
         Check("in process: EXPLAIN DELETE has no effects", await RowsAsync(session, "SELECT COUNT(*) FROM default_guard"), [[3L]]);
+        foreach (string side in new[] { "left", "right" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE hash_{side}(id INT PRIMARY KEY,k INT)");
+            await session.ExecuteAsync($"INSERT INTO hash_{side} VALUES " + string.Join(',', Enumerable.Range(1, 80).Select(id => $"({id},{id})")));
+        }
+        const string hashQuery = "SELECT l.id,r.id FROM hash_left l JOIN hash_right r ON l.k=r.k ORDER BY l.id";
+        Check("in process: hash join pairs", await RowsAsync(session, hashQuery),
+            Enumerable.Range(1, 80).Select(id => new object?[] { id, id }).ToArray());
+        var hashPlan = await RowsAsync(session, "EXPLAIN " + hashQuery);
+        Check("in process: plain hash EXPLAIN has no actual counts", hashPlan.Any(row => Equals(row[2], "HashJoin")) && hashPlan.All(row => row[7] is null), true);
+        var hashAnalysis = await RowsAsync(session, "EXPLAIN ANALYZE " + hashQuery);
+        Check("in process: hash analysis actual candidates", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L)), true);
         await session.ExecuteAsync("CREATE TABLE binary_keys (key_bytes VARBINARY(4))");
         await session.ExecuteAsync("CREATE INDEX by_bytes ON binary_keys (key_bytes)");
         await using (var description = (DatabaseResultSet)await session.ExecuteAsync(
@@ -361,7 +373,7 @@ internal static class Program
             bool describedBytes = false;
             await foreach (var row in description.GetRowsAsync(CancellationToken.None))
             {
-                describedBytes |= row.GetString(2) == "IndexSeek" && row.GetString(5) == "key_bytes = X'00ABFF'";
+                describedBytes |= row.GetString(2) == "IndexSeek" && row.GetString(5) == "key_bytes = X'00ABFF'; estimate_kind=exact_probe; probe_entries=0; probe_pages=1";
             }
             Check("in process: EXPLAIN binary bounds", describedBytes, true);
         }
@@ -451,6 +463,9 @@ internal static class Program
         Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
+        var hashAnalysis = await RowsAsync(connection,
+            "EXPLAIN ANALYZE SELECT l.id FROM hash_left l JOIN hash_right r ON l.k=r.k", timeout.Token);
+        Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
         Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,

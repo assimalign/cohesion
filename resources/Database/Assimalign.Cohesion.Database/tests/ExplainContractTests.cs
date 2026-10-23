@@ -80,7 +80,6 @@ public sealed class ExplainContractTests
     [InlineData("SQL", "EXPLAIN CREATE TABLE t (id INT)")]
     [InlineData("SQL", "EXPLAIN BEGIN")]
     [InlineData("SQL", "EXPLAIN EXPLAIN SELECT * FROM t")]
-    [InlineData("SQL", "EXPLAIN ANALYZE SELECT * FROM t")]
     [InlineData("OQL", "EXPLAIN CREATE INDEX ix ON c (a)")]
     [InlineData("OQL", "EXPLAIN CREATE COLLECTION c")]
     [InlineData("OQL", "EXPLAIN BEGIN")]
@@ -102,6 +101,32 @@ public sealed class ExplainContractTests
         };
         // Assert
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001" && diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - EXPLAIN ANALYZE: SQL retains the shared columns and reports executed candidates (#1522)")]
+    public async Task Execute_AnalyzedSql_ShouldRetainTheSharedContractAsync()
+    {
+        // Forty seconds is a hang guard, not a performance assertion.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+        var token = timeout.Token;
+        await using var engine = SqlDatabaseEngine.Create("sql-analyzed-contract", new());
+        await using var session = await (await engine.CreateDatabaseAsync("explain", token)).CreateSessionAsync(cancellationToken: token);
+        await session.ExecuteAsync("CREATE TABLE items (id INT);", cancellationToken: token);
+        await session.ExecuteAsync("INSERT INTO items VALUES (1),(2);", cancellationToken: token);
+
+        await using var plain = (DatabasePlanDescription)await session.ExecuteAsync("EXPLAIN SELECT id FROM items;", cancellationToken: token);
+        await using var analyzed = (DatabasePlanDescription)await session.ExecuteAsync("EXPLAIN ANALYZE SELECT id FROM items;", cancellationToken: token);
+
+        analyzed.Columns.Select(column => (column.Name, column.Type, column.Ordinal, column.IsNullable))
+            .ShouldBe(plain.Columns.Select(column => (column.Name, column.Type, column.Ordinal, column.IsNullable)));
+        await foreach (var row in plain.GetRowsAsync(token)) { row.IsNull(7).ShouldBeTrue(); }
+        int measured = 0;
+        await foreach (var row in analyzed.GetRowsAsync(token))
+        {
+            row.FieldCount.ShouldBe(8);
+            if (!row.IsNull(7)) { row.GetInt64(7).ShouldBe(2); measured++; }
+        }
+        measured.ShouldBe(2, "Both Select and its TableScan report the two candidates.");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database] - EXPLAIN: every language rejects trailing text after the described statement")]

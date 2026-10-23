@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database — Design
 
+## Shared plan-description contract (#1522)
+
+SQL, Documents and Graph retain the same eight-column DatabasePlanDescription contract owned by
+Database.Execution. Optional estimates and actual candidate counts belong to each model. Plain
+EXPLAIN never executes its described statement. SQL alone supports SELECT-only EXPLAIN ANALYZE;
+it executes before returning measured counts through the existing nullable Int64 columns.
+Documents and Graph continue to reject their ANALYZE prefixes. Cross-model contract tests verify
+column names, types, order, nullability and SQL's measured SELECT/TableScan counts.
+
 ## Engine failure diagnostics (#1247, #1364)
 
 An engine error code always appears in `Diagnostics`. Only wire writers add a code prefix

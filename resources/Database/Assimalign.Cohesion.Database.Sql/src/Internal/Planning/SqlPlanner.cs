@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// The rule-based planner: binds a parsed statement against the catalog, validates
+/// The binder: resolves a parsed statement against the catalog, validates
 /// it against the executor's supported surface, and produces a <see cref="SqlPlan"/>.
 /// Unsupported dialect features fail here with precise messages rather than
 /// misexecuting.
@@ -327,14 +327,14 @@ internal sealed partial class SqlPlanner
         return usesOutput;
     }
 
-    // ── Access-path selection (rule-based, by design) ──────────────────
+    // ── Bound access-path candidates and deterministic tie-break ──────
 
     /// <summary>
     /// Picks a statement's access path: an index seek when the WHERE clause has
     /// sargable predicates on an index's leading key columns, the per-object
-    /// scan otherwise. Selection is rule-based (the MVP planner's contract —
-    /// no cost model): the index with the longest equality prefix wins; ties
+    /// scan otherwise. Binding initially prefers the longest equality prefix; ties
     /// prefer a usable range bound, then uniqueness, then name (deterministic).
+    /// Statement-local probe costing can then rank the compatible alternatives.
     /// The full WHERE always remains the residual predicate, so a wrong-looking
     /// choice can cost performance but never correctness.
     /// </summary>
@@ -379,6 +379,8 @@ internal sealed partial class SqlPlanner
         }
         indexes ??= _catalog.GetIndexes(table.ObjectId);
         SqlIndexSeekPath? best = null;
+        List<SqlIndexSeekPath>? alternatives = null;
+        SqlIndexSeekPath? firstCandidate = null;
         int bestPrefix = -1;
         bool bestHasRange = false;
 
@@ -389,6 +391,13 @@ internal sealed partial class SqlPlanner
             if (seek is null)
             {
                 continue;
+            }
+
+            if (firstCandidate is null) { firstCandidate = seek; }
+            else
+            {
+                alternatives ??= [firstCandidate];
+                alternatives.Add(seek);
             }
 
             bool better =
@@ -404,6 +413,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
+        if (best is not null && alternatives is not null) { best.Cost = new(alternatives); }
         return (SqlAccessPath?)best ?? SqlScanPath.Instance;
     }
 

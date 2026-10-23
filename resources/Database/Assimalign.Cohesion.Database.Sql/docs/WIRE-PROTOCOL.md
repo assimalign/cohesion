@@ -196,3 +196,14 @@ unchanged. Exception detail is unprefixed in process, and original causes remain
 Confirmed record decoding errors keep the existing execution-failure frame and corruption code.
 Their message identifies the page and slot; the in-process nullable SlotIndex is not a new wire
 field. Existing diagnostic negotiation, protocol version and session lifetime are unchanged.
+
+## SELECT-only execution analysis (#1522)
+
+EXPLAIN ANALYZE is ordinary Execute SQL text over SELECT query bodies. Plain EXPLAIN never
+executes its data statement. Both return the existing eight-column plan result, with optional
+Int64 estimated_rows/actual_rows values in the already nullable count columns. Detail identifies
+exact probes, incomplete lower bounds and heuristic join estimates; actual counts describe
+candidate work before residuals. No new message type, frame shape or startup version is added.
+Data-changing analysis fails COHSQLE057 (0A000). Hash-build grant exhaustion fails COHSQLE067
+(53200) through the ordinary diagnostic carrier; the resx message contains no repeated code prefix.
+No standalone ANALYZE maintenance, persisted statistic or hash spill is introduced.

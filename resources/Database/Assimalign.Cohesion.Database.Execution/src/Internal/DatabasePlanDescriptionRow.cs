@@ -11,7 +11,7 @@ internal sealed class DatabasePlanDescriptionRow : DatabaseRow
     internal DatabasePlanDescriptionRow(DatabasePlanNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        _values = [node.NodeId, node.ParentId, node.Operator, node.Target, node.Index, node.Detail, null, null];
+        _values = [node.NodeId, node.ParentId, node.Operator, node.Target, node.Index, node.Detail, node.EstimatedRows, node.ActualRows];
     }
 
     public override int FieldCount => _values.Length;

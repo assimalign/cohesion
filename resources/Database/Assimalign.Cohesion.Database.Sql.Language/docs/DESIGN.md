@@ -829,3 +829,10 @@ and now reports OverflowException for out-of-range calendar/clock/offset fields.
 and CAST translate the same reason into 22007, 22008 or 22015 without adding a public bridge or assembly
 reference. Unknown COLLATE identifiers now reach binding (42704); unsupported collation creation
 retains COHDBL001. DIALECT records the corrected mappings and persisted-expression span provenance.
+
+## SELECT-only EXPLAIN ANALYZE (#1522)
+
+SqlExplainExpression.Analyze distinguishes execution analysis from a plain nonexecuting description.
+ANALYZE is contextual after EXPLAIN; standalone statistics maintenance is not introduced. The engine
+accepts SELECT query bodies only for execution analysis. DIALECT.md defines candidate counts,
+bounded probe estimates, budget refusals and the unchanged result shape.

@@ -33,6 +33,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal sealed class SqlBoundTableCache
 {
+    internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
     private readonly object _sync = new();

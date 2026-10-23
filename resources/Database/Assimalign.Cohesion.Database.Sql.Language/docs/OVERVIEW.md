@@ -62,3 +62,10 @@ var strict = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLim
 ```
 
 See [DESIGN.md](DESIGN.md) for the parser's shape and the decisions behind it.
+
+## SELECT-only EXPLAIN ANALYZE (#1522)
+
+SqlExplainExpression.Analyze distinguishes execution analysis from a plain nonexecuting description.
+ANALYZE is contextual after EXPLAIN; standalone statistics maintenance is not introduced. The engine
+accepts SELECT query bodies only for execution analysis. DIALECT.md defines candidate counts,
+bounded probe estimates, budget refusals and the unchanged result shape.

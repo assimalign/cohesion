@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     /// <summary>
-    /// Executes a correlated index join or a buffered nested loop. Both inputs
+    /// Executes a correlated index join, bounded hash build or buffered nested loop. All inputs
     /// use the same captured statement snapshot, including every index cursor.
     /// Table intent locks protect definitions; MVCC readers need no FK row locks.
     /// </summary>
@@ -65,8 +65,8 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Produces candidates in logical column order regardless of loop direction.
-    /// At each step without a usable index, the inner input is read once, costing O(L + R)
-    /// stored reads and O(L * R) predicate evaluations, with O(R) buffered rows.
+    /// An unindexed step without a safe hash key reads its inner once and uses a nested
+    /// loop. Safe hash steps retain budgeted rows and probe only matching hash buckets.
     /// </summary>
     private async IAsyncEnumerable<object?[]> EnumerateJoinRowsAsync(SqlJoinPlan plan, SqlStatementContext statement,
         bool[] sharedColumns, [EnumeratorCancellation] CancellationToken cancellationToken,
@@ -99,7 +99,8 @@ internal sealed partial class SqlPlanExecutor
                 accesses[i] = access;
                 indexes[i] = index;
             }
-            paths[i] = accesses[i] is { } chosen ? $"join-seek:{chosen.Index.Name}" : "join-scan";
+            paths[i] = plan.Steps[i].Hash is not null ? "join-hash"
+                : accesses[i] is { } chosen ? $"join-seek:{chosen.Index.Name}" : "join-scan";
         }
         statement.Metrics.JoinAccessPaths = paths;
         if (accesses[^1] is { } last)
@@ -110,6 +111,7 @@ internal sealed partial class SqlPlanExecutor
         bool reversed = plan.FirstBinding == 1;
         var initial = plan.Bindings[reversed ? 1 : 0];
         var buffered = new List<object?[]>?[plan.Steps.Count];
+        var hashes = new SqlHashJoinTable?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
         var matched = new bool[plan.Steps.Count];
         var extended = new bool[plan.Steps.Count];
@@ -145,7 +147,19 @@ internal sealed partial class SqlPlanExecutor
                     if (cursors[level] is null)
                     {
                         IEnumerable<object?[]> candidates;
-                        if (accesses[level] is not { } access)
+                        if (step.Hash is { } hashKeys)
+                        {
+                            if (hashes[level] is null)
+                            {
+                                // Publish before reading: cancellation, decode and budget failures all
+                                // release every reservation in the enclosing finally.
+                                var table = new SqlHashJoinTable(hashKeys, statement.Metrics, _definitions.StatementMemoryBudget);
+                                hashes[level] = table;
+                                foreach (var item in ReadInput(innerBinding)) { table.Add(item, cancellationToken); }
+                            }
+                            candidates = hashes[level]!.Probe(outer, cancellationToken);
+                        }
+                        else if (accesses[level] is not { } access)
                         {
                             buffered[level] ??= ReadInput(innerBinding).ToList();
                             candidates = buffered[level]!;
@@ -162,6 +176,8 @@ internal sealed partial class SqlPlanExecutor
                     }
                     if (cursors[level]!.MoveNext())
                     {
+                        statement.Metrics.RecordJoinCandidate();
+                        if (statement.Metrics.Analysis(step) is { } work) { work.Candidates++; }
                         var joined = (object?[])outer.Clone();
                         cursors[level]!.Current.CopyTo(joined, inner.Offset);
                         await PrepareSubqueriesAsync(step.Condition, joined, statement, cancellationToken).ConfigureAwait(false);
@@ -188,6 +204,7 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             foreach (var cursor in cursors) { cursor?.Dispose(); }
+            foreach (var hash in hashes) { hash?.Dispose(); }
         }
 
         IEnumerable<object?[]> ReadInput(int binding)
@@ -205,9 +222,11 @@ internal sealed partial class SqlPlanExecutor
             // One scratch frame per enumeration, never one joined-row clone per rejected pair.
             // Filters retain the original bound ordinals, including merged USING expressions.
             var frame = filter is null ? null : new object?[plan.Columns.Count];
+            var work = statement.Metrics.Analysis(plan.Bindings[binding]);
             foreach (var candidate in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (work is not null) { work.Candidates++; }
                 if (frame is not null)
                 {
                     candidate.CopyTo(frame, plan.Bindings[binding].Offset);

@@ -78,7 +78,7 @@ public sealed class SqlBinaryOwnershipTests
         var values = await ValuesAsync(session, "SELECT l.b, COALESCE(NULL, l.b), r.b FROM l JOIN r ON l.id = r.id;");
 
         // Assert
-        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe([indexed ? "join-seek:ix_r" : "join-scan"]);
+        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe([indexed ? "join-seek:ix_r" : "join-hash"]);
         values.Count.ShouldBe(9);
         foreach (var value in values)
         {

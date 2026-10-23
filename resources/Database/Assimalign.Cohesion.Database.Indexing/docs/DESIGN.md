@@ -1028,3 +1028,15 @@ baseline of 18,241 inserts/s. The historical machine/runtime differ, so that abs
 is an acceptance observation, not a causal speedup claim. The controlled local comparison
 supports no insertion regression; permanent regression assertions use deterministic descent
 and physical-work counts, never a duration ratio.
+
+## Bounded range counts (#1522)
+
+BTreeIndex.CountRange(TransactionSnapshot, IndexKeyRange, int entryLimit = 512,
+int pageLimit = 32, CancellationToken = default) returns BTreeRangeCount: Count,
+IsComplete, EntriesExamined and PagesVisited. The caller keeps its statement snapshot pinned.
+A shared tree hold protects descent and leaf walking; no key or page escapes. Physical entry work
+includes invisible versions and the stopping key; page visits include descent and empty leaves.
+Both limits must be positive. Cancellation preserves its token and releases all ownership.
+An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
+It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
+D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.

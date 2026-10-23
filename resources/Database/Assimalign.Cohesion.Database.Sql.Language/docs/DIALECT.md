@@ -301,7 +301,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | Stored tables, persisted read-only views, virtual system relations and aliased derived queries, with written-order N-way INNER/LEFT/CROSS joins and comma items over these source kinds; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC` with per-key `NULLS FIRST`/`NULLS LAST`, nonnegative integer `LIMIT`/`OFFSET`, ISO `FETCH FIRST`/`NEXT`, and the SQL Server `TOP` lexical alias. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`, `STRING_AGG`, and `LISTAGG` execute in grouped and ungrouped queries, with DISTINCT/ALL and ordered inputs. See the aggregate contract below. Top-level `SELECT` without `FROM` is rejected by the planner; CTE bodies can use one implicit row. |
-| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. DDL, transaction control, nested EXPLAIN and EXPLAIN ANALYZE report `COHDBL001`. |
+| `EXPLAIN` | Supported extension, measured | SELECT, INSERT (including query sources), UPDATE or DELETE returns the chosen plan as ordinary rows without executing it. Plain EXPLAIN remains nonexecuting. SELECT-only `EXPLAIN ANALYZE` executes the query and reports actual candidate work (#1522); data changes, including WITH data changes, fail `COHSQLE057` (0A000). DDL, transaction control and nested EXPLAIN report `COHDBL001`. Standalone ANALYZE remains unsupported. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES` including whole-item `DEFAULT`, `INSERT ... DEFAULT VALUES` (one row of defaults, with an optional column list), and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. `VALUES` expressions have no columns in scope: a column reference reports `COHSQLE005` before anything executes (see [VALUES and counts have no column scope](#values-and-counts-have-no-column-scope-1165)). Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `INSERT ... ON CONFLICT` | Supported subset, measured | Column-set inference, ON CONSTRAINT unique-index names, untargeted DO NOTHING, and targeted DO UPDATE SET/WHERE with target and EXCLUDED scope; inserted/updated RETURNING rows and counts. See the upsert contract above. |
 | `UPDATE` | Supported | multi-column `SET`, including `c = DEFAULT`, and `WHERE` (including correlated and uncorrelated subqueries); qualified references in both use the target name or its alias, which hides the base name (PostgreSQL `parse_relation.c:3759`); hidden/unknown qualifiers fail with located `COHSQLE015` before any write and leave an explicit transaction active; aggregates in SET and outside child queries in WHERE are rejected; aggregates inside WHERE subqueries execute (see [Grouping and aggregate functions](#grouping-and-aggregate-functions-1020)) |
@@ -484,10 +484,11 @@ through SqlDatabaseServer and Sql.Client.
 
 ## Plan descriptions (#1104)
 
-Grammar: `EXPLAIN (select | insert | update | delete) [';']`. The wrapped statement retains
-normal name binding, parameter validation and planning errors. EXPLAIN never calls its data
-executor, including inside a transaction that later commits. Estimates and actual counts are
-null; EXPLAIN ANALYZE is deferred. PostgreSQL likewise distinguishes planning from execution
+Grammar: `EXPLAIN [ANALYZE] (select | insert | update | delete) [';']`. The wrapped statement retains
+normal name binding, parameter validation and planning errors. Plain EXPLAIN never calls its data
+executor, including inside a transaction that later commits. Probe estimates may be present;
+actual counts remain null. SELECT-only EXPLAIN ANALYZE executes and reports candidate work
+(#1522); analysis of data changes is refused before execution. PostgreSQL likewise distinguishes planning from execution
 with `EXEC_FLAG_EXPLAIN_ONLY` in `ExplainOnePlan` (local reference clone,
 `src/backend/commands/explain.c:562-566,574-576`); Cohesion accepts only the documented data-statement subset.
 
@@ -3564,3 +3565,20 @@ remain enforced, so rebuilding an undone child candidate can instead expose the 
 committed-replacement conflict. Soft queue cycles may be reordered without a victim; genuine
 held-lock cycles remain retryable deadlocks. No new SQL syntax, key-share mode or wire error is
 introduced. Results are returned only after the complete statement succeeds.
+
+### Probe costs and SELECT analysis (#1522, D3)
+
+No persisted statistics or standalone ANALYZE maintenance exists. Candidate index ranges are
+counted under the statement snapshot with limits of 512 physical entries and 32 page visits;
+invisible entries and the stopping key consume physical work. An unfinished count is a lower
+bound, explicitly labelled in EXPLAIN. Eligible broad equijoins can use HashJoin; full ON/WHERE
+residuals, duplicate keys, NULL and LEFT semantics remain. No hash spill exists.
+
+`SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
+It limits accounted concurrently live hash-build storage per statement. Budget exhaustion reports
+`COHSQLE067` (53200, out_of_memory). It does not cap result materialization or transient planning.
+SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including application functions, and
+returns the existing eight-column plan description. `actual_rows` counts candidates before
+residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and
+probe/heuristic qualifications appear in access and JoinStep nodes. Plain EXPLAIN never runs its
+wrapped statement and has NULL actual counts. Unmeasured counts remain NULL in either form.

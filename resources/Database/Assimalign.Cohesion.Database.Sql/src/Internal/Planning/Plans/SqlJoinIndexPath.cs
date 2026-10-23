@@ -14,4 +14,7 @@ internal sealed record SqlJoinIndexPath(
     int InnerBinding,
     SqlCatalogIndex Index,
     IReadOnlyList<int> OuterOrdinals,
-    IReadOnlyList<SqlCatalogColumn> InnerColumns);
+    IReadOnlyList<SqlCatalogColumn> InnerColumns)
+{
+    internal IReadOnlyList<SqlJoinIndexPath>? Alternatives { get; set; }
+}

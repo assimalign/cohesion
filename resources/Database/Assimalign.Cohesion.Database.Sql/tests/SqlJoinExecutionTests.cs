@@ -354,7 +354,7 @@ public sealed class SqlJoinExecutionTests
         seekRows[1].ShouldBe(new object?[] { 201, "n201" });
         scanRows.Select(row => string.Join("|", row)).ShouldBe(seekRows.Select(row => string.Join("|", row)));
         seekExamined.ShouldBe(4);
-        scanMetrics.JoinAccessPaths.ShouldBe(["join-scan"]);
+        scanMetrics.JoinAccessPaths.ShouldBe(["join-hash"]);
         scanMetrics.RecordsExamined.ShouldBeGreaterThanOrEqualTo(size);
     }
 

@@ -53,6 +53,10 @@ public sealed class SqlDatabaseEngineOptions
     /// </summary>
     public TimeSpan LockTimeout { get; set; }
 
+    /// <summary>Gets or sets the maximum accounted bytes retained by concurrent hash builds in one statement.</summary>
+    /// <remarks>Defaults to 64 MiB. Must be positive. Exceeding the budget fails the statement; hash joins never spill.</remarks>
+    public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
     /// <summary>
     /// Gets or sets the checkpoint time backstop: the longest a file set (data or catalog) whose
     /// journal received records waits for a checkpoint, which durably flushes its pages and
@@ -238,6 +242,7 @@ public sealed class SqlDatabaseEngineOptions
         GroupCommitWindow = GroupCommitWindow,
         StatementTimeout = StatementTimeout,
         LockTimeout = LockTimeout,
+        StatementMemoryBudget = StatementMemoryBudget,
         CheckpointInterval = CheckpointInterval,
         CheckpointJournalSize = CheckpointJournalSize,
         WorkerFailureWindow = WorkerFailureWindow,

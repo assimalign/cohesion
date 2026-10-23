@@ -350,7 +350,7 @@ public sealed class SqlColumnBoundsTests
         await ExecuteAsync(session, "INSERT INTO bounded_values VALUES (10, 'e'), (20, 'x')");
         const string sql = "SELECT p.id, b.id FROM probes p JOIN bounded_values b ON p.v = b.v ORDER BY p.id";
         var scanned = await RowsAsync(session, sql);
-        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe(["join-scan"]);
+        session.LastStatementMetrics.ShouldNotBeNull().JoinAccessPaths.ShouldBe(["join-hash"]);
         await ExecuteAsync(session, "CREATE INDEX bounds_index ON bounded_values (v)");
 
         // Act

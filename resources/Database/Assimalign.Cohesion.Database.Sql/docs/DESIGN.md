@@ -714,8 +714,8 @@ no catalog representation change, so no format bump or upgrade path is needed.
 
 ## EXPLAIN operator vocabulary (#1104)
 
-The ordinary binder plans the wrapped data statement once. The session then returns
-`SqlPlanner.Describe` before calling the data executor. It retains its normal
+The ordinary binder plans the wrapped data statement once and applies transient probe costing.
+For plain EXPLAIN the session returns `SqlPlanner.Describe` before calling the data executor. It retains its normal
 statement admission and transaction bracket, so an explained mutation writes nothing in
 autocommit or an explicit transaction. SQL and its client use existing result frames unchanged.
 Deferred-provisioning admission recursively walks `SqlExplainExpression.Statement`, including
@@ -730,7 +730,7 @@ SQL's combined operators, not a shared or independently executable algebra:
 | Operators | Meaning |
 | --- | --- |
 | `Select`, `TableScan`, `IndexSeek` | Bound projection/filter/order/distinct/window above the chosen table access; seeks name the catalog index and equality-prefix/range bounds |
-| `NestedLoopJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
+| `NestedLoopJoin`, `HashJoin`, `JoinStep` | N-way written-order join; each JoinStep describes its kind and has its own scan or correlated index seek child |
 | `Group` | Group keys, aggregates, HAVING and result modifiers above the actual input plan |
 | `With` | Reachable CTE materializations in declaration order, followed by the enclosing input |
 | `Materialize` | One named CTE's complete definition plan, evaluated once per statement |
@@ -2926,13 +2926,12 @@ project reference or InternalsVisibleTo change is required.
 
 ## Execution model
 
-- **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against
+- **Binding, transient costing and the plan/execute split.** `SqlPlanner` binds the AST against
   the catalog into a small `SqlPlan` IR and rejects everything outside the
   [declared dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md)
   *at plan time with precise messages*. The IR
-  is deliberately thin — a cost-based planner replaces the binding internals
-  later without changing the executor seam (#178's plan-stage requirement, MVP
-  shape). That promise paid out with index adoption: the IR gained exactly one
+  remains deliberately thin. Bounded probe costing chooses physical paths after binding
+  without changing the executor seam (#1522, D3). That promise paid out with index adoption: the IR gained exactly one
   node family (`SqlAccessPath` on SELECT, UPDATE and DELETE plans — scan | index seek) and the
   executor seam did not move.
 - **Unknown functions and wrong argument counts fail before binding (#1068,
@@ -2984,13 +2983,12 @@ project reference or InternalsVisibleTo change is required.
   populated one. The arity walk runs first, so a wrong count still reports
   `COHSQLE006`. Every DML RETURNING list uses the same COHSQLE017 aggregate refusal,
   because it projects one written row at a time.
-- **Access-path selection (rule-based; no cost model — the MVP planner
-  contract).** The planner flattens the WHERE clause's top-level `AND`
+- **Access-path binding and probe costing (#1522).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where
   the comparand is plan-time evaluable (literal/parameter, no column
   references), non-null, and coercible to the column's storage type; `BETWEEN`
-  contributes its two bounds — then picks the index with the **longest
-  equality prefix** over its leading key columns (ties prefer a usable range
+  contributes its two bounds — then binds candidate indexes by **equality
+  prefix** over its leading key columns (ties prefer a usable range
   bound, then uniqueness, then name — deterministic), extended by range bounds
   on the next key column. **Range sargability is a type matrix**: only types
   whose evaluator comparison order provably equals the key codec's byte order
@@ -5773,8 +5771,8 @@ identity tables through the ordinary SQL executor.
 
 RIGHT/FULL OUTER, NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
 subqueries, `Serializable`
-isolation (rejected at begin), cost-based optimization (selection stays
-rule-based), and index-only result production (a seek always fetches the row).
+isolation (rejected at begin), persisted statistics, standalone ANALYZE, hash spill,
+and index-only result production (a seek always fetches the row).
 (Row-level MVCC visibility and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
 integration", "Secondary indexes", and the access-path bullets above.)
@@ -7426,3 +7424,100 @@ The single-row seek/lock-race guard counts exactly two examined rows for DELETE 
 refused row lock (the original seek and retry), and exactly one for UPDATE. Uncontended seek
 counts remain unchanged; no scan bound is widened (#1420).
 
+## Transient probe costing and bounded hash builds (#1522, D3)
+
+No catalog statistic, maintenance command, storage format change or legacy reader is introduced.
+Binding still proves sargability and keeps the entire WHERE/ON residual. Competing seek paths
+are ranked by snapshot-visible B+Tree range counts. Each probe visits at most 32 pages and
+examines at most 512 physical entries, including invisible entries and the stopping key.
+Exact exhaustion and incomplete lower bounds are distinct. A refused table IS intent gives an
+unknown estimate without waiting; a granted intent protects the probed definition/tree from DROP
+only during the probe. MarkStatement/ReleaseSince removes that temporary grant in finally while
+preserving older grants. Costing never adds a transaction-long table lock to an MVCC reader.
+Counts are neither cached across statements nor persisted. Unique complete equalities need no probe.
+Equal estimated costs retain binding's equality-prefix/range/uniqueness/name tie-break.
+Incomplete counts cost at least 1024 candidates or twice their observed visible count; unknown
+inputs cost 4096. These are planning heuristics, not reported exact cardinalities. A seek with
+more than 16 candidates loses to a scan only when an exact base probe costs no more than four
+random fetch units per seek candidate. Small indexed inner inputs (at most 16 exact candidates)
+and unique complete probes retain their index nested loop.
+
+For a safe mandatory equality, hash build plus probe work is compared with nested work.
+An unindexed loop costs the input product; an index loop costs outer rows times
+(1 + log2(inner rows + 1)). Loops remain when that work is at most four times the input sum.
+Unknown outer cardinality conservatively retains an available index probe. When both first-pair
+inputs have count estimates, compatible indexed directions use the same lookup cost, rather
+than index name, to choose the driver. Later indexed steps retain their bound direction. Only the first INNER pair may
+reverse to build the smaller estimated input. LEFT always preserves its written outer input.
+Each later join step can build its own table once. NULL keys have no matches; duplicate keys and
+hash collisions retain every candidate and evaluate the full ON. Numeric, temporal, binary and
+collated string hashes use SqlValueComparer equality classes. CHAR keys and unproven throwing,
+lazy, application-call or derived-text conditions retain the existing loop/probe path. Rewritten
+CTE definitions and references share one identity map; cached view plans are never mutated.
+
+SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default 67108864
+(64 MiB), snapshotted with engine options. It bounds concurrently retained hash builds in one
+statement, including nested queries: each table reserves 80 bytes, arrays reserve both old and
+new storage during doubling, and retained rows charge their arrays and conservatively sized
+boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
+The limit governs accounted live hash-build memory, not result
+materialization, planning or transient scalar hashing. Reservation precedes retained allocation.
+Every exit releases reservations, including cancellation, failed decoding and budget refusal.
+COHSQLE067 / PostgreSQL SQLSTATE 53200 reports budget exhaustion through an unprefixed resx
+message and one diagnostic code. There is no partitioning or spill. Persisted statistics,
+standalone ANALYZE and spill remain post-T2 Hardening work under D3.
+
+Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_rows stays NULL.
+Owner clarification on 2026-10-22 adds EXPLAIN ANALYZE over SELECT query bodies only, including
+read-only WITH/set operations. It executes and drains the query under normal snapshot,
+cancellation, timeout and hash-memory rules, then returns the description. INSERT/UPDATE/DELETE,
+including WITH data changes, fail COHSQLE057 / SQLSTATE 0A000 before execution. Standalone
+ANALYZE remains unsupported. SELECT expressions and application functions run as for an ordinary SELECT.
+The existing eight columns and ordinary result frames remain unchanged. estimated_rows on an
+access node contains the probe count; detail says exact_probe or lower_bound and records physical
+entry/page work. JoinStep estimates are explicitly heuristic (minimum probed inputs for hash,
+Cartesian product for loops), without a distinct-count claim. actual_rows records candidate work
+before residuals on measured select/join/access/step nodes; it is not the final result cardinality.
+Repeated probes/child executions accumulate, and unmeasured nodes remain NULL. Analysis counters
+are absent during normal execution. Join-only telemetry and live-memory accounting reuse the
+existing metrics path slot; ordinary statement/context instance layouts do not grow.
+
+Reference consultation, no copied code (clones under C:/Source/repos):
+PostgreSQL postgres/postgres/src/backend/utils/errcodes.txt:119,409 defines 0A000
+(feature_not_supported) and 53200 (out_of_memory), respectively.
+PostgreSQL postgres/postgres/src/backend/optimizer/path/costsize.c:546-580 models index fetch
+costs; :4330-4400 models hash build/probe work.
+postgres/postgres/src/backend/executor/nodeHash.c:683-720 sizes tuples and bucket memory; its
+batch/spill machinery is deliberately excluded by D3.
+Neo4j neo4j/neo4j/community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/ValueHashJoinPipe.scala:47-80
+uses a tracked table, skips null keys and retains matching rows.
+RavenDB ravendb/ravendb/src/Raven.Server/Documents/Queries/Dynamic/DynamicQueryToIndexMatcher.cs:71-115
+ranks compatible indexes, then freshness/field coverage; those proxies were rejected for SQL skew
+in favor of bounded physical probes.
+
+Before/after measurement uses frozen item-9 Release assemblies and the final item-10 assemblies,
+with explicit copied-assembly hash checks. Windows ARM64 .NET 10.0.13, tiering/background GC off,
+one warm-up followed by twelve batches per shape; these are sequential shared-host samples,
+not interleaved quiet-host rankings. Table values are rounded to six decimal places. Queries execute synchronously in one explicit ReadCommitted
+transaction with pre-parsed requests. Stopwatch and current-thread allocation surround ExecuteAsync;
+row enumeration, exact id/pair verification, digesting and disposal occur outside each interval.
+Both join inputs have primary indexes but no index on the joined key. The skewed table has the
+same broad composite and rare single-column indexes on both versions. No statistics are saved.
+
+| Shape | Median ns/query, before -> after | Median B/query, before -> after | After durations at/below old median |
+| --- | --- | --- | --- |
+| 80-by-80 equality join, 12 queries/batch | 714412.5 -> 125000 | 423344 -> 80080 | 12/12 |
+| 800-by-800 equality join, 2 queries/batch | 62780875 -> 1108150 | 36331456 -> 609096 | 12/12 |
+| 800-row skewed lookup, 100 queries/batch | 249362.5 -> 18649.5 | 263208 -> 14928 | 12/12 |
+| Complete primary-key lookup, 100 queries/batch | 5634 -> 5621.5 | 8520 -> 8528 | 7/12 |
+
+Exact output digests remain 457EF3AD47C442A1, 8169E2A5479E4EF1 and 000000000000004C
+(the last applies to both lookup shapes). The seek metadata adds one reference field and therefore
+eight bytes to this primary-key query, even though its fast path performs no probe or cost-context
+allocation. The ordinary scan/context/metrics layouts remain unchanged. These durations are
+descriptive evidence; deterministic candidate and physical-work counters decide regressions.
+Raw harness, frozen assemblies, hashes and twelve-sample JSONL files are retained outside the
+repository under Temp/Wave11SqlCostProbe and Temp/wave11-1522-probe-*. The final after sample
+and its hashes are -after-final.jsonl and -final-hashes.json; earlier after data precedes a
+comment-only cleanup and is retained as superseded evidence. The stored-query Release guard
+remains 4280 B/query in three runs, below its unchanged 4293.296 bound.

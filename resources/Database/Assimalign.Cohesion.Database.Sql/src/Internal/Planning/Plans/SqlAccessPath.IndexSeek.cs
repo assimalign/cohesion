@@ -19,4 +19,8 @@ internal sealed record SqlIndexSeekPath(
     SqlCatalogIndex Index,
     IReadOnlyList<object?> EqualityValues,
     SqlSeekBound? Lower,
-    SqlSeekBound? Upper) : SqlAccessPath;
+    SqlSeekBound? Upper) : SqlAccessPath
+{
+    // One optional reference; only competing paths allocate a cost description.
+    internal SqlAccessCost? Cost { get; set; }
+}

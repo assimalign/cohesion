@@ -67,6 +67,7 @@ internal sealed class SqlQueryExecutor
 
         statement.Metrics.IsPlanned = true;
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
+        plan = executor.Cost(plan, statement, cancellationToken);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }

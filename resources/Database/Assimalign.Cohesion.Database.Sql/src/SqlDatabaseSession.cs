@@ -689,13 +689,25 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
         cancellationToken.ThrowIfCancellationRequested();
         SqlSystemViews.EnsureReadOnly(explain.Statement);
+        if (explain.Analyze && explain.Statement is not SqlQueryBodyExpression)
+        {
+            throw new SqlExecutionException(SqlExecutionException.UnsupportedCode,
+                ErrorMessages.ExplainAnalyzeSelectOnly, location: explain.Location);
+        }
         var parameters = SqlQueryExecutor.NormalizeParameters(request.Parameters);
         _database.Definitions.EnsureDefinitions(cancellationToken);
         var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
             var plan = planner.Plan(explain.Statement);
+            var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
+            plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
+            if (explain.Analyze)
+            {
+                scope.Metrics.BeginAnalysis();
+                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken);
+            }
             var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
             return Task.FromResult<DatabaseResult>(result);
         }
@@ -703,6 +715,19 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             return Task.FromResult<DatabaseResult>(new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0, [.. exception.Diagnostics]));
         }
+    }
+
+    private static async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
+        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    {
+        await using var result = (DatabaseResultSet)await executor.ExecuteAsync(plan, scope, cancellationToken).ConfigureAwait(false);
+        // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
+        await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
+        }
+        return SqlPlanner.Describe(plan, diagnostics, scope.Metrics);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,

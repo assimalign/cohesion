@@ -508,7 +508,9 @@ public sealed class SqlTableReclamationTests
         await using var engine = await builder.BuildAsync(timeout.Token);
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var writer = await database.CreateSessionAsync(timeout.Token);
-        await SeedAsync(writer, "t", 100, timeout.Token);
+        // Preserve the cursor-specific half of this race under probe costing: 100 matches
+        // out of 500 rows retain the seek; the scan variant still has exactly 100 rows.
+        await SeedAsync(writer, "t", indexed ? 500 : 100, timeout.Token);
         await using var reader = await database.CreateSessionAsync(timeout.Token);
         var snapshot = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
         string sql = indexed ? "SELECT id FROM t WHERE id >= 0 AND id < 100 AND hold_row(id) >= 0" : "SELECT id FROM t WHERE hold_row(id) >= 0";

@@ -12,7 +12,8 @@ namespace Assimalign.Cohesion.Database.Execution;
 
 /// <summary>A materialized EXPLAIN result with the same eight columns for every language.</summary>
 /// <remarks>
-/// Nodes appear in depth-first pre-order. Estimated and actual row counts are null in Tier 1.
+/// Nodes appear in depth-first pre-order. Counts are optional model-defined candidate work.
+/// Nonexecuting descriptions never supply observed counts.
 /// The shape describes a chosen plan; it does not define a shared operator algebra.
 /// </remarks>
 public sealed class DatabasePlanDescription : DatabaseResultSet

@@ -27,6 +27,8 @@ internal sealed record SqlJoinPlan(
     /// <summary>The driving input of the first pair, independent of runtime index attachment.</summary>
     internal int FirstBinding { get; init; }
 
+    internal Assimalign.Cohesion.Database.Indexing.BTreeRangeCount?[]? InputEstimates { get; init; }
+
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
     internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
     internal override IReadOnlyList<SqlRelationBinding>? OutputBindings => Bindings;

@@ -117,7 +117,7 @@ public sealed class SqlSystemRelationJoinTests
         var scanned = await RowsAsync(session, query);
 
         // Assert
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash"]);
         Check(sought, [[1, "parent"], [2, "child"]]);
         Check(scanned, sought);
     }
@@ -292,7 +292,7 @@ public sealed class SqlSystemRelationJoinTests
 
             // Assert: another owner can still acquire exclusive locks while this transaction remains active.
             rows.Count.ShouldBe(7);
-            session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan"]);
+            session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash"]);
             foreach (string name in new[] { "parent", "child" })
             {
                 database.Catalog.TryGetTable("dbo", name, out var table).ShouldBeTrue();

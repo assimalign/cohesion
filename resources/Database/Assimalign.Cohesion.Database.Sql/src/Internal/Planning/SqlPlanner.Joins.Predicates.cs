@@ -210,7 +210,7 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Only expressions proven non-throwing for their operand types may run before a join.</summary>
-    private static bool JoinRestrictionColumns(SqlBoundExpression expression, HashSet<int> columns, IReadOnlyList<SqlCatalogColumn> schema)
+    internal static bool JoinRestrictionColumns(SqlBoundExpression expression, HashSet<int> columns, IReadOnlyList<SqlCatalogColumn> schema)
         => JoinRestrictionType(expression, columns, schema) is not null;
 
     // Volatility alone says nothing about errors. Keep an explicit allowlist, including each

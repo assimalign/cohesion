@@ -56,3 +56,15 @@ The owning coordinator calls it under the apply gate. Unique inserts use the opt
 descent and insertion position through splits. Read cursors stay read-only. Empty-leaf reclamation
 and merges remain deferred; B-tree format 2 is unchanged. Physical page rollback remains the
 approved #1393 design; [DESIGN.md](DESIGN.md) records the alternatives and measurements.
+
+## Bounded range counts (#1522)
+
+BTreeIndex.CountRange(TransactionSnapshot, IndexKeyRange, int entryLimit = 512,
+int pageLimit = 32, CancellationToken = default) returns BTreeRangeCount: Count,
+IsComplete, EntriesExamined and PagesVisited. The caller keeps its statement snapshot pinned.
+A shared tree hold protects descent and leaf walking; no key or page escapes. Physical entry work
+includes invisible versions and the stopping key; page visits include descent and empty leaves.
+Both limits must be positive. Cancellation preserves its token and releases all ownership.
+An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
+It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
+D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.

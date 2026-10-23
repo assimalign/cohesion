@@ -76,7 +76,23 @@ internal sealed partial class SqlPlanExecutor
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
-    internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
+            : ExecuteCoreAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecuteAnalyzedAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        long before = plan is SqlJoinPlan ? statement.Metrics.JoinCandidatePairs : statement.Metrics.RecordsExamined;
+        var result = await ExecuteCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        if (plan is SqlSelectPlan or SqlJoinPlan)
+        {
+            statement.Metrics.Analysis(plan)!.Candidates +=
+                (plan is SqlJoinPlan ? statement.Metrics.JoinCandidatePairs : statement.Metrics.RecordsExamined) - before;
+        }
+        return result;
+    }
+
+    private async Task<DatabaseResult> ExecuteCoreAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;

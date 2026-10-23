@@ -60,7 +60,7 @@ public sealed class SqlNWayJoinTests
         // Act / Assert
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id AND c.enabled = TRUE ORDER BY a.id;"),
             [[1, 1], [2, null], [3, null]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(indexed ? ["join-seek:ix_b", "join-seek:ix_c"] : ["join-scan", "join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(indexed ? ["join-seek:ix_b", "join-seek:ix_c"] : ["join-hash", "join-hash"]);
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id WHERE c.enabled = TRUE ORDER BY a.id;"), [[1, 1]]);
         Check(await RowsAsync(session, "SELECT COUNT(*), COUNT(c.id) FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id AND c.enabled = TRUE;"), [[3L, 1L]]);
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a LEFT JOIN c ON NULL ORDER BY a.id;"), [[1, null], [2, null], [3, null]]);
@@ -186,11 +186,11 @@ public sealed class SqlNWayJoinTests
         // Act / Assert
         Check(await RowsAsync(session, "SELECT n.name, c.COLUMN_NAME FROM names n LEFT JOIN INFORMATION_SCHEMA.COLUMNS c ON n.name = c.TABLE_NAME ORDER BY n.name;"),
             [["absent", null], ["names", "name"]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash"]);
         session.LastStatementMetrics.CatalogSnapshot.ShouldNotBeNull();
         Check(await RowsAsync(session, "SELECT t.TABLE_NAME, c.COLUMN_NAME, n.name FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c USING (TABLE_NAME) LEFT JOIN names n ON t.TABLE_NAME = n.name WHERE t.TABLE_NAME = 'names';"),
             [["names", "name", "names"]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan", "join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash", "join-hash"]);
         session.LastStatementMetrics.CatalogSnapshotCaptures.ShouldBe(isolation == 2 ? 0 : 1);
     }
 
