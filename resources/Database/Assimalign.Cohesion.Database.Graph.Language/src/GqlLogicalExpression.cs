@@ -16,13 +16,13 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// operator merges into it: <c>(p AND q) AND r</c> is the same node as <c>p AND q AND r</c>. A
 /// parenthesized chain in a later position stays a nested node, <c>p AND (q AND r)</c>; the meaning
 /// is the same, and merging it would cost a copy of its operands per enclosing group. Nesting
-/// through parentheses is bounded only by the stack: the parser reports <c>GQL0009</c> and the
-/// engine <c>COHDBG008</c> instead of overflowing it.
+/// through parentheses is bounded only by the stack: the parser reports <c>CG00009</c> and the
+/// engine <c>CG05008</c> instead of overflowing it.
 /// </para>
 /// <para>
 /// The engine evaluates operands first to last: AND stops at false, OR at true, and XOR propagates unknown. A hand-built
 /// node with an undefined operator, a null operand list, a null operand or fewer than two operands
-/// is rejected by the planner with <c>COHDBG001</c>.
+/// is rejected by the planner with <c>CG05001</c>.
 /// </para>
 /// </remarks>
 public sealed class GqlLogicalExpression : GqlExpression

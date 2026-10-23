@@ -28,21 +28,21 @@ public sealed class IndexFailureTranslationTests
         var translated = database.TranslateFailure(error).ShouldBeOfType<DatabaseCorruptionException>();
 
         // Assert
-        translated.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "COHDBG006"]);
+        translated.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "CG06006"]);
         translated.InnerException.ShouldBeSameAs(cause);
         translated.PageId.ShouldBe((PageId)42);
         translated.Message.ShouldNotStartWith("CK06003:", Case.Sensitive);
         database.TranslateFailure(translated).ShouldBeSameAs(translated);
         var coded = new DatabaseException("Coded wrapper.", [new Types.Diagnostic
-        { Code = "COHDBG006", Message = "Coded wrapper.", Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CG06006", Message = "Coded wrapper.", Severity = Types.DiagnosticSeverity.Error }], cause);
         database.TranslateFailure(coded).ShouldBeOfType<DatabaseCorruptionException>().InnerException.ShouldBeSameAs(cause);
         var aggregate = new DatabaseException("Aggregate wrapper.", coded.Diagnostics,
             new AggregateException(coded, new StorageCorruptionException((PageId)43, "Damaged storage page.")));
         database.TranslateFailure(aggregate).ShouldBeOfType<DatabaseCorruptionException>().PageId.ShouldBe((PageId)43);
         var ordinary = database.TranslateFailure(new Exception("Wrapper.", new IndexException("Index failed."))).ShouldBeOfType<DatabaseException>();
-        ordinary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        ordinary.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
         var storage = database.TranslateFailure(new StorageIOException("Device failed.")).ShouldBeOfType<DatabaseException>();
-        storage.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        storage.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
         storage.Message.ShouldBe("Device failed.");
     }
 }

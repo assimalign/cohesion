@@ -533,7 +533,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
     /// <summary>
     /// Creates the model's coded error for work refused by an aborted transaction (for example
-    /// <c>COHDBG007</c> in the graph model). The cause travels in the message as well as the inner
+    /// <c>CG04007</c> in the graph model). The cause travels in the message as well as the inner
     /// exception, because the wire carries message text only. Called under the base's lock: it
     /// must only build the exception.
     /// </summary>

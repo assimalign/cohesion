@@ -61,7 +61,7 @@ public sealed class GqlOptionalMatchParserTests
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - MATCH: unsupported and invalid compositions keep exact codes")]
     [InlineData("MANDATORY MATCH (a) RETURN a", "CK00001")]
-    [InlineData("OPTIONAL RETURN a", "GQL0002")]
+    [InlineData("OPTIONAL RETURN a", "CG00002")]
     public void Parse_InvalidComposition_ShouldKeepCode(string source, string code)
     {
         // Arrange / Act

@@ -32,7 +32,7 @@ public sealed class GraphStorageOperationsTests
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a statement, BEGIN, COMMIT and ROLLBACK of an open
-    /// transaction, over the wire too — is refused with COHDBG012, and nothing reaches the file
+    /// transaction, over the wire too — is refused with CG06012, and nothing reaches the file
     /// set, through the workers' passes and the sessions' close included. The root bases' checks
     /// come first (concrete-types plan §6.4): BEGIN on the session holding the open transaction is
     /// refused as already active, a canceled token is refused before the offline refusal of a new
@@ -97,7 +97,7 @@ public sealed class GraphStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBG012. The typed node and
+        // BEGIN. Before the bases, each of these was refused with CG06012. The typed node and
         // relationship operations do not pass the session's execute seams, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
         using var canceled = new CancellationTokenSource();
@@ -146,20 +146,20 @@ public sealed class GraphStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBG012");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CG06012");
         unconfirmed.Message.ShouldStartWith("Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBG012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CG06012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CG06012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        typedRefusal.Code.ShouldBe("COHDBG012");
+        typedRefusal.Code.ShouldBe("CG06012");
         nullRequest.ParamName.ShouldBe("request");
         blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);
         statementError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        statementError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
+        statementError.Message.ShouldStartWith("CG06012", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBG012", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CG06012", Case.Sensitive);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);

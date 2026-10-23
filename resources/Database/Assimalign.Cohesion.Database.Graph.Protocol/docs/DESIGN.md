@@ -30,7 +30,7 @@ budgets. Unordered read LIMIT may stop expansion (D4); final results stay materi
 completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, with positive engine
 ceilings of 64 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
 Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
-COHDBG020/COHDBG021 and the preserved 64-hop trail limit.
+CG05020/CG08021 and the preserved 64-hop trail limit.
 
 ## Execute transaction status (#1540, D5)
 
@@ -50,3 +50,13 @@ the connector. Clients never determine transaction state by recognizing user com
 PostgreSQL reports the same idle/active/failed distinction after a command cycle in
 `src/backend/tcop/dest.c:268-281` and `src/backend/access/transam/xact.c:5058-5090` (local PostgreSQL
 clone). This copies the state contract only; no source code is copied.
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

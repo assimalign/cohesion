@@ -24,19 +24,19 @@ public sealed partial class GqlQueryParser
 
         if (!node)
         {
-            Error("GQL0002", "A relationship has one type: write one label expression, such as :T|U; ':A:B' repeats node labels.", Current);
+            Error("CG00002", ErrorMessages.ParserParseLabelSpecificationVoid, Current);
             return expression;
         }
         if (!colon)
         {
-            Error("GQL0002", "':' cannot follow an IS label expression; write IS A&B.", Current);
+            Error("CG00002", ErrorMessages.ParserParseLabelSpecificationVoid2, Current);
             return expression;
         }
         // The convenience starts from one plain name: '%' is also one token, so (n:%:A) needs
         // the type test as well as the token count.
         if (expression is not GqlLabelName || _position != first + 1)
         {
-            Error("GQL0002", mixedColonMessage, Current);
+            Error("CG00002", mixedColonMessage, Current);
             return expression;
         }
 
@@ -47,20 +47,20 @@ public sealed partial class GqlQueryParser
         {
             if (Current.Type is TokenType.Bang or TokenType.Percent or TokenType.LeftParen)
             {
-                Error("GQL0002", mixedColonMessage, Current);
+                Error("CG00002", mixedColonMessage, Current);
                 break;
             }
             operands.Add(new GqlLabelName(Identifier(allowKeyword: true)));
         }
         if (!Failed && Current.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Concat)
         {
-            Error("GQL0002", mixedColonMessage, Current);
+            Error("CG00002", mixedColonMessage, Current);
         }
         return GqlLabelConjunction.FromOwnedList(operands);
     }
 
-    private const string mixedColonMessage =
-        "Repeated ':' labels cannot be combined with label-expression operators; write ':A&B' or ':A:B'.";
+    private static readonly string mixedColonMessage =
+        ErrorMessages.GqlQueryParserVoid;
 
     // label-expression := label-term ('|' label-term)*
     private GqlLabelExpression ParseLabelDisjunction()
@@ -75,7 +75,7 @@ public sealed partial class GqlQueryParser
         {
             if (Current.Type == TokenType.Concat)
             {
-                Error("GQL0002", "'||' is not a label operator; write one '|' between labels.", Current);
+                Error("CG00002", ErrorMessages.QueryParserParseLabelDisjunctionVoid, Current);
                 break;
             }
             Advance();
@@ -128,11 +128,11 @@ public sealed partial class GqlQueryParser
         }
 
         string message = token.Type == TokenType.Colon
-            ? "A label expression follows one ':'; write ':A|B', not ':A|:B'."
+            ? ErrorMessages.GqlQueryParserParseLabelPrimaryVoid
             : negated
-                ? "Expected a label name, '%' or '(' after '!'; '!' negates one label, '%' or parenthesized expression."
-                : "Expected a label name, '%', '!' or '('.";
-        Error("GQL0002", message, token);
+                ? ErrorMessages.GqlQueryParserParseLabelPrimaryVoid2
+                : ErrorMessages.GqlQueryParserParseLabelPrimaryVoid3;
+        Error("CG00002", message, token);
         return new GqlLabelWildcard();
     }
 
@@ -193,7 +193,7 @@ public sealed partial class GqlQueryParser
         var labels = ParseLabelDisjunction();
         if (!Failed && Current.Type == TokenType.Colon)
         {
-            Error("GQL0002", "Repeated ':' labels are a node-pattern convenience; write n:A&B in a predicate.", Current);
+            Error("CG00002", ErrorMessages.QueryParserParseLabeledPredicateVoid, Current);
         }
         return new GqlLabeledPredicate(variable, labels, negated, Span(start, Previous));
     }

@@ -154,14 +154,14 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         {
             if (GraphProtocolPathsCompleteMessage.Decode(frame.Payload.Span).PathCount != _count)
             {
-                throw new ProtocolException("The graph path completion count does not match the received paths.");
+                throw new ProtocolException(ErrorMessages.PathsExchangeConsumeFrameProtocol);
             }
             _pathsComplete = true;
             return;
         }
         if (frame.Type != (ProtocolMessageType)GraphProtocolMessageType.Path)
         {
-            throw new ProtocolException("Expected a graph path or path completion.");
+            throw new ProtocolException(ErrorMessages.PathsExchangeConsumeFrameProtocol2);
         }
         long started = Stopwatch.GetTimestamp();
         GraphProtocolPathMessage decoded;

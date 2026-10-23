@@ -13,7 +13,7 @@ internal readonly record struct GraphEvaluationContext(DateTimeOffset Transactio
     {
         ulong id = start ? relationship.From.Value : relationship.To.Value;
         if (Database is null || Operation is null || Operation.Updates.FindNode(id) is not { } node)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.FunctionEndpointMissing); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.FunctionEndpointMissing); }
         return GraphDatabase.Materialize(node);
     }
 }

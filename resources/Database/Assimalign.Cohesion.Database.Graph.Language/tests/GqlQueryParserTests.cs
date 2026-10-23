@@ -65,36 +65,36 @@ public class GqlQueryParserTests
     }
 
     [Theory]
-    [InlineData("", "GQL0001")]
-    [InlineData("MATCH (a RETURN a", "GQL0002")]
-    [InlineData("MATCH (a:\"a\"\"", "GQL0003")]
-    [InlineData("MATCH a RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)-[r->(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)<--(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)<-->(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)-[r]-->(b) RETURN a", "GQL0008")]
-    [InlineData("MATCH (a)-[r]-> RETURN a", "GQL0002")]
-    [InlineData("MATCH (a)", "GQL0002")]
-    [InlineData("MATCH (a) RETURN", "GQL0002")]
-    [InlineData("MATCH () RETURN *", "GQL0002")]
-    [InlineData("RETURN *", "GQL0002")]
-    [InlineData("RETURN DISTINCT", "GQL0002")]
-    [InlineData("RETURN ALL", "GQL0002")]
-    [InlineData("MATCH (a) RETURN *, a", "GQL0002")]
-    [InlineData("RETURN 1 AS", "GQL0002")]
-    [InlineData("MATCH (is) RETURN is", "GQL0002")]
-    [InlineData("MATCH (a) WHERE a.age = RETURN a", "GQL0002")]
-    [InlineData("MATCH (a) WHERE a.age = 2 = 3 RETURN a", "GQL0002")]
-    [InlineData("MATCH (a) RETURN a; MATCH (b) RETURN b", "GQL0002")]
-    [InlineData("CREATE (:Person {age: 1, age: 2})", "GQL0006")]
-    [InlineData("CREATE (:Person {age: 9223372036854775808})", "GQL0004")]
-    [InlineData("CREATE (:Person {age: 1e999})", "GQL0004")]
-    [InlineData("CREATE (:Person {age: 1e})", "GQL0004")]
-    [InlineData("CREATE (:Person {name: 'unterminated})", "GQL0003")]
-    [InlineData("MATCH (\"unterminated) RETURN a", "GQL0003")]
-    [InlineData("/* unterminated", "GQL0003")]
-    [InlineData("MATCH (\"\") RETURN a", "GQL0002")]
-    [InlineData("MATCH (other.Person) RETURN a", "GQL0002")]
+    [InlineData("", "CG00001")]
+    [InlineData("MATCH (a RETURN a", "CG00002")]
+    [InlineData("MATCH (a:\"a\"\"", "CG00003")]
+    [InlineData("MATCH a RETURN a", "CG00002")]
+    [InlineData("MATCH (a)-[r->(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)<--(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)<-->(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a)-[r]-->(b) RETURN a", "CG00008")]
+    [InlineData("MATCH (a)-[r]-> RETURN a", "CG00002")]
+    [InlineData("MATCH (a)", "CG00002")]
+    [InlineData("MATCH (a) RETURN", "CG00002")]
+    [InlineData("MATCH () RETURN *", "CG00002")]
+    [InlineData("RETURN *", "CG00002")]
+    [InlineData("RETURN DISTINCT", "CG00002")]
+    [InlineData("RETURN ALL", "CG00002")]
+    [InlineData("MATCH (a) RETURN *, a", "CG00002")]
+    [InlineData("RETURN 1 AS", "CG00002")]
+    [InlineData("MATCH (is) RETURN is", "CG00002")]
+    [InlineData("MATCH (a) WHERE a.age = RETURN a", "CG00002")]
+    [InlineData("MATCH (a) WHERE a.age = 2 = 3 RETURN a", "CG00002")]
+    [InlineData("MATCH (a) RETURN a; MATCH (b) RETURN b", "CG00002")]
+    [InlineData("CREATE (:Person {age: 1, age: 2})", "CG00006")]
+    [InlineData("CREATE (:Person {age: 9223372036854775808})", "CG00004")]
+    [InlineData("CREATE (:Person {age: 1e999})", "CG00004")]
+    [InlineData("CREATE (:Person {age: 1e})", "CG00004")]
+    [InlineData("CREATE (:Person {name: 'unterminated})", "CG00003")]
+    [InlineData("MATCH (\"unterminated) RETURN a", "CG00003")]
+    [InlineData("/* unterminated", "CG00003")]
+    [InlineData("MATCH (\"\") RETURN a", "CG00002")]
+    [InlineData("MATCH (other.Person) RETURN a", "CG00002")]
     public void MalformedCorpus_ReturnsStableDiagnostic(string source, string code)
     {
         var statement = Parse(source);
@@ -227,7 +227,7 @@ public class GqlQueryParserTests
     }
 
     /// <summary>
-    /// A path pattern keeps its 64-relationship bound (GQL0005). Predicates have no count or depth
+    /// A path pattern keeps its 64-relationship bound (CG00005). Predicates have no count or depth
     /// limit (#1139 follow-up): a 10,000-comparison AND chain is one node, and parentheses nest
     /// as deep as the stack allows (GqlLabelChainParserTests covers the stack).
     /// </summary>
@@ -235,7 +235,7 @@ public class GqlQueryParserTests
     public void Parse_LongPredicateAndLongPath_ShouldBoundOnlyThePath()
     {
         Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 65)) + " RETURN a")
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00005");
         Parse("MATCH (a)" + string.Concat(Enumerable.Repeat("-[]->()", 64)) + " RETURN a").Diagnostics.ShouldBeEmpty();
         var chain = Parse("MATCH (a) WHERE " + string.Join(" AND ", Enumerable.Repeat("a.x = 1", 10_000)) + " RETURN a");
         chain.Diagnostics.ShouldBeEmpty();

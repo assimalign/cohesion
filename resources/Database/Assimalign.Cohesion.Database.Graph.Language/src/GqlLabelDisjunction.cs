@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// merges into it: <c>(A|B)|C</c> is the same node as <c>A|B|C</c>. One in a later position stays a
 /// nested node, <c>A|(B|C)</c>; the meaning is the same, and merging it would cost a copy of its
 /// operands per enclosing group. A hand-built node with a null operand list, a null operand or
-/// fewer than two operands is rejected by the planner with <c>COHDBG001</c>.
+/// fewer than two operands is rejected by the planner with <c>CG05001</c>.
 /// </remarks>
 public sealed record GqlLabelDisjunction : GqlLabelExpression
 {

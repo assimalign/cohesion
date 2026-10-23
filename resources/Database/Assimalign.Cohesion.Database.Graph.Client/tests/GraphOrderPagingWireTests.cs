@@ -71,7 +71,7 @@ public sealed class GraphOrderPagingWireTests
             await connection.QueryAsync("RETURN 1 LIMIT $rows", new Dictionary<string, object?> { ["rows"] = value }, harness.Token));
         var next = await connection.QueryAsync("RETURN 1", cancellationToken: harness.Token);
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         next.ShouldHaveSingleItem()[0].ShouldBe(1L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(id);
     }

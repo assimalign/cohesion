@@ -72,7 +72,7 @@ internal static class GraphRecordCodec
                 _ => "A property index definition's label and property key",
             };
             throw new GraphElementTooLargeException(
-                $"{element} encode to {stream.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes one graph record can hold.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecEncodeFailure, element, stream.Length, SlottedPage.MaxRecordSize));
         }
         return stream.ToArray();
     }
@@ -157,7 +157,7 @@ internal static class GraphRecordCodec
                 case decimal value: output.Write((byte)11); output.Write(value); break;
                 case double value when double.IsFinite(value): output.Write((byte)12); output.Write(value); break;
                 case float value when float.IsFinite(value): output.Write((byte)13); output.Write(value); break;
-                default: throw new ArgumentException("Graph properties support null, Boolean, String, Decimal, integral types, and finite floating point values.");
+                default: throw new ArgumentException(ErrorMessages.GraphRecordCodecPropertiesArgument);
             }
         }
     }
@@ -195,7 +195,7 @@ internal static class GraphRecordCodec
     /// <exception cref="GraphElementTooLargeException">The value encodes past <see cref="MaximumKeyPrefix"/> bytes.</exception>
     internal static IndexKey Key(object? value) => TryKey(value, out var key) ? key
         : throw new GraphElementTooLargeException(
-            $"An indexed property value encodes to {key.Length} bytes, more than the {MaximumKeyPrefix}-byte index key it must fit.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphRecordCodecKeyFailure, key.Length, MaximumKeyPrefix));
 
     /// <summary>
     /// The index key prefix of a property value, or <see langword="false"/> when it encodes past
@@ -216,7 +216,7 @@ internal static class GraphRecordCodec
             string text => IndexKey.From(writer.AppendBinary(Encoding.BigEndianUnicode.GetBytes(text))),
             decimal or byte or sbyte or short or ushort or int or uint or long or ulong or double or float
                 => IndexKey.From(writer.AppendFloat64(NumberKey(value))),
-            _ => throw new ArgumentException("Unsupported graph property index scalar.", nameof(value))
+            _ => throw new ArgumentException(ErrorMessages.GraphRecordCodecTryKeyArgument, nameof(value))
         };
         return key.Length <= MaximumKeyPrefix;
     }
@@ -226,7 +226,7 @@ internal static class GraphRecordCodec
     private static double NumberKey(object value)
     {
         double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-        if (!double.IsFinite(number)) { throw new ArgumentException("Graph index bounds require finite numeric values.", nameof(value)); }
+        if (!double.IsFinite(number)) { throw new ArgumentException(ErrorMessages.GraphRecordCodecNumberKeyArgument, nameof(value)); }
         return number == 0 ? 0d : number;
     }
 

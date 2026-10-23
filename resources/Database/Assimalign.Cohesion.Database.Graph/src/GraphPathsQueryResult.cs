@@ -30,7 +30,7 @@ public sealed class GraphPathsQueryResult : DatabaseResult
     /// <inheritdoc />
     /// <remarks>
     /// An empty collection when the statement reported nothing. A MATCH that names a label or
-    /// relationship type the database does not have reports a <c>COHDBG010</c> or <c>COHDBG011</c>
+    /// relationship type the database does not have reports a <c>CG01010</c> or <c>CG01011</c>
     /// warning here; such a name matches nothing.
     /// </remarks>
     public override IReadOnlyList<Diagnostic> Diagnostics => _warnings;

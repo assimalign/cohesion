@@ -71,7 +71,7 @@ public sealed class GqlParameterParserTests
     public void Parse_InvalidReference_ShouldReportSyntaxError(string source)
     {
         // Act / Assert
-        new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Parameters: malformed references precede capability errors at the sigil")]
@@ -92,7 +92,7 @@ public sealed class GqlParameterParserTests
         var diagnostic = new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("GQL0002");
+        diagnostic.Code.ShouldBe("CG00002");
         diagnostic.Start.ShouldBe(sigil);
         diagnostic.End.ShouldBe(sigil + 1);
     }

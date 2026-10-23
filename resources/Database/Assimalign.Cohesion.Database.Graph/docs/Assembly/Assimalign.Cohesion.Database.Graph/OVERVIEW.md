@@ -25,20 +25,20 @@ Transferred `GraphNode`, `GraphRelationship`, `GraphPath` and their identity val
   RETURN may order by expressions/aliases with explicit null placement and page with
   OFFSET/SKIP and LIMIT. `GraphPathsQueryRequest` applies the same stage before returning
   `GraphPathsQueryResult.Paths`. Paging follows full materialization and every mutation;
-  invalid dynamic counts fail before execution with `COHDBG013`.
+  invalid dynamic counts fail before execution with `CG02013`.
 - `GraphRequest.Parameters` supplies scalar, list and map bindings for `$name` and `@name` in
   WHERE/RETURN operands; pattern property maps remain scalar-only. Bare names match ordinally and case-sensitively after removing one sigil.
-  Missing bindings fail planning with `COHDBG001`, invalid values with `COHDBG003`, and
-  normalized-key collisions with `COHDBG014`. Runtime scalar types are preserved; lists snapshot
+  Missing bindings fail planning with `CG05001`, invalid values with `CG03003`, and
+  normalized-key collisions with `CG01014`. Runtime scalar types are preserved; lists snapshot
   to object?[] and maps to read-only IReadOnlyDictionary<string, object?>. Values permit depth 64,
   65,536 values and 16 MiB encoded bytes.
 - A read that names a label or relationship type the database does not have succeeds: the name
-  matches nothing, and the result's `Diagnostics` carries a `COHDBG010` (label) or `COHDBG011`
+  matches nothing, and the result's `Diagnostics` carries a `CG01010` (label) or `CG01011`
   (relationship type) warning. The read does not abort an explicit transaction.
 - `GraphSchema.Open(database, session)` returns a sealed `GraphSchema` for label/type discovery,
   definition and property changes, and node-property index creation. It rejects foreign sessions.
   `GetIndexesAsync` returns `GraphSchemaResult<GraphIndexMetadata>`, a read-only list whose
-  `Diagnostics` holds the `COHDBG010` warning for a label the database does not have.
+  `Diagnostics` holds the `CG01010` warning for a label the database does not have.
 - `AddGraph(name, engine => ...)` is an extension member on the root
   `IDatabaseApplicationBuilder`; it captures construction and returns the application builder.
   Its Build-time callback receives the `GraphDatabaseEngineBuilder` with model options and

@@ -55,7 +55,7 @@ public sealed class GraphServerProtocolTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+            error.Message.ShouldContain("CG05001", Case.Sensitive);
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
                 GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
             var complete = await ReadAsync(channel, token);
@@ -116,18 +116,18 @@ public sealed class GraphServerProtocolTests
                 GraphProtocolExecuteMessage.Create(statement).Encode(), token);
             var error = await ReadErrorAsync(channel, token);
             error.Code.ShouldBe(expectedCode);
-            if (statement is "COMMIT" or "ROLLBACK") { error.Message.ShouldContain("COHDBG023"); }
+            if (statement is "COMMIT" or "ROLLBACK") { error.Message.ShouldContain("CG04023"); }
             await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
             (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
         });
     }
 
     /// <summary>
-    /// A Cypher arrow is a parse failure that names GQL0008 on either exchange (#1139), and the
+    /// A Cypher arrow is a parse failure that names CG00008 on either exchange (#1139), and the
     /// session stays ready: the next Ping gets Pong.
     /// </summary>
     /// <param name="paths">Whether the statement goes through ExecutePaths rather than Execute.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: a Cypher arrow is a GQL0008 parse failure and keeps the session ready")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: a Cypher arrow is a CG00008 parse failure and keeps the session ready")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Execute_CypherArrow_ShouldReturnGql0008AndKeepSessionReady(bool paths)
@@ -138,7 +138,7 @@ public sealed class GraphServerProtocolTests
                 GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode(), token);
             var error = await ReadErrorAsync(channel, token);
             error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-            error.Message.Split("GQL0008", StringSplitOptions.None).Length.ShouldBe(2);
+            error.Message.Split("CG00008", StringSplitOptions.None).Length.ShouldBe(2);
             await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
             (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
         });
@@ -162,7 +162,7 @@ public sealed class GraphServerProtocolTests
 
     /// <summary>
     /// After a failed statement aborts the explicit transaction, both exchanges are refused with a
-    /// COHDBG007 ExecutionFailure and the session stays ready (#1188). An empty statement is no
+    /// CG04007 ExecutionFailure and the session stays ready (#1188). An empty statement is no
     /// statement, so it is a ParseFailure that leaves an active transaction untouched. The wire has
     /// no transaction control, so the test opens the transaction on the server's engine session.
     /// </summary>
@@ -183,14 +183,14 @@ public sealed class GraphServerProtocolTests
 
             await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
                 GraphProtocolExecuteMessage.Create("MATCH (n) RETURN m.name").Encode(), token);
-            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("CG05001", Case.Sensitive);
             foreach (var type in new[] { GraphProtocolMessageType.Execute, GraphProtocolMessageType.ExecutePaths })
             {
                 await WriteAsync(channel, (ProtocolMessageType)type, GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
                 var refused = await ReadErrorAsync(channel, token);
                 refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-                refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
-                refused.Message.ShouldContain("COHDBG001", Case.Sensitive);
+                refused.Message.ShouldStartWith("CG04007", Case.Sensitive);
+                refused.Message.ShouldContain("CG05001", Case.Sensitive);
             }
             await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
             (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);

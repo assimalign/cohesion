@@ -29,7 +29,7 @@ expressions. `GqlAggregateFunction` names Count, Sum, Avg, Min, Max and CollectL
 parses as CollectList. A null operand means COUNT(*). `GroupBy` is null for implicit grouping,
 or an explicit ISO list equal to the non-aggregate RETURN keys. Aggregates skip NULL values;
 count is Int64, sum/avg have documented numeric promotion, and collect returns a list. Grouping
-runs before projection, DISTINCT and ordering. Invalid placement or scope is COHDBG001.
+runs before projection, DISTINCT and ordering. Invalid placement or scope is CG05001.
 `OrderBy` contains `GqlSortItem(Expression, Direction, NullOrdering)` records with
 `GqlSortDirection.Ascending`/`Descending` and `GqlNullOrdering.Default`/`First`/`Last`.
 Default placement is NULL last ascending, first descending. `Offset` (also spelled SKIP)
@@ -39,8 +39,8 @@ receive the same planner shape/value diagnostics as parsed statements.
 The original constructor still creates the single mandatory clause; `Matches` and `Predicate`
 expose that view only and return empty/null for optional or multiple clauses. The engine reads
 Stages and null-extends every new binding of an unmatched optional clause. Each clause's
-predicate sees its own and preceding variables. Optional-only path projections are COHDBG001.
-`GqlPathPattern` holds ordered node/relationship chains or an Elements list of GqlPathNode, GqlPathRelationship and GqlParenthesizedPathPattern records; GqlQuantifier(Min, Max) supplies inclusive relationship/subpath repetition bounds. A parenthesized path has empty chain lists; contradictory representations are COHDBG001. Quantified bindings are source-ordered lists. The chain facade holds ordered nodes and relationships; their immutable metadata
+predicate sees its own and preceding variables. Optional-only path projections are CG05001.
+`GqlPathPattern` holds ordered node/relationship chains or an Elements list of GqlPathNode, GqlPathRelationship and GqlParenthesizedPathPattern records; GqlQuantifier(Min, Max) supplies inclusive relationship/subpath repetition bounds. A parenthesized path has empty chain lists; contradictory representations are CG05001. Quantified bindings are source-ordered lists. The chain facade holds ordered nodes and relationships; their immutable metadata
 captures labels, direction, type and scalar properties. Each pattern's `LabelExpression` is a
 `GqlLabelExpression` tree (`GqlLabelName`, `GqlLabelWildcard`, `GqlLabelNegation`,
 `GqlLabelConjunction`, `GqlLabelDisjunction`), and `GqlPatternDirection.LeftOrRight` is the ISO

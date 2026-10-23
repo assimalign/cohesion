@@ -121,7 +121,7 @@
   <data name="RegistrationIdentityInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration identity.</value></data>
   <data name="QueryMemoryBudgetExceeded" xml:space="preserve"><value>The query exceeded its retained execution-memory budget of {0} bytes.</value></data>
   <data name="QueryLimitsInvalid" xml:space="preserve"><value>Query memory and work limits must be positive and must not exceed the engine ceilings.</value></data>
-  <data name="QueryBudgetOptionInvalid" xml:space="preserve"><value>COHDBG021: Query budget ceilings must be positive.</value></data>
+  <data name="QueryBudgetOptionInvalid" xml:space="preserve"><value>CG08021: Query budget ceilings must be positive.</value></data>
   <data name="TransactionPathsInvalid" xml:space="preserve"><value>Transaction control requires Execute, not ExecutePaths.</value></data>
   <data name="TransactionAlreadyOpen" xml:space="preserve"><value>START TRANSACTION requires a session without an open transaction.</value></data>
   <data name="TransactionNotOpen" xml:space="preserve"><value>COMMIT and ROLLBACK require an open transaction.</value></data>
@@ -138,4 +138,99 @@
   <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
   <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
   <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
+  <data name="GraphDatabaseTraverseAsyncDatabase" xml:space="preserve"><value>CG05001: Traversal depth and direction must be valid.</value></data>
+  <data name="DatabaseRequireOwnSessionDatabase" xml:space="preserve"><value>CG07005: The session belongs to another database or engine.</value></data>
+  <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>CG03003: Property '{0}' does not match the graph definition.</value></data>
+  <data name="GraphDatabaseTypeOfDatabase" xml:space="preserve"><value>CG03003: Unsupported graph property value.</value></data>
+  <data name="GraphDatabaseLockWriterAsyncDatabase" xml:space="preserve"><value>The graph operation's transaction ended while waiting for the writer lock.</value></data>
+  <data name="EngineDropDatabaseCoreAsyncFailure" xml:space="preserve"><value>Database '{0}' does not exist.</value></data>
+  <data name="EngineDisposeAsyncCoreAggregate" xml:space="preserve"><value>One or more graph databases failed to close.</value></data>
+  <data name="DatabaseEngineGetDatabaseDatabase" xml:space="preserve"><value>Database '{0}' already exists.</value></data>
+  <data name="GraphDatabaseEngineGetDatabaseFailure" xml:space="preserve"><value>The storage strategy returned null.</value></data>
+  <data name="DatabaseSessionEnterOperationDatabase" xml:space="preserve"><value>Dispose the active graph operation before starting another operation on this session.</value></data>
+  <data name="BeginTransactionCoreAsyncDatabase" xml:space="preserve"><value>The graph engine supports Snapshot and ReadCommitted isolation.</value></data>
+  <data name="SessionExecuteCoreAsyncGraphPlanning" xml:space="preserve"><value>EXPLAIN returns rows and cannot run on ExecutePaths.</value></data>
+  <data name="SessionDisposeAsyncCoreDatabase" xml:space="preserve"><value>The graph session closed while the operation was running.</value></data>
+  <data name="GraphQueryRequestFromGqlDatabaseParse" xml:space="preserve"><value>GQL parse error {0}: {1}</value></data>
+  <data name="SchemaSavePropertyKeyAsyncDatabase" xml:space="preserve"><value>CG03003: Property type '{0}' is not supported by graph storage.</value></data>
+  <data name="SchemaSavePropertyKeyAsyncDatabase2" xml:space="preserve"><value>CG03003: Existing graph data violates property '{0}'.</value></data>
+  <data name="GraphSchemaDropLabelAsyncDatabase" xml:space="preserve"><value>CG03003: The label is in use.</value></data>
+  <data name="DropRelationshipTypeAsyncDatabase" xml:space="preserve"><value>CG03003: The relationship type is in use.</value></data>
+  <data name="GraphSchemaLabelDatabase" xml:space="preserve"><value>CG01002: Unknown label '{0}'.</value></data>
+  <data name="GraphCatalogConflictGraphCatalog" xml:space="preserve"><value>Graph catalog write conflict: the definition changed after the transaction snapshot.</value></data>
+  <data name="GraphCatalogEnsureActiveFailure" xml:space="preserve"><value>Catalog mutations require an active transaction.</value></data>
+  <data name="IntrospectionExecuteGraphPlanning" xml:space="preserve"><value>Graph catalog introspection is read-only.</value></data>
+  <data name="IntrospectionExecuteGraphPlanning2" xml:space="preserve"><value>SHOW cannot be composed with graph clauses.</value></data>
+  <data name="IntrospectionColumnsGraphPlanning" xml:space="preserve"><value>Unknown graph catalog introspection subject.</value></data>
+  <data name="DatabaseServerSessionAbortFailure" xml:space="preserve"><value>The server is shutting down.</value></data>
+  <data name="ServerSessionExecuteAsyncProtocol" xml:space="preserve"><value>Malformed component encoding for parameter '{0}'.</value></data>
+  <data name="SessionExecuteAsyncDatabaseParse" xml:space="preserve"><value>A graph statement must not be empty.</value></data>
+  <data name="SessionWritePathsAsyncGraphPlanning" xml:space="preserve"><value>A path request did not produce a graph path result.</value></data>
+  <data name="ServerSessionWriteResultAsyncDatabase" xml:space="preserve"><value>{0}</value></data>
+  <data name="ServerSessionRunAsyncValueTask" xml:space="preserve"><value>An unexpected server error terminated the session.</value></data>
+  <data name="ServerSessionReadyLoopAsyncValueTask" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
+  <data name="ServerSessionExecuteAsyncValueTask" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="ServerSessionExecuteAsyncValueTask2" xml:space="preserve"><value>CG09019: {0}</value></data>
+  <data name="RejectUnexpectedFrameAsyncValueTask" xml:space="preserve"><value>Unexpected {0} frame in the ready state.</value></data>
+  <data name="StoreCreateRelationshipAsyncFailure" xml:space="preserve"><value>A relationship requires two visible existing endpoints.</value></data>
+  <data name="GraphStoreLockAsyncFailure" xml:space="preserve"><value>Graph mutation requires an active transaction.</value></data>
+  <data name="GraphStoreLockAsyncFailure2" xml:space="preserve"><value>Graph transaction ended while waiting for the writer lock.</value></data>
+  <data name="GraphStoreEnsureUnchangedFailure" xml:space="preserve"><value>Graph write conflict: the addressed record changed after the transaction snapshot.</value></data>
+  <data name="GraphStoreCreateIndexAsyncFailure" xml:space="preserve"><value>A node-property index already exists for '{0}.{1}'.</value></data>
+  <data name="GraphStoreDropIndexAsyncFailure" xml:space="preserve"><value>No visible node-property index exists for '{0}.{1}'.</value></data>
+  <data name="GraphStoreDropIndexAsyncFailure2" xml:space="preserve"><value>Graph write conflict: the index changed after the transaction snapshot.</value></data>
+  <data name="GraphStoreResolveIndexFailure" xml:space="preserve"><value>Missing graph B+Tree registration '{0}'.</value></data>
+  <data name="StoreResolveStatementBracketFailure" xml:space="preserve"><value>Graph index mutation requires a shared statement bracket.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog" xml:space="preserve"><value>Unsupported graph catalog format version {0}.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog2" xml:space="preserve"><value>A catalog name cannot be null.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog3" xml:space="preserve"><value>Invalid required-property marker.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog4" xml:space="preserve"><value>An index property cannot be null.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog5" xml:space="preserve"><value>Unexpected graph metadata record kind {0}.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog6" xml:space="preserve"><value>Trailing graph catalog metadata.</value></data>
+  <data name="GraphCatalogCodecDecodeGraphCatalog7" xml:space="preserve"><value>Malformed graph catalog metadata.</value></data>
+  <data name="GraphCatalogCodecValidateArgument" xml:space="preserve"><value>A graph definition requires a nonempty identity.</value></data>
+  <data name="GraphCatalogCodecValidateArgument2" xml:space="preserve"><value>Only a schema-owned definition may name an owning schema, and must name one.</value></data>
+  <data name="GraphCatalogCodecValidateArgument3" xml:space="preserve"><value>Unknown graph property type.</value></data>
+  <data name="CatalogCodecReadStringGraphCatalog" xml:space="preserve"><value>Invalid graph catalog string length.</value></data>
+  <data name="EvaluatorEvaluateGraphPlanning" xml:space="preserve"><value>Unsupported graph expression.</value></data>
+  <data name="EvaluatorLogicalGraphPlanning" xml:space="preserve"><value>Unsupported logical operator.</value></data>
+  <data name="EvaluatorLabeledGraphPlanning" xml:space="preserve"><value>A labeled predicate requires a node or relationship.</value></data>
+  <data name="EvaluatorPropertyGraphPlanning" xml:space="preserve"><value>Property access requires a node or relationship.</value></data>
+  <data name="EvaluatorBinaryGraphPlanning" xml:space="preserve"><value>Unsupported graph operator.</value></data>
+  <data name="GraphLabelEvaluatorNamesGraphPlanning" xml:space="preserve"><value>A label expression has a missing operand.</value></data>
+  <data name="GraphLabelEvaluatorNamesGraphPlanning2" xml:space="preserve"><value>A label name cannot be null.</value></data>
+  <data name="GraphLabelEvaluatorNamesGraphPlanning3" xml:space="preserve"><value>Unsupported label expression; use a name, %, !, &amp; or |.</value></data>
+  <data name="GraphLabelEvaluatorNamesGraphPlanning4" xml:space="preserve"><value>A label {0} has no operand list.</value></data>
+  <data name="GraphLabelEvaluatorNamesGraphPlanning5" xml:space="preserve"><value>A label {0} needs at least two operands.</value></data>
+  <data name="LabelEvaluatorMatchesGraphPlanning" xml:space="preserve"><value>Unsupported label expression.</value></data>
+  <data name="ProjectRelationshipGraphPlanning" xml:space="preserve"><value>A matched relationship has a missing endpoint.</value></data>
+  <data name="PlanExecutorCreateAsyncGraphPlanning" xml:space="preserve"><value>An inserted relationship variable must be new.</value></data>
+  <data name="GraphQueryRowGetBytesDatabase" xml:space="preserve"><value>Field {0} is not JSON or a string.</value></data>
+  <data name="GraphQueryRowRequiredDatabase" xml:space="preserve"><value>Field {0} is null.</value></data>
+  <data name="GraphOperationEnsureActiveDatabase" xml:space="preserve"><value>The graph operation's transaction is no longer active.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning" xml:space="preserve"><value>Path variable '{0}' must be a new MATCH binding.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning2" xml:space="preserve"><value>Variable '{0}' has incompatible graph bindings.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning3" xml:space="preserve"><value>Variable '{0}' is not bound.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning4" xml:space="preserve"><value>Logical operator {0} is not defined.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning5" xml:space="preserve"><value>A logical predicate needs at least two operands.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning6" xml:space="preserve"><value>A predicate has a missing operand.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning7" xml:space="preserve"><value>Unsupported graph predicate.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning8" xml:space="preserve"><value>A labeled predicate requires a variable.</value></data>
+  <data name="GraphPlannerPlanCoreGraphPlanning9" xml:space="preserve"><value>A labeled predicate requires a label expression.</value></data>
+  <data name="ValidateNodeLabelsGraphPlanning" xml:space="preserve"><value>A node pattern requires a label list.</value></data>
+  <data name="ValidateNodeLabelsGraphPlanning2" xml:space="preserve"><value>A node pattern's labels must be empty or name exactly the conjunction of its label expression '{0}'.</value></data>
+  <data name="ValidateNodeLabelsGraphPlanning3" xml:space="preserve"><value>An inserted node takes a label conjunction such as :A&amp;B; '{0}' selects nodes and cannot label a new one.</value></data>
+  <data name="ValidateNodeLabelsGraphPlanning4" xml:space="preserve"><value>An inserted label cannot be empty or only whitespace.</value></data>
+  <data name="ValidatePropertiesGraphPlanning" xml:space="preserve"><value>A pattern requires a property map.</value></data>
+  <data name="ValidatePropertiesGraphPlanning2" xml:space="preserve"><value>An inserted property key cannot be empty or only whitespace.</value></data>
+  <data name="ValidateRelationshipGraphPlanning" xml:space="preserve"><value>Relationship direction {0} is not defined.</value></data>
+  <data name="ValidateRelationshipGraphPlanning2" xml:space="preserve"><value>A relationship pattern's type '{0}' must equal its label expression '{1}'.</value></data>
+  <data name="ValidateRelationshipGraphPlanning3" xml:space="preserve"><value>Inserted relationships require a type and a directed pattern.</value></data>
+  <data name="ValidateRelationshipGraphPlanning4" xml:space="preserve"><value>An inserted relationship type cannot be empty or only whitespace.</value></data>
+  <data name="StatementTooComplexCreateDatabase" xml:space="preserve"><value>Statement too complex: running it needs more stack than the executing thread has left. Reduce the nesting of its parentheses and negations, or run it on a thread with a larger stack.</value></data>
+  <data name="GraphRecordCodecEncodeFailure" xml:space="preserve"><value>{0} encode to {1} bytes, more than the {2} bytes one graph record can hold.</value></data>
+  <data name="GraphRecordCodecPropertiesArgument" xml:space="preserve"><value>Graph properties support null, Boolean, String, Decimal, integral types, and finite floating point values.</value></data>
+  <data name="GraphRecordCodecKeyFailure" xml:space="preserve"><value>An indexed property value encodes to {0} bytes, more than the {1}-byte index key it must fit.</value></data>
+  <data name="GraphRecordCodecTryKeyArgument" xml:space="preserve"><value>Unsupported graph property index scalar.</value></data>
+  <data name="GraphRecordCodecNumberKeyArgument" xml:space="preserve"><value>Graph index bounds require finite numeric values.</value></data>
 </root>

@@ -61,11 +61,11 @@ including GQL; it is not an ISO GQL or openCypher spelling.
 | OQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and execution under this contract |
 | GQL | `$name`, `@name`, `$_x`, `$1`, `@1` | Parsing and scalar binding in property maps, WHERE and RETURN (#1138, #1141) |
 
-SQL uses `CS00003`, OQL `CD00002` and GQL `GQL0002` for unsupported forms.
+SQL uses `CS00003`, OQL `CD00002` and GQL `CG00002` for unsupported forms.
 `QueryDiagnostics.UnsupportedParameterForm` owns their shared message. SQL unbound
 parameters carry `CS01020`, normalized-key collisions `CS01023`; OQL uses
-`CD01005` and `CD01009` respectively, through `DatabaseException.Diagnostics`. GQL uses `COHDBG001` for unbound references and
-`COHDBG014` for collisions; unsupported scalar values use `COHDBG003`.
+`CD01005` and `CD01009` respectively, through `DatabaseException.Diagnostics`. GQL uses `CG05001` for unbound references and
+`CG01014` for collisions; unsupported scalar values use `CG03003`.
 The wire protocol is unchanged. PostgreSQL's scanner separately recognizes `$` plus
 ASCII digits (`decdigit`, `src/backend/parser/scan.l:377`, `:398`) and rejects numeric-name
 junk (`:415-420`, `:969-983`, local reference clone); Cohesion extends that grammar to named sigils and
@@ -149,7 +149,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   is `Unrecognized` too; `char.IsDigit` used to lex it as an integer that the engines could not
   convert. Inside a name such a digit stays part of the identifier. `Unrecognized` is appended
   after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
-  syntax code at the character's span: `CS00003`, `CD00002` or `GQL0002`. The message is
+  syntax code at the character's span: `CS00003`, `CD00002` or `CG00002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
   statement then binds nothing. OQL and GQL stop before syntax parsing for these characters,
   except `?`: they defer its rejection until syntax parsing can distinguish an operand from a
@@ -162,7 +162,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's
   `<simple comment>`, so there is no per-language lexer switch. A Cypher arrow written with `--`
   directly after a GQL node's `)` or edge's `]` reads as a comment; the GQL parser reports it as
-  `GQL0008` (#1139) without any lexer change. Where the comment ends is the next section's rule.
+  `CG00008` (#1139) without any lexer change. Where the comment ends is the next section's rule.
 
 ## Line terminators and line comments (#1150)
 
@@ -187,7 +187,7 @@ needs the same boundary calls `IsLineTerminator` instead of keeping its own list
   comment may span lines, so a terminator inside it ends nothing, and `--` inside a literal starts
   no comment. The escape spelling `\r` or `\n`, written as two characters, is text everywhere.
 - **`//` is not a comment in any language.** The lexer reads `/` as the division operator, so
-  `//` is two `Slash` tokens and each parser rejects it (GQL with `GQL0002`). ISO/IEC 39075 also
+  `//` is two `Slash` tokens and each parser rejects it (GQL with `CG00002`). ISO/IEC 39075 also
   spells a `<simple comment>` with `//`; an item that adds that form needs a per-language lexer
   switch, because `//` must stay an error in SQL and OQL, and it ends the comment through the same
   scan and terminator set as `--`.
@@ -202,11 +202,11 @@ needs the same boundary calls `IsLineTerminator` instead of keeping its own list
 - **Consistency with #1101 and gql-label-direction (#1139).** Every terminator is whitespace to
   `char.IsWhiteSpace`, so outside a comment it separates tokens and is never `Unrecognized`; the
   stray-character rule is unchanged. The rule moves where a comment ends, never where it starts,
-  so `GQL0008` (#1139), keyed on a `--` comment beginning exactly where a node's `)` or an edge's
+  so `CG00008` (#1139), keyed on a `--` comment beginning exactly where a node's `)` or an edge's
   `]` ends, holds whichever terminator ends the comment. Between #1150 and #1139,
   `(a)-->(b)` followed by any line terminator read as `(a)` plus a comment, so
   `MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` deleted every Person; it now fails with
-  `GQL0008`, pinned at every terminator (`Graph.Language/docs/DESIGN.md`, "Label expressions and
+  `CG00008`, pinned at every terminator (`Graph.Language/docs/DESIGN.md`, "Label expressions and
   edge directions").
 - **Tests.** `TokenLexerLineCommentTests` pins each terminator, CR LF, a comment at the end of
   the input, terminator escapes in literals and comments, and terminators inside string literals,

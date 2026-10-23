@@ -72,7 +72,7 @@ internal sealed class GraphResultRowEncoder : IDisposable
             if (size > GraphValueCodec.MaxPayloadLength) { throw new DatabaseTypeException(ErrorMessages.CompositeLimit); }
         }
         catch (DatabaseTypeException error)
-        { throw new GraphPlanningException("COHDBG013", error.Message, null, error); }
+        { throw new GraphPlanningException("CG02013", error.Message, null, error); }
     }
 
     public void Dispose() { _writer?.Dispose(); _stream?.Dispose(); }

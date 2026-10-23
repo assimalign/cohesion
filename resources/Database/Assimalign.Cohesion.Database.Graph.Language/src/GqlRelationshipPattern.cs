@@ -24,7 +24,7 @@ public sealed record GqlRelationshipPattern(string? Variable, string? Type,
     /// <remarks>
     /// When it is set it is the relationship's whole type requirement, and <see cref="Type"/>
     /// must be null or equal the expression's single name; the planner rejects any other
-    /// combination with <c>COHDBG001</c>. A pattern built with <see cref="Type"/> alone keeps its
+    /// combination with <c>CG05001</c>. A pattern built with <see cref="Type"/> alone keeps its
     /// meaning: the relationship has exactly that type.
     /// </remarks>
     public GqlLabelExpression? LabelExpression { get; init; }

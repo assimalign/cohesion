@@ -46,7 +46,7 @@ public sealed class StorageCorruptionTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHDBG018", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CG06018", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -97,7 +97,7 @@ public sealed class StorageCorruptionTests
         await database.DisposeAsync();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
         var coded = new DatabaseException("Storage open failed.", [new Diagnostic
-        { Code = "COHDBG018", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
+        { Code = "CG06018", Message = "Storage open failed.", Severity = DiagnosticSeverity.Error }], cause);
         strategy.OpenFailure = aggregate ? new AggregateException(new InvalidOperationException("Cleanup failed."), coded) : coded;
 
         // Act
@@ -107,7 +107,7 @@ public sealed class StorageCorruptionTests
         failure.Code.ShouldBe("CK06003");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "COHDBG018"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CG06018"]);
         strategy.OpenFailure = null;
         (await engine.OpenDatabaseAsync("corrupt", CancellationToken.None)).Name.ShouldBe((DatabaseName)"corrupt");
     }

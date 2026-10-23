@@ -14,7 +14,7 @@ public sealed record GraphProtocolPathsCompleteMessage(long PathCount)
     /// <exception cref="ProtocolException">The path count is negative.</exception>
     public byte[] Encode()
     {
-        if (PathCount < 0) { throw new ProtocolException("A path count cannot be negative."); }
+        if (PathCount < 0) { throw new ProtocolException(ErrorMessages.PathsCompleteMessageEncodeProtocol); }
         var buffer = new List<byte>(8);
         ProtocolPayload.WriteInt64(buffer, PathCount);
         return buffer.ToArray();
@@ -26,10 +26,10 @@ public sealed record GraphProtocolPathsCompleteMessage(long PathCount)
     /// <exception cref="ProtocolException">The payload is not exactly eight bytes or the count is negative.</exception>
     public static GraphProtocolPathsCompleteMessage Decode(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length != 8) { throw new ProtocolException("Malformed path completion payload."); }
+        if (payload.Length != 8) { throw new ProtocolException(ErrorMessages.PathsCompleteMessageDecodeProtocol); }
         int position = 0;
         long count = ProtocolPayload.ReadInt64(payload, ref position);
-        if (count < 0) { throw new ProtocolException("A path count cannot be negative."); }
+        if (count < 0) { throw new ProtocolException(ErrorMessages.PathsCompleteMessageEncodeProtocol); }
         return new(count);
     }
 }

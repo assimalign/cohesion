@@ -42,7 +42,7 @@ the explicit-transaction state machine and their checks, so the typed members ne
 (concrete-types plan, phase 4; DESIGN.md, "Concrete types").
 
 A failed journal or data fsync takes the database offline: every later operation, in process
-and over the server, is refused with `DatabaseOfflineException` (`COHDBG012`) until
+and over the server, is refused with `DatabaseOfflineException` (`CG06012`) until
 `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed commit (#1243). A database
 its holder disposed is forgotten once the close ends, and `OpenDatabaseAsync` opens it again with
 its graph, in memory as on disk (owner decision 33).
@@ -66,9 +66,9 @@ one-node path, a single relationship includes its stored endpoints, and
 requests continue to use ordinary execution. Explicit transactions remain available through the
 in-process session API and ISO START TRANSACTION / COMMIT / ROLLBACK over Execute. A statement that
 fails inside an explicit transaction aborts the whole transaction: the session refuses further
-statements with `COHDBG007` until the caller rolls back, and a commit fails without committing.
+statements with `CG04007` until the caller rolls back, and a commit fails without committing.
 A read that names a label or relationship type the database does not have is not a failure: as in
-Neo4j, the name matches nothing and the result carries a `COHDBG010` or `COHDBG011` warning, so a
+Neo4j, the name matches nothing and the result carries a `CG01010` or `CG01011` warning, so a
 probe such as `MATCH (n:Missing) RETURN n` keeps the transaction.
 
 `GraphDatabaseEngine.CreateBuilder(name)` returns the same model builder for
@@ -131,7 +131,7 @@ compatible, and uses explicit binary codecs without reflection.
 
 Graph record and tree-registration format 4 adds catalog label GUIDs and label postings to
 format 3, which shipped with #1532's typed adjacency and entity revisions. Opening an earlier
-format fails with COHDBG017 before logical recovery scrub writes; recreate the database with
+format fails with CG06017 before logical recovery scrub writes; recreate the database with
 this engine. There is no upgrade path.
 
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,
@@ -194,7 +194,7 @@ to 1,000,000 physical units after relationship type/direction selection; FOR ele
 work. Engines can explicitly set higher positive ceilings. GraphQueryLimits supplies optional lower
 MemoryBytes/WorkUnits to the three-argument request constructors/factories or GraphTraversal.Limits.
 Remote Execute statements use server ceilings; wire payloads are unchanged. Memory exhaustion is
-COHDBG020, invalid limits COHDBG021, and work/hop exhaustion COHDBG004. Shared containers and large values are
+CG05020, invalid limits CG08021, and work/hop exhaustion CG05004. Shared containers and large values are
 counted once across operators (small leaves use conservative per-reference estimates) and every ownership lease is released on completion or failure.
 
 A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
@@ -212,3 +212,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

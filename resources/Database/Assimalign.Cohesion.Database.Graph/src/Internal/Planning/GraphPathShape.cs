@@ -139,5 +139,5 @@ internal sealed class GraphPathShape
             quantifier.Min > 64 || quantifier.Max > 64) { throw Invalid(); }
     }
 
-    private static GraphPlanningException Invalid() => new("COHDBG001", ErrorMessages.PathShapeInvalid);
+    private static GraphPlanningException Invalid() => new("CG05001", ErrorMessages.PathShapeInvalid);
 }

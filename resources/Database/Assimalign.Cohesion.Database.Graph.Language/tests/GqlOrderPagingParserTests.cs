@@ -52,16 +52,16 @@ public sealed class GqlOrderPagingParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Ordering and paging: malformed tails retain diagnostic and offending span")]
-    [InlineData("RETURN 1 LIMIT -1", "GQL0002", "-", 1)]
-    [InlineData("RETURN 1 LIMIT 1.5", "GQL0002", "1.5", 3)]
-    [InlineData("RETURN 1 LIMIT 'x'", "GQL0002", "'x'", 3)]
-    [InlineData("RETURN 1 LIMIT 9223372036854775808", "GQL0004", "9223372036854775808", 19)]
-    [InlineData("RETURN 1 OFFSET 1 OFFSET 2", "GQL0002", "OFFSET 2", 6)]
-    [InlineData("RETURN 1 SKIP 1 OFFSET 1", "GQL0002", "OFFSET", 6)]
-    [InlineData("RETURN 1 LIMIT 2 OFFSET 1", "GQL0002", "OFFSET", 6)]
-    [InlineData("RETURN 1 LIMIT 2 SKIP 1", "GQL0002", "SKIP", 4)]
-    [InlineData("MATCH (a) RETURN a.name LIMIT 1 ORDER BY a.age", "GQL0002", "ORDER", 5)]
-    [InlineData("MATCH (a) RETURN a ORDER BY a.age NULLS MIDDLE", "GQL0002", "MIDDLE", 6)]
+    [InlineData("RETURN 1 LIMIT -1", "CG00002", "-", 1)]
+    [InlineData("RETURN 1 LIMIT 1.5", "CG00002", "1.5", 3)]
+    [InlineData("RETURN 1 LIMIT 'x'", "CG00002", "'x'", 3)]
+    [InlineData("RETURN 1 LIMIT 9223372036854775808", "CG00004", "9223372036854775808", 19)]
+    [InlineData("RETURN 1 OFFSET 1 OFFSET 2", "CG00002", "OFFSET 2", 6)]
+    [InlineData("RETURN 1 SKIP 1 OFFSET 1", "CG00002", "OFFSET", 6)]
+    [InlineData("RETURN 1 LIMIT 2 OFFSET 1", "CG00002", "OFFSET", 6)]
+    [InlineData("RETURN 1 LIMIT 2 SKIP 1", "CG00002", "SKIP", 4)]
+    [InlineData("MATCH (a) RETURN a.name LIMIT 1 ORDER BY a.age", "CG00002", "ORDER", 5)]
+    [InlineData("MATCH (a) RETURN a ORDER BY a.age NULLS MIDDLE", "CG00002", "MIDDLE", 6)]
     [InlineData("MATCH (a) ORDER BY a.age RETURN a", "CK00001", "ORDER", 5)]
     [InlineData("MATCH (a) LIMIT 1 RETURN a", "CK00001", "LIMIT", 5)]
     [InlineData("ORDER BY 1", "CK00001", "ORDER", 5)]
@@ -73,8 +73,8 @@ public sealed class GqlOrderPagingParserTests
     [InlineData("CREATE (a:Person) SKIP 1 RETURN a", "CK00001", "SKIP", 4)]
     [InlineData("MATCH (a) DELETE a OFFSET 1", "CK00001", "OFFSET", 6)]
     [InlineData("MATCH (a) DETACH DELETE a ORDER BY a.age", "CK00001", "ORDER", 5)]
-    [InlineData("RETURN 1 LIMIT :rows", "GQL0002", ":rows", 5)]
-    [InlineData("RETURN 1 SKIP ?", "GQL0002", "?", 1)]
+    [InlineData("RETURN 1 LIMIT :rows", "CG00002", ":rows", 5)]
+    [InlineData("RETURN 1 SKIP ?", "CG00002", "?", 1)]
     public void Parse_InvalidTail_ShouldReportOffendingToken(string source, string code, string offending, int length)
     {
         // Arrange

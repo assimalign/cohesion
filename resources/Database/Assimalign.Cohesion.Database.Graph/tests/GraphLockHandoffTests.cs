@@ -131,7 +131,7 @@ public sealed class GraphLockHandoffTests
                 else
                 {
                     var error = await Should.ThrowAsync<DatabaseException>(async () => await pending.WaitAsync(token));
-                    error.Message.ShouldContain("COHDBG003");
+                    error.Message.ShouldContain("CG03003");
                     error.Message.ShouldContain(path.StartsWith("Drop", StringComparison.Ordinal) ? "in use" : "Existing graph data violates");
                 }
                 refused++;

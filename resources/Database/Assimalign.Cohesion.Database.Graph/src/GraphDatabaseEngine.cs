@@ -68,7 +68,9 @@ namespace Assimalign.Cohesion.Database.Graph;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class GraphDatabaseEngine : DatabaseEngine
 {
-    private const string interruptedCreationCode = "COHDBG018";
+    private static readonly string _errorEngineDisposeAsyncCoreAggregate = ErrorMessages.EngineDisposeAsyncCoreAggregate;
+
+    private const string interruptedCreationCode = "CG06018";
 
     // How the model's messages start: "Graph engine '{name}' …".
     internal const string ModelName = "Graph";
@@ -345,7 +347,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">The database's file set or index format was refused, or its graph record format is unsupported (<c>COHDBG017</c> in <see cref="DatabaseException.Diagnostics"/>; recreate the database).</exception>
+    /// <exception cref="DatabaseException">The database's file set or index format was refused, or its graph record format is unsupported (<c>CG06017</c> in <see cref="DatabaseException.Diagnostics"/>; recreate the database).</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds
@@ -370,7 +372,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled when the call is made, or while the enumeration opens a database.</exception>
     /// <exception cref="DatabaseNotFoundException">Raised while the enumeration opens a database another caller dropped meanwhile.</exception>
-    /// <exception cref="DatabaseException">Raised while the enumeration opens a database whose file set, index or graph record format is refused; unsupported graph records carry <c>COHDBG017</c> in <see cref="DatabaseException.Diagnostics"/>.</exception>
+    /// <exception cref="DatabaseException">Raised while the enumeration opens a database whose file set, index or graph record format is refused; unsupported graph records carry <c>CG06017</c> in <see cref="DatabaseException.Diagnostics"/>.</exception>
     public new IAsyncEnumerable<GraphDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
         => (IAsyncEnumerable<GraphDatabase>)base.GetDatabasesAsync(cancellationToken);
 
@@ -432,7 +434,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             // The engine lets the database go before it closes it, and the close waits for one a
@@ -560,7 +562,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more graph databases failed to close.", failures);
+            throw new AggregateException(_errorEngineDisposeAsyncCoreAggregate, failures);
         }
     }
 
@@ -576,7 +578,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             {
                 if (create)
                 {
-                    throw new DatabaseException($"Database '{name}' already exists.");
+                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
                 }
 
                 if (existing.IsClosed || !existing.IsOffline)
@@ -622,12 +624,12 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException($"Database '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
             }
 
             if (!create && !HasDatabase(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             if (directory is not null && create)
@@ -642,7 +644,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
                 if (storage is null)
                 {
-                    throw new InvalidOperationException("The storage strategy returned null.");
+                    throw new InvalidOperationException(ErrorMessages.GraphDatabaseEngineGetDatabaseFailure);
                 }
                 // Recovery may retain a partial tail described only by uncommitted work.
                 // Storage ignores it until the next allocation overwrites it.
@@ -678,7 +680,7 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
             {
                 var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
-                { Code = "COHDBG006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+                { Code = "CG06006", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
                 throw refusal;
@@ -692,14 +694,14 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "COHDBG006", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CG06006", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {
                 // The storage refused the file set before recovery wrote anything; the refusal
                 // names the formats and the remedy, and this names the database.
                 storage?.Dispose();
-                throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused, name, exception.Message), exception);
             }
             catch
             {
@@ -725,8 +727,8 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
                 if (!found)
                 {
                     throw create
-                        ? new DatabaseException($"Database '{name}' already exists.")
-                        : new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                        ? new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name))
+                        : new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
                 }
             }
             else

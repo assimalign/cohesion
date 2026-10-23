@@ -58,7 +58,7 @@ public sealed class GraphQueryRequest : GraphRequest
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
     /// <exception cref="DatabaseException">
     /// The text nests deeper than the calling thread's stack lets the parser follow:
-    /// <c>COHDBG008</c>, statement too complex. No length or nesting limit applies to label
+    /// <c>CG05008</c>, statement too complex. No length or nesting limit applies to label
     /// expressions or predicates, so the same text parses on a thread with more stack.
     /// </exception>
     public static GraphQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
@@ -71,7 +71,7 @@ public sealed class GraphQueryRequest : GraphRequest
             // The text is within the language; the thread is too small for it. That is the
             // statement-too-complex failure a planner or evaluator walk out of stack reports.
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
-            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
+            throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRequestFromGqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
         }
         return new GraphQueryRequest(statement, parameters);
     }

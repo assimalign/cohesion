@@ -71,10 +71,10 @@ internal static class GraphCatalogCodec
             byte version = reader.ReadByte();
             if (version != 1)
             {
-                throw new GraphCatalogException($"Unsupported graph catalog format version {version}.");
+                throw new GraphCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog, version));
             }
             var id = new Guid(reader.ReadBytes(16));
-            string name = ReadString(reader) ?? throw new GraphCatalogException("A catalog name cannot be null.");
+            string name = ReadString(reader) ?? throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog2);
             CatalogRecord result;
             if (kind is 1 or 2)
             {
@@ -90,7 +90,7 @@ internal static class GraphCatalogCodec
                 byte required = reader.ReadByte();
                 if (required > 1)
                 {
-                    throw new GraphCatalogException("Invalid required-property marker.");
+                    throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog3);
                 }
                 result = new CatalogRecord(Property: new GraphPropertyKeyMetadata(id, name,
                     type == byte.MaxValue ? null : (DatabaseType)type, required == 1));
@@ -98,22 +98,22 @@ internal static class GraphCatalogCodec
             else if (kind == 4)
             {
                 result = new CatalogRecord(Index: new GraphIndexMetadata(id, name,
-                    ReadString(reader) ?? throw new GraphCatalogException("An index property cannot be null.")));
+                    ReadString(reader) ?? throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog4)));
             }
             else
             {
-                throw new GraphCatalogException($"Unexpected graph metadata record kind {kind}.");
+                throw new GraphCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphCatalogCodecDecodeGraphCatalog5, kind));
             }
             Validate(result);
             if (stream.Position != stream.Length)
             {
-                throw new GraphCatalogException("Trailing graph catalog metadata.");
+                throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog6);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new GraphCatalogException("Malformed graph catalog metadata.", error);
+            throw new GraphCatalogException(ErrorMessages.GraphCatalogCodecDecodeGraphCatalog7, error);
         }
     }
 
@@ -122,17 +122,17 @@ internal static class GraphCatalogCodec
         ArgumentException.ThrowIfNullOrWhiteSpace(record.Name);
         if (record.Id == Guid.Empty)
         {
-            throw new ArgumentException("A graph definition requires a nonempty identity.");
+            throw new ArgumentException(ErrorMessages.GraphCatalogCodecValidateArgument);
         }
         if (record.Kind <= 2 && (record.Owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
             || (record.Owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(record.OwningSchema))
             || (record.Owner == DatabaseObjectOwner.Adhoc && record.OwningSchema is not null)))
         {
-            throw new ArgumentException("Only a schema-owned definition may name an owning schema, and must name one.");
+            throw new ArgumentException(ErrorMessages.GraphCatalogCodecValidateArgument2);
         }
         if (record.Property?.Type is { } type && (byte)type > (byte)DatabaseType.JsonBinary)
         {
-            throw new ArgumentException("Unknown graph property type.");
+            throw new ArgumentException(ErrorMessages.GraphCatalogCodecValidateArgument3);
         }
         if (record.Index is { } index)
         {
@@ -161,7 +161,7 @@ internal static class GraphCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new GraphCatalogException("Invalid graph catalog string length.");
+            throw new GraphCatalogException(ErrorMessages.CatalogCodecReadStringGraphCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

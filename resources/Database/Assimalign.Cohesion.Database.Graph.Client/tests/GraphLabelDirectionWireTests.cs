@@ -85,7 +85,7 @@ public sealed class GraphLabelDirectionWireTests
         connection.IsOpen.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Cypher arrows: --> on QueryAsync is a GQL0008 parse failure that keeps the pooled session")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Cypher arrows: --> on QueryAsync is a CG00008 parse failure that keeps the pooled session")]
     public async Task QueryAsync_CypherArrow_ShouldFailAsGql0008AndKeepSession()
     {
         // Arrange
@@ -101,7 +101,7 @@ public sealed class GraphLabelDirectionWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("GQL0008", Case.Sensitive);
+        error.Message.ShouldContain("CG00008", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (a:Person)->(b) RETURN b.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Bob");
@@ -113,7 +113,7 @@ public sealed class GraphLabelDirectionWireTests
     /// which the server treats as an internal failure that ends the session. It is now a coded
     /// execution failure, so the pooled session survives and serves the next statement.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Insertion: an all-whitespace label is a COHDBG001 execution failure that keeps the pooled session")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Insertion: an all-whitespace label is a CG05001 execution failure that keeps the pooled session")]
     public async Task ExecuteAsync_WhitespaceLabel_ShouldFailAsExecutionFailureAndKeepSession()
     {
         // Arrange
@@ -128,7 +128,7 @@ public sealed class GraphLabelDirectionWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain("CG05001", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (n:Person) RETURN n.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");
@@ -136,10 +136,10 @@ public sealed class GraphLabelDirectionWireTests
     }
 
     /// <summary>
-    /// On a path query the same parse failure reaches the caller as GQL0008. The terminal
+    /// On a path query the same parse failure reaches the caller as CG00008. The terminal
     /// rejection precedes path output, so the same connection serves the next query.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Cypher arrows: --> on QueryPathsAsync is a GQL0008 parse failure")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Client] - Cypher arrows: --> on QueryPathsAsync is a CG00008 parse failure")]
     public async Task QueryPathsAsync_CypherArrow_ShouldFailAsGql0008()
     {
         // Arrange
@@ -159,7 +159,7 @@ public sealed class GraphLabelDirectionWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("GQL0008", Case.Sensitive);
+        error.Message.ShouldContain("CG00008", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
         (await connection.QueryAsync("MATCH (a:Person)<-(b) RETURN b.name", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Alice");

@@ -47,15 +47,15 @@ public sealed class GqlUpdateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - SET/REMOVE: excluded forms report precise diagnostics (#1149)")]
-    [InlineData("SET a.x=1", "GQL0002")]
-    [InlineData("REMOVE a.x", "GQL0002")]
-    [InlineData("MATCH (a) SET a.x.y=1", "GQL0002")]
-    [InlineData("MATCH (a) SET a + = {x:1}", "GQL0002")]
-    [InlineData("RETURN +=1", "GQL0002")]
-    [InlineData("RETURN 1+=2", "GQL0002")]
-    [InlineData("MATCH (a)->+=(b) RETURN a", "GQL0002")]
-    [InlineData("MATCH (a) SET a.x += 1", "GQL0002")]
-    [InlineData("MATCH (a) SET a = {x:1,x:2}", "GQL0006")]
+    [InlineData("SET a.x=1", "CG00002")]
+    [InlineData("REMOVE a.x", "CG00002")]
+    [InlineData("MATCH (a) SET a.x.y=1", "CG00002")]
+    [InlineData("MATCH (a) SET a + = {x:1}", "CG00002")]
+    [InlineData("RETURN +=1", "CG00002")]
+    [InlineData("RETURN 1+=2", "CG00002")]
+    [InlineData("MATCH (a)->+=(b) RETURN a", "CG00002")]
+    [InlineData("MATCH (a) SET a.x += 1", "CG00002")]
+    [InlineData("MATCH (a) SET a = {x:1,x:2}", "CG00006")]
     [InlineData("MATCH (a) SET a.x=[1,2]", "CK00001")]
     [InlineData("MATCH (a) SET a.x=([1,2])", "CK00001")]
     [InlineData("MATCH (a) SET a.x=({x:1})", "CK00001")]
@@ -66,7 +66,7 @@ public sealed class GqlUpdateParserTests
     [InlineData("MATCH (a), (b) SET a = properties(b)", "CK00001")]
     [InlineData("MERGE (n) ON CREATE SET n.x=1", "CK00001")]
     [InlineData("MERGE (n) ON MATCH SET n.x=1", "CK00001")]
-    [InlineData("SHOW LABELS SET", "GQL0007")]
+    [InlineData("SHOW LABELS SET", "CG00007")]
     [InlineData("SESSION SET GRAPH other", "CK00001")]
     public void Parse_ExcludedUpdates_ShouldReportOneDiagnostic(string source, string code)
     {

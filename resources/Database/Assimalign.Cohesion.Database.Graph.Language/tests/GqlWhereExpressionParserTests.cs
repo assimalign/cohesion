@@ -83,8 +83,8 @@ public sealed class GqlWhereExpressionParserTests
     [InlineData("ALL(x IN [1] WHERE x = 1)", "CK00001", "ALL")]
     [InlineData("NONE(x IN [1] WHERE x = 1)", "CK00001", "NONE")]
     [InlineData("SINGLE(x IN [1] WHERE x = 1)", "CK00001", "SINGLE")]
-    [InlineData("a.x IN (1, 2)", "GQL0002", "[...]")]
-    [InlineData("a.x = 2 = 3", "GQL0002", "chained")]
+    [InlineData("a.x IN (1, 2)", "CG00002", "[...]")]
+    [InlineData("a.x = 2 = 3", "CG00002", "chained")]
     public void Parse_ExcludedConstruct_ShouldNameIt(string predicate, string code, string construct)
     {
         // Act
@@ -142,7 +142,7 @@ public sealed class GqlWhereExpressionParserTests
         // Assert
         failure.ShouldBeNull();
         var error = result.ShouldNotBeNull().Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0009");
+        error.Code.ShouldBe("CG00009");
         if (open.EndsWith("[", StringComparison.Ordinal) && open != "1 IN [") { gql[error.Start!.Value].ShouldBe('['); }
     }
 

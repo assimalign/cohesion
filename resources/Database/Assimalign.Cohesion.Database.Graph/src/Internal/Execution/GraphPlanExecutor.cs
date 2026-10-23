@@ -23,15 +23,15 @@ internal static partial class GraphPlanExecutor
         if (error is not null)
         {
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
-            throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
+            throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRequestFromGqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
         }
         if (paths && statement.GqlExpression.CatalogSurface is not null)
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, statement.GqlExpression.Location); }
+        { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.GqlExpression.Location); }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
             // Catalog requests have no parameter operands, but the shared contract still rejects
             // ambiguous normalized keys, including unused ones, on every execution.
-            ParameterBindings.Normalize(parameters, name => new GraphPlanningException("COHDBG014",
+            ParameterBindings.Normalize(parameters, name => new GraphPlanningException("CG01014",
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), statement.GqlExpression.Location));
             return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
         }
@@ -42,13 +42,13 @@ internal static partial class GraphPlanExecutor
         long headerLength = 4;
         foreach (var projection in plan.Projections) { headerLength += 5L + System.Text.Encoding.UTF8.GetByteCount(projection.Name); }
         if (headerLength > GraphValueCodec.MaxPayloadLength)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeLimit, plan.Query.Location); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.CompositeLimit, plan.Query.Location); }
         if (!compositeValues && compositeColumns.Any(value => value))
-        { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
+        { throw new GraphPlanningException("CG07016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind == GraphProjectionKind.EntityValue && projection.MayBeComposite))
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.EntityListWireUnsupported, plan.Query.Location); }
+        { throw new GraphPlanningException("CG05001", ErrorMessages.EntityListWireUnsupported, plan.Query.Location); }
         if (scalarsOnly && plan.Projections.Any(projection => projection.Kind != GraphProjectionKind.Scalar))
-        { throw new GraphPlanningException("COHDBG001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
+        { throw new GraphPlanningException("CG05001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes)
         {
             await database.LockWriterAsync(operation, token).ConfigureAwait(false);
@@ -158,11 +158,11 @@ internal static partial class GraphPlanExecutor
             foreach (string variable in deletion.Variables)
             {
                 if (!binding.TryGetValue(variable, out var value))
-                { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, deletion.Location); }
+                { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired, deletion.Location); }
                 if (value is GraphNode node) { nodes.Add(node.Id); }
                 else if (value is GraphRelationship relationship) { relationships.Add(relationship.Id); }
                 else if (value is not null)
-                { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, deletion.Location); }
+                { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired, deletion.Location); }
             }
         }
         long affected = 0;
@@ -233,7 +233,7 @@ internal static partial class GraphPlanExecutor
         var snapshot = operation.Context.Snapshot;
         if (database.Store.FindNode(relationship.From.Value, snapshot) is not { } from ||
             database.Store.FindNode(relationship.To.Value, snapshot) is not { } to)
-        { throw new GraphPlanningException("COHDBG003", "A matched relationship has a missing endpoint."); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.ProjectRelationshipGraphPlanning); }
         return new GraphPath([GraphDatabase.Materialize(from), GraphDatabase.Materialize(to)], [relationship]);
     }
 
@@ -267,7 +267,7 @@ internal static partial class GraphPlanExecutor
             if (pattern.Variable is { } variable && bindings.TryGetValue(variable, out var bound))
             {
                 if (bound is not GraphNode node || !AcceptNode(pattern, node, bindings, operation.EvaluationContext, parameters))
-                { throw new GraphPlanningException("COHDBG003", ErrorMessages.InsertEndpointInvalid); }
+                { throw new GraphPlanningException("CG03003", ErrorMessages.InsertEndpointInvalid); }
                 nodes[i] = node;
             }
             else
@@ -281,7 +281,7 @@ internal static partial class GraphPlanExecutor
         {
             var pattern = path.Relationships[i];
             if (pattern.Variable is { } variable && bindings.ContainsKey(variable))
-            { throw new GraphPlanningException("COHDBG001", "An inserted relationship variable must be new."); }
+            { throw new GraphPlanningException("CG05001", ErrorMessages.PlanExecutorCreateAsyncGraphPlanning); }
             // The planner admits only Outgoing and Incoming here.
             bool outgoing = pattern.Direction == GqlPatternDirection.Outgoing;
             var relationship = await operation.Updates.CreateRelationshipAsync(nodes[outgoing ? i : i + 1].Id,
@@ -326,7 +326,7 @@ internal static partial class GraphPlanExecutor
             OnConsume?.Invoke((int)Math.Min(next, int.MaxValue));
             _physical = next;
             if (overflow || _physical > WorkLimit)
-            { throw new GraphPlanningException("COHDBG004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable, WorkLimit)); }
+            { throw new GraphPlanningException("CG05004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable, WorkLimit)); }
         }
     }
 }

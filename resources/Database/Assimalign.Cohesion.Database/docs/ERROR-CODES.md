@@ -216,3 +216,41 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDBD003 | CD06103 | Storage/durability |
 | COHDBD004 | CD06104 | Storage/durability |
 | COHDBD005 | CD06105 | Storage/durability |
+
+## Graph migration
+
+| Previous code | Code | Category |
+|---|---|---|
+| GQL0001 | CG00001 | Language/syntax |
+| GQL0002 | CG00002 | Language/syntax |
+| GQL0003 | CG00003 | Language/syntax |
+| GQL0004 | CG00004 | Language/syntax |
+| GQL0005 | CG00005 | Language/syntax |
+| GQL0006 | CG00006 | Language/syntax |
+| GQL0007 | CG00007 | Language/syntax |
+| GQL0008 | CG00008 | Language/syntax |
+| GQL0009 | CG00009 | Language/syntax |
+| GQL0010 | CG00010 | Language/syntax |
+| COHDBG002 | CG01002 | Binding/names |
+| COHDBG010 | CG01010 | Binding/names |
+| COHDBG011 | CG01011 | Binding/names |
+| COHDBG014 | CG01014 | Binding/names |
+| COHDBG015 | CG01015 | Binding/names |
+| COHDBG009 | CG02009 | Values/types |
+| COHDBG013 | CG02013 | Values/types |
+| COHDBG003 | CG03003 | Schema/constraints |
+| COHDBG007 | CG04007 | Transactions/locking |
+| COHDBG022 | CG04022 | Transactions/locking |
+| COHDBG023 | CG04023 | Transactions/locking |
+| COHDBG001 | CG05001 | Execution/budgets |
+| COHDBG004 | CG05004 | Execution/budgets |
+| COHDBG008 | CG05008 | Execution/budgets |
+| COHDBG020 | CG05020 | Execution/budgets |
+| COHDBG006 | CG06006 | Storage/durability |
+| COHDBG012 | CG06012 | Storage/durability |
+| COHDBG017 | CG06017 | Storage/durability |
+| COHDBG018 | CG06018 | Storage/durability |
+| COHDBG005 | CG07005 | Protocol/transport |
+| COHDBG016 | CG07016 | Protocol/transport |
+| COHDBG021 | CG08021 | Configuration |
+| COHDBG019 | CG09019 | Lifecycle |

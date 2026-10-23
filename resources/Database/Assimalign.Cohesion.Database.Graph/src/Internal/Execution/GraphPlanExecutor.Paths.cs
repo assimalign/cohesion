@@ -94,13 +94,13 @@ internal static partial class GraphPlanExecutor
         {
             if (node.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
             if (value is null) { yield break; }
-            if (value is not GraphNode) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is not GraphNode) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
         foreach (var segment in shape.Segments.Where(segment => segment.Quantifier is null))
         {
             if (segment.Body.Edge?.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
             if (value is null) { yield break; }
-            if (value is not GraphRelationship) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is not GraphRelationship) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
         IAsyncEnumerable<StoredGraphNode> candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
@@ -239,7 +239,7 @@ internal static partial class GraphPlanExecutor
                                 !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
                             // The hop's own checks precede the cap; deferred references still qualify.
                             // A qualifying 65th edge fails before any target constraints can hide it.
-                            if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
+                            if (state.Relationships.Count == 64) { throw new GraphPlanningException("CG05004", ErrorMessages.PathHopLimitExceeded); }
                             ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
                             if (operation.Updates.FindNode(next) is not { } target) { break; }
                             var nextNode = GraphDatabase.Materialize(target);

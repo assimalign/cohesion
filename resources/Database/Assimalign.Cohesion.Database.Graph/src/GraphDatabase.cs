@@ -90,7 +90,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
             // The decoder's format diagnostic survives physical context without parsing text.
-            const string formatCode = "COHDBG017";
+            const string formatCode = "CG06017";
             if (exception.InnerException is GraphRecordFormatException { Diagnostics: [{ Code: formatCode }, ..] })
             {
                 string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
@@ -98,7 +98,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 throw new DatabaseException(message, [new Diagnostic
                 { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
             }
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused, name, exception.Message), exception);
         }
 
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
@@ -153,7 +153,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHDBG012";
+    internal const string OfflineCode = "CG06012";
 
     /// <summary>
     /// Gets whether a failed durable flush took the database offline.
@@ -175,7 +175,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public new async ValueTask<GraphDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (GraphDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -232,7 +232,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CG06006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -259,11 +259,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the write failed (a
-    /// property that does not match the graph definition, <c>COHDBG003</c>).
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the write failed (a
+    /// property that does not match the graph definition, <c>CG03003</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<GraphNode> CreateNodeAsync(GraphDatabaseSession session, IReadOnlyList<string> labels,
@@ -291,10 +291,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public ValueTask<GraphNode?> GetNodeAsync(GraphDatabaseSession session, GraphNodeId id, CancellationToken cancellationToken = default)
         => RunAsync(RequireOwnSession(session), operation => new ValueTask<GraphNode?>(
             Store.FindNode(id.Value, operation.Context.Snapshot) is { } node ? Materialize(node) : null), cancellationToken);
@@ -310,10 +310,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the delete failed.
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the delete failed.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The node or one of its relationships changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteNodeAsync(GraphDatabaseSession session, GraphNodeId id, CancellationToken cancellationToken = default)
@@ -341,10 +341,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// Either endpoint node does not exist, or a property does not match the graph definition
-    /// (both <c>COHDBG003</c>); the session belongs to another database (<c>COHDBG005</c>), it is
-    /// closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// (both <c>CG03003</c>); the session belongs to another database (<c>CG07005</c>), it is
+    /// closed, another statement holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog or an endpoint changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<GraphRelationship> CreateRelationshipAsync(GraphDatabaseSession session, GraphNodeId from, GraphNodeId to,
@@ -367,10 +367,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the delete failed.
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the delete failed.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The relationship changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteRelationshipAsync(GraphDatabaseSession session, GraphRelationshipId id, CancellationToken cancellationToken = default)
@@ -397,18 +397,18 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// nodes are yielded.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>); the session belongs to
-    /// another database (<c>COHDBG005</c>), it is closed (also while the nodes are yielded), another
-    /// statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// The traversal's depth or direction is invalid (<c>CG05001</c>); the session belongs to
+    /// another database (<c>CG07005</c>), it is closed (also while the nodes are yielded), another
+    /// statement holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public async IAsyncEnumerable<GraphNode> TraverseAsync(GraphDatabaseSession session, GraphTraversal traversal,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         RequireOwnSession(session);
         if (traversal.MaxDepth < 0 || !Enum.IsDefined(traversal.Direction))
         {
-            throw new DatabaseException("COHDBG001: Traversal depth and direction must be valid.");
+            throw new DatabaseException(ErrorMessages.GraphDatabaseTraverseAsyncDatabase);
         }
         // Materialize in one statement snapshot, then release the transaction.
         // Each node is visited once; the start is seeded as visited and never emitted.
@@ -482,7 +482,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         ArgumentNullException.ThrowIfNull(session);
         if (!ReferenceEquals(session.Database, this))
         {
-            throw new DatabaseException("COHDBG005: The session belongs to another database or engine.");
+            throw new DatabaseException(ErrorMessages.DatabaseRequireOwnSessionDatabase);
         }
         session.ThrowIfNotOpen();
         return session;
@@ -552,7 +552,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
             if (key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
-                throw new DatabaseException($"COHDBG003: Property '{key.Name}' does not match the graph definition.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.
@@ -579,7 +579,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         byte or short => DatabaseType.Int16, ushort or int => DatabaseType.Int32, uint or long => DatabaseType.Int64,
         float => DatabaseType.Float32, double => DatabaseType.Float64, decimal or ulong => DatabaseType.Decimal,
         string => DatabaseType.String,
-        _ => throw new DatabaseException("COHDBG003: Unsupported graph property value."),
+        _ => throw new DatabaseException(ErrorMessages.GraphDatabaseTypeOfDatabase),
     };
 
     internal static bool SupportsPropertyType(DatabaseType type) => type is DatabaseType.Boolean or DatabaseType.Int8 or

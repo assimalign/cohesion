@@ -45,7 +45,7 @@ internal sealed class GraphExecuteExchange
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
-                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the graph exchange before completion.");
+                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExecuteCoreAsyncDatabaseClient);
             if (hasDiagnostics && frame.Type != ProtocolMessageType.Error && frame.Type != (ProtocolMessageType)GraphProtocolMessageType.ResultComplete)
             {
                 throw new ProtocolException(ErrorMessages.DiagnosticsOrderInvalid);
@@ -53,7 +53,7 @@ internal sealed class GraphExecuteExchange
             switch ((byte)frame.Type)
             {
                 case (byte)GraphProtocolMessageType.ResultHeader:
-                    if (hasHeader) { throw new ProtocolException("A graph result cannot have multiple headers."); }
+                    if (hasHeader) { throw new ProtocolException(ErrorMessages.ExchangeExecuteCoreAsyncProtocol); }
                     hasHeader = true;
                     var header = GraphProtocolResultHeaderMessage.Decode(frame.Payload.Span);
                     _compositeColumns = new bool[header.Columns.Count];
@@ -68,11 +68,11 @@ internal sealed class GraphExecuteExchange
                     columns = decoded;
                     break;
                 case (byte)GraphProtocolMessageType.ResultRow:
-                    if (!hasHeader) { throw new ProtocolException("A graph row requires a result header."); }
+                    if (!hasHeader) { throw new ProtocolException(ErrorMessages.ExchangeExecuteCoreAsyncProtocol2); }
                     rows.Add(DecodeRow(frame.Payload.Span, columns.Count));
                     break;
                 case (byte)GraphProtocolMessageType.ResultComplete:
-                    if (frame.Payload.Length != sizeof(long)) { throw new ProtocolException("Malformed graph result completion."); }
+                    if (frame.Payload.Length != sizeof(long)) { throw new ProtocolException(ErrorMessages.ExchangeExecuteCoreAsyncProtocol3); }
                     var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
                     return new GraphResultSet(columns, rows, complete.AffectedCount, diagnostics);
                 case (byte)ProtocolMessageType.Diagnostics:
@@ -89,7 +89,7 @@ internal sealed class GraphExecuteExchange
                     }
                     throw new DatabaseClientException(error.Code, error.Message, diagnostics, null);
                 default:
-                    throw new ProtocolException($"Unexpected {frame.Type} frame in a graph execute exchange.");
+                    throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExchangeExecuteCoreAsyncProtocol4, frame.Type));
             }
         }
     }
@@ -116,7 +116,7 @@ internal sealed class GraphExecuteExchange
             int length = ScalarLength(payload);
             values[index] = DatabaseValueCodec.DecodeComponent(payload[..length]); payload = payload[length..];
         }
-        if (!payload.IsEmpty) { throw new ProtocolException("A graph result row has too many values."); }
+        if (!payload.IsEmpty) { throw new ProtocolException(ErrorMessages.GraphExecuteExchangeDecodeRowProtocol); }
         return values;
     }
     // Tuple framing is local to the model boundary; validation still belongs to DatabaseValueCodec.

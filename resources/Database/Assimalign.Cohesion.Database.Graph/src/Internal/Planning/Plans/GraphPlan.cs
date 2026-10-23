@@ -22,7 +22,7 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMa
     internal IReadOnlyDictionary<string, object?>? Parameters { get; init; }
 
     /// <summary>
-    /// Gets the <c>COHDBG010</c>/<c>COHDBG011</c> warnings of a read-only statement that names a
+    /// Gets the <c>CG01010</c>/<c>CG01011</c> warnings of a read-only statement that names a
     /// label or relationship type the database does not have, in first-mention order; empty for a
     /// statement that writes (#1228).
     /// </summary>

@@ -152,7 +152,7 @@ public sealed class GqlQuantifiedPathTests
         foreach (string prefix in new[] { "", "EXPLAIN " })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + source));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
     }
 
@@ -216,7 +216,7 @@ public sealed class GqlQuantifiedPathTests
         foreach (string tail in new[] { "RETURN b.k", "WHERE b.k=-1 RETURN b.k", "RETURN b.k ORDER BY b.k LIMIT 1" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:V {k:0})-[:T]->+(b) " + tail));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
             error.Message.ShouldContain("64 relationships", Case.Sensitive);
         }
         // D4 permits an unordered LIMIT to leave later branches unvisited. A visited 65th hop
@@ -226,8 +226,8 @@ public sealed class GqlQuantifiedPathTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: both expansion and binding budgets apply to repeated segments")]
-    [InlineData(18, "", "retained execution-memory budget", "COHDBG020")]
-    [InlineData(32, " {k:-1}", "1000000 candidate expansions", "COHDBG004")]
+    [InlineData(18, "", "retained execution-memory budget", "CG05020")]
+    [InlineData(32, " {k:-1}", "1000000 candidate expansions", "CG05004")]
     public async Task Execute_ExpansionBudgets_ShouldFailWithoutTruncatingAsync(int count, string endpoint, string message, string code)
     {
         // Arrange
@@ -239,7 +239,7 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync("MATCH (a:V),(b:V) INSERT (a)-[:T]->(b)", cancellationToken: timeout.Token);
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (a:V)-[:T]->{1,3}(b:V" + endpoint + ") RETURN a.k", null,
-            new() { MemoryBytes = code == "COHDBG020" ? 65536 : null }), timeout.Token));
+            new() { MemoryBytes = code == "CG05020" ? 65536 : null }), timeout.Token));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Message.ShouldContain(message, Case.Sensitive);
@@ -298,11 +298,11 @@ public sealed class GqlQuantifiedPathTests
         {
             var query = new GqlQueryStatement(new GqlQueryExpression([path], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(query)));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
         var insertion = new GqlQueryStatement(new GqlQueryExpression([], null, [inner], [], false, []));
         (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(insertion))))
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await Rows(session, "MATCH (a) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(0L);
     }
 
@@ -344,7 +344,7 @@ public sealed class GqlQuantifiedPathTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 "MATCH (a:V {k:0})-[:T " + map + "]->+(b), (c:V {k:1}) RETURN count(*)"));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
         }
     }
 

@@ -115,7 +115,7 @@ public sealed class GraphEngineTests
         await schema.SaveLabelAsync(label);
         await schema.SavePropertyKeyAsync(new(label.Id, "age", DatabaseType.Int64, true));
         var error = await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"]));
-        error.Message.ShouldContain("COHDBG003");
+        error.Message.ShouldContain("CG03003");
         await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = "old" }));
         (await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
@@ -151,7 +151,7 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with COHDBG017 before scrub, leaving every file unchanged (#1534)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with CG06017 before scrub, leaving every file unchanged (#1534)")]
     [InlineData(1, 2)]
     [InlineData(2, 2)]
     [InlineData(1, 3)]
@@ -204,7 +204,7 @@ public sealed class GraphEngineTests
             // Assert
             // EnsureIndexFormat wraps the storage failure in a coded engine exception.
             failure.Code.ShouldBe("CK06003");
-            failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "COHDBG018", "COHDBG017"]);
+            failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CG06018", "CG06017"]);
             failure.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
             failure.Diagnostics[0].Message.ShouldBe(failure.Message);
             failure.Diagnostics[2].Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
@@ -212,9 +212,9 @@ public sealed class GraphEngineTests
             var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
             corruption.PageId.ShouldNotBeNull();
             corruption.SlotIndex.ShouldNotBeNull();
-            corruption.Message.ShouldNotContain("COHDBG017:");
+            corruption.Message.ShouldNotContain("CG06017:");
             corruption.InnerException.ShouldBeOfType<Internal.GraphRecordFormatException>().Diagnostics
-                .ShouldHaveSingleItem().Code.ShouldBe("COHDBG017");
+                .ShouldHaveSingleItem().Code.ShouldBe("CG06017");
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
             Directory.GetFiles(directory).Order().ShouldBe(before.Keys.Order());

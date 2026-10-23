@@ -23,7 +23,7 @@ public sealed class GqlExecutionBudgetTests
             (i == 0 ? "(:N {k:0})" : "") + "-[:T]->(:N {k:" + (i + 1) + "})")), cancellationToken: CancellationToken.None);
         var request = GraphQueryRequest.FromGql("MATCH (a:N {k:0})-[:T]->+(b) RETURN b.k ORDER BY b.k", null, new() { WorkUnits = 6 });
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
         session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBufferCapacity.ShouldBe(0);
@@ -43,7 +43,7 @@ public sealed class GqlExecutionBudgetTests
         var request = GraphQueryRequest.FromGql(query, new Dictionary<string, object?>
         { ["payload"] = new string('p', 10000), ["xs"] = new[] { 1, 2 } }, new() { MemoryBytes = 8192 });
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG020");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05020");
         session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBufferCapacity.ShouldBe(0);
@@ -83,7 +83,7 @@ public sealed class GqlExecutionBudgetTests
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
         { await foreach (var _ in database.TraverseAsync(session, traversal with { RelationshipType = null }, CancellationToken.None)) { } });
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
         session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
     }
@@ -100,7 +100,7 @@ public sealed class GqlExecutionBudgetTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             GraphQueryRequest.FromGql("RETURN 1", null, new() { MemoryBytes = memory, WorkUnits = work }), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG021");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG08021");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Canceled anchor iteration releases every cursor and retained-memory lease (#1533)")]
@@ -135,7 +135,7 @@ public sealed class GqlExecutionBudgetTests
         var request = GraphQueryRequest.FromGql("FOR x IN $xs INSERT (:N {x:x})", new Dictionary<string, object?>
         { ["xs"] = Enumerable.Range(0, 50).ToArray() }, new() { MemoryBytes = 16 * 1024 });
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG020");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05020");
         session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
         session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
         await using var result = (DatabaseResultSet)await session.ExecuteAsync("MATCH (n:N) RETURN count(*)", cancellationToken: CancellationToken.None);
@@ -176,7 +176,7 @@ public sealed class GqlExecutionBudgetTests
         var request = GraphQueryRequest.FromGql(query, new Dictionary<string, object?>
         { ["xs"] = Enumerable.Range(0, 1000).ToArray() }, new GraphQueryLimits { MemoryBytes = 8192 });
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG020");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05020");
         session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
@@ -203,8 +203,8 @@ public sealed class GqlExecutionBudgetTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Query limits refuse explosive work or retained memory with one coded error (#1533)")]
-    [InlineData(false, "COHDBG004")]
-    [InlineData(true, "COHDBG020")]
+    [InlineData(false, "CG05004")]
+    [InlineData(true, "CG05020")]
     public async Task ExecuteAsync_LowerQueryLimit_ShouldRefuseAndLeaveSessionReusable(bool memory, string code)
     {
         await using var engine = GraphDatabaseEngine.Create("graph-lower-limits", new());

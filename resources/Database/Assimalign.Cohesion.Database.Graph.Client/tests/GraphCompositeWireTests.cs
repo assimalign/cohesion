@@ -104,7 +104,7 @@ public sealed class GraphCompositeWireTests
             failure.Type.ShouldBe(ProtocolMessageType.Error);
             var error = ProtocolErrorMessage.Decode(failure.Payload.Span);
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldContain("COHDBG016", Case.Sensitive);
+            error.Message.ShouldContain("CG07016", Case.Sensitive);
         }
         await Execute("MATCH (n:Unwritten) RETURN 1");
         (await Read()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultHeader);
@@ -169,7 +169,7 @@ public sealed class GraphCompositeWireTests
             "INSERT (:Unwritten) RETURN " + value, parameters, harness.Token));
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG013", Case.Sensitive);
+        error.Message.ShouldContain("CG02013", Case.Sensitive);
         (await connection.QueryAsync("MATCH (n:Unwritten) RETURN 1", cancellationToken: harness.Token)).ShouldBeEmpty();
         (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
@@ -191,7 +191,7 @@ public sealed class GraphCompositeWireTests
             {
                 var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(query + suffix, cancellationToken: harness.Token));
                 error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-                error.Message.ShouldContain("GQL0002", Case.Sensitive);
+                error.Message.ShouldContain("CG00002", Case.Sensitive);
             }
         }
         // The server parses on a thread pool thread whose stack is 8 MB on Linux against 1 to 1.5 MB
@@ -200,7 +200,7 @@ public sealed class GraphCompositeWireTests
         var deep = "RETURN " + string.Concat(Enumerable.Repeat("0[", depth)) + "0" + new string(']', depth);
         var nesting = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(deep, cancellationToken: harness.Token));
         nesting.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        nesting.Message.ShouldContain("COHDBG008", Case.Sensitive);
+        nesting.Message.ShouldContain("CG05008", Case.Sensitive);
         (await connection.QueryAsync("RETURN 42", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(42L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
     }

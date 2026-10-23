@@ -29,7 +29,7 @@ internal static class GraphGrouping
                 bool inside = item.InsideAggregate;
                 if (item.Expression is GqlAggregateExpression aggregate)
                 {
-                    if (inside) { throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, aggregate.Location); }
+                    if (inside) { throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, aggregate.Location); }
                     aggregated = inside = true;
                     if (aggregates.Add(aggregate)) { aggregateList.Add(aggregate); }
                 }
@@ -41,24 +41,24 @@ internal static class GraphGrouping
         if (query.GroupBy is null && aggregateList.Count == 0) { return null; }
         foreach (var candidate in candidates)
         { token.ThrowIfCancellationRequested(); if (keys.Add(candidate)) { keyList.Add(candidate); } }
-        if (projections.Count == 0) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+        if (projections.Count == 0) { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
         if (query.GroupBy is not null)
         {
             var explicitKeys = new List<GqlExpression>();
             foreach (var key in query.GroupBy)
             {
                 token.ThrowIfCancellationRequested();
-                if (key is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+                if (key is null) { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
                 GqlExpression resolved = key;
                 // Neo4j AggregationChecker.scala:117-144 exempts non-aggregate grouping
                 // aliases and diagnoses an aggregate alias. Expressions retain input scope.
                 if (key is GqlVariableExpression name && groupingNames.TryGetValue(name.Variable, out var item))
-                { resolved = item ?? throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, key.Location); }
+                { resolved = item ?? throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, key.Location); }
                 validateKey?.Invoke(resolved);
                 explicitKeys.Add(resolved);
             }
             if (explicitKeys.Count != keys.Count || !keys.SetEquals(explicitKeys))
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+            { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
         }
         var scope = new GraphGroupingScope(keyList, aggregateList, shape, token);
         var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);

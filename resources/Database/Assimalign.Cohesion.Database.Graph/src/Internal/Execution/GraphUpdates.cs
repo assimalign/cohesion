@@ -399,7 +399,7 @@ internal sealed class GraphUpdates : IDisposable
                             GraphExpressionEvaluator.PropertyScalar(property.Value, binding, _operation.EvaluationContext, parameters)),
                         GqlSetPropertiesItem map => SetProperties(value, map, binding, parameters),
                         GqlSetLabelsItem labels => SetLabels(value, labels.Labels, remove: false),
-                        _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, item.Location),
+                        _ => throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location),
                     });
                 }
             }
@@ -411,7 +411,7 @@ internal sealed class GraphUpdates : IDisposable
                     {
                         GqlRemovePropertyItem property => SetProperty(value, property.Property, null),
                         GqlRemoveLabelsItem labels => SetLabels(value, labels.Labels, remove: true),
-                        _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.StageUnsupported, item.Location),
+                        _ => throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location),
                     });
                 }
             }
@@ -419,13 +419,13 @@ internal sealed class GraphUpdates : IDisposable
             void Apply(string variable, Assimalign.Cohesion.Database.Language.Location? location, Func<object, object> update)
             {
                 if (!binding.TryGetValue(variable, out var value))
-                { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
+                { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, location); }
                 if (value is null) { return; }
                 value = Current(value);
                 if (value is GraphNode node)
                 {
                     if (FindNode(node.Id.Value) is null)
-                    { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
+                    { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, location); }
                     var replacement = (GraphNode)update(value);
                     if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
                     {
@@ -437,7 +437,7 @@ internal sealed class GraphUpdates : IDisposable
                 else if (value is GraphRelationship relationship)
                 {
                     if (FindRelationship(relationship.Id.Value) is null)
-                    { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
+                    { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, location); }
                     var replacement = (GraphRelationship)update(value);
                     if (!Identical(relationship.Properties, replacement.Properties))
                     {
@@ -447,7 +447,7 @@ internal sealed class GraphUpdates : IDisposable
                         touchedRelationships.Add(relationship.Id.Value);
                     }
                 }
-                else { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired, location); }
+                else { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, location); }
             }
         }
         // Validate the complete resulting entity, reusing INSERT's catalog discovery and schema rules.
@@ -510,16 +510,16 @@ internal sealed class GraphUpdates : IDisposable
     }
 
     private static IReadOnlyDictionary<string, object?> Properties(object entity) => entity switch
-    { GraphNode node => node.Properties, GraphRelationship edge => edge.Properties, _ => throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired) };
+    { GraphNode node => node.Properties, GraphRelationship edge => edge.Properties, _ => throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired) };
 
     private static object WithProperties(object entity, Dictionary<string, object?> properties) => entity switch
     { GraphNode node => node with { Properties = new ReadOnlyDictionary<string, object?>(properties) },
         GraphRelationship edge => edge with { Properties = new ReadOnlyDictionary<string, object?>(properties) },
-        _ => throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired) };
+        _ => throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired) };
 
     private static object SetLabels(object entity, IReadOnlyList<string> labels, bool remove)
     {
-        if (entity is not GraphNode node) { throw new GraphPlanningException("COHDBG003", ErrorMessages.EntityBindingRequired); }
+        if (entity is not GraphNode node) { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired); }
         return node with { Labels = Array.AsReadOnly((remove ? node.Labels.Except(labels, StringComparer.Ordinal) : node.Labels.Concat(labels).Distinct(StringComparer.Ordinal))
             .Order(StringComparer.Ordinal).ToArray()) };
     }

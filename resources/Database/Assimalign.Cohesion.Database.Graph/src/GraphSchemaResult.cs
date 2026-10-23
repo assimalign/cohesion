@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <typeparam name="T">The definition type.</typeparam>
 /// <remarks>
 /// A read that names a label the database does not have returns no definitions and a
-/// <c>COHDBG010</c> warning instead of failing, so it never aborts the caller's explicit
+/// <c>CG01010</c> warning instead of failing, so it never aborts the caller's explicit
 /// transaction (Graph DESIGN, "Unknown labels and relationship types in reads"). Neo4j's schema API
 /// likewise returns an empty list for a label token that does not exist.
 /// </remarks>

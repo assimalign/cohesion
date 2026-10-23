@@ -84,7 +84,7 @@ public sealed class GraphDatabaseEngineOptions
     /// <see cref="DatabaseEngine.MaximumWorkerFailureWindow"/>.
     /// </summary>
     /// <remarks>
-    /// An offline database refuses every operation with <c>COHDBG012</c> until it is reopened
+    /// An offline database refuses every operation with <c>CG06012</c> until it is reopened
     /// (<see cref="GraphDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work ends the streak, and the window starts

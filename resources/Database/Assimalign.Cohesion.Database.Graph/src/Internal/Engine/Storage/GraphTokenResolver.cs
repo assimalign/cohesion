@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// </summary>
 /// <remarks>
 /// The warnings are coded diagnostics of <see cref="DiagnosticSeverity.Warning"/> severity:
-/// <c>COHDBG010</c> for a label (Neo4j's <c>Neo.ClientNotification.Statement.UnknownLabelWarning</c>,
-/// GQLSTATUS 01N50) and <c>COHDBG011</c> for a relationship type
+/// <c>CG01010</c> for a label (Neo4j's <c>Neo.ClientNotification.Statement.UnknownLabelWarning</c>,
+/// GQLSTATUS 01N50) and <c>CG01011</c> for a relationship type
 /// (<c>UnknownRelationshipTypeWarning</c>, 01N51), as <c>common/.../kernel/api/exceptions/Status.java:346-355</c>
 /// and <c>neo4j-notifications/.../NotificationCodeWithDescription.java:190-199</c> define them. Neo4j
 /// records one notification per mention position in a set; pattern names carry no source position
@@ -31,11 +31,15 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// </remarks>
 internal sealed class GraphTokenResolver
 {
+    private static readonly string _errorUnknownRelationshipTypeDiagnostic = Resources.UnknownRelationshipTypeDiagnostic;
+
+    private static readonly string _errorTokenResolverUnknownLabelDiagnostic = Resources.TokenResolverUnknownLabelDiagnostic;
+
     /// <summary>The warning code for a label the database does not have.</summary>
-    internal const string UnknownLabelCode = "COHDBG010";
+    internal const string UnknownLabelCode = "CG01010";
 
     /// <summary>The warning code for a relationship type the database does not have.</summary>
-    internal const string UnknownRelationshipTypeCode = "COHDBG011";
+    internal const string UnknownRelationshipTypeCode = "CG01011";
 
     private readonly GraphCatalog _catalog;
     private readonly TransactionSnapshot _snapshot;
@@ -91,21 +95,19 @@ internal sealed class GraphTokenResolver
         return known;
     }
 
-    /// <summary>Creates the <c>COHDBG010</c> warning for a label the database does not have.</summary>
+    /// <summary>Creates the <c>CG01010</c> warning for a label the database does not have.</summary>
     /// <param name="name">The label name.</param>
     /// <param name="location">The source span that names it, or <see langword="null"/>.</param>
     /// <returns>The warning.</returns>
     internal static Diagnostic UnknownLabel(string name, Location? location) => Create(UnknownLabelCode,
-        $"Label '{GraphLabelEvaluator.Shorten(name)}' is not in the database, so no node carries it. " +
-        "Check its spelling, or that the label exists when the statement runs.", location);
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTokenResolverUnknownLabelDiagnostic, GraphLabelEvaluator.Shorten(name)), location);
 
-    /// <summary>Creates the <c>COHDBG011</c> warning for a relationship type the database does not have.</summary>
+    /// <summary>Creates the <c>CG01011</c> warning for a relationship type the database does not have.</summary>
     /// <param name="name">The relationship type name.</param>
     /// <param name="location">The source span that names it, or <see langword="null"/>.</param>
     /// <returns>The warning.</returns>
     internal static Diagnostic UnknownRelationshipType(string name, Location? location) => Create(UnknownRelationshipTypeCode,
-        $"Relationship type '{GraphLabelEvaluator.Shorten(name)}' is not in the database, so no relationship has it. " +
-        "Check its spelling, or that the type exists when the statement runs.", location);
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorUnknownRelationshipTypeDiagnostic, GraphLabelEvaluator.Shorten(name)), location);
 
     private static Diagnostic Create(string code, string message, Location? location) => new()
     {

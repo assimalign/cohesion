@@ -47,7 +47,7 @@ internal sealed class GraphGroupingScope
             };
             if (name is not null && (_variables.Contains(name) || aliases is not null && aliases.ContainsKey(name))) { continue; }
             if (name is not null || expression is GqlAggregateExpression)
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
+            { throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
             foreach (var child in GraphValueExpressions.Children(expression)) { pending.Push(child); }
         }
     }

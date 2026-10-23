@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
+    private static readonly string _errorGraphStoreDropIndexAsyncFailure2 = ErrorMessages.GraphStoreDropIndexAsyncFailure2;
+
     private const ulong adjacencyId = ulong.MaxValue;
     private const string treeName = "graph";
     private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
@@ -62,7 +64,7 @@ public sealed partial class GraphStore
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
         var latest = Latest(context);
-        if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException($"A node-property index already exists for '{label}.{propertyKey}'."); }
+        if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreCreateIndexAsyncFailure, label, propertyKey)); }
         ulong id = (ulong)_storage.ReserveTransactionSequence();
         var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
@@ -94,10 +96,10 @@ public sealed partial class GraphStore
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
         var definition = Definition(label, propertyKey, context.Snapshot)
-            ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
+            ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreDropIndexAsyncFailure, label, propertyKey));
         if (Definition(label, propertyKey, Latest(context))?.Id != definition.Id)
         {
-            throw new TransactionAbortedException("Graph write conflict: the index changed after the transaction snapshot.");
+            throw new TransactionAbortedException(_errorGraphStoreDropIndexAsyncFailure2);
         }
         var found = Find(3, definition.Id, context.Snapshot)!.Value;
         await ApplyAsync(context, bracket =>
@@ -129,7 +131,7 @@ public sealed partial class GraphStore
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var definition = Definition(label, propertyKey, snapshot)
-            ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
+            ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreDropIndexAsyncFailure, label, propertyKey));
         if (!GraphRecordCodec.TryKey(value, out var key)) { yield break; }
         // Exact-key postings contain the scalar key and one identity suffix. Bound a full 64-entry cursor batch.
         reserve?.Invoke(4096L + 64L * (key.Length + 72));
@@ -179,7 +181,7 @@ public sealed partial class GraphStore
     }
 
     private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, treeName, out var index)
-        ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
+        ? index : throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreResolveIndexFailure, id));
 
     private static IndexKey AdjacencyKey(ulong nodeId, GraphIncidentDirection direction, Guid typeId, ulong relationshipId)
     {
@@ -291,7 +293,7 @@ public sealed partial class GraphStore
     // The index manager's storage transaction for a context: the shared statement bracket the
     // coordinator owns, or this store's own error when there is none.
     private StorageTransaction ResolveStatementBracket(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
-        ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
+        ? bracket : throw new InvalidOperationException(ErrorMessages.StoreResolveStatementBracketFailure);
 
     private sealed class IndexUndo : RecordVersionIndex
     {

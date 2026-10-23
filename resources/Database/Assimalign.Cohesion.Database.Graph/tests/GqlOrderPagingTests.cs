@@ -97,7 +97,7 @@ public sealed class GqlOrderPagingTests
         foreach (string source in new[] { "INSERT (:Unwritten) RETURN 1 LIMIT $page", "MATCH (n:Missing) RETURN n LIMIT @page", "EXPLAIN RETURN 1 SKIP $page" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, parameters, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         }
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
     }
@@ -115,7 +115,7 @@ public sealed class GqlOrderPagingTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
                 "INSERT (:Unwritten) RETURN 1 LIMIT $page", new Dictionary<string, object?> { ["page"] = value }, CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
         (await RowsAsync(session, "SHOW LABELS")).ShouldBeEmpty();
     }
@@ -137,7 +137,7 @@ public sealed class GqlOrderPagingTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: DISTINCT computed expressions compare structurally and project before paging")]
@@ -207,8 +207,8 @@ public sealed class GqlOrderPagingTests
             "MATCH ()-[r:MANAGES]->() RETURN r AS relAlias ORDER BY relAlias:MANAGES", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
         // Assert
         rows.Select(row => row[0]).ShouldBe(["Bob", "Alice", "Isolated"]);
-        scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
-        staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        scalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        staticScalar.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         nodeAlias.Diagnostics.ShouldBeEmpty();
         relationshipAlias.Diagnostics.ShouldBeEmpty();
     }
@@ -372,7 +372,7 @@ public sealed class GqlOrderPagingTests
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
     }
 
@@ -387,7 +387,7 @@ public sealed class GqlOrderPagingTests
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("MATCH p = (a)->(b) RETURN p AS route ORDER BY route.name", cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 
     private static async Task<List<object?[]>> RowsAsync(GraphDatabaseSession session, string source, IReadOnlyDictionary<string, object?>? parameters = null)

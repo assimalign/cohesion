@@ -33,7 +33,7 @@ public sealed class GraphClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         if (options.Settings is null || options.ConnectionFactory is null)
         {
-            throw new ArgumentException("Connection settings and a connection factory are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.GraphClientCreateArgument, nameof(options));
         }
         return new GraphClient(DatabaseClient.Create(new DatabaseClientOptions
         {

@@ -11,7 +11,7 @@ internal sealed class GraphRecordFormatException : StorageException
 {
     internal GraphRecordFormatException(string message) : base(message)
         => Diagnostics = Array.AsReadOnly<Diagnostic>([new Diagnostic
-        { Code = "COHDBG017", Message = message, Severity = DiagnosticSeverity.Error }]);
+        { Code = "CG06017", Message = message, Severity = DiagnosticSeverity.Error }]);
 
     internal IReadOnlyList<Diagnostic> Diagnostics { get; }
 }

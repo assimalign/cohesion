@@ -26,10 +26,10 @@ ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
 literal-map replacement and D3 merge (`+=`), and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `CK00001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
-as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
+as `(a)-->(b)`, which GQL reads as a comment, produces `CG00008`. The parser does not throw for
 malformed query text. As in Neo4j, label expressions and predicates have no length or nesting
 limit: `:A:B:...`, `A|B|...` and AND/OR/XOR runs are each one n-ary node of any length, and
-parentheses nest as deep as the parsing thread's stack allows; deeper text reports `GQL0009`
+parentheses nest as deep as the parsing thread's stack allows; deeper text reports `CG00009`
 instead of overflowing it.
 
 Named path assignment is supported only in `MATCH`. The engine's path request API projects one
@@ -49,3 +49,13 @@ bindings stream and an unordered LIMIT can stop upstream work; final results rem
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
 Standalone START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540).
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

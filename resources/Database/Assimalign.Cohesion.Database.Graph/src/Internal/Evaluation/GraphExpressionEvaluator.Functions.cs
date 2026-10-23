@@ -16,7 +16,7 @@ internal static partial class GraphExpressionEvaluator
         GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         if (!GraphScalarFunctions.ValidArity(call))
-        { throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
+        { throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
         if (call.IsNiladic)
         {
             return call.Function == GqlScalarFunction.CurrentDate
@@ -37,7 +37,7 @@ internal static partial class GraphExpressionEvaluator
         {
             object? value = i switch { 0 => firstArgument, 1 => second, _ => third };
             if ((GraphScalarFunctions.Argument(call.Function, i) & GraphScalarFunctions.Kind(value)) == 0)
-            { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Location); }
+            { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Location); }
         }
         object first = firstArgument!;
         try
@@ -69,11 +69,11 @@ internal static partial class GraphExpressionEvaluator
                 GqlScalarFunction.ToInteger => CypherInteger(first),
                 GqlScalarFunction.ToFloat => first is string input ? CypherFloat(input) : Finite(Convert.ToDouble(first, CultureInfo.InvariantCulture)),
                 GqlScalarFunction.ToBoolean => CypherBoolean(first),
-                _ => throw new GraphPlanningException("COHDBG001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location),
+                _ => throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location),
             };
         }
         catch (Exception error) when (error is ArithmeticException or FormatException or InvalidCastException or ArgumentException)
-        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, GraphScalarFunctions.Name(call.Function)), call.Location, error); }
+        { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, GraphScalarFunctions.Name(call.Function)), call.Location, error); }
     }
 
     private static double Logarithm(object first, object? second)

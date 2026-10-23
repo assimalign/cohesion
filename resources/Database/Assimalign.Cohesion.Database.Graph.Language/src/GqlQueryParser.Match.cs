@@ -17,7 +17,7 @@ public sealed partial class GqlQueryParser
             if (Take("NEXT"))
             {
                 if (stages.Count == 0 || stages[^1] is GqlNextStage or GqlReturnStage { IsWith: true } || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
-                { Error("GQL0002", "NEXT requires a RETURN or data-modifying segment and a following segment.", clauseStart); break; }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid, clauseStart); break; }
                 if (stages[^1] is not GqlReturnStage) { hasNamedBinding = false; }
                 stages.Add(new GqlNextStage(Span(clauseStart, Previous)));
                 segmentWrites = false;
@@ -170,7 +170,7 @@ public sealed partial class GqlQueryParser
                 else { Take("ALL"); }
                 returnStar = Take(TokenType.Asterisk);
                 if (returnStar && !hasNamedBinding)
-                { Error("GQL0002", "RETURN * requires at least one named binding.", Previous); }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid2, Previous); }
                 if (!returnStar)
                 {
                     do
@@ -204,7 +204,7 @@ public sealed partial class GqlQueryParser
                         {
                             if (Take("FIRST")) { nullOrdering = GqlNullOrdering.First; }
                             else if (Take("LAST")) { nullOrdering = GqlNullOrdering.Last; }
-                            else { Error("GQL0002", "Expected FIRST or LAST after NULLS.", Current); }
+                            else { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid3, Current); }
                         }
                         orderBy.Add(new GqlSortItem(expression, direction, nullOrdering));
                     } while (!Failed && Take(TokenType.Comma));
@@ -213,7 +213,7 @@ public sealed partial class GqlQueryParser
                 {
                     bool limiting = Is("LIMIT");
                     if (limit is not null || !limiting && offset is not null)
-                    { Error("GQL0002", "Expected OFFSET or SKIP before LIMIT, with each paging clause at most once.", Current); break; }
+                    { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid4, Current); break; }
                     Advance();
                     var value = ParsePageValue();
                     if (limiting) { limit = value; } else { offset = value; }
@@ -233,7 +233,7 @@ public sealed partial class GqlQueryParser
         }
         if (!Failed && (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: true } ||
             !segmentWrites && (stages.Count == 0 || stages[^1] is not GqlReturnStage { IsWith: false })))
-        { Error("GQL0002", "A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, DELETE, SET or REMOVE.", Current); }
+        { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid5, Current); }
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }
 
@@ -247,7 +247,7 @@ public sealed partial class GqlQueryParser
     private GqlExpression ParsePageValue()
     {
         if (Current.Type is TokenType.Integer or TokenType.Parameter or TokenType.Colon || Current.Text == "?") { return ParseScalar(); }
-        Error("GQL0002", "Expected an unsigned integer or parameter.", Current);
+        Error("CG00002", ErrorMessages.GqlQueryParserParsePageValueVoid, Current);
         return new GqlLiteralExpression(null, Span(Current, Current));
     }
 

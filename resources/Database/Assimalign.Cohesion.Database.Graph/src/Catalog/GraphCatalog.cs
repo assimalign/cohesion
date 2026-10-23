@@ -345,7 +345,7 @@ public sealed class GraphCatalog
     }
 
     internal static GraphCatalogException Conflict()
-        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.") { IsConflict = true };
+        => new(ErrorMessages.GraphCatalogConflictGraphCatalog) { IsConflict = true };
 
     private void RequireMutableDefinition(Guid id, TransactionSnapshot snapshot, string operation, bool labelOnly = false)
     {
@@ -567,7 +567,7 @@ public sealed class GraphCatalog
         ArgumentNullException.ThrowIfNull(context);
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.GraphCatalogEnsureActiveFailure);
         }
     }
 

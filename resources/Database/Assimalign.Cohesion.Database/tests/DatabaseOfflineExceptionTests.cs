@@ -19,7 +19,7 @@ public class DatabaseOfflineExceptionTests
     [InlineData("CS04004")]
     [InlineData("COHDBK002")]
     [InlineData("CD06102")]
-    [InlineData("COHDBG012")]
+    [InlineData("CG06012")]
     [InlineData("COHDBB002")]
     public void Create_UnconfirmedCommit_ShouldPopulateDiagnostics(string code)
     {
@@ -41,7 +41,7 @@ public class DatabaseOfflineExceptionTests
     [InlineData("CS04004")]
     [InlineData("COHDBK002")]
     [InlineData("CD06102")]
-    [InlineData("COHDBG012")]
+    [InlineData("CG06012")]
     [InlineData("COHDBB002")]
     public void Constructor_ModelCode_ShouldPopulateDiagnostics(string code)
     {

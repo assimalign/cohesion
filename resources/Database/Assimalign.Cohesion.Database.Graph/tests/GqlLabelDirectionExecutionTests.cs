@@ -192,7 +192,7 @@ public sealed class GqlLabelDirectionExecutionTests
     }
 
     /// <param name="gql">An insertion that would have to guess a label, a type or a direction.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Insertion: |, !, %, either-direction and untyped edges are COHDBG001 and write nothing")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Insertion: |, !, %, either-direction and untyped edges are CG05001 and write nothing")]
     [InlineData("INSERT (:A|B)")]
     [InlineData("INSERT (:!A)")]
     [InlineData("INSERT (:%)")]
@@ -217,7 +217,7 @@ public sealed class GqlLabelDirectionExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
         (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
     }
@@ -228,7 +228,7 @@ public sealed class GqlLabelDirectionExecutionTests
     /// of letting the store's argument check escape as an uncoded exception.
     /// </summary>
     /// <param name="gql">An insertion naming an all-whitespace label, type or property key.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Insertion: an all-whitespace label, type or property key is COHDBG001 and writes nothing")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Insertion: an all-whitespace label, type or property key is CG05001 and writes nothing")]
     [InlineData("INSERT (:\" \")")]
     [InlineData("INSERT (n IS \" \")")]
     [InlineData("INSERT (:A&\" \")")]
@@ -249,7 +249,7 @@ public sealed class GqlLabelDirectionExecutionTests
             await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         error.Message.ShouldContain("only whitespace", Case.Sensitive);
         (await RowsAsync(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
         (await RowsAsync(session, "MATCH ()-[r]->() RETURN r")).ShouldBeEmpty();
@@ -264,22 +264,22 @@ public sealed class GqlLabelDirectionExecutionTests
     /// </summary>
     /// <param name="gql">A read naming a label or type the catalog does not define.</param>
     /// <param name="expected">The comma-separated names it returns, regardless of row order, or empty.</param>
-    /// <param name="code">The warning's code: COHDBG010 for a label, COHDBG011 for a relationship type.</param>
+    /// <param name="code">The warning's code: CG01010 for a label, CG01011 for a relationship type.</param>
     /// <param name="name">The unknown name the warning quotes.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Label expressions: an unknown name anywhere in MATCH matches nothing and warns")]
-    [InlineData("MATCH (n:A|Missing) RETURN n.name", "a,ab", "COHDBG010", "Missing")]
-    [InlineData("MATCH (n:!Missing) RETURN n.name", "a,b,ab,c,u", "COHDBG010", "Missing")]
-    [InlineData("MATCH (n:A&!(B|Missing)) RETURN n.name", "a", "COHDBG010", "Missing")]
-    [InlineData("MATCH (n IS Missing|%) RETURN n.name", "a,b,ab,c", "COHDBG010", "Missing")]
-    [InlineData("MATCH (n:A&Missing) RETURN n.name", "", "COHDBG010", "Missing")]
-    [InlineData("MATCH ()-[r:T|Missing]->() RETURN r.name", "t", "COHDBG011", "Missing")]
-    [InlineData("MATCH ()-[r:!Missing]->() RETURN r.name", "t,u1", "COHDBG011", "Missing")]
-    [InlineData("MATCH ()-[r:Missing]->() RETURN r.name", "", "COHDBG011", "Missing")]
-    [InlineData("MATCH (n) WHERE n:Missing RETURN n.name", "", "COHDBG010", "Missing")]
-    [InlineData("MATCH (n) WHERE n IS NOT LABELED A|Missing RETURN n.name", "b,c,u", "COHDBG010", "Missing")]
-    [InlineData("MATCH ()-[r]->() WHERE r:Missing RETURN r.name", "", "COHDBG011", "Missing")]
-    [InlineData("MATCH ()-[r]->() WHERE r:A RETURN r.name", "", "COHDBG011", "A")]
-    [InlineData("MATCH (n) WHERE n:T RETURN n.name", "", "COHDBG010", "T")]
+    [InlineData("MATCH (n:A|Missing) RETURN n.name", "a,ab", "CG01010", "Missing")]
+    [InlineData("MATCH (n:!Missing) RETURN n.name", "a,b,ab,c,u", "CG01010", "Missing")]
+    [InlineData("MATCH (n:A&!(B|Missing)) RETURN n.name", "a", "CG01010", "Missing")]
+    [InlineData("MATCH (n IS Missing|%) RETURN n.name", "a,b,ab,c", "CG01010", "Missing")]
+    [InlineData("MATCH (n:A&Missing) RETURN n.name", "", "CG01010", "Missing")]
+    [InlineData("MATCH ()-[r:T|Missing]->() RETURN r.name", "t", "CG01011", "Missing")]
+    [InlineData("MATCH ()-[r:!Missing]->() RETURN r.name", "t,u1", "CG01011", "Missing")]
+    [InlineData("MATCH ()-[r:Missing]->() RETURN r.name", "", "CG01011", "Missing")]
+    [InlineData("MATCH (n) WHERE n:Missing RETURN n.name", "", "CG01010", "Missing")]
+    [InlineData("MATCH (n) WHERE n IS NOT LABELED A|Missing RETURN n.name", "b,c,u", "CG01010", "Missing")]
+    [InlineData("MATCH ()-[r]->() WHERE r:Missing RETURN r.name", "", "CG01011", "Missing")]
+    [InlineData("MATCH ()-[r]->() WHERE r:A RETURN r.name", "", "CG01011", "A")]
+    [InlineData("MATCH (n) WHERE n:T RETURN n.name", "", "CG01010", "T")]
     public async Task Execute_UnknownLabelOrType_ShouldMatchNothingAndWarnAsync(string gql, string expected, string code, string name)
     {
         // Arrange
@@ -327,11 +327,11 @@ public sealed class GqlLabelDirectionExecutionTests
 
     /// <param name="gql">A labeled predicate over an unusable variable.</param>
     /// <param name="code">The binding code it reports.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Labeled predicate: a path operand is COHDBG003, an unbound variable COHDBG001")]
-    [InlineData("MATCH p = (a)-[r]->(b) WHERE p:A RETURN a", "COHDBG003")]
-    [InlineData("MATCH p = (a)-[r]->(b) WHERE p IS LABELED A RETURN a", "COHDBG003")]
-    [InlineData("MATCH (n) WHERE m:A RETURN n", "COHDBG001")]
-    [InlineData("MATCH (n) WHERE m IS NOT LABELED A RETURN n", "COHDBG001")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Labeled predicate: a path operand is CG03003, an unbound variable CG05001")]
+    [InlineData("MATCH p = (a)-[r]->(b) WHERE p:A RETURN a", "CG03003")]
+    [InlineData("MATCH p = (a)-[r]->(b) WHERE p IS LABELED A RETURN a", "CG03003")]
+    [InlineData("MATCH (n) WHERE m:A RETURN n", "CG05001")]
+    [InlineData("MATCH (n) WHERE m IS NOT LABELED A RETURN n", "CG05001")]
     public async Task Execute_LabeledPredicateOverUnusableVariable_ShouldFailAsync(string gql, string code)
     {
         // Arrange
@@ -352,7 +352,7 @@ public sealed class GqlLabelDirectionExecutionTests
     /// It now fails at parse time on both session seams and deletes nothing.
     /// </summary>
     /// <param name="terminator">The line terminator, by name.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph] - Cypher arrows: --> fails with GQL0008 at every terminator and changes nothing")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Cypher arrows: --> fails with CG00008 at every terminator and changes nothing")]
     [InlineData("LF")]
     [InlineData("CR")]
     [InlineData("CRLF")]
@@ -384,7 +384,7 @@ public sealed class GqlLabelDirectionExecutionTests
                 await session.ExecuteAsync(new GraphQueryRequest((GqlQueryStatement)new GqlQueryParser().Parse(gql)), CancellationToken.None));
 
             // Assert
-            text.Message.ShouldStartWith("GQL parse error GQL0008: ", Case.Sensitive);
+            text.Message.ShouldStartWith("GQL parse error CG00008: ", Case.Sensitive);
             typed.Message.ShouldBe(text.Message);
         }
         (await ColumnAsync(session, "MATCH (n:Person) RETURN n.name")).ShouldBe(["Alice", "Bob"], ignoreOrder: true);
@@ -402,8 +402,8 @@ public sealed class GqlLabelDirectionExecutionTests
     [InlineData("MATCH (a:Person)<~(b) DETACH DELETE a", "CK00001")]
     [InlineData("MATCH (a:Person)~>(b) DETACH DELETE a", "CK00001")]
     [InlineData("INSERT (:Person)~>(:Person)", "CK00001")]
-    [InlineData("MATCH (a:Person)<--(b) DETACH DELETE a", "GQL0002")]
-    [InlineData("MATCH (a:Person)<-->(b) DETACH DELETE a", "GQL0002")]
+    [InlineData("MATCH (a:Person)<--(b) DETACH DELETE a", "CG00002")]
+    [InlineData("MATCH (a:Person)<-->(b) DETACH DELETE a", "CG00002")]
     public async Task Execute_UnsupportedEdge_ShouldFailWithoutEffectAsync(string gql, string code)
     {
         // Arrange

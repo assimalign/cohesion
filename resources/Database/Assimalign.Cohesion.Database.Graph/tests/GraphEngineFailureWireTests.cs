@@ -36,15 +36,15 @@ public sealed class GraphEngineFailureWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Wire: child failures report execution failure and preserve the session")]
-    [InlineData(0, false, "COHDBG006")]
-    [InlineData(1, false, "COHDBG006")]
-    [InlineData(2, false, "COHDBG007")]
-    [InlineData(3, false, "COHDBG019")]
+    [InlineData(0, false, "CG06006")]
+    [InlineData(1, false, "CG06006")]
+    [InlineData(2, false, "CG04007")]
+    [InlineData(3, false, "CG09019")]
     [InlineData(4, false, "CK06003")]
-    [InlineData(0, true, "COHDBG006")]
-    [InlineData(1, true, "COHDBG006")]
-    [InlineData(2, true, "COHDBG007")]
-    [InlineData(3, true, "COHDBG019")]
+    [InlineData(0, true, "CG06006")]
+    [InlineData(1, true, "CG06006")]
+    [InlineData(2, true, "CG04007")]
+    [InlineData(3, true, "CG09019")]
     [InlineData(4, true, "CK06003")]
     public async Task Execute_EngineFailure_ShouldKeepSessionReady(int kind, bool explicitTransaction, string code)
     {
@@ -88,7 +88,7 @@ public sealed class GraphEngineFailureWireTests
             await client.SendAsync(GraphProtocolMessageType.Execute, GraphProtocolExecuteMessage.Create("INSERT (:Refused)").Encode());
             var refused = await client.ExpectAsync(ProtocolMessageType.Error);
             var refusal = ProtocolErrorMessage.Decode(refused.Payload.Span);
-            refusal.Message.ShouldStartWith("COHDBG007:", Case.Sensitive);
+            refusal.Message.ShouldStartWith("CG04007:", Case.Sensitive);
             await transaction!.RollbackAsync(timeout.Token);
         }
         await client.SendAsync(ProtocolMessageType.Ping);
@@ -116,7 +116,7 @@ public sealed class GraphEngineFailureWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldStartWith("COHDBG019:", Case.Sensitive);
+        error.Message.ShouldStartWith("CG09019:", Case.Sensitive);
         await client.SendAsync(ProtocolMessageType.Ping);
         await client.ExpectAsync(ProtocolMessageType.Pong);
         harness.Server.Sessions.ShouldHaveSingleItem();
@@ -139,21 +139,21 @@ public sealed class GraphEngineFailureWireTests
 
         // Assert
         retry.InnerException.ShouldBeSameAs(conflict);
-        retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG007");
+        retry.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04007");
         retry.Message.ShouldBe(conflict.Message);
-        corruption.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        corruption.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
         corruption.InnerException!.InnerException.ShouldBeSameAs(malformed);
-        lifetime.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG019");
+        lifetime.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG09019");
         lifetime.InnerException.ShouldBeSameAs(disposed);
         database.TranslateFailure(lifetime).ShouldBeSameAs(lifetime);
         var mismatch = database.TranslateFailure(new InvalidOperationException("Data mismatch.")).ShouldBeOfType<DatabaseException>();
-        mismatch.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        mismatch.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         mismatch.Message.ShouldBe("Data mismatch.");
         var mixed = database.TranslateFailure(new AggregateException(conflict, new IndexException("Index failed during cleanup.")))
             .ShouldBeOfType<DatabaseException>();
-        mixed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        mixed.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
         var storageAndDisposal = database.TranslateFailure(new AggregateException(disposed, new IndexException("Index failed.")))
             .ShouldBeOfType<DatabaseException>();
-        storageAndDisposal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG006");
+        storageAndDisposal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG06006");
     }
 }

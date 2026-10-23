@@ -73,9 +73,9 @@ internal sealed class GraphAggregateAccumulator
             }
         }
         catch (ArithmeticException error)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticFailure, _expression.Location, error); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.ArithmeticFailure, _expression.Location, error); }
         catch (DatabaseTypeException error)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeLimit, _expression.Location, error); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.CompositeLimit, _expression.Location, error); }
     }
 
     internal object? Finish()
@@ -101,13 +101,13 @@ internal sealed class GraphAggregateAccumulator
             return checked((long)(_exactSum / _scale));
         }
         catch (ArithmeticException error)
-        { throw new GraphPlanningException("COHDBG013", ErrorMessages.ArithmeticFailure, _expression.Location, error); }
+        { throw new GraphPlanningException("CG02013", ErrorMessages.ArithmeticFailure, _expression.Location, error); }
     }
 
     private void AddNumber(object value)
     {
         if (!GraphValueComparer.IsNumber(value))
-        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture,
+        { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture,
             ErrorMessages.AggregateNumericRequired, _expression.Function.ToString().ToUpperInvariant()), _expression.Location); }
         double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
         // Neo4j AvgFunction.scala:69-70 uses incrementalAverage. Weighted terms avoid

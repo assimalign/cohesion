@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// decision 2026-10-02: "do what Neo4j does"). A chain of one operator, <c>:A:B:...</c>,
 /// <c>A&amp;B&amp;...</c>, <c>A|B|...</c> or <c>p AND q AND ...</c>, is one n-ary node of any length,
 /// as Neo4j's <c>Conjunctions</c>, <c>Disjunctions</c> and <c>Ands</c> are, and only the stack bounds
-/// genuine nesting: a parse that runs out of it reports <c>GQL0009</c> instead of overflowing.
+/// genuine nesting: a parse that runs out of it reports <c>CG00009</c> instead of overflowing.
 /// </summary>
 public sealed class GqlLabelChainParserTests
 {
@@ -164,13 +164,13 @@ public sealed class GqlLabelChainParserTests
     }
 
     /// <summary>
-    /// Nesting deeper than the parsing thread's stack is one GQL0009 at the group that could not be
+    /// Nesting deeper than the parsing thread's stack is one CG00009 at the group that could not be
     /// entered, never a process crash, and the parser instance serves the next statement.
     /// </summary>
     /// <param name="template">The statement, with the nested text at <c>{0}</c>.</param>
     /// <param name="open">The text that opens one level.</param>
     /// <param name="close">The text that closes one level.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Label chains: nesting past a small thread's stack is GQL0009, not a crash")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Label chains: nesting past a small thread's stack is CG00009, not a crash")]
     [InlineData("MATCH (n:{0}) RETURN n", "(", ")")]
     [InlineData("MATCH (n:{0}) RETURN n", "!(", ")")]
     [InlineData("MATCH (a)-[r:{0}]->(b) RETURN r", "(T|", ")")]
@@ -193,7 +193,7 @@ public sealed class GqlLabelChainParserTests
 
         // Assert
         var error = deep.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0009");
+        error.Code.ShouldBe("CG00009");
         error.Message.ShouldNotBeNull().ShouldContain("stack", Case.Sensitive);
         int start = error.Start.ShouldNotBeNull();
         start.ShouldBeInRange(0, gql.Length - 1);

@@ -18,10 +18,10 @@ public sealed class GraphTransactionTextWireTests
         await connection.ExecuteAsync("INSERT (:Pending)", cancellationToken: harness.Token);
         var duplicate = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token));
-        duplicate.Diagnostics.ShouldContain(item => item.Code == "COHDBG022");
+        duplicate.Diagnostics.ShouldContain(item => item.Code == "CG04022");
         var refused = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("INSERT (:Escaped)", cancellationToken: harness.Token));
-        refused.Diagnostics.ShouldContain(item => item.Code == "COHDBG007");
+        refused.Diagnostics.ShouldContain(item => item.Code == "CG04007");
         await connection.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token);
         (await connection.QueryAsync("MATCH (n) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
     }
@@ -37,7 +37,7 @@ public sealed class GraphTransactionTextWireTests
         {
             await foreach (var _ in connection.QueryPathsAsync("START TRANSACTION", cancellationToken: harness.Token)) { }
         });
-        error.Diagnostics.ShouldContain(item => item.Code == "COHDBG001");
+        error.Diagnostics.ShouldContain(item => item.Code == "CG05001");
         harness.Server.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull().CurrentTransaction.ShouldBeNull();
         await connection.ExecuteAsync("START TRANSACTION", cancellationToken: harness.Token);
         await connection.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token);
@@ -58,7 +58,7 @@ public sealed class GraphTransactionTextWireTests
             await first.QueryAsync(failure, cancellationToken: harness.Token));
         var refused = await Should.ThrowAsync<GraphClientException>(async () =>
             await first.ExecuteAsync("INSERT (:Escaped)", cancellationToken: harness.Token));
-        refused.Diagnostics.ShouldContain(item => item.Code == "COHDBG007");
+        refused.Diagnostics.ShouldContain(item => item.Code == "CG04007");
         var session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         if (explicitRollback) { await first.ExecuteAsync("ROLLBACK", cancellationToken: harness.Token); }
         await first.DisposeAsync();

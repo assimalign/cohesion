@@ -32,9 +32,9 @@ await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2
     if (paths.Paths.Count != 1 || paths.Paths[0].Relationships.Count != 1) { throw new InvalidOperationException("Path smoke mismatch."); }
     checks++;
 }
-await Refuse(new() { WorkUnits = 3 }, "COHDBG004");
-await Refuse(new() { MemoryBytes = 1024 }, "COHDBG020");
-await Refuse(new() { WorkUnits = 0 }, "COHDBG021");
+await Refuse(new() { WorkUnits = 3 }, "CG05004");
+await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
+await Refuse(new() { WorkUnits = 0 }, "CG08021");
 await Check("RETURN 7", [[7L]]);
 await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationToken.None);
 await session.ExecuteAsync("INSERT (:Uncommitted)", cancellationToken: CancellationToken.None);

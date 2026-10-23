@@ -21,10 +21,10 @@ public sealed class GqlOptionalMatchTests
     private const string seed = "INSERT (a:Person {name:'Alice', age:42})-[:KNOWS]->(b:Person {name:'Bob', age:17}), (:Person {name:'Isolated', age:30})";
 
     [Theory(DisplayName = "Cohesion Test [Graph] - OPTIONAL MATCH: unknown names null-extend and warn without emptying the statement")]
-    [InlineData("MATCH (a:Person) OPTIONAL MATCH (b:Missing) RETURN a.name, b.name", "COHDBG010", false)]
-    [InlineData("MATCH (a:Person) OPTIONAL MATCH (a)-[:MISSING]->(b) RETURN a.name, b.name", "COHDBG011", false)]
-    [InlineData("MATCH (a:Person) OPTIONAL MATCH (b) WHERE b:Missing RETURN a.name, b.name", "COHDBG010", false)]
-    [InlineData("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) MATCH (c:Missing) RETURN a.name, b.name", "COHDBG010", true)]
+    [InlineData("MATCH (a:Person) OPTIONAL MATCH (b:Missing) RETURN a.name, b.name", "CG01010", false)]
+    [InlineData("MATCH (a:Person) OPTIONAL MATCH (a)-[:MISSING]->(b) RETURN a.name, b.name", "CG01011", false)]
+    [InlineData("MATCH (a:Person) OPTIONAL MATCH (b) WHERE b:Missing RETURN a.name, b.name", "CG01010", false)]
+    [InlineData("MATCH (a:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) MATCH (c:Missing) RETURN a.name, b.name", "CG01010", true)]
     public async Task Execute_UnknownOptionalName_ShouldKeepNullRowsAndTransactionAsync(string source, string code, bool empty)
     {
         // Arrange
@@ -74,7 +74,7 @@ public sealed class GqlOptionalMatchTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG003");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG03003");
         (await QueryAsync(session, "MATCH (n) RETURN n.name")).Count.ShouldBe(3);
         (await QueryAsync(session, "MATCH ()-[r]->() RETURN r")).Count.ShouldBe(1);
     }
@@ -115,9 +115,9 @@ public sealed class GqlOptionalMatchTests
         await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         // Act / Assert
         var planError = await Should.ThrowAsync<DatabaseException>(async () => await PlanAsync(database, session, source, paths: true));
-        planError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        planError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(source), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Paths: a mandatory binding remains projectable alongside optionals")]
@@ -149,10 +149,10 @@ public sealed class GqlOptionalMatchTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - MATCH: malformed clause ASTs and optional SHOW composition fail with COHDBG001")]
+    [Fact(DisplayName = "Cohesion Test [Graph] - MATCH: malformed clause ASTs and optional SHOW composition fail with CG05001")]
     public async Task Execute_MalformedClauseAst_ShouldRejectAsync()
     {
         // Arrange
@@ -170,7 +170,7 @@ public sealed class GqlOptionalMatchTests
         foreach (var query in queries)
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
     }
 
@@ -201,9 +201,9 @@ public sealed class GqlOptionalMatchTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: materialization and candidate budgets remain effective across clauses")]
-    [InlineData(317, "MATCH (a:N) MATCH (b:N) RETURN a", "retained execution-memory budget", "COHDBG020")]
-    [InlineData(317, "MATCH (a:N) OPTIONAL MATCH (b:N) RETURN a", "retained execution-memory budget", "COHDBG020")]
-    [InlineData(1001, "MATCH (a:N) OPTIONAL MATCH (b:N) WHERE FALSE RETURN a", "1000000 candidate expansions", "COHDBG004")]
+    [InlineData(317, "MATCH (a:N) MATCH (b:N) RETURN a", "retained execution-memory budget", "CG05020")]
+    [InlineData(317, "MATCH (a:N) OPTIONAL MATCH (b:N) RETURN a", "retained execution-memory budget", "CG05020")]
+    [InlineData(1001, "MATCH (a:N) OPTIONAL MATCH (b:N) WHERE FALSE RETURN a", "1000000 candidate expansions", "CG05004")]
     public async Task Execute_AcrossClauseBounds_ShouldKeepLimitsAsync(int nodes, string source, string message, string code)
     {
         // Arrange
@@ -214,7 +214,7 @@ public sealed class GqlOptionalMatchTests
         await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N)", nodes)), cancellationToken: cancellation.Token);
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql(source, null,
-            new() { MemoryBytes = code == "COHDBG020" ? 32768 : null }), cancellation.Token));
+            new() { MemoryBytes = code == "CG05020" ? 32768 : null }), cancellation.Token));
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Message.ShouldContain(message, Case.Sensitive);

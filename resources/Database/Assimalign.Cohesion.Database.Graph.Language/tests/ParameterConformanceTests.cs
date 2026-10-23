@@ -28,7 +28,7 @@ public sealed class ParameterConformanceTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("GQL0002");
+        diagnostic.Code.ShouldBe("CG00002");
         diagnostic.Start.ShouldBe(query.IndexOf(form, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + form.Length);
         diagnostic.Message!.ShouldContain("$name");
@@ -50,7 +50,7 @@ public sealed class ParameterConformanceTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("GQL0002");
+        diagnostic.Code.ShouldBe("CG00002");
         diagnostic.Message!.ShouldContain("Unexpected character");
         diagnostic.Message!.ShouldNotContain("$name");
     }

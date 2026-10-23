@@ -179,7 +179,7 @@ public sealed class GraphQueryTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("INSERT (:Person {name: 'isolated'}), (a:Person {name: 'connected'})-[:LINK]->(b:Other {name: 'target'})");
         var exception = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:Person) DELETE a"));
-        exception.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        exception.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         (await Rows(session, "MATCH (a:Person) RETURN a.name")).Select(row => row.GetString(0)).Order().ShouldBe(["connected", "isolated"]);
         (await Rows(session, "MATCH (a)-[r:LINK]->(b) RETURN r")).Count.ShouldBe(1);
     }
@@ -220,10 +220,10 @@ public sealed class GraphQueryTests
     }
 
     [Theory]
-    [InlineData("MATCH (a)-[a]->(b) RETURN a", "COHDBG003")]
-    [InlineData("MATCH (a) RETURN unbound", "COHDBG001")]
-    [InlineData("INSERT (a)-[r]-(b)", "COHDBG001")]
-    [InlineData("INSERT (a)-[r]->(b)", "COHDBG001")]
+    [InlineData("MATCH (a)-[a]->(b) RETURN a", "CG03003")]
+    [InlineData("MATCH (a) RETURN unbound", "CG05001")]
+    [InlineData("INSERT (a)-[r]-(b)", "CG05001")]
+    [InlineData("INSERT (a)-[r]->(b)", "CG05001")]
     public async Task BindingAndSchemaDiagnostics_HaveStableCodes(string query, string code)
     {
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
@@ -290,11 +290,11 @@ public sealed class GraphQueryTests
         GqlRelationshipPattern edge = new("r", null, (GqlPatternDirection)99, new Dictionary<string, GqlExpression>());
         var malformed = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, node], [edge])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
         var invalid = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(malformed)));
-        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+        invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
 
         // Predicates (#1139 follow-up): AND is one n-ary GqlLogicalExpression, so a binary AND,
         // an undefined operator, a missing operand or list, and a chain of fewer than two operands
-        // are COHDBG001. Depth has no fixed limit (GqlLabelChainExecutionTests).
+        // are CG05001. Depth has no fixed limit (GqlLabelChainExecutionTests).
         GqlExpression one = new GqlBinaryExpression(new GqlLiteralExpression(1L), "=", new GqlLiteralExpression(1L));
         GqlExpression[] badChains =
         [
@@ -309,7 +309,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badChain, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         }
 
         // Label expressions (#1139): a null operand, name or operand list, a chain of fewer than
@@ -333,7 +333,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([badNode], [])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         }
         GqlRelationshipPattern[] edges =
         [
@@ -348,7 +348,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node, new("b", [], empty)], [badEdge])], null, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         }
         GqlExpression[] predicates =
         [
@@ -361,11 +361,11 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([new GqlPathPattern([node], [])], badPredicate, [], [], false, [new GqlProjection(new GqlVariableExpression("a"))]));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         }
 
         // Storage cannot hold an empty label, type or property key, so a hand-built insertion
-        // naming one is COHDBG001 before anything is written.
+        // naming one is CG05001 before anything is written.
         GqlPathPattern[] unstorable =
         [
             new([new(null, [""], empty)], []),
@@ -379,7 +379,7 @@ public sealed class GraphQueryTests
         {
             var statement = new GqlQueryStatement(new GqlQueryExpression([], null, [insertion], [], false, []));
             (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement))))
-                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         }
         (await Rows(session, "MATCH (n) RETURN n")).Count.ShouldBe(2);
 

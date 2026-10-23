@@ -73,12 +73,12 @@ internal sealed class GraphQueryResult : DatabaseResultSet
             null => ReadOnlyMemory<byte>.Empty,
             JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
             string text => Encoding.UTF8.GetBytes(text),
-            _ => throw new DatabaseException($"Field {ordinal} is not JSON or a string."),
+            _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowGetBytesDatabase, ordinal)),
         };
         public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => _values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is null.");
+        private object Required(int ordinal) => _values[ordinal] ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRowRequiredDatabase, ordinal));
     }
 }

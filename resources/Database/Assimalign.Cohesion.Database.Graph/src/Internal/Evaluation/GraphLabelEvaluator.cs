@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// and no count or depth limit applies (as Neo4j). Validation and the name walks use an explicit
 /// stack and hold for a tree of any shape. Evaluation recurses only where the tree nests (a group
 /// inside a chain, or a negation), and checks the stack before each descent: a tree deeper than the
-/// executing thread's stack fails its statement with <c>COHDBG008</c> instead of overflowing it.
+/// executing thread's stack fails its statement with <c>CG05008</c> instead of overflowing it.
 /// </para>
 /// <para>
 /// The planner validates every expression before execution, so evaluation sees only the five
@@ -35,7 +35,7 @@ internal static class GraphLabelEvaluator
     /// <summary>
     /// Validates an expression's shape and lists the names it mentions, in source order. A null
     /// operand, name or operand list, a chain with fewer than two operands, or an unknown kind is
-    /// <c>COHDBG001</c>.
+    /// <c>CG05001</c>.
     /// </summary>
     /// <param name="expression">The expression to validate.</param>
     /// <returns>Every name the expression mentions, including names under <c>!</c> and <c>|</c>.</returns>
@@ -64,19 +64,19 @@ internal static class GraphLabelEvaluator
                     PushOperands(pending, disjunction.Operands, "disjunction");
                     break;
                 case null:
-                    throw new GraphPlanningException("COHDBG001", "A label expression has a missing operand.");
+                    throw new GraphPlanningException("CG05001", ErrorMessages.GraphLabelEvaluatorNamesGraphPlanning);
                 case GqlLabelName:
-                    throw new GraphPlanningException("COHDBG001", "A label name cannot be null.");
+                    throw new GraphPlanningException("CG05001", ErrorMessages.GraphLabelEvaluatorNamesGraphPlanning2);
                 default:
-                    throw new GraphPlanningException("COHDBG001", "Unsupported label expression; use a name, %, !, & or |.");
+                    throw new GraphPlanningException("CG05001", ErrorMessages.GraphLabelEvaluatorNamesGraphPlanning3);
             }
         }
         return names;
 
         static void PushOperands(Stack<GqlLabelExpression?> pending, IReadOnlyList<GqlLabelExpression>? operands, string kind)
         {
-            if (operands is null) { throw new GraphPlanningException("COHDBG001", $"A label {kind} has no operand list."); }
-            if (operands.Count < 2) { throw new GraphPlanningException("COHDBG001", $"A label {kind} needs at least two operands."); }
+            if (operands is null) { throw new GraphPlanningException("CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphLabelEvaluatorNamesGraphPlanning4, kind)); }
+            if (operands.Count < 2) { throw new GraphPlanningException("CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphLabelEvaluatorNamesGraphPlanning5, kind)); }
             // Pushed last to first, so names list in source order.
             for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
         }
@@ -153,7 +153,7 @@ internal static class GraphLabelEvaluator
                 }
                 return false;
             default:
-                throw new GraphPlanningException("COHDBG001", "Unsupported label expression.");
+                throw new GraphPlanningException("CG05001", ErrorMessages.LabelEvaluatorMatchesGraphPlanning);
         }
     }
 
@@ -267,7 +267,7 @@ internal static class GraphLabelEvaluator
                 }
                 return false;
             default:
-                throw new GraphPlanningException("COHDBG001", "Unsupported label expression.");
+                throw new GraphPlanningException("CG05001", ErrorMessages.LabelEvaluatorMatchesGraphPlanning);
         }
     }
 

@@ -22,6 +22,10 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 /// </remarks>
 public sealed partial class GraphStore
 {
+    private static readonly string _errorGraphStoreEnsureUnchangedFailure = ErrorMessages.GraphStoreEnsureUnchangedFailure;
+
+    private static readonly string _errorGraphStoreLockAsyncFailure2 = ErrorMessages.GraphStoreLockAsyncFailure2;
+
     private readonly GraphStorage _storage;
     private readonly TransactionCoordinator _coordinator;
     private readonly object _sync = new();
@@ -83,7 +87,7 @@ public sealed partial class GraphStore
     /// <param name="storage">Graph file set.</param>
     /// <exception cref="ArgumentNullException"><paramref name="storage"/> is null.</exception>
     /// <exception cref="IndexFormatException">An index tree is in another B-tree page format.</exception>
-    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>COHDBG017</c>), or a persisted index registration is malformed.</exception>
+    /// <exception cref="StorageCorruptionException">A graph record or registration has an unsupported format (<c>CG06017</c>), or a persisted index registration is malformed.</exception>
     public static void EnsureIndexFormat(GraphStorage storage)
     {
         ArgumentNullException.ThrowIfNull(storage);
@@ -205,7 +209,7 @@ public sealed partial class GraphStore
         { throw new TransactionAbortedException(ErrorMessages.EndpointDeleted); }
         if (FindNode(sourceId, latest) is null || FindNode(targetId, latest) is null)
         {
-            throw new InvalidOperationException("A relationship requires two visible existing endpoints.");
+            throw new InvalidOperationException(ErrorMessages.StoreCreateRelationshipAsyncFailure);
         }
         ulong id = relationship.Id;
         EnsureNew(2, id);
@@ -342,7 +346,7 @@ public sealed partial class GraphStore
         if (node is null) { return; }
         var incident = await GetIncidentAsync(id, Latest(context), cancellationToken).ConfigureAwait(false);
         foreach (var relationship in incident) { EnsureUnchanged(2, relationship.Id, context); }
-        if (incident.Count != 0 && !detach) { throw new InvalidOperationException("Cannot delete a connected node without DETACH DELETE."); }
+        if (incident.Count != 0 && !detach) { throw new InvalidOperationException(ErrorMessages.ConnectedNodeDeletion); }
         var indexes = Definitions(Latest(context));
         await ApplyAsync(context, async bracket =>
         {
@@ -551,14 +555,14 @@ public sealed partial class GraphStore
     private async ValueTask LockAsync(TransactionContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.State != TransactionState.Active) { throw new InvalidOperationException("Graph mutation requires an active transaction."); }
+        if (context.State != TransactionState.Active) { throw new InvalidOperationException(ErrorMessages.GraphStoreLockAsyncFailure); }
         await _coordinator.LockManager.AcquireAsync(context.Sequence, LockResource.Database(), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (context.State != TransactionState.Active)
             {
-                throw new TransactionAbortedException("Graph transaction ended while waiting for the writer lock.");
+                throw new TransactionAbortedException(_errorGraphStoreLockAsyncFailure2);
             }
         }
         catch
@@ -577,7 +581,7 @@ public sealed partial class GraphStore
         var latest = Find(kind, id, Latest(context));
         if (prior?.Reference != latest?.Reference)
         {
-            throw new TransactionAbortedException("Graph write conflict: the addressed record changed after the transaction snapshot.");
+            throw new TransactionAbortedException(_errorGraphStoreEnsureUnchangedFailure);
         }
     }
 

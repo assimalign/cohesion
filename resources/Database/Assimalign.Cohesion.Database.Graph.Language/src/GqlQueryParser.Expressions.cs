@@ -53,7 +53,7 @@ public sealed partial class GqlQueryParser
             if (precedence < minimum) { break; }
             if (precedence == 5 && compared && op != "IS")
             {
-                Error("GQL0002", "Comparison predicates cannot be chained; use AND or parentheses.", Current);
+                Error("CG00002", ErrorMessages.GqlQueryParserParseExpressionVoid, Current);
                 break;
             }
             if (op == "<-")
@@ -73,14 +73,14 @@ public sealed partial class GqlQueryParser
                     bool? truth = null;
                     if (Take("TRUE")) { truth = true; }
                     else if (Take("FALSE")) { truth = false; }
-                    else if (!Take("UNKNOWN")) { Error("GQL0002", "Expected NULL, TRUE, FALSE or UNKNOWN after IS [NOT].", Current); }
+                    else if (!Take("UNKNOWN")) { Error("CG00002", ErrorMessages.GqlQueryParserParseExpressionVoid2, Current); }
                     left = new GqlTruthTestExpression(left, truth, negated, Span(start, Previous));
                 }
             }
             else if (op == "IN")
             {
                 if (Current.Type == TokenType.LeftParen && StartsTuple())
-                { Error("GQL0002", "IN requires a list value, such as the [...] list form.", Current); break; }
+                { Error("CG00002", ErrorMessages.GqlQueryParserParseExpressionVoid3, Current); break; }
                 var list = ParseExpression(precedence + 1);
                 left = new GqlInExpression(left, list, Span(start, Previous));
             }
@@ -166,7 +166,7 @@ public sealed partial class GqlQueryParser
         if (Take(TokenType.Asterisk))
         {
             if (function != GqlAggregateFunction.Count || distinct || all)
-            { Error("GQL0002", "Only COUNT(*) accepts a star, without a set quantifier.", Previous); }
+            { Error("CG00002", ErrorMessages.GqlQueryParserParseAggregateVoid, Previous); }
         }
         else { operand = ParsePredicate(); }
         Expect(TokenType.RightParen, "')'");
@@ -186,7 +186,7 @@ public sealed partial class GqlQueryParser
         var parameter = Current;
         Advance();
         if (!ParameterBindings.IsValidReference(parameter.Text))
-        { Error("GQL0002", "Expected a named parameter after $ or @.", parameter); }
+        { Error("CG00002", ErrorMessages.GqlQueryParserParseScalarVoid, parameter); }
         return new GqlParameterExpression(ParameterBindings.BareName(parameter.Text), Span(parameter, parameter));
     }
 
@@ -203,7 +203,7 @@ public sealed partial class GqlQueryParser
                 Advance();
             }
             _parameterFormPositions.Add(start.Start);
-            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("GQL0002", Span(start, end)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CG00002", Span(start, end)));
             return new GqlLiteralExpression(null, Span(start, end));
         }
         object? value = null;
@@ -220,7 +220,7 @@ public sealed partial class GqlQueryParser
             if (Take(TokenType.Integer))
             {
                 if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long integer)) { value = integer; }
-                else { Error("GQL0004", "Integer literal is outside the signed 64-bit range.", start); }
+                else { Error("CG00004", ErrorMessages.GqlQueryParserParseLiteralVoid, start); }
             }
             else if (Take(TokenType.Float))
             {
@@ -228,10 +228,10 @@ public sealed partial class GqlQueryParser
                 {
                     value = floating;
                 }
-                else { Error("GQL0004", "Floating-point literal is invalid or outside the finite double range.", start); }
+                else { Error("CG00004", ErrorMessages.GqlQueryParserParseLiteralVoid2, start); }
             }
-            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("CK00001", Current.Type == TokenType.LeftBracket ? "List-valued properties are unsupported by graph storage." : "Map-valued properties are unsupported by graph storage.", Current); }
-            else { Error("GQL0002", "Expected a scalar literal.", start); }
+            else if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace) { Error("CK00001", Current.Type == TokenType.LeftBracket ? ErrorMessages.GqlQueryParserParseLiteralVoid3 : ErrorMessages.GqlQueryParserParseLiteralVoid4, Current); }
+            else { Error("CG00002", ErrorMessages.GqlQueryParserParseLiteralVoid5, start); }
         }
         return new GqlLiteralExpression(value, Span(start, Previous));
     }

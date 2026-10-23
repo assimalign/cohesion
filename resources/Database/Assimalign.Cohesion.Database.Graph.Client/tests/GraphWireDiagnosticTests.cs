@@ -28,7 +28,7 @@ public sealed class GraphWireDiagnosticTests
         expected.Length.ShouldBeGreaterThanOrEqualTo(2);
         parse.Diagnostics.Select(Value).ShouldBe(expected.Select(Value));
         parse.InnerException.ShouldBeOfType<DatabaseClientException>().Diagnostics.Select(Value).ShouldBe(expected.Select(Value));
-        plan.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        plan.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
         harness.Server.Sessions.Count.ShouldBe(1);
     }
@@ -47,11 +47,11 @@ public sealed class GraphWireDiagnosticTests
         var pathResult = connection.QueryPathsAsync("MATCH (n:Absent) RETURN n", cancellationToken: harness.Token);
         await foreach (var path in pathResult) { paths++; }
         // Assert
-        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        result.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
         result.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         paths.ShouldBe(0);
         Should.Throw<InvalidOperationException>(() => pathResult.GetAsyncEnumerator(harness.Token));
-        pathResult.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG010");
+        pathResult.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
         pathResult.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);
         harness.Server.Sessions.Count.ShouldBe(1);

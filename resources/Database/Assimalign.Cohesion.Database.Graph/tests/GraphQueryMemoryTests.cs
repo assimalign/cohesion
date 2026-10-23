@@ -95,7 +95,7 @@ public sealed class GraphQueryMemoryTests
         using var owner = new GraphMemoryOwner(memory);
         var error = Should.Throw<GraphPlanningException>(() => owner.RetainValue(
             Enumerable.Range(0, 30).Select(value => (object?)new string((char)('a' + value % 26), 40)).ToArray(), CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG020");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05020");
         memory.RetainedBytes.ShouldBe(0);
         var small = new object?[] { 7L };
         owner.RetainValue(small, CancellationToken.None);

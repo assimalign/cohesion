@@ -114,7 +114,7 @@ internal static partial class GraphPlanExecutor
                     object? value = GraphExpressionEvaluator.Evaluate(loop.List, binding, operation.EvaluationContext, parameters);
                     if (value is null) { break; }
                     if (value is not System.Collections.IList list || value is byte[])
-                    { throw new GraphPlanningException("COHDBG013", ErrorMessages.ForListRequired, loop.List.Location); }
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.ForListRequired, loop.List.Location); }
                     // The row is borrowed until the consumer's next move. Consumers copy any
                     // retained values, so one slot array serves this complete FOR input list.
                     var row = new GraphBindingRow(layout, binding) { [loop.Variable] = null };
@@ -130,7 +130,7 @@ internal static partial class GraphPlanExecutor
                         budget.Consume();
                         if (item is not null && (stage.ElementKind == GraphProjectionKind.Node && item is not GraphNode ||
                             stage.ElementKind == GraphProjectionKind.Relationship && item is not GraphRelationship))
-                        { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired, loop.List.Location); }
+                        { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired, loop.List.Location); }
                         row[loop.Variable] = item;
                         bool composite = item is not null && (GraphValueMemory.IsTracked(item) || item is string or byte[] or GraphNode or GraphRelationship);
                         if (composite) { rowMemory.RetainValue(item, token); }
@@ -259,7 +259,7 @@ internal static partial class GraphPlanExecutor
                 {
                     if (plan.Projections[i].BindingName is not { } name) { continue; }
                     if (!carried.TryAdd(name, values[i]))
-                    { throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    { throw new GraphPlanningException("CG01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                         ErrorMessages.DuplicateResultColumn, name), plan.Projections[i].Expression.Location ?? plan.Query.Location); }
                 }
                 retained.RetainValue(values, token);
@@ -302,7 +302,7 @@ internal static partial class GraphPlanExecutor
             {
                 if (plan.Projections[i].BindingName is not { } name) { continue; }
                 if (!row.TryAdd(name, values[i]))
-                { throw new GraphPlanningException("COHDBG015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                { throw new GraphPlanningException("CG01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateResultColumn, name), plan.Projections[i].Expression.Location ?? plan.Query.Location); }
             }
             using (budget.Memory.Reserve(row.RetainedBytes)) { yield return row; }
@@ -368,7 +368,7 @@ internal static partial class GraphPlanExecutor
                     {
                         bool unsigned = row[i] is byte or ushort or uint or ulong;
                         if (unsigned && !compositeValues)
-                        { throw new GraphPlanningException("COHDBG016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
+                        { throw new GraphPlanningException("CG07016", ErrorMessages.CompositeCapabilityRequired, plan.Query.Location); }
                         if (unsigned || compositeValues && row[i] is decimal)
                         { valueColumnsAdded |= !compositeColumns[i]; compositeColumns[i] = true; }
                     }
@@ -397,7 +397,7 @@ internal static partial class GraphPlanExecutor
                     GraphPath path => path,
                     GraphNode node => new GraphPath([node], []),
                     GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
-                    _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.PathProjectionRequired, plan.Query.Location),
+                    _ => throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, plan.Query.Location),
                 };
                 retained.RetainValue(results[i], token);
             }

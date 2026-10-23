@@ -71,8 +71,8 @@ public abstract class GraphRequest : DatabaseRequest
     /// <summary>
     /// Gets the named scalar, list or map bindings for $name and @name references, or null for none.
     /// Lookup strips one leading sigil from map keys and uses ordinal, case-sensitive bare names.
-    /// Unbound references fail planning with COHDBG001; duplicate normalized keys use COHDBG014.
-    /// Referenced values retain their runtime scalar types; unsupported values use COHDBG003.
+    /// Unbound references fail planning with CG05001; duplicate normalized keys use CG01014.
+    /// Referenced values retain their runtime scalar types; unsupported values use CG03003.
     /// Lists snapshot to <c>object?[]</c>; maps to read-only <c>IReadOnlyDictionary&lt;string, object?&gt;</c>.
     /// Values permit depth 64, 65,536 total values including the root, and 16 MiB of encoded bytes.
     /// Pattern property maps remain scalar-only. Wire composites require the negotiated capability;

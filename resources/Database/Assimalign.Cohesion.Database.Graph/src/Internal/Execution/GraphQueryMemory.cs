@@ -97,7 +97,7 @@ internal sealed class GraphQueryMemory(long limit, GraphQueryMemoryPool? pool = 
     {
         if (bytes < 0) { throw new ArgumentOutOfRangeException(nameof(bytes)); }
         if (bytes > Limit - RetainedBytes)
-        { throw new GraphPlanningException("COHDBG020", string.Format(CultureInfo.CurrentCulture, ErrorMessages.QueryMemoryBudgetExceeded, Limit)); }
+        { throw new GraphPlanningException("CG05020", string.Format(CultureInfo.CurrentCulture, ErrorMessages.QueryMemoryBudgetExceeded, Limit)); }
         RetainedBytes += bytes;
         PeakRetainedBytes = Math.Max(PeakRetainedBytes, RetainedBytes);
     }

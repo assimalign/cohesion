@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <c>MATCH (a) -- c&lt;CR&gt;WHERE a.name = 'x'&lt;LF&gt;DETACH DELETE a</c> deleted every node
 /// (#1150). With <c>DETACH DELETE</c> on the CR line too, the comment swallowed it as well and the
 /// statement failed instead. Diagnostic lines break at the same terminators. <c>--</c> directly
-/// after <c>)</c> or <c>]</c> is <c>GQL0008</c> (#1139), pinned at every terminator in
+/// after <c>)</c> or <c>]</c> is <c>CG00008</c> (#1139), pinned at every terminator in
 /// <c>GqlCypherArrowTests</c>.
 /// </summary>
 public sealed class GqlLineCommentTests
@@ -107,7 +107,7 @@ public sealed class GqlLineCommentTests
         var statement = Parse(gql);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
         statement.GqlExpression.Projections.ShouldBeEmpty();
     }
 
@@ -182,7 +182,7 @@ public sealed class GqlLineCommentTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         error.Start.ShouldBe(gql.IndexOf('/'));
     }
 

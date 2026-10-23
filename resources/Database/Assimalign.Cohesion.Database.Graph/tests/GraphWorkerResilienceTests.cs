@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// lasts, retried after the worker's backoff, and recovers when the fault clears, while the
 /// engine's other database keeps its work; a failed group-commit drain (#1252) or fsync and a
 /// failed header slot write take only their database offline, and every later operation on it is
-/// refused with COHDBG012 while nothing more is written to it.
+/// refused with CG06012 while nothing more is written to it.
 /// </summary>
 [Collection(nameof(GraphWorkerResilienceCollection))]
 public sealed class GraphWorkerResilienceTests
@@ -267,7 +267,7 @@ public sealed class GraphWorkerResilienceTests
         (drain ? faults.JournalWriteFailureThread : faults.JournalFlushFailureThread).ShouldBe(worker.Name + " lane");
         worker.Name.ShouldBe(engine.Name + "/wal-flush");
         (drain ? faults.JournalFlushFailures : faults.JournalWriteFailures).ShouldBe(0);
-        refusal.Code.ShouldBe("COHDBG012");
+        refusal.Code.ShouldBe("CG06012");
         StorageOfflineException.Find(refusal)!.Cause.ShouldBe(StorageOfflineCause.JournalFlush);
         refusal.Message.ShouldContain("a write or flush of the journal");
         StorageOfflineException.Find(refusal)!.Message.ShouldContain(drain ? "a write of the journal" : "a durable flush of the journal");
@@ -322,7 +322,7 @@ public sealed class GraphWorkerResilienceTests
 
         // Assert
         offline.ShouldBeTrue();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBG012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBG012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CG06012" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CG06012" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         refusals.ShouldAllBe(refusal => refusal.Message.Contains("a write of the file header", StringComparison.Ordinal));
         StorageOfflineException.Find(refusals[0])!.Cause.ShouldBe(StorageOfflineCause.HeaderWrite);
         faults.HeaderWriteFailures.ShouldBe(1);
@@ -400,9 +400,9 @@ public sealed class GraphWorkerResilienceTests
         queuedWhileOnline.ShouldBeTrue(queuedState);
         offline.ShouldBeTrue();
         ended.ShouldBeTrue("the queued writer was still waiting five seconds after the database went offline");
-        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBG012");
+        queuedRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("CG06012");
         StorageOfflineException.Find(queuedRefusal)!.Cause.ShouldBe(fault == DeviceFault.HeaderWrite ? StorageOfflineCause.HeaderWrite : StorageOfflineCause.JournalFlush);
-        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBG012");
+        holderRefusal.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("CG06012");
         reopened.IsOffline.ShouldBeFalse();
         (await CountAsync(reopened)).ShouldBe(0);
     }
@@ -612,7 +612,7 @@ public sealed class GraphWorkerResilienceTests
     /// online and keeps being checkpointed. The window is measured on the engine's clock, which the
     /// test moves: the minimum of failed passes, each a backoff after the one before it, leaves the
     /// database online while the window has not passed, and the first failed pass past it takes the
-    /// database offline. Every operation is then refused with COHDBG012, and once the fault clears the
+    /// database offline. Every operation is then refused with CG06012, and once the fault clears the
     /// reopen brings the database back with its nodes. Before decision 25 the worker retried it
     /// every second for as long as the process ran, and its journal grew without bound.
     /// </summary>
@@ -664,8 +664,8 @@ public sealed class GraphWorkerResilienceTests
         onlineInsideTheWindow.ShouldBeTrue();
         offline.ShouldBeTrue();
         failedPasses.ShouldBeGreaterThan(passesInsideTheWindow);
-        refusal.Code.ShouldBe("COHDBG012");
-        refusal.Diagnostics.ShouldContain(d => d.Code == "COHDBG012");
+        refusal.Code.ShouldBe("CG06012");
+        refusal.Diagnostics.ShouldContain(d => d.Code == "CG06012");
         refusal.Message.ShouldStartWith("Database", Case.Sensitive);
         refusal.Message.ShouldContain("its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
@@ -736,7 +736,7 @@ public sealed class GraphWorkerResilienceTests
         // Long before the window: fewer failed passes than the window holds at the backoff.
         failedPasses.ShouldBeLessThan((long)(DatabaseEngine.DefaultWorkerFailureWindow / DatabaseEngineWorker.FailureBackoff));
         failedTwice.ShouldBeTrue();
-        refusal.Code.ShouldBe("COHDBG012");
+        refusal.Code.ShouldBe("CG06012");
         refusal.Message.ShouldContain("its journal grew past its engine's limit while its checkpoints kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.JournalSizeLimit);
@@ -995,7 +995,7 @@ public sealed class GraphWorkerResilienceTests
         // Assert
         onlineInsideTheWindow.ShouldBeTrue();
         offline.ShouldBeTrue();
-        refusal.Code.ShouldBe("COHDBG012");
+        refusal.Code.ShouldBe("CG06012");
         refusal.Message.ShouldContain("its version purge kept failing");
         var cause = StorageOfflineException.Find(refusal).ShouldNotBeNull();
         cause.Cause.ShouldBe(StorageOfflineCause.VersionPurgeFailures);

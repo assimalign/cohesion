@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <summary>A scalar comparison, arithmetic or string concatenation expression.</summary>
 /// <remarks>
 /// A conjunction is not a binary node: every <c>AND</c> chain is one <see cref="GqlLogicalExpression"/>,
-/// and the engine rejects a binary node whose operator is <c>AND</c> with <c>COHDBG001</c>.
+/// and the engine rejects a binary node whose operator is <c>AND</c> with <c>CG05001</c>.
 /// </remarks>
 public sealed class GqlBinaryExpression : GqlExpression
 {

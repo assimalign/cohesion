@@ -34,7 +34,7 @@ public sealed class DatabaseCorruptionTests
         await using var engine = new TestEngine();
         var cause = new StorageCorruptionException((PageId)9L, "Page 9 failed checksum verification.");
         Diagnostic[] diagnostics = [new Diagnostic
-        { Code = "COHDBG018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }];
+        { Code = "CG06018", Message = "Open failed.", Severity = DiagnosticSeverity.Error }];
         if (wrapper >= 5)
         {
             diagnostics = [new Diagnostic
@@ -89,7 +89,7 @@ public sealed class DatabaseCorruptionTests
         failure.Database.ShouldBe((DatabaseName)"broken");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(wrapper != 0 ? ["CK06003", "COHDBG018"] : ["CK06003"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(wrapper != 0 ? ["CK06003", "CG06018"] : ["CK06003"]);
         failure.Message.ShouldContain("verified backup", Case.Sensitive);
         engine.CreateOperation = null;
         (await engine.CreateDatabaseAsync("healthy", CancellationToken.None)).Name.ShouldBe((DatabaseName)"healthy");
