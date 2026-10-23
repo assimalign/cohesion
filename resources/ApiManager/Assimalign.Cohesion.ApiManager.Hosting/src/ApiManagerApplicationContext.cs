@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.ApiManager.Hosting;
 /// <summary>
 /// Provides the ApiManager application environment and runtime composition.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApiManagerApplicationContext {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApiManagerApplicationContext : HostContext, IApiManagerApplicationContext, IHealthContributor
 {
     private IServiceProvider? _serviceProvider;
@@ -97,5 +99,23 @@ public sealed class ApiManagerApplicationContext : HostContext, IApiManagerAppli
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApiManagerApplicationContext _target;
+
+        public DebugView(ApiManagerApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public IHostEnvironment Environment => _target.Environment;
+        public IEnumerable<IHostService> HostedServices => _target.HostedServices;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

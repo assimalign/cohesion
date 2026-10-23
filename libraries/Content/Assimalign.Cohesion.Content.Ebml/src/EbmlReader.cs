@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <remarks>ReadNext returns false at the current master boundary. Call LeaveMaster, then ReadNext
 /// to consume a sibling. Consume, skip, enter, or stream each current element before advancing. The source
 /// is borrowed by default. Instances and lazy segments sharing a source must be used sequentially.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("EbmlReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class EbmlReader : IDisposable
 {
     private readonly Stream _source;
@@ -708,6 +710,8 @@ public sealed partial class EbmlReader : IDisposable
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MasterFrame")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class MasterFrame
     {
         internal MasterFrame(EbmlElementHeader header) { Header = header; }
@@ -717,5 +721,27 @@ public sealed partial class EbmlReader : IDisposable
         internal uint Crc { get; set; } = uint.MaxValue;
         internal uint? ExpectedCrc { get; set; }
         internal long CrcOffset { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(MasterFrame value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EbmlReader _target;
+
+        public DebugView(EbmlReader value)
+        {
+            _target = value;
+        }
+
+        public long Position => _target.Position;
+        public int Depth => _target.Depth;
+        public EbmlSchema Schema => _target.Schema;
+        public IReadOnlyList<ContentFormatException> Diagnostics => _target.Diagnostics;
     }
 }

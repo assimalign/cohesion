@@ -32,6 +32,8 @@ public sealed class Http1ConnectionListenerOptions
     /// <c>Http1RequestBodyStream</c>) and connection loop; violations are answered with
     /// <c>400</c> / <c>408</c> / <c>414</c> / <c>431</c> / <c>413</c> before the connection is closed.
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("Http1Limits")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public sealed class Http1Limits : HttpConnectionListenerLimits
     {
         private int _maxRequestLineSize = 8 * 1024;
@@ -127,6 +129,26 @@ public sealed class Http1ConnectionListenerOptions
                 ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
                 _maxChunkFramingLineSize = value;
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Http1Limits _target;
+
+            public DebugView(Http1Limits value)
+            {
+                _target = value;
+            }
+
+            public int MaxRequestLineSize => _target.MaxRequestLineSize;
+            public int MaxRequestHeaderCount => _target.MaxRequestHeaderCount;
+            public int MaxRequestHeadersTotalSize => _target.MaxRequestHeadersTotalSize;
+            public int MaxChunkFramingLineSize => _target.MaxChunkFramingLineSize;
+            public long? MaxRequestBodySize => _target.MaxRequestBodySize;
+            public global::System.TimeSpan KeepAliveTimeout => _target.KeepAliveTimeout;
+            public global::System.TimeSpan RequestHeadersTimeout => _target.RequestHeadersTimeout;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinRequestBodyDataRate => _target.MinRequestBodyDataRate;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinResponseDataRate => _target.MinResponseDataRate;
         }
     }
 }

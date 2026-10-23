@@ -60,6 +60,8 @@ public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
 
 
 
+[global::System.Diagnostics.DebuggerDisplay("TestPollingChangeToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class TestPollingChangeToken : PollingChangeToken<string>
 {
     public TestPollingChangeToken(TimeSpan startAfter, TimeSpan interval) : base(startAfter, interval)
@@ -77,6 +79,13 @@ public class TestPollingChangeToken : PollingChangeToken<string>
     public override IDisposable OnChange(Action<string> callback)
     {
         throw new NotImplementedException();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TestPollingChangeToken value)
+        {
+        }
     }
 }
 

@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.IoTHub.Hosting;
 /// <summary>
 /// Hosts an IoTHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("IoTHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IoTHubApplication : Host<IoTHubApplicationContext>, IIoTHubApplication
 {
     private readonly IoTHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class IoTHubApplication : Host<IoTHubApplicationContext>, IIoTHubA
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new IoTHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IoTHubApplication _target;
+
+        public DebugView(IoTHubApplication value)
+        {
+            _target = value;
+        }
+
+        public IoTHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

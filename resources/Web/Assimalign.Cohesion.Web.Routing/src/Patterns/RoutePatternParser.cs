@@ -505,6 +505,7 @@ public sealed class RoutePatternParser
     }
 
 
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     [DebuggerDisplay("{DebuggerToString()}")]
     internal sealed class Context
     {
@@ -600,6 +601,21 @@ public sealed class RoutePatternParser
             {
                 return string.Concat(_template.Substring(0, _index), "|", _template.Substring(_index));
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Context _target;
+
+            public DebugView(Context value)
+            {
+                _target = value;
+            }
+
+            public char Current => _target.Current;
+            public int Index => _target.Index;
+            public string? Error => _target.Error;
+            public HashSet<string> ParameterNames => _target.ParameterNames;
         }
     }
 }

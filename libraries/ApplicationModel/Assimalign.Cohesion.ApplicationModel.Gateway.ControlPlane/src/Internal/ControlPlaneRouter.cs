@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 /// <c>Allow</c> header listing those methods in route order (plus <c>HEAD</c> when <c>GET</c> is
 /// listed); and anything else returns <c>404</c>. Neither status writes a body.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ControlPlaneRouter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ControlPlaneRouter
 {
     private readonly ControlPlaneRoute[] _routes;
@@ -126,5 +128,12 @@ internal sealed class ControlPlaneRouter
         return value.Length == 0
             ? Array.Empty<string>()
             : value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ControlPlaneRouter value)
+        {
+        }
     }
 }

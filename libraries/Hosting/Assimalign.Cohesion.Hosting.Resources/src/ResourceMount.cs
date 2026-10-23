@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// files at that path contain CurrentUser DPAPI-protected bytes; use <see cref="OpenRead"/>
 /// or <see cref="ReadAllBytes"/> when plaintext is required.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResourceMount")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ResourceMount
 {
     private readonly byte[]? _content;
@@ -129,5 +131,17 @@ public sealed class ResourceMount
         {
             CryptographicOperations.ZeroMemory(protectedBytes);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ResourceMount _target;
+
+        public DebugView(ResourceMount value)
+        {
+            _target = value;
+        }
+
+        public string? Path => _target.Path;
     }
 }

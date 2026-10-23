@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ApiManagerControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApiManagerControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class ApiManagerControlPlaneEndpointService : IHostService, IDis
                 ? address
                 : throw new InvalidOperationException($"The ApiManager endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly ApiManagerControlPlaneEndpointService _target;
+
+        public DebugView(ApiManagerControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

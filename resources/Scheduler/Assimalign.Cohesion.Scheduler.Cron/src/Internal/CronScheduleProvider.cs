@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Cron.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CronScheduleProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CronScheduleProvider : IScheduleProvider
 {
     private readonly object _sync = new();
@@ -62,6 +64,13 @@ internal sealed class CronScheduleProvider : IScheduleProvider
         {
             throw new KeyNotFoundException(
                 $"Job '{jobId}' is not registered under schedule '{scheduleId}'.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CronScheduleProvider value)
+        {
         }
     }
 }

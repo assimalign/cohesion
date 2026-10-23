@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteStackGuard")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteStackGuard
 {
     private const int MaxExecutionStackCount = 1024;
@@ -55,6 +57,13 @@ internal sealed class CallSiteStackGuard
         finally
         {
             _executionStackCount--;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteStackGuard value)
+        {
         }
     }
 }

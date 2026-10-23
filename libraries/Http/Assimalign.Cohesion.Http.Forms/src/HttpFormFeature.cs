@@ -44,6 +44,8 @@ namespace Assimalign.Cohesion.Http;
 // Assimalign.Cohesion.Web.Forms.UseForms() and the forms integration tests
 // construct this concrete feature directly across assembly boundaries, so it
 // stays public rather than an internal IHttpFormFeature impl. See docs/DESIGN.md.
+[global::System.Diagnostics.DebuggerDisplay("HttpFormFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpFormFeature : IHttpFormFeature
 {
     private const string UrlEncodedContentType = "application/x-www-form-urlencoded";
@@ -473,5 +475,17 @@ public sealed class HttpFormFeature : IHttpFormFeature
 
         value = raw.ToString();
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpFormFeature _target;
+
+        public DebugView(HttpFormFeature value)
+        {
+            _target = value;
+        }
+
+        public IHttpFormCollection? Form => _target.Form;
     }
 }

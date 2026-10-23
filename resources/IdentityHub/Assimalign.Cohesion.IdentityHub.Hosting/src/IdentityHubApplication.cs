@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 /// <summary>
 /// Hosts an IdentityHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>, IIdentityHubApplication
 {
     private readonly IdentityHubApplicationContext _context;
@@ -72,5 +74,18 @@ public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         return new IdentityHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityHubApplication _target;
+
+        public DebugView(IdentityHubApplication value)
+        {
+            _target = value;
+        }
+
+        public IdentityHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

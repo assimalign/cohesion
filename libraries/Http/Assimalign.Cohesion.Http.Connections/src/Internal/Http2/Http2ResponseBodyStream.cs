@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// commits a HEADERS frame carrying <c>END_STREAM</c> and discards every body write and its trailers,
 /// matching the HTTP/1.1 sink.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2ResponseBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
 {
     private readonly Http2ConnectionContext _connection;
@@ -51,4 +53,22 @@ internal sealed class Http2ResponseBodyStream : HttpResponseBodyStream
 
     protected override ValueTask CompleteFramedAsync(CancellationToken cancellationToken)
         => new(_connection.CompleteStreamingAsync(_context, cancellationToken));
+
+    private sealed class DebugView
+    {
+        private readonly Http2ResponseBodyStream _target;
+
+        public DebugView(Http2ResponseBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool HasStarted => _target.HasStarted;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

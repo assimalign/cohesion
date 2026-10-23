@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Dns;
 /// represents both halves with separate byte arrays so callers can manage them explicitly.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsEdnsCookieOption")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DnsEdnsCookieOption : DnsEdnsOption
 {
     private readonly byte[] _clientCookie;
@@ -71,5 +73,18 @@ public sealed class DnsEdnsCookieOption : DnsEdnsOption
             ? default
             : reader.ReadBytes(payloadLength - 8);
         return new DnsEdnsCookieOption(client, server);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DnsEdnsCookieOption _target;
+
+        public DebugView(DnsEdnsCookieOption value)
+        {
+            _target = value;
+        }
+
+        public bool HasServerCookie => _target.HasServerCookie;
+        public global::Assimalign.Cohesion.Dns.DnsEdnsOptionCode Code => _target.Code;
     }
 }

@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// as a supervised child process, starting them in dependency order, gating each on readiness,
 /// and stopping them in reverse order. It requires no platform tooling.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LocalGateway {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRenderer
 {
     private readonly LocalGatewayOptions _options;
@@ -206,5 +208,21 @@ public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRender
         return Path.IsPathFullyQualified(path)
             ? Path.GetFullPath(path)
             : Path.GetFullPath(Path.Combine(baseDirectory, path));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LocalGateway _target;
+
+        public DebugView(LocalGateway value)
+        {
+            _target = value;
+        }
+
+        public ResourceName Name => _target.Name;
+        public IReadOnlyList<IApplicationResourceController> Controllers => _target.Controllers;
+        public IApplicationResourceStateManager State => _target.State;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayOptions Options => _target.Options;
+        public global::System.TimeSpan ReadinessBudget => _target.ReadinessBudget;
     }
 }

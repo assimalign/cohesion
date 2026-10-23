@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// syntax is canonical RFC 9651: <c>camera=(), geolocation=(self "https://maps.example.com"), fullscreen=*</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("PermissionsPolicyBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PermissionsPolicyBuilder
 {
     private static readonly StructuredFieldItem _selfItem = new(StructuredFieldBareItem.FromToken("self"));
@@ -157,5 +159,12 @@ public sealed class PermissionsPolicyBuilder
 
         _features.Add(new KeyValuePair<string, StructuredFieldMember>(feature, allowlist));
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PermissionsPolicyBuilder value)
+        {
+        }
     }
 }

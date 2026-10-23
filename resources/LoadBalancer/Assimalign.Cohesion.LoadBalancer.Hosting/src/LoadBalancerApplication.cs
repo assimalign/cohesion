@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 /// <summary>
 /// Hosts a LoadBalancer application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LoadBalancerApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContext>, ILoadBalancerApplication
 {
     private readonly LoadBalancerApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContex
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new LoadBalancerApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LoadBalancerApplication _target;
+
+        public DebugView(LoadBalancerApplication value)
+        {
+            _target = value;
+        }
+
+        public LoadBalancerApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Http;
 /// deterministically; production uses <see cref="TimeProvider.System"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryHttpSessionStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryHttpSessionStore : IHttpSessionStore
 {
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
@@ -139,5 +141,12 @@ public sealed class InMemoryHttpSessionStore : IHttpSessionStore
         public TimeSpan IdleTimeout { get; }
 
         public Entry RenewedTo(DateTimeOffset expiresAt) => new(Payload, expiresAt, IdleTimeout);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryHttpSessionStore value)
+        {
+        }
     }
 }

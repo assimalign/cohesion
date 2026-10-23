@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols;
 /// uninitialized (<see langword="default" />) instance equals <see cref="Unknown" /> and
 /// renders as <c>"unknown"</c> — its <see cref="Name" /> is never null.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolRole {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct ProtocolRole : IEquatable<ProtocolRole>
 {
     private const string UnknownName = "unknown";
@@ -100,4 +102,16 @@ public readonly struct ProtocolRole : IEquatable<ProtocolRole>
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    private sealed class DebugView
+    {
+        private readonly ProtocolRole _target;
+
+        public DebugView(ProtocolRole value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+    }
 }

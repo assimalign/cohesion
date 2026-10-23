@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// directly and install the context with
 /// <see cref="ResourceRuntime.CreateScope(ResourceContext)"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResourceContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class ResourceContext
 {
     private const string EndpointToken = "<EP>";
@@ -696,4 +698,22 @@ public sealed partial class ResourceContext
 
     private static string? NullIfWhiteSpace(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private sealed class DebugView
+    {
+        private readonly ResourceContext _target;
+
+        public DebugView(ResourceContext value)
+        {
+            _target = value;
+        }
+
+        public string? ApplicationName => _target.ApplicationName;
+        public string? ResourceName => _target.ResourceName;
+        public string EnvironmentName => _target.EnvironmentName;
+        public string? GatewayName => _target.GatewayName;
+        public string ContentRootPath => _target.ContentRootPath;
+        public ReadOnlyMemory<byte> BootstrapCredential => _target.BootstrapCredential;
+        public ReadOnlyMemory<byte> ApplicationTrustKey => _target.ApplicationTrustKey;
+    }
 }

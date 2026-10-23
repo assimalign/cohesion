@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// to require N bytes look-ahead, and <see cref="ReadLineAsync"/> reads up to
 /// the next CRLF with an explicit per-line length cap.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BufferedReadStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BufferedReadStream : Stream
 {
     private const byte CR = (byte)'\r';
@@ -304,5 +306,23 @@ internal sealed class BufferedReadStream : Stream
             throw new ArgumentException(ErrorMessages.RequestedBufferRangeTooLarge);
         }
         Debug.Assert(buffer.Length - offset >= count);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BufferedReadStream _target;
+
+        public DebugView(BufferedReadStream value)
+        {
+            _target = value;
+        }
+
+        public ArraySegment<byte> BufferedData => _target.BufferedData;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

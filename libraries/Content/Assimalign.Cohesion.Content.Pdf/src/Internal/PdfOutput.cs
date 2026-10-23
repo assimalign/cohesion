@@ -7,6 +7,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
 // Count relative offsets without seeking the destination. Never own the destination.
+[global::System.Diagnostics.DebuggerDisplay("PdfOutput")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfOutput : Stream
 {
     private readonly Stream _destination;
@@ -48,4 +50,22 @@ internal sealed class PdfOutput : Stream
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.OutputForwardOnly);
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(ErrorMessages.OutputForwardOnly);
     public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.OutputForwardOnly);
+
+    private sealed class DebugView
+    {
+        private readonly PdfOutput _target;
+
+        public DebugView(PdfOutput value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Position => _target.Position;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

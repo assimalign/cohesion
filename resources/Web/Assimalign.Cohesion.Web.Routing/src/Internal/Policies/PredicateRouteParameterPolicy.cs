@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// <summary>
 /// Evaluates a route parameter using a custom predicate.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("PredicateRouteParameterPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PredicateRouteParameterPolicy : RouteParameterPolicy
 {
     private readonly Func<RouteParameterPolicyContext, bool> _predicate;
@@ -26,5 +28,12 @@ internal sealed class PredicateRouteParameterPolicy : RouteParameterPolicy
         ArgumentNullException.ThrowIfNull(context);
 
         return _predicate(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PredicateRouteParameterPolicy value)
+        {
+        }
     }
 }

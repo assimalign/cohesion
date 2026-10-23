@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// <summary>
 /// The content-family reader seam over <see cref="MarkdownText.Parse(Stream)"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownDocumentReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MarkdownDocumentReader : IContentReader<MarkdownDocument>
 {
     private readonly MarkdownParserOptions _options;
@@ -23,6 +25,13 @@ internal sealed class MarkdownDocumentReader : IContentReader<MarkdownDocument>
     {
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<MarkdownDocument>(Read(stream));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MarkdownDocumentReader value)
+        {
+        }
     }
 }
 

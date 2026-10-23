@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.MediaHub.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MediaHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
 {
     private readonly MediaHubApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
     }
 
     IMediaHubApplication IMediaHubApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly MediaHubApplicationBuilder _target;
+
+        public DebugView(MediaHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Connections.Udp;
 /// <summary>
 /// Defines options for creating a connected client-side UDP datagram socket.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("UdpConnectOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class UdpConnectOptions
 {
     private int? _receiveBufferSize;
@@ -75,5 +77,20 @@ public sealed class UdpConnectOptions
 
             _sendBufferSize = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UdpConnectOptions _target;
+
+        public DebugView(UdpConnectOptions value)
+        {
+            _target = value;
+        }
+
+        public EndPoint EndPoint => _target.EndPoint;
+        public bool DualMode => _target.DualMode;
+        public int? ReceiveBufferSize => _target.ReceiveBufferSize;
+        public int? SendBufferSize => _target.SendBufferSize;
     }
 }

@@ -3,6 +3,8 @@ namespace System.Buffers;
 /// <summary>
 /// Retains a pressure-sensitive number of idle blocks based on recent pool activity.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AdaptiveMemoryPoolPressurePolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AdaptiveMemoryPoolPressurePolicy : IAdaptiveMemoryPoolPolicy
 {
     private int _minimumRetainedBlocks = 8;
@@ -97,5 +99,20 @@ public sealed class AdaptiveMemoryPoolPressurePolicy : IAdaptiveMemoryPoolPolicy
         }
 
         return Math.Clamp(targetRetainedBlocks, MinimumRetainedBlocks, MaximumRetainedBlocks);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AdaptiveMemoryPoolPressurePolicy _target;
+
+        public DebugView(AdaptiveMemoryPoolPressurePolicy value)
+        {
+            _target = value;
+        }
+
+        public int MinimumRetainedBlocks => _target.MinimumRetainedBlocks;
+        public int MaximumRetainedBlocks => _target.MaximumRetainedBlocks;
+        public double PeakRetentionRatio => _target.PeakRetentionRatio;
+        public TimeSpan WarmWindow => _target.WarmWindow;
     }
 }

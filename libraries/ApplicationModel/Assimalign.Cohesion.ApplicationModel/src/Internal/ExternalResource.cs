@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ExternalResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExternalResource : PlannedResource, IExternalResource
 {
     internal const string PlanHint = "cohesion.external";
@@ -133,5 +135,25 @@ internal sealed class ExternalResource : PlannedResource, IExternalResource
     {
         ArgumentNullException.ThrowIfNull(declaration);
         return declaration.Manifest ?? CreateManifest(declaration);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ExternalResource _target;
+
+        public DebugView(ExternalResource value)
+        {
+            _target = value;
+        }
+
+        public ExternalResourceDeclaration Declaration => _target.Declaration;
+        public IExternalResourceResolver Resolver => _target.Resolver;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

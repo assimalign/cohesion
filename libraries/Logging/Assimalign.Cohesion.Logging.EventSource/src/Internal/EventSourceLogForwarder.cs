@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// raised the event. EventSource rethrows a listener's exception into that code, so neither callback lets
 /// one escape.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EventSourceLogForwarder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EventSourceLogForwarder : EventListener, ILoggerForwarder
 {
     // EventListener's constructor reports every existing event source through OnEventSourceCreated before
@@ -188,5 +190,17 @@ internal sealed class EventSourceLogForwarder : EventListener, ILoggerForwarder
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EventSourceLogForwarder _target;
+
+        public DebugView(EventSourceLogForwarder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

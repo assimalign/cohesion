@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// yields an equivalent tree (the round-trip guarantee for parser-produced documents). The walk is
 /// iterative for the same stack-safety reasons as the HTML renderer.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MarkdownWriter
 {
     private readonly StringBuilder _builder = new();
@@ -558,5 +560,12 @@ internal sealed class MarkdownWriter
 
         public static Op PushPrefix(string prefix, bool emitIfMidLine = false)
             => new() { Kind = OpKind.PushPrefix, Text = prefix, EmitIfMidLine = emitIfMidLine };
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MarkdownWriter value)
+        {
+        }
     }
 }

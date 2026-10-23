@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HttpConfigurationStoreClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
 {
     private const string commandRoute = "/cohesion/v1/commands";
@@ -164,5 +166,12 @@ internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(acceptMediaType));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _credential.Token);
         return request;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpConfigurationStoreClient value)
+        {
+        }
     }
 }

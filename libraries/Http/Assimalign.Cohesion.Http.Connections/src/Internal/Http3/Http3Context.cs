@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http3Context")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3Context : TransportHttpContext
 {
     // 0 while the exchange runs, 1 once it has ended (SendAsync returned or threw, or the exchange was
@@ -228,5 +230,31 @@ internal sealed class Http3Context : TransportHttpContext
         {
             // Teardown is best effort when the stream or its connection has already ended.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3Context _target;
+
+        public DebugView(Http3Context value)
+        {
+            _target = value;
+        }
+
+        public string? ExtendedConnectProtocol => _target.ExtendedConnectProtocol;
+        public IMultiplexedConnectionStream StreamConnection => _target.StreamConnection;
+        public long StreamId => _target.StreamId;
+        public Http3RequestBodyStream RequestBody => _target.RequestBody;
+        public HttpPriority EffectivePriority => _target.EffectivePriority;
+        public Http3ExtendedConnectStream? Tunnel => _target.Tunnel;
+        public Http3ConnectionContext? Connection => _target.Connection;
+        public global::Assimalign.Cohesion.Http.HttpVersion Version => _target.Version;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpRequest Request => _target.Request;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpResponse Response => _target.Response;
+        public global::Assimalign.Cohesion.Http.HttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public global::Assimalign.Cohesion.Http.HttpFeatureCollection Features => _target.Features;
+        public global::System.Collections.Generic.IDictionary<string, object?> Items => _target.Items;
+        public global::System.Threading.CancellationToken RequestCancelled => _target.RequestCancelled;
+        public bool CancelRequested => _target.CancelRequested;
     }
 }

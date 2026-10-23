@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// the IdentityModel JSON Web Token contracts, maps the token onto a principal, and emits RFC 6750
 /// <c>WWW-Authenticate</c> challenges.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JwtBearerHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JwtBearerHandler : IAuthenticationHandler
 {
     private static readonly string _bearerCredentialTokenMissingMessage = ErrorMessages.BearerCredentialTokenMissing;
@@ -360,5 +362,12 @@ public sealed class JwtBearerHandler : IAuthenticationHandler
         }
 
         return new string(buffer[..length]);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(JwtBearerHandler value)
+        {
+        }
     }
 }

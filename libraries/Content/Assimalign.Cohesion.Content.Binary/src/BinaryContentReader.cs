@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Binary;
 /// <remarks>Only string reads allocate. Failed reads leave the cursor unchanged and report the absolute start position.
 /// UTF-8 decoding replaces invalid sequences with the Unicode replacement character; format-specific validation belongs to callers.</remarks>
 // Deviates from the repo interface-first rule per the Stage 1 brief: a ref struct preserves span lifetimes.
+[global::System.Diagnostics.DebuggerDisplay("BinaryContentReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public ref struct BinaryContentReader
 {
     private readonly ReadOnlySpan<byte> _buffer;
@@ -308,5 +310,26 @@ public ref struct BinaryContentReader
         }
         value = ReadBytes(count);
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly long _member0;
+        private readonly int _member1;
+        private readonly int _member2;
+        private readonly bool _member3;
+
+        public DebugView(BinaryContentReader value)
+        {
+            _member0 = value.Position;
+            _member1 = value.Consumed;
+            _member2 = value.Remaining;
+            _member3 = value.IsEnd;
+        }
+
+        public long Position => _member0;
+        public int Consumed => _member1;
+        public int Remaining => _member2;
+        public bool IsEnd => _member3;
     }
 }

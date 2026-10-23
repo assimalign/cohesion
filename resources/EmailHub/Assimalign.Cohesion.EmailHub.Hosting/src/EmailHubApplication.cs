@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.EmailHub.Hosting;
 /// <summary>
 /// Hosts an EmailHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("EmailHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EmailHubApplication : Host<EmailHubApplicationContext>, IEmailHubApplication
 {
     private readonly EmailHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class EmailHubApplication : Host<EmailHubApplicationContext>, IEma
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new EmailHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EmailHubApplication _target;
+
+        public DebugView(EmailHubApplication value)
+        {
+            _target = value;
+        }
+
+        public EmailHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

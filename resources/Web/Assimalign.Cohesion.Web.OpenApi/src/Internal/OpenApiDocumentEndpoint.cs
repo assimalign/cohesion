@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// no body.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiDocumentEndpoint")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OpenApiDocumentEndpoint
 {
     private readonly IOpenApiDescriptionProvider _provider;
@@ -132,4 +134,11 @@ internal sealed class OpenApiDocumentEndpoint
     }
 
     private sealed record Representation(byte[] Content, HttpEntityTag ETag);
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiDocumentEndpoint value)
+        {
+        }
+    }
 }

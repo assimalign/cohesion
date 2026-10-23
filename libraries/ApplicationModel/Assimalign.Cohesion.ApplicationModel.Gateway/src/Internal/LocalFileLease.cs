@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// The sidecar is deliberately retained after release so every process continues to lock
 /// the same file-system identity.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LocalFileLease")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalFileLease : IDisposable
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _processGates =
@@ -128,5 +130,12 @@ internal sealed class LocalFileLease : IDisposable
         return OperatingSystem.IsWindows()
             ? nativeError is 32 or 33
             : nativeError is 11 or 13 or 35;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalFileLease value)
+        {
+        }
     }
 }

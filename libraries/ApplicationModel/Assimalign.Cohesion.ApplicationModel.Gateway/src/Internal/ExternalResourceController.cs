@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <summary>
 /// Resolves external resources without asking a platform controller to realize them.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ExternalResourceController")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExternalResourceController : IApplicationResourceController
 {
     internal const string PlanHint = "cohesion.external";
@@ -179,5 +181,12 @@ internal sealed class ExternalResourceController : IApplicationResourceControlle
             $"(export schema {ApplicationExportDocument.CurrentSchemaVersion}); observed manifest " +
             $"{observedHash} (export schema {observedSchema}). Update the provider export or bind " +
             "every endpoint named by the declaration.";
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ExternalResourceController value)
+        {
+        }
     }
 }

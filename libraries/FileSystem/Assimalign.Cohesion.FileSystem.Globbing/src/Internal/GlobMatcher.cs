@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.FileSystem.Globbing.Internal;
 
 using Cohesion.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GlobMatcher")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class GlobMatcher : IGlobMatcher
 {
     private readonly IEnumerable<IGlobContext> _includes;
@@ -99,6 +101,13 @@ internal class GlobMatcher : IGlobMatcher
                     Recurse(dir, matches);
                     break;
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GlobMatcher value)
+        {
         }
     }
 }

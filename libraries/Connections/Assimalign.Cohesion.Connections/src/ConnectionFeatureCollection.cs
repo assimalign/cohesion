@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Connections;
 /// Enumeration visits local features first, followed by visible wrapped features. A traversal is not
 /// an atomic snapshot of independently changing wrapped collections.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ConnectionFeatureCollection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class ConnectionFeatureCollection : IConnectionFeatureCollection
 {
     private readonly IConnectionFeatureCollection? _inner;
@@ -197,5 +199,12 @@ public class ConnectionFeatureCollection : IConnectionFeatureCollection
         }
 
         return -1;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConnectionFeatureCollection value)
+        {
+        }
     }
 }

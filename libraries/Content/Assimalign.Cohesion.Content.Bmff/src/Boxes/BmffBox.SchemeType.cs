@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The SchemeType box; ISO/IEC 14496-12 8.12.4.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SchemeTypeBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -75,5 +77,26 @@ public sealed class SchemeTypeBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" scheme={SchemeType} scheme-version={SchemeVersion}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchemeTypeBox _target;
+
+        public DebugView(SchemeTypeBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public FourCC SchemeType => _target.SchemeType;
+        public uint SchemeVersion => _target.SchemeVersion;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RezolvrApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
 {
     private readonly RezolvrApplicationContext _context;
@@ -201,4 +203,16 @@ public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
     }
 
     IRezolvrApplication IRezolvrApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly RezolvrApplicationBuilder _target;
+
+        public DebugView(RezolvrApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

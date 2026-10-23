@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("RezolvrControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -101,4 +103,16 @@ internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDispos
                 ? address
                 : throw new InvalidOperationException($"The Rezolvr endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly RezolvrControlPlaneEndpointService _target;
+
+        public DebugView(RezolvrControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

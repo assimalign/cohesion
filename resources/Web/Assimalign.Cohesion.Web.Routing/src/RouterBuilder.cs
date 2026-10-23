@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// build is either part of the router or rejected.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouterBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RouterBuilder : IRouterBuilder
 {
     private readonly List<IRouterRoute> _routes = new();
@@ -110,5 +112,12 @@ public sealed class RouterBuilder : IRouterBuilder
         }
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RouterBuilder value)
+        {
+        }
     }
 }

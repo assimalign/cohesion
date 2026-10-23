@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Binary;
 /// <remarks>Default is the empty materialized segment. Lazy segments never own their source: it must remain
 /// open, its byte layout unchanged, and its cursor unmoved by concurrent operations. Sequential reads
 /// reposition it. Equality compares backing-memory identity or source identity and range, not byte contents.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("BinarySegment {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct BinarySegment : IEquatable<BinarySegment>
 {
     private readonly ReadOnlyMemory<byte> _memory;
@@ -201,4 +203,18 @@ public readonly struct BinarySegment : IEquatable<BinarySegment>
 
     /// <inheritdoc/>
     public override int GetHashCode() => HashCode.Combine(_source, _offset, _length, _memory);
+
+    private sealed class DebugView
+    {
+        private readonly BinarySegment _target;
+
+        public DebugView(BinarySegment value)
+        {
+            _target = value;
+        }
+
+        public long Length => _target.Length;
+        public bool IsEmpty => _target.IsEmpty;
+        public bool IsMaterialized => _target.IsMaterialized;
+    }
 }

@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client;
 /// <summary>
 /// Carries the opaque bootstrap token presented to a configuration-store endpoint.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ClientCredential")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed record ClientCredential
 {
     /// <summary>
@@ -26,4 +28,11 @@ public sealed record ClientCredential
     /// </summary>
     /// <returns>A redacted credential description.</returns>
     public override string ToString() => $"{nameof(ClientCredential)} {{ Token = [redacted] }}";
+
+    private sealed class DebugView
+    {
+        public DebugView(ClientCredential value)
+        {
+        }
+    }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileSystemEventToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class InMemoryFileSystemEventToken : IFileSystemEventToken, IDisposable
 {
     private readonly Glob _glob;
@@ -208,6 +210,8 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken, IDisposable
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Subscriber")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(InMemoryFileSystemEventToken.Subscriber<>.DebugView))]
     partial class Subscriber<T> : Subscriber
     {
         public required T? State { get; init; }
@@ -216,8 +220,25 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken, IDisposable
         {
             Callback.Invoke(new FileSystemEvent<T?>(args.FullPath, State, (FileSystemEventType)args.ChangeType));
         }
+
+        private sealed class DebugView
+        {
+            private readonly Subscriber<T> _target;
+
+            public DebugView(Subscriber<T> value)
+            {
+                _target = value;
+            }
+
+            public T? State => _target.State;
+            public Action<FileSystemEvent<T?>> Callback => _target.Callback;
+            public global::Assimalign.Cohesion.FileSystem.Internal.InMemoryFileSystemEventToken.ChangeType ChangeType => _target.ChangeType;
+            public global::System.Action<global::Assimalign.Cohesion.FileSystem.Internal.InMemoryFileSystemEventToken.Subscriber> OnDispose => _target.OnDispose;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("RenameSubscriber")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(InMemoryFileSystemEventToken.RenameSubscriber<>.DebugView))]
     partial class RenameSubscriber<T> : Subscriber
     {
         public required T State { get; init; }
@@ -227,6 +248,28 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken, IDisposable
             var renameArgs = (RenamedEventArgs)args;
 
             Callback.Invoke(new FileSystemRenameEvent<T>(renameArgs.OldFullPath, renameArgs.FullPath, State, (FileSystemEventType)args.ChangeType));
+        }
+
+        private sealed class DebugView
+        {
+            private readonly RenameSubscriber<T> _target;
+
+            public DebugView(RenameSubscriber<T> value)
+            {
+                _target = value;
+            }
+
+            public T State => _target.State;
+            public Action<FileSystemRenameEvent<T>> Callback => _target.Callback;
+            public global::Assimalign.Cohesion.FileSystem.Internal.InMemoryFileSystemEventToken.ChangeType ChangeType => _target.ChangeType;
+            public global::System.Action<global::Assimalign.Cohesion.FileSystem.Internal.InMemoryFileSystemEventToken.Subscriber> OnDispose => _target.OnDispose;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryFileSystemEventToken value)
+        {
         }
     }
 }

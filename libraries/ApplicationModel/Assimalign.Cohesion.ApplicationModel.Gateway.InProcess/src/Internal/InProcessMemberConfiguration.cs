@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessMemberConfiguration")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessMemberConfiguration
 {
     internal InProcessMemberConfiguration(
@@ -42,6 +44,13 @@ internal sealed class InProcessMemberConfiguration
     internal InProcessProbeConfiguration LivenessProbe { get; }
 
     internal RestartPolicy RestartPolicy { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessMemberConfiguration value)
+        {
+        }
+    }
 }
 
 internal sealed record InProcessProbeConfiguration(

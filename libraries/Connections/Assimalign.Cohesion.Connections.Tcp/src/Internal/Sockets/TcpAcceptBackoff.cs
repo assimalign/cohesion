@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 /// were not reported since the previous one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TcpAcceptBackoff")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TcpAcceptBackoff
 {
     /// <summary>The first wait after an accept fails for want of resources.</summary>
@@ -86,6 +88,13 @@ internal sealed class TcpAcceptBackoff
             _unreported = 0;
 
             return true;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TcpAcceptBackoff value)
+        {
         }
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// An inline image: a source destination, an optional title, and the inline content used as the
 /// alternative text.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownImage")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownImage : MarkdownInline
 {
     private string _destination;
@@ -39,4 +41,18 @@ public sealed class MarkdownImage : MarkdownInline
 
     /// <summary>Gets the inline content rendered as the image's alternative text, in order.</summary>
     public IList<MarkdownInline> Inlines { get; } = new List<MarkdownInline>();
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownImage _target;
+
+        public DebugView(MarkdownImage value)
+        {
+            _target = value;
+        }
+
+        public string Destination => _target.Destination;
+        public string? Title => _target.Title;
+        public IList<MarkdownInline> Inlines => _target.Inlines;
+    }
 }

@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SocketPipeSenderPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class SocketPipeSenderPool : IDisposable
 {
     private const int MaxQueueSize = 1024; // REVIEW: Is this good enough?
@@ -67,6 +69,13 @@ internal class SocketPipeSenderPool : IDisposable
             {
                 sender.Dispose();
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SocketPipeSenderPool value)
+        {
         }
     }
 }

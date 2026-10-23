@@ -4,6 +4,8 @@ namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 /// <summary>Maps a relocation rule's checkpoint coordinates into one candidate output layout.</summary>
 /// <remarks>Used only during a registered rule's apply callback. Never accumulate deltas between callbacks.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("BmffRelocationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffRelocationContext : IBmffRelocationContext
 {
     private readonly BmffLayout _original;
@@ -35,5 +37,12 @@ internal sealed class BmffRelocationContext : IBmffRelocationContext
         ArgumentNullException.ThrowIfNull(box);
         return layout.Entries.TryGetValue(box, out var entry) ? entry.Offset :
             throw new ContentFormatException(ErrorMessages.RelocationTarget, ContentFormatErrorCode.InvalidStructure, box.Offset);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffRelocationContext value)
+        {
+        }
     }
 }

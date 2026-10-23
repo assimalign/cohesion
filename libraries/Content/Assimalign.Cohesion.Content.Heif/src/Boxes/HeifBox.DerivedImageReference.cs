@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The dimg item reference; its ID width comes from the enclosing iref version.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DerivedImageReferenceBox : BmffBox
 {
     /// <summary>Creates an empty DerivedImageReferenceBox model.</summary>
@@ -51,5 +53,23 @@ public sealed class DerivedImageReferenceBox : BmffBox
     {
         base.WriteDescription(writer);
         _fields.WriteDescription(writer);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DerivedImageReferenceBox _target;
+
+        public DebugView(DerivedImageReferenceBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool LargeIds => _target.LargeIds;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

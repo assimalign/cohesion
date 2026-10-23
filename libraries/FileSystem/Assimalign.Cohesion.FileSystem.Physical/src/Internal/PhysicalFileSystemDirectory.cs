@@ -12,6 +12,7 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// <summary>
 /// Represents a directory on a physical filesystem
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[D] - {Path}")]
 internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystemDirectory
 {
@@ -138,5 +139,24 @@ internal class PhysicalFileSystemDirectory : PhysicalFileSystemInfo, IFileSystem
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PhysicalFileSystemDirectory _target;
+
+        public DebugView(PhysicalFileSystemDirectory value)
+        {
+            _target = value;
+        }
+
+        public DirectoryName Name => _target.Name;
+        public global::System.IO.FileSystemPath Path => _target.Path;
+        public global::System.DateTime UpdatedOn => _target.UpdatedOn;
+        public global::System.DateTime CreatedOn => _target.CreatedOn;
+        public global::System.DateTime AccessedOn => _target.AccessedOn;
+        public global::Assimalign.Cohesion.FileSystem.PhysicalFileSystem FileSystem => _target.FileSystem;
+        public global::System.IO.FileAttributes Attributes => _target.Attributes;
+        public global::System.IO.FileAttributes IgnoreAttributes => _target.IgnoreAttributes;
     }
 }

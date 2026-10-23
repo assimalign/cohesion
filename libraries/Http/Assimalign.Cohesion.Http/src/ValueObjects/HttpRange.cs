@@ -18,6 +18,7 @@ namespace Assimalign.Cohesion.Http;
 /// into a concrete <c>(offset, length)</c> slice against a known representation length, reporting
 /// whether the spec is satisfiable.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpRange : IEquatable<HttpRange>
 {
@@ -240,4 +241,21 @@ public readonly struct HttpRange : IEquatable<HttpRange>
 
     /// <summary>Determines whether two range specs are not equal.</summary>
     public static bool operator !=(HttpRange left, HttpRange right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpRange _target;
+
+        public DebugView(HttpRange value)
+        {
+            _target = value;
+        }
+
+        public long? From => _target.From;
+        public long? To => _target.To;
+        public long? SuffixLength => _target.SuffixLength;
+        public bool IsSuffix => _target.IsSuffix;
+        public bool IsOpenEnded => _target.IsOpenEnded;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

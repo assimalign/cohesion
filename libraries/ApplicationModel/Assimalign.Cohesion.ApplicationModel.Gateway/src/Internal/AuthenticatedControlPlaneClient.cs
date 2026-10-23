@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// Binds an <see cref="IAuthenticatedControlPlaneClient"/> to the calling application's
 /// peer-control-plane credential and trusted-issuer snapshot for one external resolution.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticatedControlPlaneClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AuthenticatedControlPlaneClient : IControlPlaneClient
 {
     private readonly IAuthenticatedControlPlaneClient _client;
@@ -48,5 +50,12 @@ internal sealed class AuthenticatedControlPlaneClient : IControlPlaneClient
                 _trustedIssuers,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AuthenticatedControlPlaneClient value)
+        {
+        }
     }
 }

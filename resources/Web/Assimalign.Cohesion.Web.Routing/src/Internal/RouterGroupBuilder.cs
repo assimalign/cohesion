@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// and nested groups read their ancestors' metadata through the parent chain rather than a
 /// snapshot.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouterGroupBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RouterGroupBuilder : IRouterGroupBuilder
 {
     private readonly IRouterBuilder _routerBuilder;
@@ -239,5 +241,17 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
         }
 
         return $"{left}/{right}";
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RouterGroupBuilder _target;
+
+        public DebugView(RouterGroupBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Prefix => _target.Prefix;
     }
 }

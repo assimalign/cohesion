@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The ItemLocation box; ISO/IEC 14496-12 8.11.3.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ItemLocationBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -185,5 +187,29 @@ public sealed class ItemLocationBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" items={Entries.Length}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ItemLocationBox _target;
+
+        public DebugView(ItemLocationBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte OffsetSize => _target.OffsetSize;
+        public byte LengthSize => _target.LengthSize;
+        public byte BaseOffsetSize => _target.BaseOffsetSize;
+        public byte IndexSize => _target.IndexSize;
+        public Entry[] Entries => _target.Entries;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

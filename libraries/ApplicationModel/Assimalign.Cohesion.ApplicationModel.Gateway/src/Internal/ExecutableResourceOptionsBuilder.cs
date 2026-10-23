@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ExecutableResourceOptionsBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExecutableResourceOptionsBuilder : IExecutableResourceOptionsBuilder
 {
     private readonly List<ResourceEndpoint> _endpoints = new();
@@ -140,5 +142,23 @@ internal sealed class ExecutableResourceOptionsBuilder : IExecutableResourceOpti
             throw new InvalidOperationException(
                 $"The executable {role} probe cannot use gRPC because IProbeSpec does not carry a gRPC service name.");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ExecutableResourceOptionsBuilder _target;
+
+        public DebugView(ExecutableResourceOptionsBuilder value)
+        {
+            _target = value;
+        }
+
+        public string? ReadyMarker => _target.ReadyMarker;
+        public IProbeSpec? ReadinessProbe => _target.ReadinessProbe;
+        public IProbeSpec? StartupProbe => _target.StartupProbe;
+        public IProbeSpec? LivenessProbe => _target.LivenessProbe;
+        public RestartPolicy RestartPolicy => _target.RestartPolicy;
+        public IReadOnlyList<ResourceEndpoint> Endpoints => _target.Endpoints;
+        public IReadOnlyDictionary<string, string> Environment => _target.Environment;
     }
 }

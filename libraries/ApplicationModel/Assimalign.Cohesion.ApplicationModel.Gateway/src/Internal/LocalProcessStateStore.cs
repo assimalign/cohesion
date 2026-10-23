@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalProcessStateStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalProcessStateStore
 {
     private readonly string _stateDirectory;
@@ -273,6 +275,13 @@ internal sealed class LocalProcessStateStore
         }
     }
 
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalProcessStateStore value)
+        {
+        }
+    }
 }
 
 internal sealed class LocalProcessRegistration

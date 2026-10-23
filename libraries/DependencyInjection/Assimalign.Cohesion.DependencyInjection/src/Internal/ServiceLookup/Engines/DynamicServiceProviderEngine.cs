@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DynamicServiceProviderEngine")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DynamicServiceProviderEngine : CompiledServiceProviderEngine
 {
     private readonly ServiceProvider _serviceProvider;
@@ -44,5 +46,17 @@ internal sealed class DynamicServiceProviderEngine : CompiledServiceProviderEngi
 
             return result;
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DynamicServiceProviderEngine _target;
+
+        public DebugView(DynamicServiceProviderEngine value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.DependencyInjection.Internal.ILEmitResolverBuilderVisitor ResolverBuilder => _target.ResolverBuilder;
     }
 }

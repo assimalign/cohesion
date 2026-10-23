@@ -15,6 +15,7 @@ using static Assimalign.Cohesion.Internal.PathHelper;
 /// <summary>
 /// A case-insensitive representation of an absolute or relative path.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{_value}")]
 [JsonConverter(typeof(PathJsonConverter))]
 public readonly struct FileSystemPath : IEquatable<FileSystemPath>
@@ -979,6 +980,8 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
             : string.Concat(kept, "/", right));
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PathJsonConverter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal partial class PathJsonConverter : JsonConverter<FileSystemPath>
     {
         public override FileSystemPath Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
@@ -1003,6 +1006,19 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
             var str = value.ToString();
 
             writer.WriteStringValue(str);
+        }
+
+        private sealed class DebugView
+        {
+            private readonly PathJsonConverter _target;
+
+            public DebugView(PathJsonConverter value)
+            {
+                _target = value;
+            }
+
+            public bool HandleNull => _target.HandleNull;
+            public global::System.Type Type => _target.Type;
         }
     }
 
@@ -1087,4 +1103,17 @@ public readonly struct FileSystemPath : IEquatable<FileSystemPath>
     //        throw new NotImplementedException();
     //    }
     //}
+
+    private sealed class DebugView
+    {
+        private readonly FileSystemPath _target;
+
+        public DebugView(FileSystemPath value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

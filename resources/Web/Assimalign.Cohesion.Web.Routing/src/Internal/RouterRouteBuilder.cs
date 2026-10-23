@@ -4,6 +4,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// Default <see cref="IRouterRouteBuilder"/>: attaches metadata to one mapped route through the route's
 /// <see cref="DeferredRouteMetadata"/>, which composes it when the route table is built.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RouterRouteBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RouterRouteBuilder : IRouterRouteBuilder
 {
     private readonly DeferredRouteMetadata _metadata;
@@ -27,4 +29,11 @@ internal sealed class RouterRouteBuilder : IRouterRouteBuilder
     }
 
     IRouterConventionBuilder IRouterConventionBuilder.WithMetadata(params object[] items) => WithMetadata(items);
+
+    private sealed class DebugView
+    {
+        public DebugView(RouterRouteBuilder value)
+        {
+        }
+    }
 }

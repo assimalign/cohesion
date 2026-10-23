@@ -77,6 +77,8 @@ internal static class YamlEventValidator
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Expansion")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class Expansion
     {
         internal long Count { get; private set; } = 1;
@@ -92,6 +94,13 @@ internal static class YamlEventValidator
                 return;
             }
             Count += child.Count;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(Expansion value)
+            {
+            }
         }
     }
 }

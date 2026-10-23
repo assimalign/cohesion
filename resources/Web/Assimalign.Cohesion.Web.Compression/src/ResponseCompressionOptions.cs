@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.Compression;
 /// <c>docs/DESIGN.md</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResponseCompressionOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ResponseCompressionOptions
 {
     private int _minimumResponseSizeBytes = 1024;
@@ -118,4 +120,21 @@ public sealed class ResponseCompressionOptions
         "application/problem+xml",
         "image/svg+xml",
     };
+
+    private sealed class DebugView
+    {
+        private readonly ResponseCompressionOptions _target;
+
+        public DebugView(ResponseCompressionOptions value)
+        {
+            _target = value;
+        }
+
+        public bool EnableForHttps => _target.EnableForHttps;
+        public bool EnableGzip => _target.EnableGzip;
+        public bool EnableBrotli => _target.EnableBrotli;
+        public CompressionLevel Level => _target.Level;
+        public int MinimumResponseSizeBytes => _target.MinimumResponseSizeBytes;
+        public IList<string> MimeTypes => _target.MimeTypes;
+    }
 }

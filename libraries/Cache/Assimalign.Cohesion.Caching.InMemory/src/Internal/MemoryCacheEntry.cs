@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Caching.InMemory.Internal;
 /// configuration of the same entry from multiple threads is a usage error.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MemoryCacheEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MemoryCacheEntry : ICacheEntry
 {
     private readonly MemoryCache _cache;
@@ -64,4 +66,22 @@ internal sealed class MemoryCacheEntry : ICacheEntry
     internal IReadOnlyList<PostEvictionCallbackRegistration> Callbacks => _postEvictionCallbacks is null
         ? Array.Empty<PostEvictionCallbackRegistration>()
         : _postEvictionCallbacks;
+
+    private sealed class DebugView
+    {
+        private readonly MemoryCacheEntry _target;
+
+        public DebugView(MemoryCacheEntry value)
+        {
+            _target = value;
+        }
+
+        public object Key => _target.Key;
+        public object? Value => _target.Value;
+        public DateTimeOffset? AbsoluteExpiration => _target.AbsoluteExpiration;
+        public TimeSpan? AbsoluteExpirationRelativeToNow => _target.AbsoluteExpirationRelativeToNow;
+        public TimeSpan? SlidingExpiration => _target.SlidingExpiration;
+        public CacheEntryPriority Priority => _target.Priority;
+        public long? Size => _target.Size;
+    }
 }

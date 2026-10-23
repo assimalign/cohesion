@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalGatewayProcessSupervisor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalGatewayProcessSupervisor
 {
     private const int ConfigurationExitCode = 64;
@@ -1355,6 +1357,8 @@ internal sealed class LocalGatewayProcessSupervisor
             => new(AttemptOutcomeKind.Restart, 0, detail);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("SupervisedResource")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class SupervisedResource
     {
         private readonly object _gate = new();
@@ -1438,8 +1442,27 @@ internal sealed class LocalGatewayProcessSupervisor
                 completion.TrySetException(exception);
             }
         }
+
+        private sealed class DebugView
+        {
+            private readonly SupervisedResource _target;
+
+            public DebugView(SupervisedResource value)
+            {
+                _target = value;
+            }
+
+            public LocalResourceConfiguration Configuration => _target.Configuration;
+            public CancellationTokenSource Lifetime => _target.Lifetime;
+            public CancellationTokenSource ForceStop => _target.ForceStop;
+            public Task Completion => _target.Completion;
+            public bool StopRequested => _target.StopRequested;
+            public ProcessStopResult StopResult => _target.StopResult;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ProcessAttempt")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ProcessAttempt
     {
         private readonly object _stopGate = new();
@@ -1480,6 +1503,32 @@ internal sealed class LocalGatewayProcessSupervisor
             {
                 return _stop ??= start();
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly ProcessAttempt _target;
+
+            public DebugView(ProcessAttempt value)
+            {
+                _target = value;
+            }
+
+            public Process Process => _target.Process;
+            public LocalProcessRegistration Registration => _target.Registration;
+            public EventWaitHandle? StopEvent => _target.StopEvent;
+            public bool RequiresRelaunch => _target.RequiresRelaunch;
+            public Task Exit => _target.Exit;
+            public Task StandardOutput => _target.StandardOutput;
+            public Task StandardError => _target.StandardError;
+            public TaskCompletionSource MarkerSeen => _target.MarkerSeen;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalGatewayProcessSupervisor value)
+        {
         }
     }
 }

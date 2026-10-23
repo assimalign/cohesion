@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// 
 /// </summary>
 /// <typeparam name="T"></typeparam>
+[global::System.Diagnostics.DebuggerDisplay("ValidationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(ValidationContext<>.DebugView))]
 public sealed class ValidationContext<T> : IValidationContext
 {
     private readonly Type _type;
@@ -128,5 +130,21 @@ public sealed class ValidationContext<T> : IValidationContext
     public void AddInvocation(ValidationInvocation invocation)
     {
         InvocationQueue.Enqueue(invocation);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ValidationContext<T> _target;
+
+        public DebugView(ValidationContext<T> value)
+        {
+            _target = value;
+        }
+
+        public T Instance => _target.Instance;
+        public Type InstanceType => _target.InstanceType;
+        public bool ThrowExceptionOnFailure => _target.ThrowExceptionOnFailure;
+        public bool ContinueThroughValidationChain => _target.ContinueThroughValidationChain;
+        public ValidationMode ValidationMode => _target.ValidationMode;
     }
 }

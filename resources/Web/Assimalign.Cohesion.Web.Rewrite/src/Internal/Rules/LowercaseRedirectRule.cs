@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// Inside a <c>Map(path)</c> branch only the path below the branch's prefix is lowercased. The rule is
 /// idempotent: the target of its redirect is a path it leaves alone, so it cannot loop.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LowercaseRedirectRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LowercaseRedirectRule : RewriteRule
 {
     private readonly HttpStatusCode _statusCode;
@@ -35,5 +37,12 @@ internal sealed class LowercaseRedirectRule : RewriteRule
         context.Redirect(
             RewriteUrl.BuildLocation(null, null, context.PathBase, new HttpPath(lowercase), context.SerializedQuery),
             _statusCode);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LowercaseRedirectRule value)
+        {
+        }
     }
 }

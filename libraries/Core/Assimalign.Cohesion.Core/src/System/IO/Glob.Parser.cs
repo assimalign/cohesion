@@ -15,6 +15,8 @@ namespace System.IO;
 public sealed partial class Glob
 {
 
+    [global::System.Diagnostics.DebuggerDisplay("Lexer")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal ref struct Lexer
     {
         private static ReadOnlySpan<char> _separators => new char[] { '/', '\\' };
@@ -160,8 +162,25 @@ public sealed partial class Glob
         {
             return !_starting.Contains(character);
         }
+
+        private sealed class DebugView
+        {
+            private readonly int _member0;
+            private readonly bool _member1;
+
+            public DebugView(Lexer value)
+            {
+                _member0 = value.Index;
+                _member1 = value.End;
+            }
+
+            public int Index => _member0;
+            public bool End => _member1;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Parser")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal partial class Parser
     {
         // The cache starts over after this many misses. Patterns can be caller input or paths (the
@@ -548,6 +567,13 @@ public sealed partial class Glob
 
             _buffer.Clear();
             return text;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(Parser value)
+            {
+            }
         }
     }
 }

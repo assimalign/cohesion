@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect;
 /// validation instant is a required constructor argument — a descriptive library never
 /// owns a clock.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenIdConnectIdTokenValidationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenIdConnectIdTokenValidationOptions
 {
     private long? _maxAge;
@@ -87,4 +89,24 @@ public sealed class OpenIdConnectIdTokenValidationOptions
     /// <see cref="MaxAge" /> (a client registered with <c>require_auth_time</c>).
     /// </summary>
     public bool RequireAuthTime { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly OpenIdConnectIdTokenValidationOptions _target;
+
+        public DebugView(OpenIdConnectIdTokenValidationOptions value)
+        {
+            _target = value;
+        }
+
+        public DateTimeOffset ValidateAt => _target.ValidateAt;
+        public TimeSpan ClockSkew => _target.ClockSkew;
+        public string? ExpectedIssuer => _target.ExpectedIssuer;
+        public string? ExpectedAudience => _target.ExpectedAudience;
+        public IList<string> TrustedAudiences => _target.TrustedAudiences;
+        public bool AllowAdditionalAudiences => _target.AllowAdditionalAudiences;
+        public string? ExpectedNonce => _target.ExpectedNonce;
+        public long? MaxAge => _target.MaxAge;
+        public bool RequireAuthTime => _target.RequireAuthTime;
+    }
 }

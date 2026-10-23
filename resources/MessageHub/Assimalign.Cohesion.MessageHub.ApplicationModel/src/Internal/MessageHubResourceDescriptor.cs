@@ -5,6 +5,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MessageHubResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MessageHubResourceDescriptor : IMessageHubResourceDescriptor
 {
     private readonly IApplicationResourceDescriptor _inner;
@@ -36,5 +38,19 @@ internal sealed class MessageHubResourceDescriptor : IMessageHubResourceDescript
     {
         _inner.DependsOn(resources);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MessageHubResourceDescriptor _target;
+
+        public DebugView(MessageHubResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public MessageHubResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

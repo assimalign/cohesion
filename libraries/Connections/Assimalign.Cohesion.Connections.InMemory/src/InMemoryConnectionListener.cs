@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// connection is pending, <see cref="AcceptAsync(CancellationToken)"/> waits (like a real listener)
 /// until one is dialed, the accept is cancelled, or the listener is disposed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryConnectionListener : DuplexConnectionListener
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
@@ -134,5 +136,20 @@ public sealed class InMemoryConnectionListener : DuplexConnectionListener
         _ = server.DisposeAsync();
 
         throw new ConnectionAbortedException(ErrorMessages.ListenerNoLongerAcceptingConnections);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryConnectionListener _target;
+
+        public DebugView(InMemoryConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IDuplexConnection> Connections => _target.Connections;
     }
 }

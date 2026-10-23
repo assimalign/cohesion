@@ -8,6 +8,8 @@ using Assimalign.Cohesion.FileSystem;
 /// <summary>
 /// Represents options used by file-backed configuration providers.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemConfigurationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class FileSystemConfigurationOptions
 {
     private TimeSpan _reloadDelay = TimeSpan.FromMilliseconds(250);
@@ -52,4 +54,21 @@ public class FileSystemConfigurationOptions
     /// Gets or sets the callback used to handle file load exceptions.
     /// </summary>
     public Action<ConfigurationFileLoadExceptionContext>? OnLoadException { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly FileSystemConfigurationOptions _target;
+
+        public DebugView(FileSystemConfigurationOptions value)
+        {
+            _target = value;
+        }
+
+        public IFileSystem? FileSystem => _target.FileSystem;
+        public FileSystemPath Path => _target.Path;
+        public bool Optional => _target.Optional;
+        public bool ReloadOnChange => _target.ReloadOnChange;
+        public TimeSpan ReloadDelay => _target.ReloadDelay;
+        public Action<ConfigurationFileLoadExceptionContext>? OnLoadException => _target.OnLoadException;
+    }
 }

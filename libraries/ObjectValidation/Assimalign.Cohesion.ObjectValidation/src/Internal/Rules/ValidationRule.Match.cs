@@ -3,6 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MatchValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MatchValidationRule : ValidationRuleBase<string>
 {
     /// <summary>
@@ -108,6 +110,21 @@ internal sealed class MatchValidationRule : ValidationRuleBase<string>
             // which passes any input slow enough to time out.
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MatchValidationRule _target;
+
+        public DebugView(MatchValidationRule value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }
 

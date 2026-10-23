@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// <summary>
 /// Verifies JOSE ECDSA signatures in their fixed-size IEEE P1363 <c>r||s</c> representation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("EcdsaJsonWebTokenSignatureVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EcdsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureVerifier
 {
     private readonly ECDsa _publicKey;
@@ -80,6 +82,13 @@ public sealed class EcdsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureV
         catch (CryptographicException)
         {
             return false;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EcdsaJsonWebTokenSignatureVerifier value)
+        {
         }
     }
 }

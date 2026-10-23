@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// — the transport's own body is written first, so caching is a strictly additive side effect that can
 /// never corrupt or withhold the response.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OutputCacheBufferStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OutputCacheBufferStream : Stream
 {
     private readonly Stream _inner;
@@ -101,5 +103,23 @@ internal sealed class OutputCacheBufferStream : Stream
         }
 
         _capture.Write(bytes);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OutputCacheBufferStream _target;
+
+        public DebugView(OutputCacheBufferStream value)
+        {
+            _target = value;
+        }
+
+        public bool IsCapExceeded => _target.IsCapExceeded;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

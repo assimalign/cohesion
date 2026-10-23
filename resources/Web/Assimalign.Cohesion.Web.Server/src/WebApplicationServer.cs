@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Web;
 /// response, a replacement <c>500</c>, and a reset alike.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplicationServer : IWebApplicationServer
 {
     // Request id/activity, response starting/client fault, completion, drain, and the reserved slot
@@ -1004,5 +1006,12 @@ public sealed class WebApplicationServer : IWebApplicationServer
 
         /// <summary>The exchange was abandoned (server shutdown or exchange cancellation); it is reset.</summary>
         Cancelled,
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebApplicationServer value)
+        {
+        }
     }
 }

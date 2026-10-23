@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LogSpaceControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDisposable
 {
     private readonly WebApplication _application;
@@ -96,4 +98,16 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
                 : throw new InvalidOperationException($"The LogSpace endpoint host '{host}' is not a bindable IP address.");
 
 
+
+    private sealed class DebugView
+    {
+        private readonly LogSpaceControlPlaneEndpointService _target;
+
+        public DebugView(LogSpaceControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

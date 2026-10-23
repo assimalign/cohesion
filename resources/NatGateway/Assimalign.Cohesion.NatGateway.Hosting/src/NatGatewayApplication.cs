@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.NatGateway.Hosting;
 /// <summary>
 /// Hosts a NatGateway application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("NatGatewayApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NatGatewayApplication : Host<NatGatewayApplicationContext>, INatGatewayApplication
 {
     private readonly NatGatewayApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class NatGatewayApplication : Host<NatGatewayApplicationContext>, 
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new NatGatewayApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NatGatewayApplication _target;
+
+        public DebugView(NatGatewayApplication value)
+        {
+            _target = value;
+        }
+
+        public NatGatewayApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

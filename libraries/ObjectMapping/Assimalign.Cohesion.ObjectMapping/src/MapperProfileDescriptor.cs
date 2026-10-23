@@ -15,6 +15,8 @@ using Assimalign.Cohesion.ObjectMapping.Internal;
 /// </summary>
 /// <typeparam name="TTarget">The target type the profile maps to.</typeparam>
 /// <typeparam name="TSource">The source type the profile maps from.</typeparam>
+[global::System.Diagnostics.DebuggerDisplay("MapperProfileDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MapperProfileDescriptor<,>.DebugView))]
 public sealed class MapperProfileDescriptor<
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TTarget,
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSource>
@@ -344,5 +346,17 @@ public sealed class MapperProfileDescriptor<
         }
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MapperProfileDescriptor<TTarget, TSource> _target;
+
+        public DebugView(MapperProfileDescriptor<TTarget, TSource> value)
+        {
+            _target = value;
+        }
+
+        public MapperProfile<TTarget, TSource> Profile => _target.Profile;
     }
 }

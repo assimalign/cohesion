@@ -359,6 +359,8 @@ namespace Assimalign.Cohesion.DependencyInjection.Utilities
             return true;
         }
 
+        [global::System.Diagnostics.DebuggerDisplay("ConstructorMatcher")]
+        [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
         private struct ConstructorMatcher
         {
             private readonly ConstructorInfo _constructor;
@@ -433,6 +435,13 @@ namespace Assimalign.Cohesion.DependencyInjection.Utilities
                 }
 
                 return _constructor.Invoke(BindingFlags.DoNotWrapExceptions, binder: null, parameters: _parameterValues, culture: null);
+            }
+
+            private sealed class DebugView
+            {
+                public DebugView(ConstructorMatcher value)
+                {
+                }
             }
         }
 

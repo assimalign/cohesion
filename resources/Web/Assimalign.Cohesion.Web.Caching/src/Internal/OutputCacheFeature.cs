@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// handle that forwards tag eviction to the middleware's backing <see cref="IOutputCacheStore"/>. One
 /// instance is captured at builder time and installed on each request — it holds no per-request state.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OutputCacheFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OutputCacheFeature : IOutputCacheFeature
 {
     private readonly IOutputCacheStore _store;
@@ -26,5 +28,12 @@ internal sealed class OutputCacheFeature : IOutputCacheFeature
     {
         ArgumentException.ThrowIfNullOrEmpty(tag);
         return _store.EvictByTagAsync(tag, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OutputCacheFeature value)
+        {
+        }
     }
 }

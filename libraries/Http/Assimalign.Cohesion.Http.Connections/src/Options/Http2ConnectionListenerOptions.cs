@@ -57,6 +57,8 @@ public sealed class Http2ConnectionListenerOptions
     /// and are out of scope for this surface.
     /// </para>
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("Http2Limits")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public sealed class Http2Limits : HttpConnectionListenerLimits
     {
         /// <summary>Default <see cref="MaxStreamsPerConnection"/> (mirrors the advertised SETTINGS_MAX_CONCURRENT_STREAMS).</summary>
@@ -217,6 +219,28 @@ public sealed class Http2ConnectionListenerOptions
 
                 _floodDetectionWindow = value;
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Http2Limits _target;
+
+            public DebugView(Http2Limits value)
+            {
+                _target = value;
+            }
+
+            public int MaxStreamsPerConnection => _target.MaxStreamsPerConnection;
+            public int MaxRequestHeaderListSize => _target.MaxRequestHeaderListSize;
+            public int MaxResetStreamsPerWindow => _target.MaxResetStreamsPerWindow;
+            public int MaxSettingsFramesPerWindow => _target.MaxSettingsFramesPerWindow;
+            public int MaxPingFramesPerWindow => _target.MaxPingFramesPerWindow;
+            public TimeSpan FloodDetectionWindow => _target.FloodDetectionWindow;
+            public long? MaxRequestBodySize => _target.MaxRequestBodySize;
+            public global::System.TimeSpan KeepAliveTimeout => _target.KeepAliveTimeout;
+            public global::System.TimeSpan RequestHeadersTimeout => _target.RequestHeadersTimeout;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinRequestBodyDataRate => _target.MinRequestBodyDataRate;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinResponseDataRate => _target.MinResponseDataRate;
         }
     }
 }

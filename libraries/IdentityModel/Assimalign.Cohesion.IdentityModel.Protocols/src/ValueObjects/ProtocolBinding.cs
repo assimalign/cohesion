@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols;
 /// form at construction; the <see langword="default" /> instance equals
 /// <see cref="Unknown" /> and its <see cref="Name" /> is never null.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolBinding {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct ProtocolBinding : IEquatable<ProtocolBinding>
 {
     private const string UnknownName = "unknown";
@@ -109,4 +111,16 @@ public readonly struct ProtocolBinding : IEquatable<ProtocolBinding>
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    private sealed class DebugView
+    {
+        private readonly ProtocolBinding _target;
+
+        public DebugView(ProtocolBinding value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+    }
 }

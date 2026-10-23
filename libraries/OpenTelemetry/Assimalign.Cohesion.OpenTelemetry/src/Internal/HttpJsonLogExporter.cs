@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.OpenTelemetry.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HttpJsonLogExporter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpJsonLogExporter : IOtlpLogExporter
 {
     private readonly Channel<OtlpLogRecord> _queue;
@@ -224,6 +226,13 @@ internal sealed class HttpJsonLogExporter : IOtlpLogExporter
         while (_queue.Reader.TryRead(out _))
         {
             Interlocked.Increment(ref _dropped);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpJsonLogExporter value)
+        {
         }
     }
 }

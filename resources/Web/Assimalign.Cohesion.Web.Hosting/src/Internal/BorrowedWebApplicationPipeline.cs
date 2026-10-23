@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Http;
 /// factories return. Wrapping the caller's pipeline keeps it borrowed, like every other instance
 /// handed to the builder.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BorrowedWebApplicationPipeline")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BorrowedWebApplicationPipeline : IWebApplicationPipeline
 {
     private readonly IWebApplicationPipeline _pipeline;
@@ -26,5 +28,12 @@ internal sealed class BorrowedWebApplicationPipeline : IWebApplicationPipeline
     public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
     {
         return _pipeline.ExecuteAsync(context, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BorrowedWebApplicationPipeline value)
+        {
+        }
     }
 }

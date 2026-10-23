@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// where the specification does.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ContentSecurityPolicySourceListBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ContentSecurityPolicySourceListBuilder
 {
     private const string noneSource = "'none'";
@@ -213,5 +215,12 @@ public sealed class ContentSecurityPolicySourceListBuilder
         }
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ContentSecurityPolicySourceListBuilder value)
+        {
+        }
     }
 }

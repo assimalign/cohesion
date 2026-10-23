@@ -3,6 +3,8 @@ using System.IO;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BmffBufferStream {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffBufferStream : MemoryStream
 {
     private readonly int _limit;
@@ -38,5 +40,25 @@ internal sealed class BmffBufferStream : MemoryStream
     {
         Check(value);
         base.SetLength(value);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffBufferStream _target;
+
+        public DebugView(BmffBufferStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public int Capacity => _target.Capacity;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Connections.Udp;
 /// receives datagrams from any peer, while a client connects its socket to a fixed remote peer. Both roles
 /// surface the same <see cref="IDatagramConnection"/> contract. Only IPv4 and IPv6 endpoints are supported.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("UdpConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class UdpConnectionFactory
 {
     private readonly UdpBindOptions _serverOptions;
@@ -332,5 +334,17 @@ public sealed class UdpConnectionFactory
         }
 
         return new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UdpConnectionFactory _target;
+
+        public DebugView(UdpConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
     }
 }

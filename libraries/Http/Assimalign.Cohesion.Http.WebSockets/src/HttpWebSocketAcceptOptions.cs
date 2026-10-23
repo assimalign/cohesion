@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Http;
 /// not retained, so one instance can serve many accepts.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpWebSocketAcceptOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpWebSocketAcceptOptions
 {
     private string? _subProtocol;
@@ -137,5 +139,22 @@ public sealed class HttpWebSocketAcceptOptions
         }
 
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpWebSocketAcceptOptions _target;
+
+        public DebugView(HttpWebSocketAcceptOptions value)
+        {
+            _target = value;
+        }
+
+        public string? SubProtocol => _target.SubProtocol;
+        public TimeSpan? KeepAliveInterval => _target.KeepAliveInterval;
+        public TimeSpan? KeepAliveTimeout => _target.KeepAliveTimeout;
+        public bool? DangerousEnableCompression => _target.DangerousEnableCompression;
+        public bool DisableServerContextTakeover => _target.DisableServerContextTakeover;
+        public int ServerMaxWindowBits => _target.ServerMaxWindowBits;
     }
 }

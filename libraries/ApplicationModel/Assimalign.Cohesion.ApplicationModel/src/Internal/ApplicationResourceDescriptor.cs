@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// descriptor returned by <see cref="IApplicationBuilder.AddResource(IApplicationResource)"/>
 /// is the same instance referenced by <c>DependsOn</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationResourceDescriptor : IResourceCommandDescriptor
 {
     private readonly List<IApplicationResourceDescriptor> _dependencies = new();
@@ -76,5 +78,19 @@ internal sealed class ApplicationResourceDescriptor : IResourceCommandDescriptor
         }
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApplicationResourceDescriptor _target;
+
+        public DebugView(ApplicationResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public IApplicationResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

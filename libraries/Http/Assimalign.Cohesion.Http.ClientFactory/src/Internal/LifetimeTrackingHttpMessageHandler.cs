@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// it pairs cheap client disposal with safe handler lifetime.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LifetimeTrackingHttpMessageHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LifetimeTrackingHttpMessageHandler : DelegatingHandler
 {
     public LifetimeTrackingHttpMessageHandler(HttpMessageHandler innerHandler)
@@ -39,5 +41,17 @@ internal sealed class LifetimeTrackingHttpMessageHandler : DelegatingHandler
     {
         // Intentionally do NOT call base.Dispose(disposing). The base implementation would
         // dispose InnerHandler, which we explicitly do not own here.
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LifetimeTrackingHttpMessageHandler _target;
+
+        public DebugView(LifetimeTrackingHttpMessageHandler value)
+        {
+            _target = value;
+        }
+
+        public global::System.Net.Http.HttpMessageHandler? InnerHandler => _target.InnerHandler;
     }
 }

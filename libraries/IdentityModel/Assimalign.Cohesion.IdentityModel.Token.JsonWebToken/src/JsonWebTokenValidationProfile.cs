@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// resolver backed by a mutable trust store observes additions and removals immediately.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("JsonWebTokenValidationProfile")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JsonWebTokenValidationProfile
 {
     private readonly TimeSpan _clockSkew = TimeSpan.FromMinutes(5);
@@ -91,5 +93,21 @@ public sealed class JsonWebTokenValidationProfile
         ArgumentNullException.ThrowIfNull(keys);
 
         return candidate => string.Equals(candidate, issuer, StringComparison.Ordinal) ? keys : null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly JsonWebTokenValidationProfile _target;
+
+        public DebugView(JsonWebTokenValidationProfile value)
+        {
+            _target = value;
+        }
+
+        public Func<string, JsonWebKeySet?> IssuerKeys => _target.IssuerKeys;
+        public TimeSpan MaximumLifetime => _target.MaximumLifetime;
+        public TimeSpan ClockSkew => _target.ClockSkew;
+        public string? ExpectedSubject => _target.ExpectedSubject;
+        public bool RequireSubject => _target.RequireSubject;
     }
 }

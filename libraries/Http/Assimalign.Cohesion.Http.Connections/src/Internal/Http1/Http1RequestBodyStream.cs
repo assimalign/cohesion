@@ -58,6 +58,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// be drained for keep-alive — see <see cref="DrainAsync"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1RequestBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1RequestBodyStream : Stream
 {
     private readonly PipeReader _input;
@@ -1101,5 +1103,22 @@ internal sealed class Http1RequestBodyStream : Stream
 
         /// <summary>A trailer field line, capped by what is left of the trailer section's size limit.</summary>
         TrailerSection,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http1RequestBodyStream _target;
+
+        public DebugView(Http1RequestBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

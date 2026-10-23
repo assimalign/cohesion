@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 /// The connection is live on construction: the constructor starts the receive and send pump
 /// loops, which continuously move bytes between the socket and the consumer-facing duplex pipe.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TcpConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TcpConnection : DuplexConnection
 {
     private readonly CancellationTokenSource _connectionClosedTokenSource = new CancellationTokenSource();
@@ -377,5 +379,26 @@ internal sealed class TcpConnection : DuplexConnection
         {
             // The token source was disposed concurrently with tear-down.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TcpConnection _target;
+
+        public DebugView(TcpConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.ConnectionDirection Direction => _target.Direction;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

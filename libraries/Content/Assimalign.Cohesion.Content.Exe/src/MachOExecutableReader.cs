@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Exe;
 
 /// <summary>Inspects thin and universal Mach-O headers.</summary>
 /// <remarks>Sources must be readable and seekable. Parsing starts at the current position and leaves the source open.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MachOExecutableReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MachOExecutableReader : IContentReader<IExecutableFile>
 {
     private readonly ExecutableReaderOptions _options;
@@ -52,4 +54,11 @@ public sealed class MachOExecutableReader : IContentReader<IExecutableFile>
     /// <exception cref="OperationCanceledException">Inspection was canceled.</exception>
     public ValueTask<IExecutableFile> ReadAsync(Stream stream, CancellationToken cancellationToken = default) =>
         ExecutableInspection.ReadAsync(stream, _options, Format, true, cancellationToken);
+
+    private sealed class DebugView
+    {
+        public DebugView(MachOExecutableReader value)
+        {
+        }
+    }
 }

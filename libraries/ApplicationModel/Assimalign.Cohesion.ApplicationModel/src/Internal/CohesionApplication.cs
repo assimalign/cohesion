@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// starts the gateway, blocks until cancellation, then lets the gateway apply its per-resource
 /// shutdown budgets, while Describe writes the model without gateway contact.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("CohesionApplication")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CohesionApplication : IApplication
 {
     private readonly IApplicationGateway _gateway;
@@ -118,5 +120,17 @@ internal sealed class CohesionApplication : IApplication
         {
             await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CohesionApplication _target;
+
+        public DebugView(CohesionApplication value)
+        {
+            _target = value;
+        }
+
+        public IApplicationModel Model => _target.Model;
     }
 }

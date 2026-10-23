@@ -2,6 +2,8 @@ using System;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HttpResponseHeaderPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpResponseHeaderPolicy
 {
     public static HttpResponseHeaderPolicy Default { get; } = new(HttpResponseDateCache.For(TimeProvider.System));
@@ -14,4 +16,11 @@ internal sealed class HttpResponseHeaderPolicy
     }
 
     public HttpResponseDateHeader? GetDateHeader() => _dateCache?.GetCurrent();
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpResponseHeaderPolicy value)
+        {
+        }
+    }
 }

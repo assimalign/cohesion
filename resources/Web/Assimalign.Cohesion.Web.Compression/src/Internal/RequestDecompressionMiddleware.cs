@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// (<see cref="IWebClientFaultFeature"/>, #1340).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestDecompressionMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
 {
     private readonly RequestDecompressionOptions _options;
@@ -186,5 +188,12 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         }
 
         response.StatusCode = statusCode;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RequestDecompressionMiddleware value)
+        {
+        }
     }
 }

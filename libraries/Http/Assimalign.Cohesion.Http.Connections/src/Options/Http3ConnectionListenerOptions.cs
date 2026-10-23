@@ -52,6 +52,8 @@ public sealed class Http3ConnectionListenerOptions
     /// <c>H3_REQUEST_CANCELLED</c> (#1384). Each property documents its HTTP/3 enforcement.
     /// </para>
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("Http3Limits")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public sealed class Http3Limits : HttpConnectionListenerLimits
     {
         /// <summary>
@@ -80,6 +82,23 @@ public sealed class Http3ConnectionListenerOptions
                 ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
                 _maxRequestHeadersFrameSize = value;
             }
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Http3Limits _target;
+
+            public DebugView(Http3Limits value)
+            {
+                _target = value;
+            }
+
+            public int MaxRequestHeadersFrameSize => _target.MaxRequestHeadersFrameSize;
+            public long? MaxRequestBodySize => _target.MaxRequestBodySize;
+            public global::System.TimeSpan KeepAliveTimeout => _target.KeepAliveTimeout;
+            public global::System.TimeSpan RequestHeadersTimeout => _target.RequestHeadersTimeout;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinRequestBodyDataRate => _target.MinRequestBodyDataRate;
+            public global::Assimalign.Cohesion.Http.HttpMinDataRate? MinResponseDataRate => _target.MinResponseDataRate;
         }
     }
 }

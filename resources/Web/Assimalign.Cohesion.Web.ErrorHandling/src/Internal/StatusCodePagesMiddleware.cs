@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// nothing per request. It acts only when the response is genuinely bodyless and has not started, so
 /// it never clobbers a body a handler already wrote or a head already committed to the wire.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StatusCodePagesMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class StatusCodePagesMiddleware : IWebApplicationMiddleware
 {
     private readonly StatusCodePagesOptions _options;
@@ -86,5 +88,12 @@ internal sealed class StatusCodePagesMiddleware : IWebApplicationMiddleware
 
         Stream body = response.Body;
         return !body.CanSeek || body.Length == 0;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(StatusCodePagesMiddleware value)
+        {
+        }
     }
 }

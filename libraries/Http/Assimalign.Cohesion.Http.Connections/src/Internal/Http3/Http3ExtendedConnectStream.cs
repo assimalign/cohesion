@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// frame.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http3ExtendedConnectStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
 {
     private readonly Http3ConnectionContext _connection;
@@ -175,5 +177,25 @@ internal sealed class Http3ExtendedConnectStream : HttpExtendedConnectStream
             // The peer stopped reading the stream (STOP_SENDING or a reset): the octets cannot reach it.
             throw new IOException(ErrorMessages.Http3TunnelOutputStopped);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3ExtendedConnectStream _target;
+
+        public DebugView(Http3ExtendedConnectStream value)
+        {
+            _target = value;
+        }
+
+        public bool IsWriteCompleted => _target.IsWriteCompleted;
+        public bool IsHeadCommitted => _target.IsHeadCommitted;
+        public bool IsClosed => _target.IsClosed;
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

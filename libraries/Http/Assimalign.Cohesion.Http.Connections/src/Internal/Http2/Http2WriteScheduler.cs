@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// in isolation.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2WriteScheduler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2WriteScheduler : IDisposable
 {
     /// <summary>
@@ -234,6 +236,8 @@ internal sealed class Http2WriteScheduler : IDisposable
     /// policy in <see cref="SelectNextWaiterIndex"/> can be exercised directly by
     /// the co-located tests.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("Waiter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal sealed class Waiter
     {
         private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -291,6 +295,29 @@ internal sealed class Http2WriteScheduler : IDisposable
             // Scheduler disposal also cancels queued waiters under _sync.
             _registration.Unregister();
             _completion.TrySetCanceled();
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Waiter _target;
+
+            public DebugView(Waiter value)
+            {
+                _target = value;
+            }
+
+            public int StreamId => _target.StreamId;
+            public int Urgency => _target.Urgency;
+            public bool Incremental => _target.Incremental;
+            public long Sequence => _target.Sequence;
+            public Task Completion => _target.Completion;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(Http2WriteScheduler value)
+        {
         }
     }
 }

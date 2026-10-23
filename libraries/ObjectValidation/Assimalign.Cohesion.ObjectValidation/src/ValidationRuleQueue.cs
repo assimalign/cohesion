@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// Enumeration, <see cref="ToArray()"/>, <see cref="CopyTo(IValidationRule[], int)"/>, <c>Peek</c> and
 /// <c>Pop</c> all start at the rule pushed first.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ValidationRuleQueue {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ValidationRuleQueue : IValidationRuleQueue
 {
 	private int _size;
@@ -336,6 +338,8 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 		return GetEnumerator();
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal struct Enumerator : IEnumerator<IValidationRule>, IDisposable, IEnumerator
 	{
 		private readonly int _version;
@@ -408,5 +412,24 @@ public sealed class ValidationRuleQueue : IValidationRuleQueue
 			_index = -2;
 			_current = default;
 		}
+
+        private sealed class DebugView
+        {
+            public DebugView(Enumerator value)
+            {
+            }
+        }
+	}
+
+	private sealed class DebugView
+	{
+		private readonly ValidationRuleQueue _target;
+
+		public DebugView(ValidationRuleQueue value)
+		{
+			_target = value;
+		}
+
+		public int Count => _target.Count;
 	}
 }

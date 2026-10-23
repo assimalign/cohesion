@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Web.Antiforgery.Internal;
 /// endpoint that streams its body keeps it when the client sends the token in the header.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AntiforgeryMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
 {
     /// <summary>
@@ -160,5 +162,12 @@ internal sealed class AntiforgeryMiddleware : IWebApplicationMiddleware
         string detail = status == HttpStatusCode.RequestEntityTooLarge ? tooLargeDetail : rejectionDetail;
         ProblemDetails problem = ProblemDetails.FromStatus(status, detail);
         await context.Response.WriteProblemDetailsAsync(problem, context.RequestCancelled).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AntiforgeryMiddleware value)
+        {
+        }
     }
 }

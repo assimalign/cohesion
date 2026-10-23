@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>An editable EBML header and body retaining lazy binary payloads over its seekable source.</summary>
 /// <remarks>The source must remain open and unchanged until the document is disposed. Saving to a separate
 /// output copies lazy data through. Concurrent operations over the same source are unsupported.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("EbmlDocument")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class EbmlDocument : IDisposable
 {
     private Stream? _source;
@@ -162,6 +164,8 @@ public sealed partial class EbmlDocument : IDisposable
         return document;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("DocumentReader")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class DocumentReader : IContentReader<EbmlDocument>
     {
         private readonly EbmlSchema _schema;
@@ -172,6 +176,13 @@ public sealed partial class EbmlDocument : IDisposable
         public EbmlDocument Read(Stream stream) => Load(stream, _schema, _options, registry: _registry);
         public ValueTask<EbmlDocument> ReadAsync(Stream stream, CancellationToken cancellationToken = default) =>
             LoadCoreAsync(stream, _schema, _options, _registry, cancellationToken);
+
+        private sealed class DebugView
+        {
+            public DebugView(DocumentReader value)
+            {
+            }
+        }
     }
 
     private sealed class DocumentWriter : IContentWriter<EbmlDocument>
@@ -186,5 +197,20 @@ public sealed partial class EbmlDocument : IDisposable
             ArgumentNullException.ThrowIfNull(document);
             return document.SaveCoreAsync(stream, cancellationToken);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EbmlDocument _target;
+
+        public DebugView(EbmlDocument value)
+        {
+            _target = value;
+        }
+
+        public EbmlHeader Header => _target.Header;
+        public EbmlBody Body => _target.Body;
+        public EbmlSchema Schema => _target.Schema;
+        public IReadOnlyList<ContentFormatException> Diagnostics => _target.Diagnostics;
     }
 }

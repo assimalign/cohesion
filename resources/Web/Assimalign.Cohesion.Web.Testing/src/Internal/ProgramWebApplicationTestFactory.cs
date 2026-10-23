@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Testing.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ProgramWebApplicationTestFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramTestFactory
 {
     private const string HttpEndpointName = "http";
@@ -454,5 +456,18 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
                 "Bearer",
                 Encoding.UTF8.GetString(ResourceContext.BootstrapCredential.Span));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ProgramWebApplicationTestFactory _target;
+
+        public DebugView(ProgramWebApplicationTestFactory value)
+        {
+            _target = value;
+        }
+
+        public ResourceContext ResourceContext => _target.ResourceContext;
+        public bool IsStarted => _target.IsStarted;
     }
 }

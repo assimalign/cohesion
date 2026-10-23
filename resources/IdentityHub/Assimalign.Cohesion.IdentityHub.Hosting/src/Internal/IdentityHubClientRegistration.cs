@@ -8,6 +8,8 @@ using Assimalign.Cohesion.IdentityHub;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubClientRegistration")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentityHubClientRegistration
 {
     private readonly byte[]? _secretHash;
@@ -133,5 +135,12 @@ internal sealed class IdentityHubClientRegistration
             options.AllowDeviceAuthorization,
             options.AccessTokenLifetime,
             new ReadOnlyCollection<string>(audiences));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IdentityHubClientRegistration value)
+        {
+        }
     }
 }

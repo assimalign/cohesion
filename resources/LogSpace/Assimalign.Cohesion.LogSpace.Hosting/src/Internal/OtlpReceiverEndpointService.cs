@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("OtlpReceiverEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OtlpReceiverEndpointService : IHostService, IDisposable
 {
     private readonly WebApplication _application;
@@ -95,4 +97,16 @@ internal sealed class OtlpReceiverEndpointService : IHostService, IDisposable
                 : throw new InvalidOperationException($"The LogSpace endpoint host '{host}' is not a bindable IP address.");
 
 
+
+    private sealed class DebugView
+    {
+        private readonly OtlpReceiverEndpointService _target;
+
+        public DebugView(OtlpReceiverEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

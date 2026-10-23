@@ -3,6 +3,8 @@ using System.Linq;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CustomValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(CustomValidationRule<>.DebugView))]
 internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
 {
     private readonly Action<TValue, IValidationContext> _validation;
@@ -43,5 +45,20 @@ internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
         context = new ValidationContext<TValue>(value);
         _validation.Invoke(value, context);
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CustomValidationRule<TValue> _target;
+
+        public DebugView(CustomValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }

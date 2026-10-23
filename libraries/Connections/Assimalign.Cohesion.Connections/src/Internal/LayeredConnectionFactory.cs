@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Connections.Internal;
 /// An <see cref="IDuplexConnectionFactory"/> that applies a <see cref="IConnectionLayer"/> to every
 /// established connection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LayeredConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LayeredConnectionFactory : DuplexConnectionFactory
 {
     private readonly IDuplexConnectionFactory _inner;
@@ -35,6 +37,13 @@ internal sealed class LayeredConnectionFactory : DuplexConnectionFactory
             // and nothing else holds it: a TLS layer that fails disposes only its own stream (#1309).
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LayeredConnectionFactory value)
+        {
         }
     }
 }

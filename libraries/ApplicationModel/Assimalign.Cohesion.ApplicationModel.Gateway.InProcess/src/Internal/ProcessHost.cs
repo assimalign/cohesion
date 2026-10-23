@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 /// <summary>
 /// Owns the nested host services surrendered by in-process resource entry invocations.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ProcessHost {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ProcessHost : Host<ProcessHostContext>
 {
     private readonly ProcessHostContext _context;
@@ -334,8 +336,23 @@ internal sealed class ProcessHost : Host<ProcessHostContext>
         using IDisposable scope = ResourceRuntime.CreateScope(resourceContext);
         await host.DisposeAsync().ConfigureAwait(false);
     }
+
+    private sealed class DebugView
+    {
+        private readonly ProcessHost _target;
+
+        public DebugView(ProcessHost value)
+        {
+            _target = value;
+        }
+
+        public ProcessHostContext Context => _target.Context;
+        public HostId Id => _target.Id;
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("ProcessHostContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ProcessHostContext : HostContext
 {
     private readonly Lock _lock = new();
@@ -411,6 +428,21 @@ internal sealed class ProcessHostContext : HostContext
             return result;
         }
     }
+
+    private sealed class DebugView
+    {
+        private readonly ProcessHostContext _target;
+
+        public DebugView(ProcessHostContext value)
+        {
+            _target = value;
+        }
+
+        public IHostEnvironment Environment => _target.Environment;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
+    }
 }
 
 internal sealed class ProcessHostOptions : HostOptions<ProcessHostContext>;
@@ -422,6 +454,8 @@ internal sealed record ProcessHostLease(
     Task Completion,
     ResourceContext ResourceContext);
 
+[global::System.Diagnostics.DebuggerDisplay("AmbientResourceHostService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmbientResourceHostService : IHostService
 {
     private readonly IHostService _inner;
@@ -445,5 +479,17 @@ internal sealed class AmbientResourceHostService : IHostService
     {
         using IDisposable scope = ResourceRuntime.CreateScope(_context);
         await _inner.StopAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmbientResourceHostService _target;
+
+        public DebugView(AmbientResourceHostService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

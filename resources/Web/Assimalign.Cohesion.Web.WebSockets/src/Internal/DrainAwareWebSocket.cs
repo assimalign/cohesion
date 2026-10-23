@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// sent, and a receive returns the rest of the peer's messages and then its close.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DrainAwareWebSocket")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DrainAwareWebSocket : WebSocket
 {
     private const string drainDescription = "The server is shutting down.";
@@ -186,5 +188,20 @@ internal sealed class DrainAwareWebSocket : WebSocket
         {
             await _inner.CloseAsync(closeStatus, statusDescription, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DrainAwareWebSocket _target;
+
+        public DebugView(DrainAwareWebSocket value)
+        {
+            _target = value;
+        }
+
+        public WebSocketCloseStatus? CloseStatus => _target.CloseStatus;
+        public string? CloseStatusDescription => _target.CloseStatusDescription;
+        public WebSocketState State => _target.State;
+        public string? SubProtocol => _target.SubProtocol;
     }
 }

@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiRequestBody"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiRequestBodyBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiRequestBodyBuilder
 {
     private readonly OpenApiRequestBody _body = new();
@@ -54,5 +56,12 @@ public sealed class OpenApiRequestBodyBuilder
         configure(builder);
         _body.Content[mediaType] = builder.Build();
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiRequestBodyBuilder value)
+        {
+        }
     }
 }

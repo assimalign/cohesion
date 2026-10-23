@@ -6,6 +6,7 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[F] - {Path}")]
 internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 {
@@ -325,5 +326,30 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
         public FileAccess Access { get; }
 
         public FileShare Share { get; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryFileSystemFile _target;
+
+        public DebugView(InMemoryFileSystemFile value)
+        {
+            _target = value;
+        }
+
+        public Size Size => _target.Size;
+        public FileName Name => _target.Name;
+        public InMemoryFileContent Content => _target.Content;
+        public InMemoryFileSystemDirectory Directory => _target.Directory;
+        public global::System.DateTime UpdatedOn => _target.UpdatedOn;
+        public global::System.DateTime AccessedOn => _target.AccessedOn;
+        public global::System.DateTime CreatedOn => _target.CreatedOn;
+        public global::System.IO.FileAttributes Attributes => _target.Attributes;
+        public global::System.IO.FileAttributes IgnoreAttributes => _target.IgnoreAttributes;
+        public bool IgnoreCase => _target.IgnoreCase;
+        public global::System.Globalization.CultureInfo CultureInfo => _target.CultureInfo;
+        public global::Assimalign.Cohesion.FileSystem.InMemoryFileSystem FileSystem => _target.FileSystem;
+        public global::Assimalign.Cohesion.FileSystem.Internal.InMemoryFileSystemDispatcher Dispatcher => _target.Dispatcher;
+        public bool IsLocked => _target.IsLocked;
     }
 }

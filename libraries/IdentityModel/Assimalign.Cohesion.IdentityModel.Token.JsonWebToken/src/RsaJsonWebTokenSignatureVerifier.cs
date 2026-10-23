@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// <summary>
 /// Verifies JOSE RSA PKCS#1 and RSA-PSS signatures.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RsaJsonWebTokenSignatureVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureVerifier
 {
     private readonly RSA _publicKey;
@@ -66,6 +68,13 @@ public sealed class RsaJsonWebTokenSignatureVerifier : IJsonWebTokenSignatureVer
         catch (CryptographicException)
         {
             return false;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RsaJsonWebTokenSignatureVerifier value)
+        {
         }
     }
 }

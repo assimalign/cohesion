@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// callbacks already dispatched may finish; callbacks can safely dispose the token or its owner.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IsolatedStorageFileSystemPollingEventToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEventToken, IDisposable
 {
     private readonly IsolatedStorageFile _storage;
@@ -369,6 +371,8 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
         public void Dispose() => OnDispose(this);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("TypedSubscriber")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(IsolatedStorageFileSystemPollingEventToken.TypedSubscriber<>.DebugView))]
     private sealed class TypedSubscriber<T> : Subscriber
     {
         private readonly T? _state;
@@ -395,10 +399,30 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
             ChangeType.Changed => FileSystemEventType.Changed,
             _ => FileSystemEventType.Changed,
         };
+
+        private sealed class DebugView
+        {
+            private readonly TypedSubscriber<T> _target;
+
+            public DebugView(TypedSubscriber<T> value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.FileSystem.Internal.IsolatedStorageFileSystemPollingEventToken.ChangeType ChangeType => _target.ChangeType;
+            public global::System.Action<global::Assimalign.Cohesion.FileSystem.Internal.IsolatedStorageFileSystemPollingEventToken.Subscriber> OnDispose => _target.OnDispose;
+        }
     }
 
     private sealed class NoopRegistration : IDisposable
     {
         public void Dispose() { }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IsolatedStorageFileSystemPollingEventToken value)
+        {
+        }
     }
 }

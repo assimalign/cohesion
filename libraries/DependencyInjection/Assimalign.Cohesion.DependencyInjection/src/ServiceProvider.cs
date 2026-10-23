@@ -12,6 +12,8 @@ using Assimalign.Cohesion.DependencyInjection.Internal;
 /// <summary>
 /// The default IServiceProvider.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ServiceProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDisposable
 {
     private readonly CallSiteValidatorVisitor? _callSiteValidator;
@@ -212,5 +214,12 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         public CallSiteService? CallSite { get; }
 
         public Func<ServiceProviderEngineScope, object?> RealizedService { get; }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ServiceProvider value)
+        {
+        }
     }
 }

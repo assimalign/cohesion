@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationChangeToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationChangeToken : IChangeToken
 {
     private readonly Lock _lock;
@@ -57,6 +59,8 @@ internal sealed class ConfigurationChangeToken : IChangeToken
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Subscriber")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class Subscriber : IDisposable
     {
         private readonly ConfigurationChangeToken _owner;
@@ -86,6 +90,20 @@ internal sealed class ConfigurationChangeToken : IChangeToken
             {
                 _owner.Unsubscribe(this);
             }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(Subscriber value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationChangeToken value)
+        {
         }
     }
 }

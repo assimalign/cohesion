@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// It reads the control on every access rather than copying the status, because the transport latches
 /// the status while the pipeline runs, when the application's body read fails.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebClientFaultFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebClientFaultFeature : IWebClientFaultFeature
 {
     private readonly IHttpExchangeControl _control;
@@ -28,4 +30,16 @@ internal sealed class WebClientFaultFeature : IWebClientFaultFeature
 
     /// <inheritdoc />
     public HttpStatusCode? StatusCode => _control.ClientFaultStatusCode;
+
+    private sealed class DebugView
+    {
+        private readonly WebClientFaultFeature _target;
+
+        public DebugView(WebClientFaultFeature value)
+        {
+            _target = value;
+        }
+
+        public HttpStatusCode? StatusCode => _target.StatusCode;
+    }
 }

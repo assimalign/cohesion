@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// user agent does.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookiePolicyRules")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CookiePolicyRules
 {
     private const string securePrefix = "__Secure-";
@@ -347,4 +349,16 @@ internal sealed class CookiePolicyRules
         HttpCookieSameSiteMode.Strict => 3,
         _ => 0,
     };
+
+    private sealed class DebugView
+    {
+        private readonly CookiePolicyRules _target;
+
+        public DebugView(CookiePolicyRules value)
+        {
+            _target = value;
+        }
+
+        public HttpCookieName ConsentCookieName => _target.ConsentCookieName;
+    }
 }

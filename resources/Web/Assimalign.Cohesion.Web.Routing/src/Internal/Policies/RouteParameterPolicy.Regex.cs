@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// <summary>
 /// Validates a route parameter using a regular expression.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RegexRouteParameterPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RegexRouteParameterPolicy : RouteParameterPolicy
 {
     private static readonly TimeSpan _regexMatchTimeout = TimeSpan.FromSeconds(10);
@@ -77,5 +79,12 @@ internal sealed class RegexRouteParameterPolicy : RouteParameterPolicy
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RegexRouteParameterPolicy value)
+        {
+        }
     }
 }

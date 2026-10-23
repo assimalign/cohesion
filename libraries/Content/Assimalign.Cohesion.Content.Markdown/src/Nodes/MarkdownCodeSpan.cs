@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// <summary>
 /// An inline code span: literal, uninterpreted content.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownCodeSpan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownCodeSpan : MarkdownInline
 {
     private string _literal;
@@ -30,5 +32,17 @@ public sealed class MarkdownCodeSpan : MarkdownInline
             ArgumentNullException.ThrowIfNull(value);
             _literal = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownCodeSpan _target;
+
+        public DebugView(MarkdownCodeSpan value)
+        {
+            _target = value;
+        }
+
+        public string Literal => _target.Literal;
     }
 }

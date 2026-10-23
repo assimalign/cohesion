@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 /// collection asks for it or is empty, plain scalars where safe, and quoting or literal blocks where
 /// content demands it. Nodes that occur more than once emit an anchor on first use and aliases after.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("YamlNodeEmitter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class YamlNodeEmitter
 {
     private readonly StringBuilder _output = new();
@@ -662,6 +664,13 @@ internal sealed class YamlNodeEmitter
         while (_output.Length > 0 && _output[^1] == '\n')
         {
             _output.Length--;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(YamlNodeEmitter value)
+        {
         }
     }
 }

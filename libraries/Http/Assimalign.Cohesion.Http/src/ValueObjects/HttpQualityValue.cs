@@ -8,6 +8,7 @@ namespace Assimalign.Cohesion.Http;
 /// (<c>Accept-Charset</c>, <c>Accept-Encoding</c>, <c>Accept-Language</c>): a value token
 /// (which may be the wildcard <c>*</c>) paired with its RFC 9110 &#167; 12.4.2 quality weight.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpQualityValue : IEquatable<HttpQualityValue>
 {
@@ -67,4 +68,18 @@ public readonly struct HttpQualityValue : IEquatable<HttpQualityValue>
 
     /// <summary>Determines whether two entries are not equal.</summary>
     public static bool operator !=(HttpQualityValue left, HttpQualityValue right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpQualityValue _target;
+
+        public DebugView(HttpQualityValue value)
+        {
+            _target = value;
+        }
+
+        public string Value => _target.Value;
+        public HttpQuality Quality => _target.Quality;
+        public bool IsWildcard => _target.IsWildcard;
+    }
 }

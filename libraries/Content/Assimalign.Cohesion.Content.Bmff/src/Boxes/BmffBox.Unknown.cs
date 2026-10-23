@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Content.Binary;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>An unregistered or unsupported box preserved without interpreting its payload.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class UnknownBox : BmffBox
 {
     private UnknownBox(BmffBoxHeader header, BinarySegment payload, ContentFormatErrorCode reason)
@@ -45,4 +47,23 @@ public sealed class UnknownBox : BmffBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly UnknownBox _target;
+
+        public DebugView(UnknownBox value)
+        {
+            _target = value;
+        }
+
+        public BinarySegment Payload => _target.Payload;
+        public ContentFormatErrorCode PreservationReason => _target.PreservationReason;
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// store whose reads, writes, and waiter registration all happen under one lock, so a
 /// <see cref="SetState"/> racing a <see cref="WaitForStateAsync"/> can never be lost.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryResourceStateManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryResourceStateManager : IApplicationResourceStateManager
 {
     private readonly object _gate = new();
@@ -307,5 +309,12 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
         public void Cancel() => Owner.CancelWaiter(this);
 
         public void Timeout() => Owner.TimeoutWaiter(this);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryResourceStateManager value)
+        {
+        }
     }
 }

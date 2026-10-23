@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// allocates nothing for it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransportHttpResponse")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TransportHttpResponse : HttpResponse
 {
     private readonly bool _supportsTrailers;
@@ -82,4 +84,19 @@ internal sealed class TransportHttpResponse : HttpResponse
     /// for a non-null value, so a response without trailers goes out exactly as it did before.
     /// </summary>
     internal HttpTrailerCollection? StagedTrailers => _trailers is { Count: > 0 } trailers ? trailers : null;
+
+    private sealed class DebugView
+    {
+        private readonly TransportHttpResponse _target;
+
+        public DebugView(TransportHttpResponse value)
+        {
+            _target = value;
+        }
+
+        public HttpStatusCode StatusCode => _target.StatusCode;
+        public HttpHeaderCollection Headers => _target.Headers;
+        public HttpContext HttpContext => _target.HttpContext;
+        public Stream Body => _target.Body;
+    }
 }

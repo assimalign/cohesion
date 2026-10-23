@@ -76,6 +76,8 @@ internal static class OpenApiSchemaWalker
         return context.Results;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("WalkContext")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class WalkContext
     {
         private readonly HashSet<OpenApiSchema> _visitedSchemas = new(ReferenceComparer<OpenApiSchema>.Instance);
@@ -261,6 +263,13 @@ internal static class OpenApiSchemaWalker
             for (var index = 0; index < schemas.Count; index++)
             {
                 Schema(schemas[index], Pointer.Append(pointer, index.ToString()));
+            }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(WalkContext value)
+            {
             }
         }
     }

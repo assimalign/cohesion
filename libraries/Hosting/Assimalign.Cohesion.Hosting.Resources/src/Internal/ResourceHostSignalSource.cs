@@ -64,6 +64,8 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("SignalCallback")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class SignalCallback
     {
         private Func<ResourceHostStopSignal, bool>? _callback;
@@ -98,8 +100,17 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
         {
             Interlocked.Exchange(ref _callback, null);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(SignalCallback value)
+            {
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Subscription")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class Subscription : IDisposable
     {
         private SignalCallback? _signalCallback;
@@ -134,6 +145,13 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
             processSignalSubscription?.Dispose();
             stopEventRegistration?.Unregister(waitObject: null);
             stopEvent?.Dispose();
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(Subscription value)
+            {
+            }
         }
     }
 
@@ -223,6 +241,8 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
             context.Cancel = accepted;
         }
 
+        [global::System.Diagnostics.DebuggerDisplay("ProcessSignalSubscription")]
+        [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
         private sealed class ProcessSignalSubscription : IDisposable
         {
             private Func<ResourceHostStopSignal, bool>? _callback;
@@ -243,6 +263,13 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
                 lock (_gate)
                 {
                     _subscribers.Remove(callback);
+                }
+            }
+
+            private sealed class DebugView
+            {
+                public DebugView(ProcessSignalSubscription value)
+                {
                 }
             }
         }

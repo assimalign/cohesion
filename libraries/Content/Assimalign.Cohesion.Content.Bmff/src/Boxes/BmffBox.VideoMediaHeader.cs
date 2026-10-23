@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The VideoMediaHeader box; ISO/IEC 14496-12 8.4.5.2.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class VideoMediaHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -70,5 +72,28 @@ public sealed class VideoMediaHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" graphics-mode={GraphicsMode}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly VideoMediaHeaderBox _target;
+
+        public DebugView(VideoMediaHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public ushort GraphicsMode => _target.GraphicsMode;
+        public ushort OpColorRed => _target.OpColorRed;
+        public ushort OpColorGreen => _target.OpColorGreen;
+        public ushort OpColorBlue => _target.OpColorBlue;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

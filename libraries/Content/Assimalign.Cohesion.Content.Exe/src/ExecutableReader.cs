@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Exe;
 
 /// <summary>Detects and inspects a retained executable format without launching it.</summary>
 /// <remarks>Sources must be readable and seekable. Parsing starts at the current position and leaves the source open.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ExecutableReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ExecutableReader : IContentReader<IExecutableFile>
 {
     private readonly ExecutableReaderOptions _options;
@@ -81,4 +83,11 @@ public sealed class ExecutableReader : IContentReader<IExecutableFile>
     /// <exception cref="OperationCanceledException">Inspection was canceled.</exception>
     public ValueTask<IExecutableFile> ReadAsync(Stream stream, CancellationToken cancellationToken = default) =>
         ExecutableInspection.ReadAsync(stream, _options, ContentFormat.Unknown, true, cancellationToken);
+
+    private sealed class DebugView
+    {
+        public DebugView(ExecutableReader value)
+        {
+        }
+    }
 }

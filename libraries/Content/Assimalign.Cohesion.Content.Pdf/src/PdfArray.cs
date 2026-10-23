@@ -5,6 +5,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Content.Pdf;
 
 /// <summary>An ordered, editable PDF array (§7.3.6).</summary>
+[global::System.Diagnostics.DebuggerDisplay("PdfArray {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfArray : IPdfObject, IReadOnlyList<IPdfObject>
 {
     private readonly List<IPdfObject> _items = new();
@@ -35,4 +37,16 @@ public sealed class PdfArray : IPdfObject, IReadOnlyList<IPdfObject>
     public IEnumerator<IPdfObject> GetEnumerator() => _items.GetEnumerator();
     /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly PdfArray _target;
+
+        public DebugView(PdfArray value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

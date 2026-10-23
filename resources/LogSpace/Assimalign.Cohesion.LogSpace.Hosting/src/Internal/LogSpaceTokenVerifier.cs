@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 /// Verifies the default application-key credentials a LogSpace accepts: gateway management tokens and
 /// <c>scope=telemetry</c> emitter tokens whose subject names the emitting resource.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LogSpaceTokenVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LogSpaceTokenVerifier
 {
     private readonly string _application;
@@ -95,5 +97,12 @@ internal sealed class LogSpaceTokenVerifier
                 ? key
                 : throw new InvalidOperationException(
                     $"The application trust key is not a valid EC P-256 JWK. {failure}".TrimEnd());
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LogSpaceTokenVerifier value)
+        {
+        }
     }
 }

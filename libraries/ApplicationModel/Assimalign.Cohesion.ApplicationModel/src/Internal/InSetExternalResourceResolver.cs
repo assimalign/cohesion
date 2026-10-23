@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InSetExternalResourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InSetExternalResourceResolver : IControlPlaneExternalResourceResolver
 {
     private readonly IApplicationSetExternalResourceResolver _direct;
@@ -36,5 +38,12 @@ internal sealed class InSetExternalResourceResolver : IControlPlaneExternalResou
         }
 
         return await _fallback.ResolveAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InSetExternalResourceResolver value)
+        {
+        }
     }
 }

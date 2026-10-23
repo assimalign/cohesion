@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// returned by <see cref="CreateECDsa"/> is owned and disposed by the caller.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("JsonWebKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JsonWebKey
 {
     private const string keyTypeMember = "kty";
@@ -447,5 +449,25 @@ public sealed class JsonWebKey
 
         failure = null;
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly JsonWebKey _target;
+
+        public DebugView(JsonWebKey value)
+        {
+            _target = value;
+        }
+
+        public string? KeyType => _target.KeyType;
+        public string? Curve => _target.Curve;
+        public string? X => _target.X;
+        public string? Y => _target.Y;
+        public string? Modulus => _target.Modulus;
+        public string? Exponent => _target.Exponent;
+        public string? KeyId => _target.KeyId;
+        public string? Algorithm => _target.Algorithm;
+        public string? Use => _target.Use;
     }
 }

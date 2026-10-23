@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// Build one with <see cref="Create"/> or a <see cref="PermissionsPolicyBuilder"/>, for example
 /// <c>PermissionsPolicy.Create(policy =&gt; policy.Disable("camera").Disable("microphone").AllowSelf("geolocation"))</c>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("PermissionsPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PermissionsPolicy
 {
     private readonly string _value;
@@ -41,4 +43,11 @@ public sealed class PermissionsPolicy
     /// </summary>
     /// <returns>The serialized <c>Permissions-Policy</c> field value.</returns>
     public override string ToString() => _value;
+
+    private sealed class DebugView
+    {
+        public DebugView(PermissionsPolicy value)
+        {
+        }
+    }
 }

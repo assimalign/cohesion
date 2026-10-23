@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.Validation;
 /// callback.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ValidationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ValidationBuilder
 {
     private readonly EndpointValidationOptions _options = new();
@@ -54,5 +56,17 @@ public sealed class ValidationBuilder
     public IHttpFeature Build()
     {
         return new EndpointValidationFeature(_options.Enabled, _options.Validators);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ValidationBuilder _target;
+
+        public DebugView(ValidationBuilder value)
+        {
+            _target = value;
+        }
+
+        public EndpointValidationOptions Options => _target.Options;
     }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The clap box in the HEIF item model.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CleanApertureBox : BmffBox
 {
     /// <summary>Creates an empty CleanApertureBox model.</summary>
@@ -78,5 +80,31 @@ public sealed class CleanApertureBox : BmffBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" aperture={WidthNumerator}/{WidthDenominator}x{HeightNumerator}/{HeightDenominator}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CleanApertureBox _target;
+
+        public DebugView(CleanApertureBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte[] TrailingData => _target.TrailingData;
+        public uint WidthNumerator => _target.WidthNumerator;
+        public uint WidthDenominator => _target.WidthDenominator;
+        public uint HeightNumerator => _target.HeightNumerator;
+        public uint HeightDenominator => _target.HeightDenominator;
+        public int HorizontalOffsetNumerator => _target.HorizontalOffsetNumerator;
+        public uint HorizontalOffsetDenominator => _target.HorizontalOffsetDenominator;
+        public int VerticalOffsetNumerator => _target.VerticalOffsetNumerator;
+        public uint VerticalOffsetDenominator => _target.VerticalOffsetDenominator;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

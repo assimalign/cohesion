@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// survives the transport changing <em>when</em> it freezes (buffered materialization today,
 /// first body byte once bodies stream).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpMaxRequestBodySizeFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpMaxRequestBodySizeFeature : IHttpMaxRequestBodySizeFeature
 {
     /// <summary>
@@ -44,5 +46,19 @@ internal sealed class HttpMaxRequestBodySizeFeature : IHttpMaxRequestBodySizeFea
         // The context setter enforces the full contract: InvalidOperationException once the
         // transport has frozen the value, ArgumentOutOfRangeException for negatives.
         set => _context.MaxRequestBodySize = value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpMaxRequestBodySizeFeature _target;
+
+        public DebugView(HttpMaxRequestBodySizeFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public long? MaxRequestBodySize => _target.MaxRequestBodySize;
     }
 }

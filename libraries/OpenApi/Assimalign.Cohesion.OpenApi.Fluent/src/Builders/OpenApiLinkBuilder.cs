@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// A fluent builder for an <see cref="OpenApiLink"/> — a design-time link from a response to another
 /// operation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiLinkBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiLinkBuilder
 {
     private readonly OpenApiLink _link = new();
@@ -75,5 +77,12 @@ public sealed class OpenApiLinkBuilder
         ArgumentNullException.ThrowIfNull(url);
         _link.Server = new OpenApiServer { Url = url, Description = description };
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiLinkBuilder value)
+        {
+        }
     }
 }

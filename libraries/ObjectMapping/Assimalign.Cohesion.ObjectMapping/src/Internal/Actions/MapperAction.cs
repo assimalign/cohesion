@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MapperAction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class MapperAction : IMapperAction
 {
     private readonly Action<IMapperContext> _configure;
@@ -14,5 +16,12 @@ internal class MapperAction : IMapperAction
     public virtual void Invoke(IMapperContext context)
     {
         _configure.Invoke(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperAction value)
+        {
+        }
     }
 }

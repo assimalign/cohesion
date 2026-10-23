@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.ApiManager.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ApiManagerApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
 {
     private readonly ApiManagerApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
     }
 
     IApiManagerApplication IApiManagerApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly ApiManagerApplicationBuilder _target;
+
+        public DebugView(ApiManagerApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

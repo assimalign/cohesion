@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Internal;
 /// which releases every permit — the correct lifetime for a concurrency limiter whose permit must span
 /// the whole request.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RateLimitingFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RateLimitingFeature : IRateLimitingFeature, IDisposable
 {
     private List<RateLimitLease>? _leases;
@@ -57,5 +59,19 @@ internal sealed class RateLimitingFeature : IRateLimitingFeature, IDisposable
         }
 
         _leases.Clear();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RateLimitingFeature _target;
+
+        public DebugView(RateLimitingFeature value)
+        {
+            _target = value;
+        }
+
+        public string? PolicyName => _target.PolicyName;
+        public bool IsAcquired => _target.IsAcquired;
+        public TimeSpan? RetryAfter => _target.RetryAfter;
     }
 }

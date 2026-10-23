@@ -4,6 +4,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>Composes immutable, hand-written EBML definitions without reflection or XML.</summary>
+[global::System.Diagnostics.DebuggerDisplay("EbmlSchemaBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EbmlSchemaBuilder
 {
     private readonly Dictionary<ulong, EbmlElementDefinition> _definitions = new();
@@ -62,5 +64,12 @@ public sealed class EbmlSchemaBuilder
         }
 
         return new EbmlSchema(_definitions);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EbmlSchemaBuilder value)
+        {
+        }
     }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The TrackFragmentHeader box; ISO/IEC 14496-12 8.8.7.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TrackFragmentHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -127,5 +129,30 @@ public sealed class TrackFragmentHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" track-id={TrackId} base-data-offset={BaseDataOffset}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TrackFragmentHeaderBox _target;
+
+        public DebugView(TrackFragmentHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public uint TrackId => _target.TrackId;
+        public ulong? BaseDataOffset => _target.BaseDataOffset;
+        public uint? SampleDescriptionIndex => _target.SampleDescriptionIndex;
+        public uint? DefaultSampleDuration => _target.DefaultSampleDuration;
+        public uint? DefaultSampleSize => _target.DefaultSampleSize;
+        public uint? DefaultSampleFlags => _target.DefaultSampleFlags;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

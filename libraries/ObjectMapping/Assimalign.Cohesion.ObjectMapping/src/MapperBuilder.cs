@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.ObjectMapping;
 /// <summary>
 /// Collects profiles and options, then builds a <see cref="Mapper"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MapperBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MapperBuilder : IMapperBuilder
 {
     private readonly MapperOptions _options;
@@ -83,5 +85,12 @@ public sealed class MapperBuilder : IMapperBuilder
     IMapper IMapperBuilder.Build()
     {
         return Build();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperBuilder value)
+        {
+        }
     }
 }

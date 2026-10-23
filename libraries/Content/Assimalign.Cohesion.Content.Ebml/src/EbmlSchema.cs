@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Ebml.Internal;
 namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>An immutable schema shared safely by independent readers.</summary>
+[global::System.Diagnostics.DebuggerDisplay("EbmlSchema")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EbmlSchema
 {
     private readonly FrozenDictionary<ulong, EbmlElementDefinition> _definitions;
@@ -163,5 +165,17 @@ public sealed class EbmlSchema
         builder.Add(EbmlElementDefinition.Create(VInt.FromEncoded(0xBF), "CRC-32", EbmlElementType.Binary,
             global: true, maxOccurs: 1, minimumLength: 4, maximumLength: 4));
         return builder.Build();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EbmlSchema _target;
+
+        public DebugView(EbmlSchema value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyDictionary<ulong, EbmlElementDefinition> Definitions => _target.Definitions;
     }
 }

@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Logging;
 /// decisions key off the <em>entry's</em> timestamp, so behavior is deterministic under a fake
 /// <see cref="TimeProvider"/> upstream.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("W3CAccessLogWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class W3CAccessLogWriter : IDisposable
 {
     private static readonly UTF8Encoding _utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
@@ -362,5 +364,12 @@ internal sealed class W3CAccessLogWriter : IDisposable
             : string.Create(CultureInfo.InvariantCulture, $"{_prefix}-{date:yyyyMMdd}.{sequence:D3}.log");
 
         return Path.Combine(_directory, name);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(W3CAccessLogWriter value)
+        {
+        }
     }
 }

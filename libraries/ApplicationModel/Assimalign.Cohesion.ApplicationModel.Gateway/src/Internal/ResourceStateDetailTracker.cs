@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 // Events supply diagnostics for foreign managers only. Their delivery order must never
 // decide readiness or override the built-in manager's atomic state/detail observations.
+[global::System.Diagnostics.DebuggerDisplay("ResourceStateDetailTracker")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceStateDetailTracker : IDisposable
 {
     private readonly IApplicationResourceStateManager _state;
@@ -59,4 +61,11 @@ internal sealed class ResourceStateDetailTracker : IDisposable
 
     private void OnStateChanged(object? sender, ResourceStateChangedEventArgs args) =>
         _observations.SetState(args.Resource, args.Current, args.Detail);
+
+    private sealed class DebugView
+    {
+        public DebugView(ResourceStateDetailTracker value)
+        {
+        }
+    }
 }

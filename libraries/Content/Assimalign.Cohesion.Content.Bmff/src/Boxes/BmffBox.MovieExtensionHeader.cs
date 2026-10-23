@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The MovieExtensionHeader box; ISO/IEC 14496-12 8.8.2.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MovieExtensionHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -59,5 +61,25 @@ public sealed class MovieExtensionHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" duration={FragmentDuration}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MovieExtensionHeaderBox _target;
+
+        public DebugView(MovieExtensionHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public ulong FragmentDuration => _target.FragmentDuration;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// canonical multi-value representation, with provenance disambiguating the sources.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IdentityClaimMapper")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityClaimMapper
 {
     private static readonly FrozenSet<string> _structuralTargets = new[]
@@ -205,5 +207,17 @@ public sealed class IdentityClaimMapper
         }
 
         return resolved.ToFrozenDictionary(StringComparer.Ordinal);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityClaimMapper _target;
+
+        public DebugView(IdentityClaimMapper value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyDictionary<string, string> Mappings => _target.Mappings;
     }
 }

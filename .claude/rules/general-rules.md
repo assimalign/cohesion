@@ -144,6 +144,91 @@ The legacy `this T param` syntax is forbidden in new code.
 - Area-root exceptions inherit directly from `Exception` or `SystemException` unless there's a strong BCL reason otherwise.
 - Keep exception inheritance local to the owning area.
 
+### Concrete types use a private nested debugger view only to filter nonpublic state
+
+This rule applies only to C# source files in `src/` folders under `libraries/` and `resources/`:
+`libraries/**/src/**/*.cs` and `resources/**/src/**/*.cs`, excluding `resources/Database/**`.
+A concrete instance type there — a non-abstract, non-static class, struct, or record, regardless
+of visibility — needs a debugger view **only when it has private or internal instance fields or
+properties that should be omitted from the default debugging view**, including inherited state.
+Private protected members count as nonpublic state. Public auto-property backing fields,
+compiler-generated storage, static members, constants, and members already hidden with
+`DebuggerBrowsable(DebuggerBrowsableState.Never)` do not by themselves justify a proxy.
+The debugger view's own storage must not make its enclosing type qualify.
+
+**EventSource types are excluded:** a type deriving directly or indirectly from
+`System.Diagnostics.Tracing.EventSource` must not gain debugger display/proxy attributes or a
+nested debugger view under this rule.
+
+**Exception types are excluded:** any type deriving directly or indirectly from `System.Exception`
+must not gain debugger display/proxy attributes or a nested debugger view under this rule.
+Preserve preexisting intentional debugger attributes and views.
+
+**Reuse a base class's debugger view first:** if a base class already supplies both an effective
+`DebuggerDisplayAttribute` and `DebuggerTypeProxyAttribute`, inherit that display and proxy.
+This includes abstract and concrete base classes, attributes supplied by different ancestors,
+and framework base classes. Do not repeat the attributes or add a new nested view on the derived
+type, even when it adds private/internal state. Preserve existing intentional redaction.
+
+Types with only public/protected instance data, or no instance data to filter, must use the normal
+debugger member view unless they inherit an existing base view; do not add a `DebuggerTypeProxy`
+or nested `DebugView` to them. A useful standalone `DebuggerDisplay` is allowed, and existing
+diagnostic summaries and redaction must be preserved. For types that need to filter nonpublic
+state and have no existing base view, follow this pattern:
+
+- Decorate the concrete type itself with both `DebuggerDisplayAttribute` and
+  `DebuggerTypeProxyAttribute` from `System.Diagnostics`. The display gives a concise summary;
+  the type proxy references that type's own nested `DebugView`.
+- Declare `DebugView` as a **private nested type**, at the **bottom of the concrete type**, after
+  all other members and immediately before its closing brace. Keep it in the same source file;
+  do not use a top-level helper or a separate partial file.
+- Give the view a public constructor that accepts the enclosing concrete instance. Keep its
+  backing reference private, and expose debugger data through public read-only properties.
+- For a `ref struct`, snapshot permitted non-ref-like state in that constructor instead of
+  retaining the stack-only instance or its spans in a heap object.
+- Project **only public or protected members of the concrete type**, including inherited ones.
+  Do not expose its private or internal implementation state through the view.
+- Keep inspection free of I/O, mutation, and lazy materialization. Preserve existing redaction;
+  a debugger view must not reveal data that the type's diagnostic display deliberately hides.
+- The nested debugger view is debugger infrastructure and does **not** require its own nested
+  view or debugger attributes; this rule must not recurse.
+
+**Everything else is excluded:** do not apply this rule under `resources/Database/**` or outside
+the scoped `src/` folders. This excludes tests, shared source, fixtures, samples, examples, and
+all other repository areas. Build output such as `bin/` and `obj/` is also excluded.
+
+```csharp
+using System.Diagnostics;
+
+namespace Assimalign.Cohesion;
+
+[DebuggerDisplay("{Name,nq}")]
+[DebuggerTypeProxy(typeof(DebugView))]
+internal sealed class WorkItem
+{
+    private readonly string _name;
+
+    public WorkItem(string name)
+    {
+        _name = name;
+    }
+
+    public string Name => _name;
+
+    private sealed class DebugView
+    {
+        private readonly WorkItem _item;
+
+        public DebugView(WorkItem item)
+        {
+            _item = item;
+        }
+
+        public string Name => _item.Name;
+    }
+}
+```
+
 ## Forbidden patterns
 
 ### Block-scoped namespaces
@@ -357,7 +442,9 @@ namespace Assimalign.Cohesion.Database;
    Exception: `resources/Database/**` is concrete-first and follows `database-area.md`
    instead (owner decision 2026-10-04).
 3. **Extension containers:** always `public static`, with members inside `extension(...)`.
-4. **Nested types:** match outer type visibility unless explicitly different.
+4. **Nested types:** match outer type visibility unless explicitly different. Debugger views
+   required by "Concrete types use a private nested debugger view only to filter nonpublic state"
+   are always private.
 5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
 
 ### Creation-only facades become public implementations

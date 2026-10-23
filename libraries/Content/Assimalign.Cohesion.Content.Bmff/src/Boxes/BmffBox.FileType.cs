@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The file brand and compatible-brand declarations.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileTypeBox : BmffBox
 {
     private uint[] _compatibleBrands = Array.Empty<uint>();
@@ -99,5 +101,25 @@ public sealed class FileTypeBox : BmffBox
             writer.Write(FourCC.FromUInt32(CompatibleBrands[index]).ToString());
         }
         writer.Write(']');
+    }
+
+    private sealed class DebugView
+    {
+        private readonly FileTypeBox _target;
+
+        public DebugView(FileTypeBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public uint MajorBrand => _target.MajorBrand;
+        public uint MinorBrand => _target.MinorBrand;
+        public uint[] CompatibleBrands => _target.CompatibleBrands;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

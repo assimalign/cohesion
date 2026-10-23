@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.FileSystem;
 /// <summary>
 /// 
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileSystemOptions {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class InMemoryFileSystemOptions
 {
     private FileSystemPath _rootPath = DirectoryName.Root;
@@ -64,4 +66,22 @@ public class InMemoryFileSystemOptions
     /// </summary>
     //public TimeSpan LockTmieout { get; set; } = TimeSpan.FromSeconds(30);
 
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryFileSystemOptions _target;
+
+        public DebugView(InMemoryFileSystemOptions value)
+        {
+            _target = value;
+        }
+
+        public string? Name => _target.Name;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public Size Size => _target.Size;
+        public bool IgnoreCase => _target.IgnoreCase;
+        public CultureInfo? CultureInfo => _target.CultureInfo;
+        public FileSystemPath RootPath => _target.RootPath;
+        public FileAttributes IgnoreAttributes => _target.IgnoreAttributes;
+    }
 }

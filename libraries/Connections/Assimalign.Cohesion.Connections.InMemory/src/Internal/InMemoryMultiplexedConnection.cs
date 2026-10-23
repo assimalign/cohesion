@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// <see cref="AcceptStreamAsync(CancellationToken)"/>. There is no wire and no reflection; stream
 /// routing is a pure <see cref="Channel{T}"/> hand-off and is fully trim-safe.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryMultiplexedConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
@@ -253,5 +255,23 @@ internal sealed class InMemoryMultiplexedConnection : MultiplexedConnection
         {
             // A consumer callback must not prevent the other end and its streams from learning of loss.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryMultiplexedConnection _target;
+
+        public DebugView(InMemoryMultiplexedConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

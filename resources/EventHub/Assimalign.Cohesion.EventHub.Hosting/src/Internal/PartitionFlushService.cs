@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Hosting;
 
 // Dedicated OS thread per the execution menu: a synchronous blocking loop must own its
 // thread for its entire life instead of occupying the pool. See docs/DESIGN.md.
+[global::System.Diagnostics.DebuggerDisplay("PartitionFlushService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PartitionFlushService : DedicatedThreadService
 {
     protected override void Run(CancellationToken cancellationToken)
@@ -14,5 +16,17 @@ internal sealed class PartitionFlushService : DedicatedThreadService
         // TODO: flush partition logs with synchronous file I/O. The placeholder blocks until the host stops so the scaffolded
         // application starts and drains cleanly.
         cancellationToken.WaitHandle.WaitOne();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PartitionFlushService _target;
+
+        public DebugView(PartitionFlushService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

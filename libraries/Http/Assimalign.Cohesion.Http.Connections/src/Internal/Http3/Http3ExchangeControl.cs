@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// application-owned <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting the
 /// single request stream, leaving the QUIC connection's other streams intact.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http3ExchangeControl")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3ExchangeControl : IHttpExchangeControl
 {
     private readonly Http3ConnectionContext _connection;
@@ -166,5 +168,21 @@ internal sealed class Http3ExchangeControl : IHttpExchangeControl
         tunnel.MarkHeadCommitted();
 
         return tunnel;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3ExchangeControl _target;
+
+        public DebugView(Http3ExchangeControl value)
+        {
+            _target = value;
+        }
+
+        public bool HasResponseStarted => _target.HasResponseStarted;
+        public HttpStatusCode? ClientFaultStatusCode => _target.ClientFaultStatusCode;
+        public bool ResponseAbortedByClient => _target.ResponseAbortedByClient;
+        public bool CanWriteInterimResponse => _target.CanWriteInterimResponse;
+        public bool CanTakeOver => _target.CanTakeOver;
     }
 }

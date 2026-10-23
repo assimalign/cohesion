@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <summary>
 /// Selects how a <c>RemoteReference</c> resolves its external resource.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RemoteReferenceOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RemoteReferenceOptions
 {
     private readonly Dictionary<string, Uri> _endpoints = new(StringComparer.Ordinal);
@@ -136,6 +138,13 @@ public sealed class RemoteReferenceOptions
             }
 
             return names;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RemoteReferenceOptions value)
+        {
         }
     }
 }

@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 // Each closure represents a table/box, never an individual sample. Original arrays are retained
 // until the layout converges, so retries do not accumulate deltas and failure can roll back.
+[global::System.Diagnostics.DebuggerDisplay("BmffOffsetRelocator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffOffsetRelocator
 {
     private readonly BmffLayout _original;
@@ -414,5 +416,12 @@ internal sealed class BmffOffsetRelocator
 
             box.MfraSize = (uint)size;
         });
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffOffsetRelocator value)
+        {
+        }
     }
 }

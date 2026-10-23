@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// <c>UseRouting</c> builds the router) composes inside a branch exactly as it does on the
 /// application. The branch has no context of its own until its parent composes it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationBranchBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebApplicationBranchBuilder : IWebApplicationPipelineBuilder
 {
     private readonly List<Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
@@ -73,5 +75,12 @@ internal sealed class WebApplicationBranchBuilder : IWebApplicationPipelineBuild
         }
 
         return pipeline;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebApplicationBranchBuilder value)
+        {
+        }
     }
 }

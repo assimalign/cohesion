@@ -9,6 +9,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the meta relationship box identity; typed payload reading and writing are unsupported.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MetaRelationshipBox : BmffFullBox
 {
     /// <summary>Creates a MetaRelationshipBox at its original location.</summary>
@@ -43,4 +45,23 @@ public sealed class MetaRelationshipBox : BmffFullBox
     }
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly MetaRelationshipBox _target;
+
+        public DebugView(MetaRelationshipBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

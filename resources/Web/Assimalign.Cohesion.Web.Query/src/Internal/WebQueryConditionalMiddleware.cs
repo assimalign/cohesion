@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Web;
 /// any other method — and queries whose validators the provider does not know — pass through
 /// untouched.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("WebQueryConditionalMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebQueryConditionalMiddleware : IWebApplicationMiddleware
 {
     private readonly WebQueryResourceValidatorsProvider _validatorsProvider;
@@ -47,5 +49,12 @@ internal sealed class WebQueryConditionalMiddleware : IWebApplicationMiddleware
 
         HttpContextQueryExtensions.SetValidatorHeaders(context.Response, in validators);
         await next.Invoke(context).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebQueryConditionalMiddleware value)
+        {
+        }
     }
 }

@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// array element order is significant.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IdentityClaimValue")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct IdentityClaimValue : IEquatable<IdentityClaimValue>
 {
     /// <summary>
@@ -694,4 +696,18 @@ public readonly struct IdentityClaimValue : IEquatable<IdentityClaimValue>
 
     private IdentityModelException KindMismatch(IdentityValueKind expected)
         => new($"The claim value is of kind '{_kind}', not '{expected}'.");
+
+    private sealed class DebugView
+    {
+        private readonly IdentityClaimValue _target;
+
+        public DebugView(IdentityClaimValue value)
+        {
+            _target = value;
+        }
+
+        public IdentityValueKind Kind => _target.Kind;
+        public bool IsNull => _target.IsNull;
+        public bool IsUndefined => _target.IsUndefined;
+    }
 }

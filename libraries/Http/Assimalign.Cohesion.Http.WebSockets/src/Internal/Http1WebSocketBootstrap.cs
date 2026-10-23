@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <see cref="IHttpProtocolUpgrade.AcceptAsync"/>, which also scrubs body framing and claims the
 /// connection before writing.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1WebSocketBootstrap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1WebSocketBootstrap : HttpWebSocketBootstrap
 {
     private readonly IHttpRequest _request;
@@ -94,5 +96,12 @@ internal sealed class Http1WebSocketBootstrap : HttpWebSocketBootstrap
         // SP and HTAB only: "0\xA0" is not a zero length, so it counts as content (#1341).
         return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue length)
             && !length.Value.AsSpan().Trim(HttpWebSocketHandshake.OptionalWhitespace).SequenceEqual("0");
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(Http1WebSocketBootstrap value)
+        {
+        }
     }
 }

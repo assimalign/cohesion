@@ -101,6 +101,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// and a HEADERS frame after the request head is an invalid frame sequence.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http3RequestBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
@@ -1221,5 +1223,25 @@ internal sealed class Http3RequestBodyStream : Stream, IHttpLazyRequestBody
         return exception is IOException
             or ConnectionException
             or InvalidOperationException;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3RequestBodyStream _target;
+
+        public DebugView(Http3RequestBodyStream value)
+        {
+            _target = value;
+        }
+
+        public HttpStatusCode? RejectedStatusCode => _target.RejectedStatusCode;
+        public bool IsReset => _target.IsReset;
+        public bool IsCompleted => _target.IsCompleted;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("XorShift64")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class XorShift64
 {
     UInt64 _x = 88172645463325252UL;
@@ -24,5 +26,12 @@ internal class XorShift64
     {
         _x = _x ^ (_x << 7);
         return _x = _x ^ (_x >> 9);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(XorShift64 value)
+        {
+        }
     }
 }

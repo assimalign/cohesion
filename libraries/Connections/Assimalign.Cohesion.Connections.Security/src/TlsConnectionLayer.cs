@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Connections.Security;
 /// <c>IDuplexConnectionListener</c>), or with <see cref="TlsClientOptions"/> to authenticate as the
 /// client (compose onto an <c>IDuplexConnectionFactory</c>).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TlsConnectionLayer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TlsConnectionLayer : IConnectionLayer
 {
     private readonly TlsServerOptions? _serverOptions;
@@ -56,5 +58,12 @@ public sealed class TlsConnectionLayer : IConnectionLayer
         return _serverOptions is not null
             ? TlsConnection.AuthenticateAsServerAsync(connection, _serverOptions, cancellationToken)
             : TlsConnection.AuthenticateAsClientAsync(connection, _clientOptions!, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TlsConnectionLayer value)
+        {
+        }
     }
 }

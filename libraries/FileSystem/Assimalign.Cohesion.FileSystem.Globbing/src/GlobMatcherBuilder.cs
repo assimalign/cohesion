@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.FileSystem.Globbing;
 
 using Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GlobMatcherBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
 {
     private readonly List<GlobContext> _includes;
@@ -86,5 +88,12 @@ public sealed class GlobMatcherBuilder : IGlobMatcherBuilder
     IGlobMatcherBuilder IGlobMatcherBuilder.AddExclude(Glob pattern)
     {
         return AddExclude(pattern);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GlobMatcherBuilder value)
+        {
+        }
     }
 }

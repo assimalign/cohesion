@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <c>examples</c> array or <c>const</c>) throw <see cref="OpenApiException"/> when the target line does
 /// not support them.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiSchemaBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiSchemaBuilder
 {
     private readonly OpenApiSchema _schema = new();
@@ -231,5 +233,12 @@ public sealed class OpenApiSchemaBuilder
         configure(builder);
         target.Add(builder.Build());
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiSchemaBuilder value)
+        {
+        }
     }
 }

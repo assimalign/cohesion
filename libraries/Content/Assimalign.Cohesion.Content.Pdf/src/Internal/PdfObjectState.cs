@@ -3,6 +3,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
 // Retain exact container revisions, not payload hashes or event subscriptions. References are leaves.
+[global::System.Diagnostics.DebuggerDisplay("PdfObjectState")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfObjectState
 {
     private readonly List<(IPdfObject Value, long Revision)> _containers = new();
@@ -44,6 +46,13 @@ internal sealed class PdfObjectState
         {
             _containers.Add((dictionary, dictionary.Revision));
             foreach (var pair in dictionary) { Capture(pair.Value, depth + 1, maxDepth, maxObjects, visited); }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfObjectState value)
+        {
         }
     }
 }

@@ -1,5 +1,7 @@
 ﻿namespace System;
 
+[global::System.Diagnostics.DebuggerDisplay("Either")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(Either<,>.DebugView))]
 public record Either<T1, T2> : IEither
 {
     #region Implicit Conversion From Value
@@ -243,4 +245,11 @@ public record Either<T1, T2> : IEither
     public override string ToString() => $"{(this as IEither)?.Type?.Name}:{_value}";
 
     #endregion ToString
+
+    private sealed class DebugView
+    {
+        public DebugView(Either<T1, T2> value)
+        {
+        }
+    }
 }

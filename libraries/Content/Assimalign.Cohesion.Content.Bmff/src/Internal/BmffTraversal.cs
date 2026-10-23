@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Content.Binary;
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 // One frame per ancestor, never one per sibling. Also shared by lazy queries.
+[global::System.Diagnostics.DebuggerDisplay("BmffTraversal")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffTraversal
 {
     private readonly IList<BmffBox> _roots;
@@ -70,5 +72,12 @@ internal sealed class BmffTraversal
         }
         _frames.Add((box, 0));
         _path.Add(box.BoxType.ToFourCC());
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffTraversal value)
+        {
+        }
     }
 }

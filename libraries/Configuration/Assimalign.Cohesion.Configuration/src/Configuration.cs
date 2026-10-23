@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Configuration;
 
 
+[global::System.Diagnostics.DebuggerDisplay("Configuration")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class Configuration : IConfiguration
 {
     private readonly ConfigurationSetStrategy _setStrategy;
@@ -190,5 +192,17 @@ public class Configuration : IConfiguration
                 }
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Configuration _target;
+
+        public DebugView(Configuration value)
+        {
+            _target = value;
+        }
+
+        public IEnumerable<IConfigurationProvider> Providers => _target.Providers;
     }
 }

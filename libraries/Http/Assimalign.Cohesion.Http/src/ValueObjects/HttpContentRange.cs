@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Http;
 /// reports only the complete length (<c>bytes */1234</c>) — the form a <c>416 Range Not
 /// Satisfiable</c> response carries.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpContentRange : IEquatable<HttpContentRange>
 {
@@ -224,4 +225,22 @@ public readonly struct HttpContentRange : IEquatable<HttpContentRange>
 
     /// <summary>Determines whether two content-ranges are not equal.</summary>
     public static bool operator !=(HttpContentRange left, HttpContentRange right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpContentRange _target;
+
+        public DebugView(HttpContentRange value)
+        {
+            _target = value;
+        }
+
+        public string Unit => _target.Unit;
+        public long? From => _target.From;
+        public long? To => _target.To;
+        public long? Length => _target.Length;
+        public bool IsUnsatisfied => _target.IsUnsatisfied;
+        public bool HasCompleteLength => _target.HasCompleteLength;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

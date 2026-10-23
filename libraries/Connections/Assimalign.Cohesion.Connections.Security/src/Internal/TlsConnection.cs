@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Connections.Security.Internal;
 /// <see cref="ConnectionSecurity.Tls"/>. What the handshake negotiated is reported through
 /// <see cref="ITlsConnectionInfo"/>, captured once the handshake has completed.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TlsConnection {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TlsConnection : DuplexConnection, ITlsConnectionInfo
 {
     private readonly IDuplexConnection _inner;
@@ -176,5 +178,31 @@ internal sealed class TlsConnection : DuplexConnection, ITlsConnectionInfo
         }
 
         return source;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TlsConnection _target;
+
+        public DebugView(TlsConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
+        public ConnectionDirection Direction => _target.Direction;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public string Name => _target.Name;
+        public IConnectionFeatureCollection InnerFeatures => _target.InnerFeatures;
+        public SslApplicationProtocol ApplicationProtocol => _target.ApplicationProtocol;
+        public SslProtocols TlsProtocol => _target.TlsProtocol;
+        public TlsCipherSuite CipherSuite => _target.CipherSuite;
+        public X509Certificate2? RemoteCertificate => _target.RemoteCertificate;
     }
 }

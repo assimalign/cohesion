@@ -26,6 +26,7 @@ namespace Assimalign.Cohesion.Http;
 /// (RFC 9110 &#167; 13) both build on it rather than re-parsing the <c>ETag</c> grammar.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
 {
@@ -223,4 +224,18 @@ public readonly struct HttpEntityTag : IEquatable<HttpEntityTag>
 
     /// <summary>Determines structural inequality between two entity-tags.</summary>
     public static bool operator !=(HttpEntityTag left, HttpEntityTag right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpEntityTag _target;
+
+        public DebugView(HttpEntityTag value)
+        {
+            _target = value;
+        }
+
+        public string Tag => _target.Tag;
+        public bool IsWeak => _target.IsWeak;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

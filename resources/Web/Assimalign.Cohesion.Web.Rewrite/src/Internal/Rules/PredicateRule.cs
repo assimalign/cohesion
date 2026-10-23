@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// The target has no pattern to capture from, so it is parsed once, at registration, and a rewrite target is
 /// pre-parsed into the path and read-only query every matching request gets.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("PredicateRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PredicateRule : RewriteRule
 {
     private readonly Func<IRewriteContext, bool> _predicate;
@@ -73,5 +75,12 @@ internal sealed class PredicateRule : RewriteRule
         }
 
         context.Rewrite(_path, _query, _flow);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PredicateRule value)
+        {
+        }
     }
 }

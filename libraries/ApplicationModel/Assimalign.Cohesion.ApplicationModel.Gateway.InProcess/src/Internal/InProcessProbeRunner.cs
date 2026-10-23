@@ -19,6 +19,8 @@ internal interface IInProcessProbeRunner
         CancellationToken cancellationToken);
 }
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessProbeRunner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessProbeRunner : IInProcessProbeRunner
 {
     private readonly InProcessGatewayOptions _options;
@@ -151,6 +153,13 @@ internal sealed class InProcessProbeRunner : IInProcessProbeRunner
             Path = probe.Value ?? "/",
         };
         return builder.Uri;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessProbeRunner value)
+        {
+        }
     }
 }
 

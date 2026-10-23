@@ -25,6 +25,7 @@ namespace Assimalign.Cohesion.Http;
 /// (RFC 9110 &#167; 13) both consume it rather than re-parsing the list grammar.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpEntityTagCondition
 {
@@ -214,5 +215,17 @@ public readonly struct HttpEntityTagCondition
             builder.Append(_tags[i].ToString());
         }
         return builder.ToString();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpEntityTagCondition _target;
+
+        public DebugView(HttpEntityTagCondition value)
+        {
+            _target = value;
+        }
+
+        public bool IsAny => _target.IsAny;
     }
 }

@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// <see cref="InvalidOperationException"/> rather than spinning.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RewriteMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RewriteMiddleware : IWebApplicationMiddleware
 {
     private readonly IRewriteRule[] _rules;
@@ -182,5 +184,12 @@ internal sealed class RewriteMiddleware : IWebApplicationMiddleware
     {
         string prefix = pathBase.Value.TrimEnd('/');
         return prefix.Length == 0 ? path : new HttpPath(string.Concat(prefix, path.Value));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RewriteMiddleware value)
+        {
+        }
     }
 }

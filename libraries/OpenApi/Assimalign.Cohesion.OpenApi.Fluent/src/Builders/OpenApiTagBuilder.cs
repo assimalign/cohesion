@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// A fluent builder for an <see cref="OpenApiTag"/>. The 3.2-only <c>summary</c>, <c>parent</c>, and
 /// <c>kind</c> fields throw <see cref="OpenApiException"/> when the target line is earlier.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiTagBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiTagBuilder
 {
     private readonly OpenApiTag _tag;
@@ -80,5 +82,12 @@ public sealed class OpenApiTagBuilder
         ArgumentNullException.ThrowIfNull(url);
         _tag.ExternalDocs = new OpenApiExternalDocumentation { Url = url, Description = description };
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiTagBuilder value)
+        {
+        }
     }
 }

@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileSystemDispatcher")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class InMemoryFileSystemDispatcher : IDisposable
 {
     private readonly InMemoryFileSystemDispatcher? _parent;
@@ -59,5 +61,12 @@ internal class InMemoryFileSystemDispatcher : IDisposable
         Created = null;
         Deleted = null;
         Renamed = null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryFileSystemDispatcher value)
+        {
+        }
     }
 }

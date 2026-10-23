@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 /// <summary>
 /// Provides the SecretStore application environment and runtime composition.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreApplicationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreApplicationContext : HostContext, ISecretStoreApplicationContext
 {
     private IServiceProvider? _serviceProvider;
@@ -74,5 +76,22 @@ public sealed class SecretStoreApplicationContext : HostContext, ISecretStoreApp
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreApplicationContext _target;
+
+        public DebugView(SecretStoreApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public IHostEnvironment Environment => _target.Environment;
+        public IEnumerable<IHostService> HostedServices => _target.HostedServices;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

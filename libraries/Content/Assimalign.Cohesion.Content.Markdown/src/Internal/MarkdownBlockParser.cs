@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Content.Markdown.Internal;
 /// blocks, link reference definitions) fall through to paragraph text — parsing never throws for
 /// input.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownBlockParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MarkdownBlockParser
 {
     private readonly MarkdownParserOptions _options;
@@ -638,6 +640,8 @@ internal sealed class MarkdownBlockParser
     /// A tab-aware cursor over one line: columns advance to the next multiple-of-four stop on tabs.
     /// Tabs crossing a container boundary retain their remaining virtual spaces.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("LineCursor")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private ref struct LineCursor
     {
         private readonly ReadOnlySpan<char> _line;
@@ -731,6 +735,31 @@ internal sealed class MarkdownBlockParser
             }
 
             return count;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly int _member0;
+            private readonly int _member1;
+            private readonly bool _member2;
+
+            public DebugView(LineCursor value)
+            {
+                _member0 = value.Index;
+                _member1 = value.Column;
+                _member2 = value.AtEnd;
+            }
+
+            public int Index => _member0;
+            public int Column => _member1;
+            public bool AtEnd => _member2;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MarkdownBlockParser value)
+        {
         }
     }
 }

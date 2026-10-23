@@ -4,6 +4,8 @@ using System.Text;
 
 namespace System;
 
+[global::System.Diagnostics.DebuggerDisplay("ValueEither")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(ValueEither<,>.DebugView))]
 public readonly struct ValueEither<T1, T2> : IEither
 {
     #region Implicit Conversion From Value
@@ -218,4 +220,11 @@ public readonly struct ValueEither<T1, T2> : IEither
 
     #endregion ToString
 
+
+    private sealed class DebugView
+    {
+        public DebugView(ValueEither<T1, T2> value)
+        {
+        }
+    }
 }

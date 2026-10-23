@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.ObjectPool;
 
+[global::System.Diagnostics.DebuggerDisplay("DefaultObjectPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DefaultObjectPool<,>.DebugView))]
 public class DefaultObjectPool<T, TArgs> : ObjectPool<T, TArgs> where T : class
 {
     private protected readonly ConcurrentQueue<T> _objects;
@@ -83,5 +85,18 @@ public class DefaultObjectPool<T, TArgs> : ObjectPool<T, TArgs> where T : class
                 }
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DefaultObjectPool<T, TArgs> _target;
+
+        public DebugView(DefaultObjectPool<T, TArgs> value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.ObjectPool.ObjectPoolPolicy<T> Policy => _target.Policy;
+        public global::Assimalign.Cohesion.ObjectPool.ObjectPoolFactory<T, TArgs> Factory => _target.Factory;
     }
 }

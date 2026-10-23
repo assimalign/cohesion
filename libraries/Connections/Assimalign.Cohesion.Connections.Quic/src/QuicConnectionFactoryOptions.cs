@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// streams. The inbound allowance keeps a native accept pending so idle peer closure can signal
 /// <see cref="IConnection.ConnectionClosed"/> without application reads.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QuicConnectionFactoryOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -174,5 +176,23 @@ public sealed class QuicConnectionFactoryOptions
     internal StreamPipeOptionsContext CreateStreamOptions()
     {
         return PipeOptionsFactory.CreateStreamOptions(MaxReadBufferSize, MaxWriteBufferSize);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicConnectionFactoryOptions _target;
+
+        public DebugView(QuicConnectionFactoryOptions value)
+        {
+            _target = value;
+        }
+
+        public IPEndPoint EndPoint => _target.EndPoint;
+        public SslClientAuthenticationOptions ClientAuthenticationOptions => _target.ClientAuthenticationOptions;
+        public long? MaxReadBufferSize => _target.MaxReadBufferSize;
+        public long? MaxWriteBufferSize => _target.MaxWriteBufferSize;
+        public long DefaultCloseErrorCode => _target.DefaultCloseErrorCode;
+        public long DefaultStreamErrorCode => _target.DefaultStreamErrorCode;
+        public TimeSpan CloseDeliveryTimeout => _target.CloseDeliveryTimeout;
     }
 }

@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// The validated, immutable snapshot of <see cref="WebSocketOptions"/> the middleware enforces: the
 /// origin check, and the defaults applied to every accept.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("WebSocketPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebSocketPolicy
 {
     private readonly HashSet<string> _allowedOrigins;
@@ -112,5 +114,12 @@ internal sealed class WebSocketPolicy
         }
 
         return effective;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebSocketPolicy value)
+        {
+        }
     }
 }

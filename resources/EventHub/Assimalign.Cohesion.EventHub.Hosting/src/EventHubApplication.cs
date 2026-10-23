@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.EventHub.Hosting;
 /// <summary>
 /// Hosts an EventHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("EventHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EventHubApplication : Host<EventHubApplicationContext>, IEventHubApplication
 {
     private readonly EventHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class EventHubApplication : Host<EventHubApplicationContext>, IEve
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new EventHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EventHubApplication _target;
+
+        public DebugView(EventHubApplication value)
+        {
+            _target = value;
+        }
+
+        public EventHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

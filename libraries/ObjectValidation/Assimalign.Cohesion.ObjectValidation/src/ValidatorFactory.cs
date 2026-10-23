@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// <summary>
 /// 
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ValidatorFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ValidatorFactory : IValidatorFactory
 {
     private readonly IDictionary<string, IValidator> _validators;
@@ -44,5 +46,12 @@ public sealed class ValidatorFactory : IValidatorFactory
         configure.Invoke(builder);
 
         return new ValidatorFactory(builder.validators);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ValidatorFactory value)
+        {
+        }
     }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BmffWriterDefault")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffWriterDefault : BmffWriter
 {
     private readonly int _bufferLimit;
@@ -137,6 +139,13 @@ internal sealed class BmffWriterDefault : BmffWriter
                 state.Buffer?.Dispose();
                 state.Parent.Dispose();
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffWriterDefault value)
+        {
         }
     }
 }

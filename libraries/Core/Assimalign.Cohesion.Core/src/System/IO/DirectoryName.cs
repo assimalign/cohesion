@@ -15,6 +15,7 @@ using static Assimalign.Cohesion.Internal.PathHelper;
 /// <summary>
 /// A case insensitive directory name.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{_value}")]
 public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<DirectoryName>
 #if NET7_0_OR_GREATER
@@ -282,4 +283,16 @@ public readonly struct DirectoryName : IEquatable<DirectoryName>, IComparable<Di
     }
 
     #endregion
+
+    private sealed class DebugView
+    {
+        private readonly DirectoryName _target;
+
+        public DebugView(DirectoryName value)
+        {
+            _target = value;
+        }
+
+        public int Length => _target.Length;
+    }
 }

@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Web.Sessions.Internal;
 /// slides the store's idle window instead.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebSessionFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebSessionFeature : IHttpSessionFeature
 {
     private readonly IHttpContext _context;
@@ -253,4 +255,16 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     private bool ResponseHeadStarted()
         => _context.Response.Headers.IsReadOnly
             || _context.Features.Get<IHttpResponseStreamingFeature>() is { HasStarted: true };
+
+    private sealed class DebugView
+    {
+        private readonly WebSessionFeature _target;
+
+        public DebugView(WebSessionFeature value)
+        {
+            _target = value;
+        }
+
+        public bool WasAccessed => _target.WasAccessed;
+    }
 }

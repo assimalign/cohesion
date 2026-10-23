@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// The rule is idempotent: the target of its redirect is a host it leaves alone, so it cannot loop.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HostRedirectRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HostRedirectRule : RewriteRule
 {
     private const string wwwPrefix = "www.";
@@ -93,5 +95,12 @@ internal sealed class HostRedirectRule : RewriteRule
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HostRedirectRule value)
+        {
+        }
     }
 }

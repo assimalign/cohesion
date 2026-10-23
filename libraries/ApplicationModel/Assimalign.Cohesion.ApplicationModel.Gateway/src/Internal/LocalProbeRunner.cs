@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalProbeRunner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalProbeRunner
 {
     private readonly LocalGatewayOptions _options;
@@ -240,4 +242,11 @@ internal sealed class LocalProbeRunner
     }
 
     private static string ToAuthority(Uri address) => $"{address.Host}:{address.Port}";
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalProbeRunner value)
+        {
+        }
+    }
 }

@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Logging;
 /// <see cref="ILoggerFactory"/>; callers that hold the interface get an <see cref="ILogger"/>
 /// (the same instance) through the synthesized interface bridge.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LoggerFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoggerFactory : ILoggerFactory
 {
     private readonly ConcurrentDictionary<string, Logger> _cache = new(StringComparer.OrdinalIgnoreCase);
@@ -239,5 +241,20 @@ public sealed class LoggerFactory : ILoggerFactory
         {
             throw new ObjectDisposedException(nameof(LoggerFactory));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LoggerFactory _target;
+
+        public DebugView(LoggerFactory value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<ILoggerProvider> Providers => _target.Providers;
+        public IReadOnlyList<ILoggerEnricher> Enrichers => _target.Enrichers;
+        public IReadOnlyList<LoggerFilterRule> Rules => _target.Rules;
+        public IReadOnlyList<ILoggerForwarder> Forwarders => _target.Forwarders;
     }
 }

@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreRepository")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecretStoreRepository
 {
     private const byte FormatVersion = 1;
@@ -317,10 +319,33 @@ internal sealed class SecretStoreRepository
             throw new InvalidOperationException("The secret store repository has not been initialized.");
         }
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(SecretStoreRepository value)
+        {
+        }
+    }
 }
 
 internal sealed record SecretCommandDocument(string Id, string Owner, string Path, string Source, byte[] Value);
 
+[global::System.Diagnostics.DebuggerDisplay("SecretRepositoryJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SecretCommandDocument))]
-internal sealed partial class SecretRepositoryJsonContext : JsonSerializerContext;
+internal sealed partial class SecretRepositoryJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly SecretRepositoryJsonContext _target;
+
+        public DebugView(SecretRepositoryJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}

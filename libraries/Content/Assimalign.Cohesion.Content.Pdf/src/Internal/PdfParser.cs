@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfParser
 {
     private readonly PdfLexer _lexer;
@@ -221,4 +223,11 @@ internal sealed class PdfParser
     }
     private static bool TryUnsigned(PdfToken token, out long value) =>
         long.TryParse(Encoding.ASCII.GetString(token.Bytes), NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfParser value)
+        {
+        }
+    }
 }

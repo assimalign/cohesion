@@ -3,12 +3,30 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BmffLayoutEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal readonly record struct BmffLayoutEntry(long Offset, int HeaderSize, long PayloadSize)
 {
     internal long PayloadOffset => Offset + HeaderSize;
     internal long Size => HeaderSize + PayloadSize;
+
+    private sealed class DebugView
+    {
+        private readonly BmffLayoutEntry _target;
+
+        public DebugView(BmffLayoutEntry value)
+        {
+            _target = value;
+        }
+
+        public long Offset => _target.Offset;
+        public int HeaderSize => _target.HeaderSize;
+        public long PayloadSize => _target.PayloadSize;
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("BmffLayout")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffLayout
 {
     internal Func<BmffBox, long, bool, long>? PayloadOffsetMap { get; set; }
@@ -173,5 +191,12 @@ internal sealed class BmffLayout
     {
         var data = MapData(address, target);
         return data == address ? MapMoof(address, target) : data;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffLayout value)
+        {
+        }
     }
 }

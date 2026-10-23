@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// Built-in RSA and ECDSA keys delegate to the reusable IdentityModel verifiers; the Bearer
 /// package retains its HMAC verifier and compatibility adapter.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("JwtBearerOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JwtBearerOptions
 {
     private HttpFieldValue? _realm;
@@ -142,4 +144,29 @@ public sealed class JwtBearerOptions
     /// <see cref="TimeProvider.System"/>.
     /// </summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    private sealed class DebugView
+    {
+        private readonly JwtBearerOptions _target;
+
+        public DebugView(JwtBearerOptions value)
+        {
+            _target = value;
+        }
+
+        public string? DisplayName => _target.DisplayName;
+        public IList<string> ValidIssuers => _target.ValidIssuers;
+        public bool ValidateIssuer => _target.ValidateIssuer;
+        public IList<string> ValidAudiences => _target.ValidAudiences;
+        public bool ValidateAudience => _target.ValidateAudience;
+        public IList<string> AllowedAlgorithms => _target.AllowedAlgorithms;
+        public IList<IJwtSignatureVerifier> SigningKeys => _target.SigningKeys;
+        public TimeSpan ClockSkew => _target.ClockSkew;
+        public bool RequireSignedTokens => _target.RequireSignedTokens;
+        public string NameClaimType => _target.NameClaimType;
+        public string RoleClaimType => _target.RoleClaimType;
+        public HttpFieldValue? Realm => _target.Realm;
+        public string? ClaimsIssuer => _target.ClaimsIssuer;
+        public TimeProvider TimeProvider => _target.TimeProvider;
+    }
 }

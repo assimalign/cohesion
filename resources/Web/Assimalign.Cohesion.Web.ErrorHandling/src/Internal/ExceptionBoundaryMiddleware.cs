@@ -50,6 +50,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// because fault observation must never defeat the boundary's core job of rendering the response.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ExceptionBoundaryMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
 {
     private static readonly string _responseAbandonedByClientMessage = ErrorMessages.ResponseAbandonedByClient;
@@ -259,5 +261,12 @@ internal sealed class ExceptionBoundaryMiddleware : IWebApplicationMiddleware
         }
 
         response.StatusCode = statusCode;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ExceptionBoundaryMiddleware value)
+        {
+        }
     }
 }

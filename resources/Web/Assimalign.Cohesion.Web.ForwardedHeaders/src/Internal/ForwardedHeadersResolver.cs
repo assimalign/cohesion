@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 /// </description></item>
 /// </list>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ForwardedHeadersResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ForwardedHeadersResolver
 {
     private readonly ForwardedHeaderNames _headers;
@@ -421,5 +423,12 @@ internal sealed class ForwardedHeadersResolver
         public EndPoint? Anchor;
         public int Hops;
         public ForwardingStopReason StopReason;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ForwardedHeadersResolver value)
+        {
+        }
     }
 }

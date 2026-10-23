@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// <see cref="NamedPipeClientStream"/> and waits for the server pipe to become available, then returns a
 /// live <see cref="DuplexConnection"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("NamedPipeConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NamedPipeConnectionFactory : DuplexConnectionFactory
 {
     private readonly NamedPipeConnectionFactoryOptions _options;
@@ -103,4 +105,16 @@ public sealed class NamedPipeConnectionFactory : DuplexConnectionFactory
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
     public static NamedPipeConnectionFactory Create(Action<NamedPipeConnectionFactoryOptions> configure)
         => new(NamedPipeConnectionFactoryOptions.Create(configure));
+
+    private sealed class DebugView
+    {
+        private readonly NamedPipeConnectionFactory _target;
+
+        public DebugView(NamedPipeConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+    }
 }

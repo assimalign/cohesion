@@ -3,6 +3,8 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.Web.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EventThrottle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EventThrottle
 {
     private readonly object _sync = new();
@@ -30,6 +32,13 @@ internal sealed class EventThrottle
             suppressedCount = _suppressed;
             _suppressed = 0;
             return true;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EventThrottle value)
+        {
         }
     }
 }

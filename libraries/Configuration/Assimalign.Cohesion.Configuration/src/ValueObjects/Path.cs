@@ -39,6 +39,7 @@ namespace Assimalign.Cohesion.Configuration;
 /// </item>
 /// </list>
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString()}")]
 [JsonConverter(typeof(KeyPathJsonConvertor))]
 public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
@@ -519,6 +520,8 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
         return value is '\\' or '/' or ':' or '.';
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("KeyPathJsonConvertor")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     partial class KeyPathJsonConvertor : JsonConverter<Path>
     {
         public override Path Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -537,5 +540,33 @@ public readonly struct Path : IEquatable<Path>, IEnumerable<Key>
         {
             writer.WritePropertyName(value);
         }
+
+        private sealed class DebugView
+        {
+            private readonly KeyPathJsonConvertor _target;
+
+            public DebugView(KeyPathJsonConvertor value)
+            {
+                _target = value;
+            }
+
+            public bool HandleNull => _target.HandleNull;
+            public global::System.Type Type => _target.Type;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Path _target;
+
+        public DebugView(Path value)
+        {
+            _target = value;
+        }
+
+        public Key[] Keys => _target.Keys;
+        public int Count => _target.Count;
+        public bool IsEmpty => _target.IsEmpty;
+        public bool IsComposite => _target.IsComposite;
     }
 }

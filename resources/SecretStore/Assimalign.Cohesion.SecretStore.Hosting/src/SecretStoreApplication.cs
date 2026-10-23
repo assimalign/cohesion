@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 /// <summary>
 /// Hosts a SecretStore application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>, ISecretStoreApplication
 {
     private readonly SecretStoreApplicationContext _context;
@@ -81,5 +83,18 @@ public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         return new SecretStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreApplication _target;
+
+        public DebugView(SecretStoreApplication value)
+        {
+            _target = value;
+        }
+
+        public SecretStoreApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

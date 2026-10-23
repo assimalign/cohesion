@@ -6,6 +6,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LiveConnectionCollection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(LiveConnectionCollection<>.DebugView))]
 internal sealed class LiveConnectionCollection<TConnection> : IReadOnlyCollection<TConnection> where TConnection : class, IConnection
 {
     private readonly ConcurrentDictionary<TConnection, byte> _connections = new(ReferenceEqualityComparer.Instance);
@@ -47,4 +49,11 @@ internal sealed class LiveConnectionCollection<TConnection> : IReadOnlyCollectio
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        public DebugView(LiveConnectionCollection<TConnection> value)
+        {
+        }
+    }
 }

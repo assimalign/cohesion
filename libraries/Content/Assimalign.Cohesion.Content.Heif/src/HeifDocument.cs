@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 /// <summary>An editable still-image view over a BMFF document, retaining lazy image extents.</summary>
 /// <remarks>Access is sequential. Keep all borrowed sources open and unchanged through saving.
 /// Direct tree edits require constructing a new view before any save relocates its coordinates.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("HeifDocument")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class HeifDocument : IDisposable
 {
     private readonly HeifReaderOptions _options;
@@ -231,5 +233,20 @@ public sealed partial class HeifDocument : IDisposable
             }
         }
         return result.AsReadOnly();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HeifDocument _target;
+
+        public DebugView(HeifDocument value)
+        {
+            _target = value;
+        }
+
+        public BmffDocument Document => _target.Document;
+        public HeifItem? PrimaryItem => _target.PrimaryItem;
+        public HeifItem? PrimaryImage => _target.PrimaryImage;
+        public bool IsAvif => _target.IsAvif;
     }
 }

@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// fault on a stream already reset — is the control's, so the feature adds none and the guards run
 /// in one order on every path.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpExtendedConnectFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpExtendedConnectFeature : IHttpExtendedConnectFeature
 {
     /// <summary>The name under which the extended CONNECT feature is registered.</summary>
@@ -61,5 +63,18 @@ internal sealed class HttpExtendedConnectFeature : IHttpExtendedConnectFeature
         }
 
         return control.AcceptTunnelAsync(cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpExtendedConnectFeature _target;
+
+        public DebugView(HttpExtendedConnectFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public string Protocol => _target.Protocol;
     }
 }

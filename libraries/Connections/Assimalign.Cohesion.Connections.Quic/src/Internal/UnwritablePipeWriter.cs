@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// A <see cref="PipeWriter"/> for the unusable output half of a read-only stream: every write
 /// operation throws, while completion members no-op so connection teardown stays uniform.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("UnwritablePipeWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class UnwritablePipeWriter : PipeWriter
 {
     /// <summary>
@@ -47,5 +49,18 @@ internal sealed class UnwritablePipeWriter : PipeWriter
     private static InvalidOperationException NewWriteException()
     {
         return new InvalidOperationException(ErrorMessages.StreamReadOnly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UnwritablePipeWriter _target;
+
+        public DebugView(UnwritablePipeWriter value)
+        {
+            _target = value;
+        }
+
+        public bool CanGetUnflushedBytes => _target.CanGetUnflushedBytes;
+        public long UnflushedBytes => _target.UnflushedBytes;
     }
 }

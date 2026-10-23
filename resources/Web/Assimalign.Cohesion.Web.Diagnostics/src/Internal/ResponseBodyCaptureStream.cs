@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Internal;
 /// application sets it. Writes pass straight through — the wrapper never buffers the full
 /// body, so streaming responses and flow-control backpressure are unaffected.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ResponseBodyCaptureStream {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResponseBodyCaptureStream : Stream
 {
     private readonly Stream _inner;
@@ -135,5 +137,25 @@ internal sealed class ResponseBodyCaptureStream : Stream
         int take = Math.Min(data.Length, _captureLimit - _capturedCount);
         data[..take].CopyTo(_captured.AsSpan(_capturedCount));
         _capturedCount += take;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ResponseBodyCaptureStream _target;
+
+        public DebugView(ResponseBodyCaptureStream value)
+        {
+            _target = value;
+        }
+
+        public long BytesWritten => _target.BytesWritten;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

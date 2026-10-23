@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.MessageHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MessageHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MessageHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class MessageHubControlPlaneEndpointService : IHostService, IDis
                 ? address
                 : throw new InvalidOperationException($"The MessageHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly MessageHubControlPlaneEndpointService _target;
+
+        public DebugView(MessageHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Content.Media;
 /// <remarks>Default is zero at timescale one. Equality compares time, not its representation.
 /// A frame at 30000/1001 frames per second advances by 1001 at timescale 30000.
 /// Arithmetic reduces results before checking the Int64 value and positive Int64 timescale limits.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MediaTimestamp")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct MediaTimestamp : IEquatable<MediaTimestamp>, IComparable<MediaTimestamp>
 {
     private readonly long _timescale;
@@ -185,5 +187,18 @@ public readonly struct MediaTimestamp : IEquatable<MediaTimestamp>, IComparable<
             right = remainder;
         }
         return left;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MediaTimestamp _target;
+
+        public DebugView(MediaTimestamp value)
+        {
+            _target = value;
+        }
+
+        public long Value => _target.Value;
+        public long Timescale => _target.Timescale;
     }
 }

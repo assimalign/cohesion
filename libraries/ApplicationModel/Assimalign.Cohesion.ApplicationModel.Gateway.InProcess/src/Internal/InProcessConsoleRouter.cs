@@ -68,6 +68,8 @@ internal static class InProcessConsoleRouter
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ConsoleRouterLease")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ConsoleRouterLease : IDisposable
     {
         private int _disposed;
@@ -79,9 +81,18 @@ internal static class InProcessConsoleRouter
                 Release();
             }
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(ConsoleRouterLease value)
+            {
+            }
+        }
     }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("AmbientPrefixTextWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmbientPrefixTextWriter : TextWriter
 {
     private const int MaximumPendingLineLength = 16 * 1024;
@@ -229,8 +240,32 @@ internal sealed class AmbientPrefixTextWriter : TextWriter
         line.Value.Clear();
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PendingLine")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class PendingLine
     {
         internal StringBuilder Value { get; } = new();
+
+        private sealed class DebugView
+        {
+            public DebugView(PendingLine value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmbientPrefixTextWriter _target;
+
+        public DebugView(AmbientPrefixTextWriter value)
+        {
+            _target = value;
+        }
+
+        public Encoding Encoding => _target.Encoding;
+        public IFormatProvider FormatProvider => _target.FormatProvider;
+        public char[] CoreNewLine => _target.CoreNewLine;
+        public string NewLine => _target.NewLine;
     }
 }

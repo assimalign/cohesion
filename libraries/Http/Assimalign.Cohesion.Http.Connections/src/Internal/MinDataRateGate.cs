@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// integer/double arithmetic, no reflection, no <c>DateTime.UtcNow</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MinDataRateGate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MinDataRateGate
 {
     // A per-operation wait longer than this is treated as effectively unbounded: no realistic
@@ -202,5 +204,18 @@ internal sealed class MinDataRateGate
         return ReferenceEquals(_timeProvider, TimeProvider.System)
             ? new CancellationTokenSource()
             : new CancellationTokenSource(Timeout.InfiniteTimeSpan, _timeProvider);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MinDataRateGate _target;
+
+        public DebugView(MinDataRateGate value)
+        {
+            _target = value;
+        }
+
+        public long GraceTicks => _target.GraceTicks;
+        public TimeProvider TimeProvider => _target.TimeProvider;
     }
 }

@@ -33,6 +33,7 @@ namespace Assimalign.Cohesion.Http;
 /// (<c>200</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpIfRange : IEquatable<HttpIfRange>
 {
@@ -242,4 +243,19 @@ public readonly struct HttpIfRange : IEquatable<HttpIfRange>
 
     /// <summary>Determines whether two <c>If-Range</c> values are not equal.</summary>
     public static bool operator !=(HttpIfRange left, HttpIfRange right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpIfRange _target;
+
+        public DebugView(HttpIfRange value)
+        {
+            _target = value;
+        }
+
+        public HttpEntityTag? EntityTag => _target.EntityTag;
+        public DateTimeOffset? Date => _target.Date;
+        public bool IsEntityTag => _target.IsEntityTag;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

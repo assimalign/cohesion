@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Content.Text;
 /// construct one per text to tokenize, not one per line.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TextTokenizer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public ref struct TextTokenizer
 {
     private SequenceReader<char> _reader;
@@ -232,5 +234,17 @@ public ref struct TextTokenizer
         }
 
         _offset += value.Length;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Content.Text.TextPosition _member0;
+
+        public DebugView(TextTokenizer value)
+        {
+            _member0 = value.Position;
+        }
+
+        public TextPosition Position => _member0;
     }
 }

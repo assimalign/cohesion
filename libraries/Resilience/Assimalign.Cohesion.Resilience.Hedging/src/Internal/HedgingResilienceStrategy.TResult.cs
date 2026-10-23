@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HedgingResilienceStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(HedgingResilienceStrategy<>.DebugView))]
 internal sealed class HedgingResilienceStrategy<TResult> : HedgingResilienceStrategyBase, IResilienceStrategy<TResult>
 {
     public HedgingResilienceStrategy(HedgingStrategyOptions options)
@@ -31,5 +33,12 @@ internal sealed class HedgingResilienceStrategy<TResult> : HedgingResilienceStra
             static exception => exception,
             context,
             state);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HedgingResilienceStrategy<TResult> value)
+        {
+        }
     }
 }

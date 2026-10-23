@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.EventHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EventHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EventHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class EventHubControlPlaneEndpointService : IHostService, IDispo
                 ? address
                 : throw new InvalidOperationException($"The EventHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly EventHubControlPlaneEndpointService _target;
+
+        public DebugView(EventHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

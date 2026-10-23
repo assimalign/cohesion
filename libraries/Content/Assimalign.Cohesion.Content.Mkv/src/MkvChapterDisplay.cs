@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// <summary>An editable ChapterDisplay string and its ordered language and country fields.</summary>
 /// <remarks>Language and country strings retain their wire spelling. BCP 47 fields take precedence
 /// over legacy language and country fields when choosing a display; this model preserves all of them.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MkvChapterDisplay")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MkvChapterDisplay
 {
     internal MkvChapterDisplay(EbmlElement element)
@@ -51,4 +53,18 @@ public sealed class MkvChapterDisplay
     public IList<string> LanguagesBCP47 { get; }
     /// <summary>Gets editable ChapCountry occurrences in wire order.</summary>
     public IList<string> Countries { get; }
+
+    private sealed class DebugView
+    {
+        private readonly MkvChapterDisplay _target;
+
+        public DebugView(MkvChapterDisplay value)
+        {
+            _target = value;
+        }
+
+        public IList<string> Languages => _target.Languages;
+        public IList<string> LanguagesBCP47 => _target.LanguagesBCP47;
+        public IList<string> Countries => _target.Countries;
+    }
 }

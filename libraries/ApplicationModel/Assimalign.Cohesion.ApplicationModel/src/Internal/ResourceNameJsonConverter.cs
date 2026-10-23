@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ResourceNameJsonConverter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceNameJsonConverter : JsonConverter<ResourceName>
 {
     public override ResourceName Read(
@@ -37,5 +39,18 @@ internal sealed class ResourceNameJsonConverter : JsonConverter<ResourceName>
         }
 
         writer.WriteStringValue(text);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ResourceNameJsonConverter _target;
+
+        public DebugView(ResourceNameJsonConverter value)
+        {
+            _target = value;
+        }
+
+        public bool HandleNull => _target.HandleNull;
+        public global::System.Type Type => _target.Type;
     }
 }

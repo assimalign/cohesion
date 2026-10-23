@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// connection error (<c>GOAWAY</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2FlowControlWindow")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal struct Http2FlowControlWindow
 {
     /// <summary>
@@ -114,5 +116,17 @@ internal struct Http2FlowControlWindow
 
         _available = updated;
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2FlowControlWindow _target;
+
+        public DebugView(Http2FlowControlWindow value)
+        {
+            _target = value;
+        }
+
+        public long Available => _target.Available;
     }
 }

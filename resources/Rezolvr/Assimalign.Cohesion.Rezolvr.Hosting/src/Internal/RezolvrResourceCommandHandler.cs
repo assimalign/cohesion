@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("RezolvrResourceCommandHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RezolvrResourceCommandHandler : IResourceCommandHandler
 {
     internal const string AddARecord = "rezolvr.add-a-record";
@@ -35,5 +37,17 @@ internal sealed class RezolvrResourceCommandHandler : IResourceCommandHandler
     {
         await _repository.MutateAsync(command, delete: true, cancellationToken).ConfigureAwait(false);
         return ReadOnlyMemory<byte>.Empty;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RezolvrResourceCommandHandler _target;
+
+        public DebugView(RezolvrResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

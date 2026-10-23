@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <summary>
 /// Used to read an 'application/x-www-form-urlencoded' form.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpFormReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class HttpFormReader : IDisposable
 {
     /// <summary>
@@ -337,5 +339,19 @@ internal class HttpFormReader : IDisposable
             _disposed = true;
             _charPool.Return(_buffer);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpFormReader _target;
+
+        public DebugView(HttpFormReader value)
+        {
+            _target = value;
+        }
+
+        public int ValueCountLimit => _target.ValueCountLimit;
+        public int KeyLengthLimit => _target.KeyLengthLimit;
+        public int ValueLengthLimit => _target.ValueLengthLimit;
     }
 }

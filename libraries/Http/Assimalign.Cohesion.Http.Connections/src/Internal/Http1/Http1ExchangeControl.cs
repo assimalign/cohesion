@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// — the caller owns I/O on the stream, not the socket lifetime.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1ExchangeControl")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1ExchangeControl : IHttpExchangeControl
 {
     private readonly Http1Context _context;
@@ -123,5 +125,22 @@ internal sealed class Http1ExchangeControl : IHttpExchangeControl
     {
         return ValueTask.FromException<Stream>(new InvalidOperationException(
             ErrorMessages.Http1TunnelNotSupported));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http1ExchangeControl _target;
+
+        public DebugView(Http1ExchangeControl value)
+        {
+            _target = value;
+        }
+
+        public bool HasResponseStarted => _target.HasResponseStarted;
+        public HttpStatusCode? ClientFaultStatusCode => _target.ClientFaultStatusCode;
+        public bool ResponseAbortedByClient => _target.ResponseAbortedByClient;
+        public bool CanWriteInterimResponse => _target.CanWriteInterimResponse;
+        public bool CanTakeOver => _target.CanTakeOver;
+        public bool CanAcceptTunnel => _target.CanAcceptTunnel;
     }
 }

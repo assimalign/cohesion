@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// do not reach the endpoint and an invalid value fails at map time.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecurityHeadersMetadata")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecurityHeadersMetadata
 {
     private readonly SecurityHeadersPlan? _replacement;
@@ -109,5 +111,18 @@ public sealed class SecurityHeadersMetadata
     {
         ArgumentNullException.ThrowIfNull(configure);
         return configure;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecurityHeadersMetadata _target;
+
+        public DebugView(SecurityHeadersMetadata value)
+        {
+            _target = value;
+        }
+
+        public bool IsDisabled => _target.IsDisabled;
+        public bool IsAdjustment => _target.IsAdjustment;
     }
 }

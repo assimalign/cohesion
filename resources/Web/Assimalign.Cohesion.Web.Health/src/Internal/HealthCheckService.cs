@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.Health.Internal;
 /// readers; server-side diagnostics report its type and message separately.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HealthCheckService")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HealthCheckService : IHealthCheckService
 {
     /// <summary>
@@ -135,6 +137,13 @@ internal sealed class HealthCheckService : IHealthCheckService
         finally
         {
             timeoutSource?.Dispose();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HealthCheckService value)
+        {
         }
     }
 }

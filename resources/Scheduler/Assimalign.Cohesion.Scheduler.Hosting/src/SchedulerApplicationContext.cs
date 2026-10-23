@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 /// <summary>
 /// Provides the Scheduler application environment and runtime composition.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SchedulerApplicationContext {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplicationContext, IHealthContributor
 {
     private readonly IHostEnvironment _environment;
@@ -225,5 +227,25 @@ public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplica
         }
 
         return [.. schedules];
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchedulerApplicationContext _target;
+
+        public DebugView(SchedulerApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public IHostEnvironment Environment => _target.Environment;
+        public IEnumerable<IHostService> HostedServices => _target.HostedServices;
+        public IReadOnlyList<IScheduleJob> Jobs => _target.Jobs;
+        public IReadOnlyList<IScheduleProvider> ScheduleProviders => _target.ScheduleProviders;
+        public string Name => _target.Name;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

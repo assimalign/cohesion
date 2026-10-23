@@ -12,6 +12,8 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// builder is single-use; calling <see cref="Build"/> a second time throws
 /// <see cref="InvalidOperationException"/> to keep ownership semantics unambiguous.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AggregateFileSystemBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AggregateFileSystemBuilder
 {
     private readonly AggregateFileSystemOptions _options = new();
@@ -97,6 +99,13 @@ public sealed class AggregateFileSystemBuilder
         {
             throw new InvalidOperationException(
                 "AggregateFileSystemBuilder has already produced a file system. Create a new builder for additional aggregates.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AggregateFileSystemBuilder value)
+        {
         }
     }
 }

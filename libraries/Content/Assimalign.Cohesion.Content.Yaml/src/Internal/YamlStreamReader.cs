@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 /// <summary>
 /// The content-family reader seam over <see cref="YamlText.Parse(Stream)"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("YamlStreamReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class YamlStreamReader : IContentReader<YamlStream>
 {
     private readonly YamlParserOptions _options;
@@ -25,11 +27,20 @@ internal sealed class YamlStreamReader : IContentReader<YamlStream>
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<YamlStream>(Read(stream));
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(YamlStreamReader value)
+        {
+        }
+    }
 }
 
 /// <summary>
 /// The content-family writer seam over <see cref="YamlText.Write(Stream, YamlStream, YamlWriterOptions?)"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("YamlStreamWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class YamlStreamWriter : IContentWriter<YamlStream>
 {
     private readonly YamlWriterOptions _options;
@@ -49,5 +60,12 @@ internal sealed class YamlStreamWriter : IContentWriter<YamlStream>
         cancellationToken.ThrowIfCancellationRequested();
         Write(stream, document);
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(YamlStreamWriter value)
+        {
+        }
     }
 }

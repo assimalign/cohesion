@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// A mutable struct: keep it in one local or field and pass it by reference, never by copy.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpCookieCrumbs")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal struct HttpCookieCrumbs
 {
     // The crumbs in wire order, the first one included; null until a Cookie field repeats.
@@ -57,6 +59,13 @@ internal struct HttpCookieCrumbs
         if (_crumbs is not null)
         {
             fields[HttpHeaderKey.Cookie] = string.Join("; ", _crumbs);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpCookieCrumbs value)
+        {
         }
     }
 }

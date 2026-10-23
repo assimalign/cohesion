@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Binary;
 /// <remarks>Not thread-safe. Random-access reads reposition the source first, allowing several slices to
 /// be read in turn. A forward-only child exclusively borrows its parent's cursor until consumed or skipped.
 /// Disposing a slice does not drain it. Call SkipToEnd before abandoning a forward-only child.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ContentSliceStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ContentSliceStream : Stream
 {
     private readonly Stream _source;
@@ -349,5 +351,23 @@ public sealed class ContentSliceStream : Stream
         }
         base.Dispose(false);
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ContentSliceStream _target;
+
+        public DebugView(ContentSliceStream value)
+        {
+            _target = value;
+        }
+
+        public long SourceOffset => _target.SourceOffset;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

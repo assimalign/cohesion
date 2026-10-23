@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.Antiforgery;
 /// service every exchange carries and <c>UseAntiforgery</c> validates with.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AntiforgeryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AntiforgeryBuilder
 {
     // The purpose chain the data-protection protector is derived for. It is part of the token format:
@@ -138,4 +140,16 @@ public sealed class AntiforgeryBuilder
         CookiePath = options.CookiePath,
         CookieIsEssential = options.CookieIsEssential,
     };
+
+    private sealed class DebugView
+    {
+        private readonly AntiforgeryBuilder _target;
+
+        public DebugView(AntiforgeryBuilder value)
+        {
+            _target = value;
+        }
+
+        public HttpAntiforgeryOptions Options => _target.Options;
+    }
 }

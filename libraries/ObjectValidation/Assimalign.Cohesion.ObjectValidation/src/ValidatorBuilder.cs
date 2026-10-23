@@ -9,6 +9,8 @@ using Assimalign.Cohesion.ObjectValidation.Internal;
 /// <summary>
 /// A fluent builder for creating a <see cref="IValidator"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ValidatorBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ValidatorBuilder
 {
     public ValidatorBuilder()
@@ -127,5 +129,12 @@ public sealed class ValidatorBuilder
         profile.Configure(descriptor);
 
         this.Profiles.Add(profile);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ValidatorBuilder value)
+        {
+        }
     }
 }

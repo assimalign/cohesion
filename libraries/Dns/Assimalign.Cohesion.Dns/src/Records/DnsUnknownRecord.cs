@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Dns;
 /// record doesn't pin the source message buffer.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsUnknownRecord {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DnsUnknownRecord : DnsRecord
 {
     private readonly byte[] _data;
@@ -62,5 +64,20 @@ public sealed class DnsUnknownRecord : DnsRecord
     {
         ReadOnlySpan<byte> bytes = reader.ReadBytes(rdLength);
         return new DnsUnknownRecord(name, type, @class, ttl, bytes);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DnsUnknownRecord _target;
+
+        public DebugView(DnsUnknownRecord value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Dns.DnsName Name => _target.Name;
+        public global::Assimalign.Cohesion.Dns.DnsRecordType Type => _target.Type;
+        public global::Assimalign.Cohesion.Dns.DnsClass Class => _target.Class;
+        public uint TimeToLive => _target.TimeToLive;
     }
 }

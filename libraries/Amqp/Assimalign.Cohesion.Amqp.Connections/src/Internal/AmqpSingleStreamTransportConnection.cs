@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// An AMQP connection over a single-stream carrier: the live <see cref="IDuplexConnection"/>
 /// itself is the carrier of the AMQP byte stream, so acquisition has no open step.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AmqpSingleStreamTransportConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpSingleStreamTransportConnection : AmqpTransportConnection
 {
     private readonly IDuplexConnection _connection;
@@ -39,5 +41,19 @@ internal sealed class AmqpSingleStreamTransportConnection : AmqpTransportConnect
     protected override ValueTask DisposeCarrierAsync()
     {
         return _connection.DisposeAsync();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpSingleStreamTransportConnection _target;
+
+        public DebugView(AmqpSingleStreamTransportConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
     }
 }

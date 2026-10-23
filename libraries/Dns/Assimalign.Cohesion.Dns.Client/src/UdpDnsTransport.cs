@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Dns;
 /// here doesn't change either way.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("UdpDnsTransport")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class UdpDnsTransport : DnsTransport
 {
     private readonly EndPoint _endPoint;
@@ -163,5 +165,17 @@ public sealed class UdpDnsTransport : DnsTransport
     {
         _exchangeLock.Dispose();
         _socket.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UdpDnsTransport _target;
+
+        public DebugView(UdpDnsTransport value)
+        {
+            _target = value;
+        }
+
+        public bool IsDisposed => _target.IsDisposed;
     }
 }

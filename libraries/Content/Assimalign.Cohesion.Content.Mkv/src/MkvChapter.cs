@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// <summary>An editable recursive ChapterAtom with exact unsigned nanosecond timestamps.</summary>
 /// <remarks>Properties and collections update the native tree directly. Save validates the edited
 /// schema and timestamp range. Unknown native children and original unmodified encodings are retained.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MkvChapter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MkvChapter
 {
     internal MkvChapter(EbmlElement element)
@@ -86,4 +88,17 @@ public sealed class MkvChapter
     public IList<MkvChapter> Chapters { get; }
     /// <summary>Gets the editable ChapterDisplay children in wire order.</summary>
     public IList<MkvChapterDisplay> Displays { get; }
+
+    private sealed class DebugView
+    {
+        private readonly MkvChapter _target;
+
+        public DebugView(MkvChapter value)
+        {
+            _target = value;
+        }
+
+        public IList<MkvChapter> Chapters => _target.Chapters;
+        public IList<MkvChapterDisplay> Displays => _target.Displays;
+    }
 }

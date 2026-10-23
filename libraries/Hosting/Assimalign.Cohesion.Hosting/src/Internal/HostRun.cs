@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HostRun")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(HostRun<>.DebugView))]
 internal sealed class HostRun<TContext> : IHostRun
     where TContext : HostContext
 {
@@ -168,5 +170,18 @@ internal sealed class HostRun<TContext> : IHostRun
             Interlocked.CompareExchange(ref _observerException, exception, comparand: null);
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HostRun<TContext> _target;
+
+        public DebugView(HostRun<TContext> value)
+        {
+            _target = value;
+        }
+
+        public IHost Host => _target.Host;
+        public TimeSpan ShutdownTimeout => _target.ShutdownTimeout;
     }
 }

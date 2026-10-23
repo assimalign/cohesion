@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationResourceCommandHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationResourceCommandHandler : IResourceCommandHandler
 {
     private readonly ConfigurationStoreRepository _repository;
@@ -86,5 +88,17 @@ internal sealed class ConfigurationResourceCommandHandler : IResourceCommandHand
             throw new ConfigurationNamespaceNotFoundException($"{Kind} cannot find configuration namespace '{namespaceName}'. Declare the namespace in the target resource first.");
         }
         return ReadOnlyMemory<byte>.Empty;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationResourceCommandHandler _target;
+
+        public DebugView(ConfigurationResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

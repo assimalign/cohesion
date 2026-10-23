@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 /// <summary>
 /// Hosts a Scheduler application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SchedulerApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SchedulerApplication : Host<SchedulerApplicationContext>, ISchedulerApplication
 {
     private readonly SchedulerApplicationContext _context;
@@ -70,5 +72,18 @@ public sealed class SchedulerApplication : Host<SchedulerApplicationContext>, IS
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         return new SchedulerApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchedulerApplication _target;
+
+        public DebugView(SchedulerApplication value)
+        {
+            _target = value;
+        }
+
+        public SchedulerApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The HintMediaHeader box; ISO/IEC 14496-12 8.4.5.4.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HintMediaHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -74,5 +76,29 @@ public sealed class HintMediaHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" max-bitrate={MaxBitrate} average-bitrate={AverageBitrate}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HintMediaHeaderBox _target;
+
+        public DebugView(HintMediaHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public ushort MaxPduSize => _target.MaxPduSize;
+        public ushort AveragePduSize => _target.AveragePduSize;
+        public uint MaxBitrate => _target.MaxBitrate;
+        public uint AverageBitrate => _target.AverageBitrate;
+        public uint Reserved => _target.Reserved;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

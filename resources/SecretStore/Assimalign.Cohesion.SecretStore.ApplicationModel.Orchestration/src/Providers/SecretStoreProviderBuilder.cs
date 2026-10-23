@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 ///     .AsTrustStore());
 /// </code>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreProviderBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreProviderBuilder
 {
     private readonly Func<ApplicationProviders> _providers;
@@ -141,4 +143,16 @@ public sealed class SecretStoreProviderBuilder
         resource is ResourceName name
             ? $"'{provider.GetType().Name}' bound to resource '{name}'"
             : $"'{provider.GetType().Name}' bound to no resource";
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreProviderBuilder _target;
+
+        public DebugView(SecretStoreProviderBuilder value)
+        {
+            _target = value;
+        }
+
+        public ResourceName Store => _target.Store;
+    }
 }

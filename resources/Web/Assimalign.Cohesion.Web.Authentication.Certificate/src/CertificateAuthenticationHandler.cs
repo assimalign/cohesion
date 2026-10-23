@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Certificate;
 
 // Deviates from the internal-implementation rule per owner decision 59 (#1465): the implementation is public.
 /// <summary>Authenticates requests with a TLS client certificate and optional application validation.</summary>
+[global::System.Diagnostics.DebuggerDisplay("CertificateAuthenticationHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CertificateAuthenticationHandler : IAuthenticationHandler
 {
     private static readonly string _certificatePrincipalNotAuthenticatedMessage = ErrorMessages.CertificatePrincipalNotAuthenticated;
@@ -137,6 +139,13 @@ public sealed class CertificateAuthenticationHandler : IAuthenticationHandler
         if (Interlocked.Exchange(ref _rejectionReported, 1) == 0)
         {
             CertificateAuthenticationEventSource.Log.CertificateRejected(_context, _scheme.Name, reason);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CertificateAuthenticationHandler value)
+        {
         }
     }
 }

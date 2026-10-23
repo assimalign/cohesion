@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ControlPlaneSpecJsonConverter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ControlPlaneSpecJsonConverter : JsonConverter<ControlPlaneSpec>
 {
     public override bool HandleNull => true;
@@ -77,5 +79,18 @@ internal sealed class ControlPlaneSpecJsonConverter : JsonConverter<ControlPlane
         writer.WriteString("endpoint", value.Endpoint);
         writer.WriteString("path", value.Path);
         writer.WriteEndObject();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ControlPlaneSpecJsonConverter _target;
+
+        public DebugView(ControlPlaneSpecJsonConverter value)
+        {
+            _target = value;
+        }
+
+        public bool HandleNull => _target.HandleNull;
+        public global::System.Type Type => _target.Type;
     }
 }

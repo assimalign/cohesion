@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Content.Mpeg;
 /// <remarks>Use the BMFF reader/writer for forward-only streams. Tracks and indexes require the source and
 /// native tree to remain unchanged; reload the saved output after edits or relocation. Configuration and media
 /// payloads remain lazy. Access to a shared source is sequential.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("Mp4File {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Mp4File : IMediaFile
 {
     private static readonly ContentFormat _format = new()
@@ -221,5 +223,31 @@ public sealed class Mp4File : IMediaFile
             throw new ContentFormatException(ErrorMessages.DataReferenceInvalid, ContentFormatErrorCode.InvalidStructure, entry.Offset);
         }
         return references.Children[index - 1] is DataEntryUrlBox url && (url.Flags & 1) != 0;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Mp4File _target;
+
+        public DebugView(Mp4File value)
+        {
+            _target = value;
+        }
+
+        public BmffDocument Document => _target.Document;
+        public FourCC MajorBrand => _target.MajorBrand;
+        public IReadOnlyList<FourCC> CompatibleBrands => _target.CompatibleBrands;
+        public Mp4BrandFeatures BrandFeatures => _target.BrandFeatures;
+        public IReadOnlyList<ContentFormatException> Diagnostics => _target.Diagnostics;
+        public bool IsFragmented => _target.IsFragmented;
+        public IReadOnlyList<IMediaTrack> Tracks => _target.Tracks;
+        public MediaTimestamp? Duration => _target.Duration;
+        public bool IsLive => _target.IsLive;
+        public string? Name => _target.Name;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

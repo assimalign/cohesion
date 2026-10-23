@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// seeded onto every exchange. <see cref="ContentSerializationBuilder.Build"/> hands it a snapshot of
 /// the registrations, so the registry is immutable and the per-request read path takes no lock.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ContentSerializationFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ContentSerializationFeature : IContentSerializationFeature
 {
     private readonly IContentReader[] _readers;
@@ -74,5 +76,18 @@ internal sealed class ContentSerializationFeature : IContentSerializationFeature
         }
 
         return match;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ContentSerializationFeature _target;
+
+        public DebugView(ContentSerializationFeature value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<IContentReader> Readers => _target.Readers;
+        public IReadOnlyList<IContentWriter> Writers => _target.Writers;
     }
 }

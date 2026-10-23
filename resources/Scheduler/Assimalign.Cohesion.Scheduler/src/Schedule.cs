@@ -254,6 +254,8 @@ public abstract class Schedule<TContext> : ISchedule
         DateTime? lastRunTime,
         DateTime? nextRunTime);
 
+    [global::System.Diagnostics.DebuggerDisplay("OccurrenceStartGate")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(Schedule<>.OccurrenceStartGate.DebugView))]
     private sealed class OccurrenceStartGate
     {
         private readonly object _sync = new();
@@ -281,6 +283,13 @@ public abstract class Schedule<TContext> : ISchedule
             lock (_sync)
             {
                 return !_cancellationRequested && !cancellationToken.IsCancellationRequested;
+            }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(OccurrenceStartGate value)
+            {
             }
         }
     }

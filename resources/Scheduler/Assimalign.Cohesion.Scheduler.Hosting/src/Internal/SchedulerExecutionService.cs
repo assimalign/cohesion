@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SchedulerExecutionService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SchedulerExecutionService : BackgroundService
 {
     private readonly IReadOnlyList<ISchedule> _schedules;
@@ -94,5 +96,17 @@ internal sealed class SchedulerExecutionService : BackgroundService
             // The first failure is propagated by ExecuteAsync. Sibling failures are observed
             // here so cancelling their loops cannot create unobserved task exceptions.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchedulerExecutionService _target;
+
+        public DebugView(SchedulerExecutionService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

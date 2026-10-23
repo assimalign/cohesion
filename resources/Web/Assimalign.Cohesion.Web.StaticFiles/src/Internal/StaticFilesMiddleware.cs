@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Internal;
 /// construction — no request-time service location, no per-request allocation beyond the exchange
 /// itself.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("StaticFilesMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 {
     // Precompressed sibling codings in server preference order (RFC 9110 §12.5.3 lets the
@@ -334,5 +336,12 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     {
         int separator = candidate.LastIndexOf('/');
         return separator < 0 ? candidate : candidate[(separator + 1)..];
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(StaticFilesMiddleware value)
+        {
+        }
     }
 }

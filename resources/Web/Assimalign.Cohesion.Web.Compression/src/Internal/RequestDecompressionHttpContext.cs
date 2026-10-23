@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// other member forwards to the real exchange, so shared response state, features, and the
 /// cancellation token never fork.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RequestDecompressionHttpContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestDecompressionHttpContext : IHttpContext
 {
     private readonly IHttpContext _inner;
@@ -43,4 +45,22 @@ internal sealed class RequestDecompressionHttpContext : IHttpContext
     public Task CancelAsync() => _inner.CancelAsync();
 
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        private readonly RequestDecompressionHttpContext _target;
+
+        public DebugView(RequestDecompressionHttpContext value)
+        {
+            _target = value;
+        }
+
+        public HttpVersion Version => _target.Version;
+        public IHttpRequest Request => _target.Request;
+        public IHttpResponse Response => _target.Response;
+        public IHttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public IHttpFeatureCollection Features => _target.Features;
+        public IDictionary<string, object?> Items => _target.Items;
+        public CancellationToken RequestCancelled => _target.RequestCancelled;
+    }
 }

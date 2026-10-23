@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Security.DataProtection;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DpapiKeyRepository")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 internal sealed class DpapiKeyRepository : IKeyRepository
 {
@@ -47,5 +49,12 @@ internal sealed class DpapiKeyRepository : IKeyRepository
             DataProtectionScope.CurrentUser,
             _entropy);
         _inner.StoreKey(new KeyDocument(key.Name, protectedContent));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(DpapiKeyRepository value)
+        {
+        }
     }
 }

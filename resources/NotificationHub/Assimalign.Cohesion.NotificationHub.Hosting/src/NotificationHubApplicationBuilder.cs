@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.NotificationHub.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("NotificationHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NotificationHubApplicationBuilder : INotificationHubApplicationBuilder
 {
     private readonly NotificationHubApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class NotificationHubApplicationBuilder : INotificationHubApplicat
     }
 
     INotificationHubApplication INotificationHubApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly NotificationHubApplicationBuilder _target;
+
+        public DebugView(NotificationHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

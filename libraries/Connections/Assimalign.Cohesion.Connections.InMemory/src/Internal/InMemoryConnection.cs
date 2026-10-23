@@ -47,6 +47,8 @@ namespace Assimalign.Cohesion.Connections.InMemory.Internal;
 /// <see cref="System.IO.Pipelines"/> composition and is fully trim-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InMemoryConnection : DuplexConnection
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
@@ -474,6 +476,8 @@ internal sealed class InMemoryConnection : DuplexConnection
     /// One end of a stream of an in-memory multiplexed connection, which can abandon either direction with an
     /// application error code.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("StreamEnd {Id,nq}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal sealed class StreamEnd : MultiplexedConnectionStream, IMultiplexedStreamAbort
     {
         private readonly InMemoryConnection _inner;
@@ -625,6 +629,28 @@ internal sealed class InMemoryConnection : DuplexConnection
             => _inner._state is ConnectionState.Aborted or ConnectionState.Closed
                 || ((_inner._inputCompleted || Direction == ConnectionDirection.WriteOnly)
                     && (_inner._outputCompleted || Direction == ConnectionDirection.ReadOnly));
+
+        private sealed class DebugView
+        {
+            private readonly StreamEnd _target;
+
+            public DebugView(StreamEnd value)
+            {
+                _target = value;
+            }
+
+            public ConnectionId Id => _target.Id;
+            public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+            public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+            public PipeReader Input => _target.Input;
+            public PipeWriter Output => _target.Output;
+            public ConnectionDirection Direction => _target.Direction;
+            public ConnectionCapabilities Capabilities => _target.Capabilities;
+            public ConnectionState State => _target.State;
+            public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+            public bool IsInputCompleted => _target.IsInputCompleted;
+            public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
+        }
     }
 
     /// <summary>
@@ -633,6 +659,8 @@ internal sealed class InMemoryConnection : DuplexConnection
     /// transport's send loop draining its backlog before the connection closes. Completing it with an
     /// error resets the sending half, which the other end of a multiplexed stream is told about.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("SignalingPipeWriter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class SignalingPipeWriter : PipeWriter
     {
         private readonly InMemoryConnection _connection;
@@ -767,6 +795,19 @@ internal sealed class InMemoryConnection : DuplexConnection
             _connection.CheckConnectionLoss();
             return result;
         }
+
+        private sealed class DebugView
+        {
+            private readonly SignalingPipeWriter _target;
+
+            public DebugView(SignalingPipeWriter value)
+            {
+                _target = value;
+            }
+
+            public bool CanGetUnflushedBytes => _target.CanGetUnflushedBytes;
+            public long UnflushedBytes => _target.UnflushedBytes;
+        }
     }
 
     /// <summary>
@@ -776,6 +817,8 @@ internal sealed class InMemoryConnection : DuplexConnection
     /// later read fail with <see cref="ConnectionAbortedException"/>, as a QUIC stream's reads fail after
     /// its own <c>STOP_SENDING</c>.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("SignalingPipeReader")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class SignalingPipeReader : PipeReader
     {
         private readonly InMemoryConnection _connection;
@@ -920,12 +963,21 @@ internal sealed class InMemoryConnection : DuplexConnection
 
             return result;
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(SignalingPipeReader value)
+            {
+            }
+        }
     }
 
     /// <summary>
     /// A <see cref="PipeWriter"/> whose write operations throw, used for the send side of a read-only
     /// (inbound unidirectional) stream, where writing is not permitted.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("ThrowingPipeWriter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ThrowingPipeWriter : PipeWriter
     {
         public static ThrowingPipeWriter Instance { get; } = new();
@@ -951,5 +1003,39 @@ internal sealed class InMemoryConnection : DuplexConnection
         {
             // Completing the unusable send side is a harmless no-op.
         }
+
+        private sealed class DebugView
+        {
+            private readonly ThrowingPipeWriter _target;
+
+            public DebugView(ThrowingPipeWriter value)
+            {
+                _target = value;
+            }
+
+            public bool CanGetUnflushedBytes => _target.CanGetUnflushedBytes;
+            public long UnflushedBytes => _target.UnflushedBytes;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryConnection _target;
+
+        public DebugView(InMemoryConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
+        public ConnectionDirection Direction => _target.Direction;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

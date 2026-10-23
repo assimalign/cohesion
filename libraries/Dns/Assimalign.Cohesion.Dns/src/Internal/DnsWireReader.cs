@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Dns.Internal;
 /// compression pointers).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsWireReader {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal ref struct DnsWireReader
 {
     private readonly ReadOnlySpan<byte> _buffer;
@@ -141,5 +143,23 @@ internal ref struct DnsWireReader
             DnsException.ThrowMalformed(
                 $"wire buffer underrun: needed {count} octets at offset {_position} but only {_buffer.Length - _position} remain");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly int _member0;
+        private readonly int _member1;
+        private readonly int _member2;
+
+        public DebugView(DnsWireReader value)
+        {
+            _member0 = value.Position;
+            _member1 = value.Length;
+            _member2 = value.Remaining;
+        }
+
+        public int Position => _member0;
+        public int Length => _member1;
+        public int Remaining => _member2;
     }
 }

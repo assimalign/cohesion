@@ -50,6 +50,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// the sealed type guarantees the validated values the middleware reads.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationMetadata")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthorizationMetadata : IRouteMiddlewareMetadata
 {
     private readonly IReadOnlyList<string> _roles = Array.Empty<string>();
@@ -162,5 +164,22 @@ public sealed class AuthorizationMetadata : IRouteMiddlewareMetadata
     {
         ArgumentNullException.ThrowIfNull(policy);
         return policy;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuthorizationMetadata _target;
+
+        public DebugView(AuthorizationMetadata value)
+        {
+            _target = value;
+        }
+
+        public string? PolicyName => _target.PolicyName;
+        public AuthorizationPolicy? Policy => _target.Policy;
+        public IReadOnlyList<string> Roles => _target.Roles;
+        public IReadOnlyList<string> AuthenticationSchemes => _target.AuthenticationSchemes;
+        public bool AllowsAnonymous => _target.AllowsAnonymous;
+        public string? RequiredMiddleware => _target.RequiredMiddleware;
     }
 }

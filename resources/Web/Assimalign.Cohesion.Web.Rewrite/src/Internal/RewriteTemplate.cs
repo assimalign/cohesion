@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// twice.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RewriteTemplate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RewriteTemplate
 {
     // The characters HttpPath rejects once decoded (and NUL, which the URL decoder rejects).
@@ -521,5 +523,17 @@ internal sealed class RewriteTemplate
         Path,
         Query,
         Fragment,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RewriteTemplate _target;
+
+        public DebugView(RewriteTemplate value)
+        {
+            _target = value;
+        }
+
+        public bool IsAbsolute => _target.IsAbsolute;
     }
 }

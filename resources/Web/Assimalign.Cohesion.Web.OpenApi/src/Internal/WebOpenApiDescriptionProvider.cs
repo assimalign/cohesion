@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// authorization options are read when a document is built, never earlier, because reading the router
 /// builds it and closes the route table.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebOpenApiDescriptionProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvider
 {
     private readonly IWebApplicationContext _application;
@@ -81,5 +83,12 @@ internal sealed class WebOpenApiDescriptionProvider : IOpenApiDescriptionProvide
         }
 
         return document;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebOpenApiDescriptionProvider value)
+        {
+        }
     }
 }

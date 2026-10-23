@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Http;
 /// step, so reads and writes succeed before <see cref="LoadAsync"/> is called;
 /// <see cref="IsAvailable"/> simply reports whether a load has occurred.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpSession {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpSession : IHttpSession
 {
     private readonly Dictionary<string, byte[]> _values = new(StringComparer.Ordinal);
@@ -80,5 +82,19 @@ public sealed class HttpSession : IHttpSession
     public void Clear()
     {
         _values.Clear();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpSession _target;
+
+        public DebugView(HttpSession value)
+        {
+            _target = value;
+        }
+
+        public bool IsAvailable => _target.IsAvailable;
+        public string Id => _target.Id;
+        public IEnumerable<string> Keys => _target.Keys;
     }
 }

@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Web.Health;
 /// stored as an instance so a host can resolve a fresh (or dependency-injected) check per
 /// evaluation without the core library taking a dependency on any DI container.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HealthCheckRegistration {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HealthCheckRegistration
 {
     /// <summary>
@@ -126,5 +128,21 @@ public sealed class HealthCheckRegistration
         ArgumentNullException.ThrowIfNull(instance);
 
         return () => instance;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HealthCheckRegistration _target;
+
+        public DebugView(HealthCheckRegistration value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public Func<IHealthCheck> Factory => _target.Factory;
+        public HealthStatus FailureStatus => _target.FailureStatus;
+        public TimeSpan Timeout => _target.Timeout;
+        public IReadOnlyCollection<string> Tags => _target.Tags;
     }
 }

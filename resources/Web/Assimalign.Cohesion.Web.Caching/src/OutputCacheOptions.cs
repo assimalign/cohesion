@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.Caching;
 /// Both are ignored for the store when an application supplies its own <see cref="IOutputCacheStore"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OutputCacheOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OutputCacheOptions
 {
     // Ordinal (case-sensitive) policy names, matching the rate-limiting policy map: a policy name is a
@@ -128,4 +130,19 @@ public sealed class OutputCacheOptions
     /// Resolves a named policy registered through <see cref="AddPolicy"/>.
     /// </summary>
     internal bool TryGetPolicy(string name, out OutputCachePolicy? policy) => _policies.TryGetValue(name, out policy);
+
+    private sealed class DebugView
+    {
+        private readonly OutputCacheOptions _target;
+
+        public DebugView(OutputCacheOptions value)
+        {
+            _target = value;
+        }
+
+        public OutputCachePolicy? BasePolicy => _target.BasePolicy;
+        public long MaximumBodySize => _target.MaximumBodySize;
+        public long SizeLimit => _target.SizeLimit;
+        public TimeProvider? TimeProvider => _target.TimeProvider;
+    }
 }

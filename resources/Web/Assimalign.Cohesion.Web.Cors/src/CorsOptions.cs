@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.Cors;
 /// middleware keeps its own copy, so changing the options afterwards has no effect. No service container,
 /// configuration binding or request-time service location is involved.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CorsOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CorsOptions
 {
     // Ordinal (case-sensitive) names: a policy name is a developer-chosen key, so exact matching is the
@@ -122,5 +124,12 @@ public sealed class CorsOptions
         CorsPolicyBuilder builder = new();
         configure(builder);
         return builder.Build();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CorsOptions value)
+        {
+        }
     }
 }

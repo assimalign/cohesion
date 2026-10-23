@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// Compiles the local subset of a resource plan and realizes it as a supervised process,
 /// private claim directories, and loopback services.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LocalPlanController")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalPlanController : IApplicationResourceController
 {
     private readonly LocalGatewayOptions _options;
@@ -145,5 +147,12 @@ internal sealed class LocalPlanController : IApplicationResourceController
         // options as an input and performs no platform I/O or mutation.
         _ = options.LivenessFailureThreshold;
         return new LocalPlanCompilation(plan, artifact, inputs, environment, telemetry);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalPlanController value)
+        {
+        }
     }
 }

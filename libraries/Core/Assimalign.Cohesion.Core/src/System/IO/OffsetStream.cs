@@ -8,6 +8,7 @@ using Assimalign.Cohesion.Internal;
 
 
 // length: 30 - offset 15, limit 25
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("length: {_stream.Length} [Range {Offset} .. {Offset + Length}]")]
 public class OffsetStream : Stream
 {
@@ -281,5 +282,27 @@ public class OffsetStream : Stream
         {
             _stream.Position = _offset;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OffsetStream _target;
+
+        public DebugView(OffsetStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public long Offset => _target.Offset;
+        public long Remaining => _target.Remaining;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

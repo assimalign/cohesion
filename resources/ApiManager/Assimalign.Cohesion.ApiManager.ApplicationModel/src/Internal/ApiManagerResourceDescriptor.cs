@@ -5,6 +5,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ApiManagerResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApiManagerResourceDescriptor : IApiManagerResourceDescriptor
 {
     private readonly IApplicationResourceDescriptor _inner;
@@ -36,5 +38,19 @@ internal sealed class ApiManagerResourceDescriptor : IApiManagerResourceDescript
     {
         _inner.DependsOn(resources);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApiManagerResourceDescriptor _target;
+
+        public DebugView(ApiManagerResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public ApiManagerResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

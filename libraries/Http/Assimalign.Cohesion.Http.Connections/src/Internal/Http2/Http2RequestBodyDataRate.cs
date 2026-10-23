@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// connection.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2RequestBodyDataRate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2RequestBodyDataRate
 {
     private readonly Func<bool> _isConnectionReceiveBackpressured;
@@ -107,4 +109,17 @@ internal sealed class Http2RequestBodyDataRate
     /// <param name="streamId">The stream.</param>
     /// <returns>A task that completes once the answer is written or abandoned.</returns>
     public ValueTask RejectTooSlowAsync(int streamId) => _rejectTooSlow(streamId);
+
+    private sealed class DebugView
+    {
+        private readonly Http2RequestBodyDataRate _target;
+
+        public DebugView(Http2RequestBodyDataRate value)
+        {
+            _target = value;
+        }
+
+        public HttpMinDataRate? Rate => _target.Rate;
+        public TimeProvider TimeProvider => _target.TimeProvider;
+    }
 }

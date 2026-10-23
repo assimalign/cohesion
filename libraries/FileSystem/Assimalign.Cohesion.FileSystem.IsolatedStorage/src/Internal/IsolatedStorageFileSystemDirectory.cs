@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// <see cref="IsolatedStoragePathHelper"/> so the public <see cref="FileSystemPath"/> surface stays
 /// '/' separated regardless of the host OS.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[D] - {Path}")]
 internal sealed class IsolatedStorageFileSystemDirectory : IsolatedStorageFileSystemInfo, IFileSystemDirectory
 {
@@ -183,5 +184,19 @@ internal sealed class IsolatedStorageFileSystemDirectory : IsolatedStorageFileSy
         {
             yield return file;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IsolatedStorageFileSystemDirectory _target;
+
+        public DebugView(IsolatedStorageFileSystemDirectory value)
+        {
+            _target = value;
+        }
+
+        public global::System.IO.FileSystemPath Path => _target.Path;
+        public global::System.IO.IsolatedStorage.IsolatedStorageFile Storage => _target.Storage;
+        public global::Assimalign.Cohesion.FileSystem.IsolatedStorageFileSystem FileSystem => _target.FileSystem;
     }
 }

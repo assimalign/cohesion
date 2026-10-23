@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// (<see langword="default" />) instance equals <see cref="Unknown" /> and renders as
 /// <c>"unknown"</c> — its <see cref="Name" /> is never null.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticationProtocol {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct AuthenticationProtocol : IEquatable<AuthenticationProtocol>
 {
     private const string UnknownName = "unknown";
@@ -85,4 +87,16 @@ public readonly struct AuthenticationProtocol : IEquatable<AuthenticationProtoco
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    private sealed class DebugView
+    {
+        private readonly AuthenticationProtocol _target;
+
+        public DebugView(AuthenticationProtocol value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+    }
 }

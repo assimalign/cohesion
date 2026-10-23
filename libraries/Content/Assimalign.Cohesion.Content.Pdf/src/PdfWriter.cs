@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Content.Pdf;
 /// must have no trailing bytes. Source and destination must use distinct underlying storage.
 /// WriteAsync currently performs synchronous I/O with cancellation between bounded writes.
 /// Saving does not rebase or clear document edits; reload the result to start a new revision.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("PdfWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfWriter : IContentWriter<PdfDocument>
 {
     private readonly PdfWriterOptions _options;
@@ -52,5 +54,12 @@ public sealed class PdfWriter : IContentWriter<PdfDocument>
         using var session = new PdfSaveSession(document, stream, _options, cancellationToken);
         if (_options.Incremental) { session.WriteIncremental(); }
         else { session.WriteFull(); }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfWriter value)
+        {
+        }
     }
 }

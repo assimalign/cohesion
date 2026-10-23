@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Pdf;
 /// <summary>Loads PDF structure through IContentReader with random access (§7.5).</summary>
 /// <remarks>Read begins at the current position, treated as the PDF origin. The source is borrowed by default.
 /// ReadAsync performs bounded synchronous random-access parsing and observes cancellation between reads.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("PdfReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfReader : IContentReader<PdfDocument>
 {
     private readonly PdfReaderOptions _options;
@@ -50,5 +52,12 @@ public sealed class PdfReader : IContentReader<PdfDocument>
             throw new ContentFormatException(ErrorMessages.HeaderInvalid, ContentFormatErrorCode.InvalidStructure, stream.Position);
         }
         return new PdfFileLoader(stream, stream.Position, _options, cancellationToken).Load(_leaveOpen);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfReader value)
+        {
+        }
     }
 }

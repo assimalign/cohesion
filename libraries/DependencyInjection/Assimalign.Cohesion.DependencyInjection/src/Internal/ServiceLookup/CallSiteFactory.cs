@@ -7,6 +7,8 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteFactory : IServiceLookup
 {
     private const int DefaultSlot = 0;
@@ -626,6 +628,8 @@ internal sealed class CallSiteFactory : IServiceLookup
                serviceType == typeof(IServiceLookup);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ServiceDescriptorCacheItem")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private struct ServiceDescriptorCacheItem
     {
         private ServiceDescriptor _item;
@@ -712,6 +716,20 @@ internal sealed class CallSiteFactory : IServiceLookup
                 newCacheItem._items.Add(descriptor);
             }
             return newCacheItem;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(ServiceDescriptorCacheItem value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteFactory value)
+        {
         }
     }
 }

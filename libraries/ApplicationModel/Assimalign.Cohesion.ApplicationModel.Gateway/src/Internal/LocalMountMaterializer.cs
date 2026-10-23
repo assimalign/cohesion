@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalMountMaterializer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalMountMaterializer
 {
     private const UnixFileMode PrivateDirectoryMode =
@@ -306,5 +308,12 @@ internal sealed class LocalMountMaterializer
 
         Directory.CreateDirectory(path, PrivateDirectoryMode);
         File.SetUnixFileMode(path, PrivateDirectoryMode);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalMountMaterializer value)
+        {
+        }
     }
 }

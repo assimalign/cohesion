@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.Testing.Internal;
 /// releasing the stream gracefully closes the connection — the server end observes
 /// end-of-stream and unwinds its receive loop instead of parking until server shutdown.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ClientConnectionStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ClientConnectionStream : Stream
 {
     private readonly IDuplexConnection _connection;
@@ -84,5 +86,22 @@ internal sealed class ClientConnectionStream : Stream
     {
         await _connection.DisposeAsync().ConfigureAwait(false);
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ClientConnectionStream _target;
+
+        public DebugView(ClientConnectionStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

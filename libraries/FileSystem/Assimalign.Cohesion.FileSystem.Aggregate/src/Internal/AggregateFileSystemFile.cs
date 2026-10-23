@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// aggregate-space (e.g. "/data/foo.txt") instead of the provider-relative form (e.g. "/foo.txt").
 /// All file-system operations are forwarded to the underlying provider.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[F] - {Path}")]
 internal sealed class AggregateFileSystemFile : IFileSystemFile
 {
@@ -87,4 +88,23 @@ internal sealed class AggregateFileSystemFile : IFileSystemFile
 
     /// <inheritdoc />
     public IFileSystemEventToken Watch() => _inner.Watch();
+
+    private sealed class DebugView
+    {
+        private readonly AggregateFileSystemFile _target;
+
+        public DebugView(AggregateFileSystemFile value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath Path => _target.Path;
+        public DateTime CreatedOn => _target.CreatedOn;
+        public DateTime UpdatedOn => _target.UpdatedOn;
+        public DateTime AccessedOn => _target.AccessedOn;
+        public FileAttributes Attributes => _target.Attributes;
+        public IFileSystem FileSystem => _target.FileSystem;
+        public FileName Name => _target.Name;
+        public Size Size => _target.Size;
+    }
 }

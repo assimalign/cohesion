@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// field. Tokenization is span-based; only the materialized values (strings, byte arrays,
 /// and the result collections) allocate.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("StructuredFieldParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal ref struct StructuredFieldParser
 {
     private readonly ReadOnlySpan<char> _input;
@@ -733,4 +735,11 @@ internal ref struct StructuredFieldParser
     }
 
     private static int HexValue(char c) => c <= '9' ? c - '0' : c - 'a' + 10;
+
+    private sealed class DebugView
+    {
+        public DebugView(StructuredFieldParser value)
+        {
+        }
+    }
 }

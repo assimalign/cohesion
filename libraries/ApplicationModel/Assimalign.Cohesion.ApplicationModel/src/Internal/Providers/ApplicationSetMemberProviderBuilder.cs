@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// <see cref="Providers"/> is the frozen snapshot, so a registration made through a surface the
 /// callback kept a reference to throws instead of silently missing the member's model.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationSetMemberProviderBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationSetMemberProviderBuilder : IApplicationProviderBuilder
 {
     private readonly IApplicationModel _model;
@@ -57,5 +59,18 @@ internal sealed class ApplicationSetMemberProviderBuilder : IApplicationProvider
     {
         _providers = _providers.ToFrozen();
         return _providers;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApplicationSetMemberProviderBuilder _target;
+
+        public DebugView(ApplicationSetMemberProviderBuilder value)
+        {
+            _target = value;
+        }
+
+        public ApplicationName? Application => _target.Application;
+        public ApplicationProviders Providers => _target.Providers;
     }
 }

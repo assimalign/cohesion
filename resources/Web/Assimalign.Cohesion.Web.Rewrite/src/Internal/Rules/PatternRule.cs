@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// A regular-expression rule: when its pattern matches the path (or the path and query), it rewrites the
 /// URL to, or redirects to, its target with the captures substituted.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("PatternRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PatternRule : RewriteRule
 {
     private readonly Regex _pattern;
@@ -65,5 +67,12 @@ internal sealed class PatternRule : RewriteRule
         }
 
         ApplyRewrite(context, target, _flow);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PatternRule value)
+        {
+        }
     }
 }

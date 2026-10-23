@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ContainerResourceOptionsBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ContainerResourceOptionsBuilder : IContainerResourceOptionsBuilder
 {
     private readonly List<ResourceEndpoint> _endpoints = new();
@@ -166,5 +168,22 @@ internal sealed class ContainerResourceOptionsBuilder : IContainerResourceOption
             throw new InvalidOperationException(
                 $"The container {role} probe endpoint '{probe.Endpoint}' does not name a declared endpoint.");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ContainerResourceOptionsBuilder _target;
+
+        public DebugView(ContainerResourceOptionsBuilder value)
+        {
+            _target = value;
+        }
+
+        public IProbeSpec? ReadinessProbe => _target.ReadinessProbe;
+        public IProbeSpec? StartupProbe => _target.StartupProbe;
+        public IProbeSpec? LivenessProbe => _target.LivenessProbe;
+        public RestartPolicy RestartPolicy => _target.RestartPolicy;
+        public IReadOnlyList<ResourceEndpoint> Endpoints => _target.Endpoints;
+        public IReadOnlyDictionary<string, string> Environment => _target.Environment;
     }
 }

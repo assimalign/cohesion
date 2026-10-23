@@ -28,6 +28,7 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// streaming the source into a freshly created destination on the target provider.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Name} [mounts={MountCount}]")]
 public sealed class AggregateFileSystem : IFileSystem
 {
@@ -556,5 +557,12 @@ public sealed class AggregateFileSystem : IFileSystem
         using var input = source.Open(FileMode.Open, FileAccess.Read);
         using var output = destination.Open(FileMode.Open, FileAccess.Write);
         input.CopyTo(output);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AggregateFileSystem value)
+        {
+        }
     }
 }
