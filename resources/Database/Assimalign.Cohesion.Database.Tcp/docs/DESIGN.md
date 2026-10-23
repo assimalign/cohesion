@@ -36,3 +36,10 @@ The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:44
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
 
 Listener extension containers are partial and compiler/AOT defaults are inherited from the shared build. The generic Listen signature, returned concrete option type, URI checks and listener lifecycle are unchanged.
+
+
+## Framework membership validation
+
+The framework-closure guard reads the Runtime producer's public, runtime-private and analyzer item groups as one logical membership list. Splitting public and private items into separate unconditioned groups follows the repository's one-item-kind-per-group rule; it does not change which assemblies ship or become compiler references. The loader retains document order and validates supported kinds, unconditional membership, nonempty unique identities and the public umbrella first. Existing project/package closure and transitive visibility checks still run across every area.
+
+The guard accepts existing single-group area lists without rewriting other areas. New multi-group lists must keep each group homogeneous. Malformed-list and visibility fixtures plus omission, duplicate and private-edge mutants protect this aggregation from hiding missing or exposed implementation dependencies.

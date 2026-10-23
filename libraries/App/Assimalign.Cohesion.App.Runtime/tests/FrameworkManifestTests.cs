@@ -208,12 +208,8 @@ public sealed class FrameworkManifestTests
             ReadImports(list.ListPath)
                 .ShouldHaveSingleItem($"{list.ListPath} must import only the area's Directory.Build.props.")
                 .ShouldBe(@"..\Directory.Build.props", $"{list.ListPath} must import the area's Directory.Build.props.");
-            XElement group = ReadElements(list.ListPath, "ItemGroup")
-                .ShouldHaveSingleItem($"{list.ListPath} must declare exactly one ItemGroup.");
-            group.Attribute("Condition").ShouldBeNull($"{list.ListPath} must not condition its ItemGroup.");
-            ReadItems(group, "CohesionFrameworkAssembly")
-                .FirstOrDefault()
-                .ShouldBe(list.FrameworkName, $"{list.ListPath} must list its umbrella assembly first.");
+            _ = ReadAreaFrameworkGroup(
+                ReadElements(list.ListPath, "ItemGroup"), list.FrameworkName, list.ListPath);
 
             File.Exists(refsListPath).ShouldBeTrue($"{refsListPath} is missing.");
             ReadImports(refsListPath)
@@ -227,6 +223,145 @@ public sealed class FrameworkManifestTests
             "App.props must condition exactly one ItemGroup on $(CohesionFrameworkName).");
         ReadFrameworkCondition((string?)appGroup.Attribute("Condition")).ShouldBe(AppFramework);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Framework] - split membership groups retain public, private and analyzer entries")]
+    public void ReadAreaFrameworkGroup_SplitItemKinds_ShouldRetainEveryMember()
+    {
+        // Arrange
+        XElement[] groups = CreateAreaMembershipGroups();
+
+        // Act
+        XElement group = ReadAreaFrameworkGroup(groups, "Assimalign.Cohesion.App.Sample", "sample.props");
+
+        // Assert
+        ReadItems(group, "CohesionFrameworkAssembly").ShouldBe(
+            ["Assimalign.Cohesion.App.Sample", "Assimalign.Cohesion.Sample.Feature"]);
+        ReadItems(group, "CohesionFrameworkPrivateAssembly").ShouldBe(["Assimalign.Cohesion.Sample.Private"]);
+        ReadItems(group, "CohesionFrameworkAnalyzer").ShouldBe(["Assimalign.Cohesion.Sample.Generator"]);
+        groups.SelectMany(item => item.Elements()).Count().ShouldBe(4);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Framework] - existing single-group area lists preserve their membership")]
+    public void ReadAreaFrameworkGroup_LegacySingleGroup_ShouldRetainEveryItemKind()
+    {
+        // Arrange
+        XElement legacy = new("ItemGroup", CreateAreaMembershipGroups().SelectMany(group => group.Elements()));
+
+        // Act
+        XElement group = ReadAreaFrameworkGroup([legacy], "Assimalign.Cohesion.App.Sample", "sample.props");
+
+        // Assert
+        ReadItems(group, "CohesionFrameworkAssembly").ShouldBe(
+            ["Assimalign.Cohesion.App.Sample", "Assimalign.Cohesion.Sample.Feature"]);
+        ReadItems(group, "CohesionFrameworkPrivateAssembly").ShouldBe(["Assimalign.Cohesion.Sample.Private"]);
+        ReadItems(group, "CohesionFrameworkAnalyzer").ShouldBe(["Assimalign.Cohesion.Sample.Generator"]);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Framework] - malformed split membership lists are rejected")]
+    [InlineData("no-groups")]
+    [InlineData("empty-group")]
+    [InlineData("conditioned-group")]
+    [InlineData("conditioned-member")]
+    [InlineData("mixed-kinds")]
+    [InlineData("unknown-kind")]
+    [InlineData("missing-include")]
+    [InlineData("blank-include")]
+    [InlineData("duplicate-member")]
+    [InlineData("duplicate-member-case")]
+    [InlineData("missing-umbrella")]
+    [InlineData("umbrella-not-first")]
+    [InlineData("private-before-umbrella")]
+    public void ReadAreaFrameworkGroup_MalformedSplitList_ShouldReject(string malformed)
+    {
+        // Arrange
+        XElement[] groups = CreateAreaMembershipGroups();
+        switch (malformed)
+        {
+            case "private-before-umbrella": groups = [groups[1], groups[0], groups[2]]; break;
+            case "no-groups": groups = []; break;
+            case "empty-group": groups[1].RemoveNodes(); break;
+            case "conditioned-group": groups[1].SetAttributeValue("Condition", "'$(Configuration)' == 'Release'"); break;
+            case "conditioned-member": groups[1].Elements().Single().SetAttributeValue("Condition", "'$(Configuration)' == 'Release'"); break;
+            case "mixed-kinds": groups[0].Add(new XElement("CohesionFrameworkPrivateAssembly", new XAttribute("Include", "Assimalign.Cohesion.Sample.Extra"))); break;
+            case "unknown-kind": groups[1].Elements().Single().Name = "Compile"; break;
+            case "missing-include": groups[1].Elements().Single().Attribute("Include")!.Remove(); break;
+            case "blank-include": groups[1].Elements().Single().SetAttributeValue("Include", " "); break;
+            case "duplicate-member": groups[1].Elements().Single().SetAttributeValue("Include", "Assimalign.Cohesion.App.Sample"); break;
+            case "duplicate-member-case": groups[1].Elements().Single().SetAttributeValue("Include", "assimalign.cohesion.app.sample"); break;
+            case "missing-umbrella": groups[0].Elements().First().SetAttributeValue("Include", "Assimalign.Cohesion.Sample.Other"); break;
+            case "umbrella-not-first": groups[0].AddFirst(new XElement("CohesionFrameworkAssembly", new XAttribute("Include", "Assimalign.Cohesion.Sample.Before"))); break;
+        }
+
+        // Act / Assert
+        Should.Throw<ShouldAssertException>(() =>
+            ReadAreaFrameworkGroup(groups, "Assimalign.Cohesion.App.Sample", "sample.props"));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Framework] - closure keeps private dependencies and their descendants private")]
+    public void ComputeVisibilityClosure_PrivateDependency_ShouldRetainPrivateDescendants()
+    {
+        // Arrange
+        var graph = new Dictionary<string, ProjectNode>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Assimalign.Cohesion.Sample.Feature"] = new("Assimalign.Cohesion.Sample.Feature", "feature.csproj",
+                [new("Assimalign.Cohesion.Sample.Private", true), new("Assimalign.Cohesion.Sample.Public", false)], []),
+            ["Assimalign.Cohesion.Sample.Private"] = new("Assimalign.Cohesion.Sample.Private", "private.csproj",
+                [new("Assimalign.Cohesion.Sample.PrivateChild", false)], []),
+            ["Assimalign.Cohesion.Sample.PrivateChild"] = new("Assimalign.Cohesion.Sample.PrivateChild", "private-child.csproj", [], []),
+            ["Assimalign.Cohesion.Sample.Public"] = new("Assimalign.Cohesion.Sample.Public", "public.csproj", [], [])
+        };
+
+        // Act
+        IReadOnlyDictionary<string, bool> closure = ComputeVisibilityClosure(graph, ["Assimalign.Cohesion.Sample.Feature"], []);
+
+        // Assert
+        closure.Keys.OrderBy(name => name, StringComparer.Ordinal).ShouldBe(
+            ["Assimalign.Cohesion.Sample.Feature", "Assimalign.Cohesion.Sample.Private", "Assimalign.Cohesion.Sample.PrivateChild", "Assimalign.Cohesion.Sample.Public"]);
+        closure["Assimalign.Cohesion.Sample.Feature"].ShouldBeFalse();
+        closure["Assimalign.Cohesion.Sample.Private"].ShouldBeTrue();
+        closure["Assimalign.Cohesion.Sample.PrivateChild"].ShouldBeTrue();
+        closure["Assimalign.Cohesion.Sample.Public"].ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Framework] - a public path wins over a private path to the same dependency")]
+    public void ComputeVisibilityClosure_SharedDependency_ShouldPreservePublicPath()
+    {
+        // Arrange
+        var graph = new Dictionary<string, ProjectNode>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Assimalign.Cohesion.Sample.Feature"] = new("Assimalign.Cohesion.Sample.Feature", "feature.csproj",
+                [new("Assimalign.Cohesion.Sample.Private", true), new("Assimalign.Cohesion.Sample.Public", false)], []),
+            ["Assimalign.Cohesion.Sample.Private"] = new("Assimalign.Cohesion.Sample.Private", "private.csproj",
+                [new("Assimalign.Cohesion.Sample.Shared", false)], []),
+            ["Assimalign.Cohesion.Sample.Public"] = new("Assimalign.Cohesion.Sample.Public", "public.csproj",
+                [new("Assimalign.Cohesion.Sample.Shared", false)], []),
+            ["Assimalign.Cohesion.Sample.Shared"] = new("Assimalign.Cohesion.Sample.Shared", "shared.csproj", [], [])
+        };
+
+        // Act
+        IReadOnlyDictionary<string, bool> closure = ComputeVisibilityClosure(graph, ["Assimalign.Cohesion.Sample.Feature"], []);
+
+        // Assert
+        closure.Count.ShouldBe(4);
+        closure["Assimalign.Cohesion.Sample.Private"].ShouldBeTrue();
+        closure["Assimalign.Cohesion.Sample.Public"].ShouldBeFalse();
+        closure["Assimalign.Cohesion.Sample.Shared"].ShouldBeFalse();
+    }
+
+    private static XElement[] CreateAreaMembershipGroups() => XElement.Parse("""
+        <Project>
+          <ItemGroup>
+            <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Sample" />
+            <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Sample.Feature" />
+          </ItemGroup>
+          <ItemGroup>
+            <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Sample.Private" />
+          </ItemGroup>
+          <ItemGroup>
+            <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.Sample.Generator" />
+          </ItemGroup>
+        </Project>
+        """).Elements("ItemGroup").ToArray();
 
     private static IReadOnlyDictionary<string, ProjectNode> LoadProjectGraph()
     {
@@ -457,9 +592,9 @@ public sealed class FrameworkManifestTests
 
     private static IReadOnlyDictionary<string, XElement> LoadFrameworkGroups()
     {
-        // App's group comes from App.props, keyed by its $(CohesionFrameworkName) condition; each
-        // area's is the single unconditioned ItemGroup of its Runtime producer's
-        // Directory.Build.props, keyed by the area folder. Add throws on a framework defined twice.
+        // App's group comes from App.props, keyed by its $(CohesionFrameworkName) condition.
+        // An area's unconditioned membership groups form one logical list in its Runtime
+        // producer's Directory.Build.props. Add throws on a framework defined twice.
         var groups = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
         foreach (XElement group in ReadElements(_appManifestPath, "ItemGroup"))
         {
@@ -472,13 +607,49 @@ public sealed class FrameworkManifestTests
 
         foreach (AreaFrameworkList list in FindAreaFrameworkLists())
         {
-            XElement group = ReadElements(list.ListPath, "ItemGroup")
-                .Where(element => element.Attribute("Condition") is null)
-                .ShouldHaveSingleItem($"{list.ListPath} must declare its members in one unconditioned ItemGroup.");
+            XElement group = ReadAreaFrameworkGroup(
+                ReadElements(list.ListPath, "ItemGroup"), list.FrameworkName, list.ListPath);
             groups.Add(list.FrameworkName, group);
         }
 
         return groups;
+    }
+
+    private static XElement ReadAreaFrameworkGroup(XElement[] groups, string frameworkName, string listPath)
+    {
+        groups.ShouldNotBeEmpty($"{listPath} must declare its framework members.");
+        string[] allowedKinds = ["CohesionFrameworkAssembly", "CohesionFrameworkPrivateAssembly", "CohesionFrameworkAnalyzer"];
+        foreach (XElement group in groups)
+        {
+            group.Attribute("Condition").ShouldBeNull($"{listPath} must not condition a membership group.");
+            XElement[] items = group.Elements().ToArray();
+            items.ShouldNotBeEmpty($"{listPath} must not declare an empty membership group.");
+            // Older area lists still mix kinds in one group. Supporting split lists must not
+            // silently accept a new mixed group or require rewriting those other areas here.
+            if (groups.Length > 1)
+            {
+                items.Select(item => item.Name.LocalName).Distinct(StringComparer.Ordinal)
+                    .ShouldHaveSingleItem($"{listPath} must keep one item kind per membership group.");
+            }
+            foreach (XElement item in items)
+            {
+                allowedKinds.Contains(item.Name.LocalName, StringComparer.Ordinal)
+                    .ShouldBeTrue($"{listPath} declares unsupported membership kind '{item.Name.LocalName}'.");
+                item.Attribute("Condition").ShouldBeNull($"{listPath} must not condition a framework member.");
+                string.IsNullOrWhiteSpace((string?)item.Attribute("Include"))
+                    .ShouldBeFalse($"{listPath} must name every framework member.");
+            }
+        }
+
+        XElement combined = new("ItemGroup", groups.SelectMany(group => group.Elements()));
+        string[] members = combined.Elements().Select(item => (string)item.Attribute("Include")!).ToArray();
+        members.Distinct(StringComparer.OrdinalIgnoreCase).Count()
+            .ShouldBe(members.Length, $"{listPath} must not declare a framework member more than once or as both public and private.");
+        members[0].ShouldBe(frameworkName,
+            $"{listPath} must put its umbrella assembly before every other member.");
+        ReadItems(combined, "CohesionFrameworkAssembly").FirstOrDefault()
+            .ShouldBe(frameworkName, $"{listPath} must list its public umbrella assembly first.");
+        return combined;
     }
 
     private static AreaFrameworkList[] FindAreaFrameworkLists()
