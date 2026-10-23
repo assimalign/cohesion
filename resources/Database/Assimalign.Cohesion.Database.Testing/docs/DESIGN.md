@@ -176,3 +176,14 @@ Exception messages and format templates are generated from `src/Properties/Error
 format arguments use the current culture. Cancellation and abort templates used during normal
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Shared TCP binding in the SDK fixture (found during #1470)
+
+The real SampleHost imports `Assimalign.Cohesion.Database` for the generic `Listen(Uri)`
+extension supplied by Database.Tcp. Its SQL namespace import supplies model APIs; it does not
+bring the shared server-options extension into scope. This fixture is compiled against the
+installed SDK/framework packs after Install-Local, so it verifies the same exported binding an
+application consumes. Retained outputs compiled against the former Sql.Tcp namespace must not
+be used as evidence that a fresh compile succeeds. No fixture-specific listener or alternate
+bootstrap replaces the resource's ordinary Program entry point.
