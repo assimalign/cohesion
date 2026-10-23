@@ -34,3 +34,5 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+Listener extension containers are partial and compiler/AOT defaults are inherited from the shared build. The generic Listen signature, returned concrete option type, URI checks and listener lifecycle are unchanged.

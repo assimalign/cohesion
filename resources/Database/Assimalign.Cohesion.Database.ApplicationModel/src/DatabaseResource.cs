@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </remarks>
 public sealed class DatabaseResource : PlannedResource
 {
-    private const string DatabasePlannerName = "Database planner";
+    private const string databasePlannerName = "Database planner";
 
     /// <summary>
     /// Initializes a new <see cref="DatabaseResource"/> from a build-produced manifest.
@@ -36,7 +36,7 @@ public sealed class DatabaseResource : PlannedResource
     }
 
     /// <inheritdoc />
-    public override string PlannerName => DatabasePlannerName;
+    public override string PlannerName => databasePlannerName;
 
     /// <inheritdoc />
     public override ResourcePlan CreatePlan(PlanContext context)

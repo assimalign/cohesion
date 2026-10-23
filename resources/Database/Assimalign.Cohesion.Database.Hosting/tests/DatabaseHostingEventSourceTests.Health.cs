@@ -143,7 +143,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         builder.Options.WorkerFailureMinimumPasses = 2;
         builder.AddWorker(_ => worker = new FailTwice("health-offline/probe"));
         await using var engine = builder.Build();
-        await engine.CreateDatabaseAsync(App, timeout.Token);
+        await engine.CreateDatabaseAsync(appValue, timeout.Token);
         var appBuilder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
         appBuilder.AddEngine(engine);
         await using var app = appBuilder.Build();
@@ -153,7 +153,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         worker.ShouldNotBeNull().RunFailingPasses();
         while (engine.OfflineDatabases.Count == 0) { await Task.Delay(1, timeout.Token); }
         for (int poll = 0; poll < 3; poll++) { (await app.Context.CheckAsync(timeout.Token)).Status.ShouldBe(HealthStatus.Unhealthy); }
-        await engine.OpenDatabaseAsync(App, timeout.Token);
+        await engine.OpenDatabaseAsync(appValue, timeout.Token);
         for (int poll = 0; poll < 3; poll++) { (await app.Context.CheckAsync(timeout.Token)).Status.ShouldBe(HealthStatus.Healthy); }
 
         // Assert

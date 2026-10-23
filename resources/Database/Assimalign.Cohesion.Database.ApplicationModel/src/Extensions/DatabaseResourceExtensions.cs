@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <summary>
 /// Composition extensions for adding database manifests to an application model.
 /// </summary>
-public static class DatabaseResourceExtensions
+public static partial class DatabaseResourceExtensions
 {
     extension(IApplicationBuilder builder)
     {

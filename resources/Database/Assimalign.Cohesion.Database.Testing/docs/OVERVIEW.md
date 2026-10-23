@@ -126,3 +126,5 @@ at construction or typed JSON import. Default structs still pass through explici
 validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
 Database storage format, diagnostic identity, event or counter changes. All binary consumers
 must be rebuilt together, including installed SDK/framework E2E payloads.
+
+The SampleHost inherits equivalent compiler and AOT defaults from the shared build. Manifest generation, its local framework consumer and all end-to-end host behavior are unchanged.

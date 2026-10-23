@@ -361,8 +361,13 @@ internal sealed class DatabaseConnector
         }
     }
 
-    private sealed class TransactionRollbackExchange(ProtocolMessageFamily family) : DatabaseProtocolExchange<bool>(family, transactionStatus: true)
+    private sealed class TransactionRollbackExchange : DatabaseProtocolExchange<bool>
     {
+        internal TransactionRollbackExchange(ProtocolMessageFamily family)
+            : base(family, transactionStatus: true)
+        {
+        }
+
         protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken)
         {

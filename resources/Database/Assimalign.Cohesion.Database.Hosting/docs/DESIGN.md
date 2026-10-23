@@ -301,3 +301,5 @@ with its public parameterless constructor. The standalone `HealthChecks.CreateBu
 is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
 snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
 interface, protocol, format, diagnostic code, event or counter is added or changed.
+
+The rules audit aligns private test identifiers while preserving health checks, reopen behavior and hosted-service ownership. No runtime composition or public contract changes follow from those test naming edits.

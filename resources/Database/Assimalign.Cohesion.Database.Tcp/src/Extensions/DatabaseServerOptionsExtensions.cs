@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>
 /// Provides resource-endpoint binding for database servers.
 /// </summary>
-public static class DatabaseServerOptionsExtensions
+public static partial class DatabaseServerOptionsExtensions
 {
     extension<TOptions>(TOptions options) where TOptions : DatabaseServerOptions
     {

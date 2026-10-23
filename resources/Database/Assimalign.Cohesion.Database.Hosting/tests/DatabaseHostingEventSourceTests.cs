@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 [Collection(nameof(DatabaseHostingEventSourceCollection))]
 public sealed partial class DatabaseHostingEventSourceTests
 {
-    private const string App = "app";
+    private const string appValue = "app";
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: Should report build start and stop once for a real application")]
     public async Task Application_StartedAndStopped_ShouldReportEachTransitionOnce()
@@ -470,7 +470,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         builder.Options.WorkerFailureMinimumPasses = 2;
         builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
-        await engine.CreateDatabaseAsync(App);
+        await engine.CreateDatabaseAsync(appValue);
 
         var options = new DatabaseApplicationOptions
         {
@@ -529,29 +529,29 @@ public sealed partial class DatabaseHostingEventSourceTests
         found.Level.ShouldBe(EventLevel.Warning);
         found.PayloadNames.ShouldBe(["engineName", "database", "cause", "delayMilliseconds"]);
         var foundPayload = found.Payload.ShouldNotBeNull();
-        foundPayload[1].ShouldBe(App);
+        foundPayload[1].ShouldBe(appValue);
         foundPayload[2].ShouldBe("CheckpointFailures");
         ((long)foundPayload[3]!).ShouldBeInRange(10L, 20L);
 
         events[1].EventId.ShouldBe(2);
         events[1].PayloadNames.ShouldBe(["engineName", "database", "attempt"]);
-        events[1].Payload.ShouldBe([engineName, App, 1]);
+        events[1].Payload.ShouldBe([engineName, appValue, 1]);
 
         var failed = events[2];
         failed.EventId.ShouldBe(4);
         failed.Level.ShouldBe(EventLevel.Warning);
         failed.PayloadNames.ShouldBe(["engineName", "database", "attempt", "exceptionType", "exceptionMessage", "retryMilliseconds"]);
         var failedPayload = failed.Payload.ShouldNotBeNull();
-        failedPayload.Take(5).ShouldBe([engineName, App, 1, typeof(IOException).FullName, "Injected reopen failure"]);
+        failedPayload.Take(5).ShouldBe([engineName, appValue, 1, typeof(IOException).FullName, "Injected reopen failure"]);
         ((long)failedPayload[5]!).ShouldBeInRange(20L, 40L);
 
-        events[3].Payload.ShouldBe([engineName, App, 2]);
+        events[3].Payload.ShouldBe([engineName, appValue, 2]);
 
         var succeeded = events[4];
         succeeded.EventId.ShouldBe(3);
         succeeded.Level.ShouldBe(EventLevel.Informational);
         succeeded.PayloadNames.ShouldBe(["engineName", "database", "attempts"]);
-        succeeded.Payload.ShouldBe([engineName, App, 2]);
+        succeeded.Payload.ShouldBe([engineName, appValue, 2]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - DatabaseHostingEventSource: Should report a database let go without a reopen")]
@@ -565,7 +565,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         builder.Options.WorkerFailureMinimumPasses = 2;
         builder.AddWorker(_ => worker = new FailTwice(engineName + "/probe"));
         await using var engine = builder.Build();
-        await engine.CreateDatabaseAsync(App);
+        await engine.CreateDatabaseAsync(appValue);
         var options = new DatabaseApplicationOptions
         {
             ReopenInitialDelay = TimeSpan.FromSeconds(2),
@@ -593,7 +593,7 @@ public sealed partial class DatabaseHostingEventSourceTests
             await Task.Delay(10);
         }
 
-        await engine.DropDatabaseAsync(App);
+        await engine.DropDatabaseAsync(appValue);
         while (service.GetPendingReopens().Count > 0)
         {
             watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
@@ -609,7 +609,7 @@ public sealed partial class DatabaseHostingEventSourceTests
         abandoned.EventId.ShouldBe(5);
         abandoned.Level.ShouldBe(EventLevel.Informational);
         abandoned.PayloadNames.ShouldBe(["engineName", "database", "reason"]);
-        abandoned.Payload![1].ShouldBe(App);
+        abandoned.Payload![1].ShouldBe(appValue);
         abandoned.Payload[2].ShouldBeOfType<string>().ShouldContain("no longer lists it offline");
     }
 
@@ -640,9 +640,9 @@ public sealed partial class DatabaseHostingEventSourceTests
 
         protected override void RunIterationCore(CancellationToken cancellationToken)
         {
-            if (BeginDatabase(App) && Interlocked.Increment(ref _passes) <= 2)
+            if (BeginDatabase(appValue) && Interlocked.Increment(ref _passes) <= 2)
             {
-                ReportFailure(App, new IOException("Injected checkpoint failure"), TimeSpan.Zero);
+                ReportFailure(appValue, new IOException("Injected checkpoint failure"), TimeSpan.Zero);
             }
         }
     }

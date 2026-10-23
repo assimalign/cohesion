@@ -106,3 +106,7 @@ Exception messages and format templates are generated from `src/Properties/Error
 format arguments use the current culture. Cancellation and abort templates used during normal
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Explicit pool-reset construction
+
+The internal pool-reset exchange uses an explicit constructor while retaining the same negotiated status and connection-reuse behavior; see [DESIGN.md](DESIGN.md).

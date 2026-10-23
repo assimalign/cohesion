@@ -38,11 +38,11 @@ namespace Assimalign.Cohesion.Database.Testing;
 /// </remarks>
 public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFactory
 {
-    private const string AdminEndpointName = "admin";
-    private const string DatabaseEndpointName = "db";
-    private const string DataMountName = "data";
-    private const string ReadinessPath = "/readyz";
-    private const string StopPath = "/cohesion/v1/stop";
+    private const string adminEndpointName = "admin";
+    private const string databaseEndpointName = "db";
+    private const string dataMountName = "data";
+    private const string readinessPath = "/readyz";
+    private const string stopPath = "/cohesion/v1/stop";
 
     private readonly Assembly _assembly;
     private readonly string[] _arguments;
@@ -104,10 +104,10 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             ResourceContext = options.ResourceContext;
         }
 
-        if (!ResourceContext.Endpoints.ContainsKey(AdminEndpointName))
+        if (!ResourceContext.Endpoints.ContainsKey(adminEndpointName))
         {
             throw new ArgumentException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationTestFactoryArgument, AdminEndpointName),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationTestFactoryArgument, adminEndpointName),
                 nameof(options));
         }
     }
@@ -321,7 +321,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task WaitForReadinessAsync(Task program, CancellationToken cancellationToken)
     {
-        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        Uri admin = ResourceContext.Endpoints[adminEndpointName];
         using var client = new HttpClient { BaseAddress = admin };
 
         while (true)
@@ -337,7 +337,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             try
             {
                 using HttpResponseMessage response = await client
-                    .GetAsync(ReadinessPath, cancellationToken)
+                    .GetAsync(readinessPath, cancellationToken)
                     .ConfigureAwait(false);
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
@@ -355,7 +355,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
     private async Task RequestStopAsync(Task program, CancellationToken cancellationToken)
     {
-        Uri admin = ResourceContext.Endpoints[AdminEndpointName];
+        Uri admin = ResourceContext.Endpoints[adminEndpointName];
         using var client = new HttpClient { BaseAddress = admin };
 
         while (!program.IsCompleted)
@@ -363,7 +363,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, StopPath);
+                using var request = new HttpRequestMessage(HttpMethod.Post, stopPath);
                 AuthorizeControlPlaneRequest(request);
                 using HttpResponseMessage response = await client
                     .SendAsync(request, cancellationToken)
@@ -501,12 +501,12 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
 
         var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
         {
-            [DatabaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
-            [AdminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
+            [databaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
+            [adminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
         };
         var mounts = new Dictionary<string, ResourceMount>(StringComparer.OrdinalIgnoreCase)
         {
-            [DataMountName] = new ResourceMount(dataPath),
+            [dataMountName] = new ResourceMount(dataPath),
         };
 
         string resourceName = programType.Assembly.GetName().Name ?? programType.Name;

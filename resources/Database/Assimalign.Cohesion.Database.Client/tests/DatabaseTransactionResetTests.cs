@@ -117,15 +117,23 @@ public sealed class DatabaseTransactionResetTests
         await channel.Writer.FlushAsync(token);
     }
 
-    private sealed class CompleteFailureExchange(Exception failure) : DatabaseProtocolExchange<bool>(SqlProtocol.Family, transactionStatus: true)
+    private sealed class CompleteFailureExchange : DatabaseProtocolExchange<bool>
     {
+        private readonly Exception _failure;
+
+        internal CompleteFailureExchange(Exception failure)
+            : base(SqlProtocol.Family, transactionStatus: true)
+        {
+            _failure = failure;
+        }
+
         protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer, CancellationToken token)
         {
             await writer.WriteFrameAsync(new((ProtocolMessageType)5, ProtocolExecuteMessage.Create("BEGIN").Encode()), token);
             await writer.FlushAsync(token);
             (await reader.ReadFrameAsync(token))!.Value.Type.ShouldBe((ProtocolMessageType)8);
             MarkResponseComplete();
-            throw failure;
+            throw _failure;
         }
     }
 }

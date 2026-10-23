@@ -183,3 +183,5 @@ at construction or typed JSON import. Default structs still pass through explici
 validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
 Database storage format, diagnostic identity, event or counter changes. All binary consumers
 must be rebuilt together, including installed SDK/framework E2E payloads.
+
+Private identifiers and extension-container syntax follow the shared conventions. Resource kind strings, manifest fields, descriptor ownership and public composition signatures are unchanged.

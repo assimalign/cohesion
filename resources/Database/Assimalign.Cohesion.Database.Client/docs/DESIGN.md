@@ -509,3 +509,7 @@ Exception messages and format templates are generated from `src/Properties/Error
 format arguments use the current culture. Cancellation and abort templates used during normal
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Explicit pool-reset construction
+
+The private rollback exchange and its failure-test exchange use explicit constructors. The family and transaction-status setting still reach the exchange base at construction, and the test retains the same failure instance. Pool-reset timing, completion evidence, cancellation and connection-reuse rules are unchanged. Private names follow the field convention without changing endpoint or transport text.
