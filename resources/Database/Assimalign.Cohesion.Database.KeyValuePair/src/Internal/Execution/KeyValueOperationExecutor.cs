@@ -50,6 +50,8 @@ using Assimalign.Cohesion.Database.Types;
 /// outcomes — no mutation, no exception.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueOperationExecutor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueOperationExecutor.DebugView))]
 internal sealed class KeyValueOperationExecutor
 {
     private static readonly string _errorExecutorEnsureLatestVersionFailure3 = ErrorMessages.ExecutorEnsureLatestVersionFailure3;
@@ -537,4 +539,12 @@ internal sealed class KeyValueOperationExecutor
     }
 
     private readonly record struct ResolvedVersion(byte[] Key, byte[] Value, TransactionSequence Writer, ulong Location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueOperationExecutor value)
+        {
+            _ = value;
+        }
+    }
 }

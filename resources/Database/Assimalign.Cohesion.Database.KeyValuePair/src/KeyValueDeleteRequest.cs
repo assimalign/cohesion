@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// visible entry, or the compare-and-swap condition did not hold — a first-class
 /// outcome, never an exception).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDeleteRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDeleteRequest.DebugView))]
 public sealed class KeyValueDeleteRequest : KeyValueRequest
 {
     /// <summary>
@@ -39,4 +41,18 @@ public sealed class KeyValueDeleteRequest : KeyValueRequest
     /// (compare-and-swap), or null for an unconditional delete.
     /// </summary>
     public long? ExpectedETag { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDeleteRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDeleteRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte> Key => _target.Key;
+        public long? ExpectedETag => _target.ExpectedETag;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

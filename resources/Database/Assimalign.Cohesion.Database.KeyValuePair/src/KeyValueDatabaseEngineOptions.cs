@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// or <see cref="KeyValueDatabaseEngine.Create(string, KeyValueDatabaseEngineOptions)"/> (owner decision 52 of
 /// 2026-10-09).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseEngineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineOptions.DebugView))]
 public sealed class KeyValueDatabaseEngineOptions
 {
     /// <summary>
@@ -208,4 +210,26 @@ public sealed class KeyValueDatabaseEngineOptions
         RootPath = RootPath,
         StorageStrategy = StorageStrategy,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineOptions _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineOptions value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
+        public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
+        public long CheckpointJournalSize => _target.CheckpointJournalSize;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public long JournalSizeLimit => _target.JournalSizeLimit;
+        public global::System.TimeSpan PageWriteBackInterval => _target.PageWriteBackInterval;
+        public int PageWriteBackBatchSize => _target.PageWriteBackBatchSize;
+        public global::System.TimeSpan MaintenanceInterval => _target.MaintenanceInterval;
+        public global::System.IO.FileSystemPath? RootPath => _target.RootPath;
+    }
 }

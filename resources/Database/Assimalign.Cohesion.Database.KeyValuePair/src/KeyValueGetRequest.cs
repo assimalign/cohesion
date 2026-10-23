@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// set with the columns <c>key</c> (binary), <c>value</c> (binary), and
 /// <c>etag</c> (int64) — or zero rows when the key has no visible entry.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueGetRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueGetRequest.DebugView))]
 public sealed class KeyValueGetRequest : KeyValueRequest
 {
     /// <summary>
@@ -29,4 +31,17 @@ public sealed class KeyValueGetRequest : KeyValueRequest
     /// Gets the key to read.
     /// </summary>
     public ReadOnlyMemory<byte> Key { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueGetRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueGetRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte> Key => _target.Key;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

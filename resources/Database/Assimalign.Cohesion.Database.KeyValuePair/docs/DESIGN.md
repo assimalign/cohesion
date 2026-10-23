@@ -1663,3 +1663,9 @@ emits its prefix once. The entry-space format remains unchanged; the refusal onl
 own structured identity.
 Handshake refusal descriptions resolve through resources with their existing text and numeric
 protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Key-value debugger views expose fixed operation kinds, stored request/result metadata and reviewed identities. Existing public memory values are returned without reading or copying their contents; private buffers, parameters, synchronized current-transaction getters and engine/session snapshots are omitted. Internal helpers with no safe public or protected data have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

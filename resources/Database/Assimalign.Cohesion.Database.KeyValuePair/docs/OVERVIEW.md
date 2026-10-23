@@ -286,3 +286,9 @@ lists each condition. Successful execution, transaction ownership, storage forma
 layouts are unchanged; the existing wire formatter includes an error code once.
 Handshake refusal descriptions resolve through resources with their existing text and numeric
 protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Key-value debugger inspection uses stored metadata and existing public memory values without reading or copying their contents or evaluating session/storage operations.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

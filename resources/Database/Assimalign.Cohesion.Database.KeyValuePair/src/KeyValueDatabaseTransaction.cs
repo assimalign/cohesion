@@ -37,6 +37,8 @@ using Assimalign.Cohesion.Database.Transactions;
 /// an internal constructor; the session that began it is the only way to create one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction.DebugView))]
 public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
 {
     // Aborted refusals are created on a normal path, so their messages are read once.
@@ -173,4 +175,17 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
+    }
 }

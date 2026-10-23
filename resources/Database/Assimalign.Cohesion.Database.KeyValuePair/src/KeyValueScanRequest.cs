@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// result set with the columns <c>key</c> (binary), <c>value</c> (binary), and
 /// <c>etag</c> (int64).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueScanRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest.DebugView))]
 public sealed class KeyValueScanRequest : KeyValueRequest
 {
     /// <summary>
@@ -62,4 +64,20 @@ public sealed class KeyValueScanRequest : KeyValueRequest
     /// Gets the maximum number of entries to return, or null for no limit.
     /// </summary>
     public int? Limit { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte>? Prefix => _target.Prefix;
+        public global::System.ReadOnlyMemory<byte>? Start => _target.Start;
+        public global::System.ReadOnlyMemory<byte>? End => _target.End;
+        public int? Limit => _target.Limit;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

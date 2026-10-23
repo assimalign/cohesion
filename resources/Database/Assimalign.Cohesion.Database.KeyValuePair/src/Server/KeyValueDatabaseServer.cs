@@ -48,6 +48,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// <c>engineBuilder.AddServer(factory)</c> builder verb.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer.DebugView))]
 public sealed class KeyValueDatabaseServer : DatabaseServer
 {
     private readonly KeyValueDatabaseEngine _engine;
@@ -322,5 +324,17 @@ public sealed class KeyValueDatabaseServer : DatabaseServer
         {
             KeyValueDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine Engine => _target.Engine;
     }
 }

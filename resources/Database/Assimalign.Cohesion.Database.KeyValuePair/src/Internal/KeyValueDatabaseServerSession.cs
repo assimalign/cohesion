@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// which the handshake records once each; the engine session is re-exposed typed by a covariant
 /// override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueDatabaseServerSession.DebugView))]
 internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
 {
     private static readonly string _errorDatabaseServerSessionAbortFailure = ErrorMessages.DatabaseServerSessionAbortFailure;
@@ -692,5 +694,18 @@ internal sealed class KeyValueDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

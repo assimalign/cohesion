@@ -20,6 +20,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// database created as <c>sales</c> and opened as <c>SALES</c> on Linux was not found, and the
 /// engine's open-or-create made a second, empty database.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemKeyValueStorageStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.FileSystemKeyValueStorageStrategy.DebugView))]
 internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrategy
 {
     private readonly string _rootPath;
@@ -132,4 +134,12 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
     // reached disk. Inspect only the length: a refused open must not recover either set.
     internal bool HasIncompleteCreation(string databaseName)
         => new FileInfo(DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), DataFileSet).Data).Length <= Page.Size;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.FileSystemKeyValueStorageStrategy value)
+        {
+            _ = value;
+        }
+    }
 }

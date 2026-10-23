@@ -50,6 +50,8 @@ using Assimalign.Cohesion.Database.Transactions;
 /// so the engine stays <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabase {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabase.DebugView))]
 public sealed class KeyValueDatabase : DatabaseInstance
 {
     // The callback runs only after database composition has attached its current index manager.
@@ -747,5 +749,18 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         throw DatabaseException.CreateKeyValuePairFailure("CK04003",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine Engine => _target.Engine;
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
     }
 }

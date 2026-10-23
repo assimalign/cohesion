@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 /// that caller's rental.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection.DebugView))]
 public sealed class KeyValueConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
@@ -427,5 +429,17 @@ public sealed class KeyValueConnection : IAsyncDisposable
             // A telemetry observer must never mask the original failure.
             KeyValueClientEventSource.Log.ObserverFailed(this, nameof(KeyValueClientObserver.OnFailed), observerException);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Client.KeyValueConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

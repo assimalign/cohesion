@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// visible entry). A conditional miss is a first-class outcome, never an
 /// exception — see <c>docs/DESIGN.md</c> ("Etags and compare-and-swap").
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValuePutRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValuePutRequest.DebugView))]
 public sealed class KeyValuePutRequest : KeyValueRequest
 {
     /// <summary>
@@ -61,4 +63,20 @@ public sealed class KeyValuePutRequest : KeyValueRequest
     /// (compare-and-swap), or null for an unconditional write.
     /// </summary>
     public long? ExpectedETag { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValuePutRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValuePutRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte> Key => _target.Key;
+        public global::System.ReadOnlyMemory<byte> Value => _target.Value;
+        public bool OnlyIfAbsent => _target.OnlyIfAbsent;
+        public long? ExpectedETag => _target.ExpectedETag;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

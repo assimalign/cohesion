@@ -41,6 +41,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// instance method. <see cref="Open"/> is the one way to create it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog.DebugView))]
 public sealed class KeyValueCatalog
 {
     private const int indexRegistrationsKind = 1;
@@ -276,5 +278,13 @@ public sealed class KeyValueCatalog
         }
 
         return registrations;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Catalog.KeyValueCatalog value)
+        {
+            _ = value;
+        }
     }
 }

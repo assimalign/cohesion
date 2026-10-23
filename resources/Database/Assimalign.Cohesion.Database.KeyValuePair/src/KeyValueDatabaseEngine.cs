@@ -72,6 +72,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseEngine {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine.DebugView))]
 public sealed class KeyValueDatabaseEngine : DatabaseEngine
 {
     private static readonly string _errorEngineDisposeAsyncCoreAggregate = ErrorMessages.EngineDisposeAsyncCoreAggregate;
@@ -894,5 +896,18 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngine value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
     }
 }

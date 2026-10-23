@@ -52,6 +52,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseEngineBuilder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineBuilder.DebugView))]
 public sealed class KeyValueDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<KeyValueDatabaseEngine> _state;
@@ -239,4 +241,17 @@ public sealed class KeyValueDatabaseEngineBuilder
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>
     internal void Abort(Exception failure) => _state.Abort(failure);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineOptions Options => _target.Options;
+    }
 }

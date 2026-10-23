@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("KeyValueExecuteExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Client.Internal.KeyValueExecuteExchange.DebugView))]
 internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValueProtocolResult>
 {
     private readonly ProtocolExecuteMessage _request;
@@ -96,6 +98,14 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
             values.Add(DatabaseValueCodec.Read(ref reader));
         }
         return [.. values];
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Client.Internal.KeyValueExecuteExchange value)
+        {
+            _ = value;
+        }
     }
 }
 

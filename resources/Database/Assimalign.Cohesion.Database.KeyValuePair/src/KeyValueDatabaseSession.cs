@@ -48,6 +48,8 @@ using Assimalign.Cohesion.Database.Transactions;
 /// the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession.DebugView))]
 public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueRequest>
 {
     private readonly KeyValueDatabase _database;
@@ -348,5 +350,17 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         {
             await _coordinator.RollbackAsync(snapshotPin, CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabase Database => _target.Database;
     }
 }
