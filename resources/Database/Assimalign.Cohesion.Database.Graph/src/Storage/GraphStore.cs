@@ -165,6 +165,19 @@ public sealed partial class GraphStore
             .Select(node => node!.Value).OrderBy(node => node.Id).ToArray();
     }
 
+    internal IEnumerable<StoredGraphNode> StreamAllNodes(TransactionSnapshot snapshot, CancellationToken token,
+        Action visit, Action<long> reserve)
+    {
+        var ids = Ids(1, reserve);
+        Array.Sort(ids);
+        foreach (ulong id in ids)
+        {
+            token.ThrowIfCancellationRequested();
+            visit();
+            if (FindNode(id, snapshot) is { } node) { yield return node; }
+        }
+    }
+
     /// <summary>Atomically creates a relationship and both endpoint adjacency entries.</summary>
     /// <param name="relationship">The complete relationship with an identity reserved from the backing storage.</param>
     /// <param name="typeId">The stable catalog identity of the relationship type; never a name hash. The store does not verify that this identity matches <c>relationship.Type</c>; the engine resolves it from the catalog.</param>
@@ -423,10 +436,12 @@ public sealed partial class GraphStore
         }
     }
 
-    private ulong[] Ids(byte kind)
+    private ulong[] Ids(byte kind, Action<long>? reserve = null)
     {
         lock (_sync)
         {
+            if (reserve is not null)
+            { reserve(32 + 8L * (kind == 3 ? _definitionIds.Count : _records.Keys.Count(key => key.Kind == kind))); }
             return kind == 3 ? _definitionIds.ToArray() : _records.Keys.Where(key => key.Kind == kind).Select(key => key.Id).ToArray();
         }
     }

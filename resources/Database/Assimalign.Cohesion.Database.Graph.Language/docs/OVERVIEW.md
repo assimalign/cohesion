@@ -42,3 +42,8 @@ are scalar value expressions, evaluated against the incoming row. See [DIALECT.m
 
 Read [DESIGN.md](DESIGN.md) for the standard decision, exact clause matrix, AST model, bounds,
 diagnostic codes, and the conformance corpus's relationship to ISO GQL.
+
+#1533 adds GraphQueryLimits (optional lower MemoryBytes/WorkUnits) for embedded query requests.
+The engine defaults are 64 MiB retained memory and 1,000,000 physical work units. Internal read
+bindings stream and an unordered LIMIT can stop upstream work; final results remain materialized.
+This changes no grammar or wire bytes; remote execution uses the server engine ceilings.

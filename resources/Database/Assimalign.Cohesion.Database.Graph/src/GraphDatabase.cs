@@ -414,6 +414,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
         // Each node is visited once; the start is seeded as visited and never emitted.
         var nodes = await RunAsync(session, async operation =>
         {
+            var budget = session.StartQueryBudget(operation, traversal.Limits);
+            using var memory = new GraphMemoryOwner(budget.Memory);
+            memory.Add(1024);
             var result = new List<GraphNode>();
             IReadOnlyCollection<Guid>? types = traversal.RelationshipType is { } name
                 ? Catalog.FindRelationshipType(name, operation.Context.Snapshot) is { } type ? new[] { type.Id } : [] : null;
@@ -425,6 +428,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             };
             var visited = new HashSet<ulong> { traversal.Start.Value };
             var queue = new Queue<(ulong Id, int Depth)>();
+            budget.Consume();
             if (Store.FindNode(traversal.Start.Value, operation.Context.Snapshot) is not null)
             {
                 queue.Enqueue((traversal.Start.Value, 0));
@@ -433,15 +437,23 @@ public sealed partial class GraphDatabase : DatabaseInstance
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (current.Depth >= traversal.MaxDepth) { continue; }
-                foreach (var relationship in await operation.Updates.GetIncidentAsync(current.Id, direction, types,
-                    cancellationToken).ConfigureAwait(false))
+                await foreach (var relationship in operation.Updates.StreamIncidentAsync(current.Id, direction, types,
+                    cancellationToken, budget).ConfigureAwait(false))
                 {
                     bool outgoing = relationship.SourceId == current.Id;
                     ulong next = outgoing ? relationship.TargetId : relationship.SourceId;
-                    if (visited.Add(next) && Store.FindNode(next, operation.Context.Snapshot) is { } node)
+                    if (visited.Add(next))
                     {
-                        result.Add(Materialize(node));
-                        queue.Enqueue((next, current.Depth + 1));
+                        memory.Add(80); // Identity set and queue capacity, including invisible targets.
+                        if (Store.FindNode(next, operation.Context.Snapshot) is { } node)
+                        {
+                            var materialized = Materialize(node);
+                            memory.Add(32);
+                            memory.RetainValue(materialized, cancellationToken);
+                            budget.ConsumeViable();
+                            result.Add(materialized);
+                            if (current.Depth + 1 < traversal.MaxDepth) { queue.Enqueue((next, current.Depth + 1)); }
+                        }
                     }
                 }
             }

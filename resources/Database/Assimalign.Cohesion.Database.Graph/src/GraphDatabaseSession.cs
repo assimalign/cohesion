@@ -299,6 +299,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         _database.ThrowIfOffline();
         return _database.RunAsync(this, operation =>
         {
+            StartQueryBudget(operation, request.Limits, request.Statement.GqlExpression.Location);
             // Error-recovery trees still go through the normal diagnostic refusal path.
             if (request.Statement.GqlExpression.IsExplain &&
                 !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
@@ -311,11 +312,25 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
                 }
                 var planner = new GraphPlanner(_database, operation.Context.Snapshot);
                 var plan = planner.Plan(request.Statement.GqlExpression, request.Parameters);
-                return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan));
+                return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan, operation.QueryBudget));
             }
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
                 request.Parameters, cancellationToken, paths: request.Paths, scalarsOnly: request.ScalarsOnly, compositeValues: request.CompositeValues);
         }, cancellationToken);
+    }
+
+    internal GraphPlanExecutor.ExpansionBudget? LastStatementMetrics { get; private set; }
+    private readonly GraphQueryMemoryPool _queryMemoryPool = new();
+
+    internal GraphPlanExecutor.ExpansionBudget StartQueryBudget(GraphOperation operation, Assimalign.Cohesion.Database.Graph.Protocol.GraphQueryLimits? limits,
+        Assimalign.Cohesion.Database.Language.Location? location = null)
+    {
+        var options = _database.Engine.EngineOptions;
+        long memory = limits?.MemoryBytes ?? options.QueryMemoryBudget;
+        long work = limits?.WorkUnits ?? options.QueryWorkBudget;
+        if (memory <= 0 || work <= 0 || memory > options.QueryMemoryBudget || work > options.QueryWorkBudget)
+        { throw new GraphPlanningException("COHDBG021", ErrorMessages.QueryLimitsInvalid, location); }
+        return operation.QueryBudget = LastStatementMetrics = new GraphPlanExecutor.ExpansionBudget(work, memory, _queryMemoryPool);
     }
 
     /// <inheritdoc />
@@ -337,6 +352,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// </remarks>
     protected override async ValueTask DisposeAsyncCore()
     {
+        _queryMemoryPool.Dispose();
         GraphOperation? operation;
         lock (_sync)
         {

@@ -412,7 +412,7 @@ RETURN followed by NEXT and WITH retain only aliased columns and bare-variable p
 
 WITH's ORDER BY and WHERE see both projected aliases and the incoming scope when neither DISTINCT nor grouping is present. Aliases shadow incoming names. With DISTINCT or grouping, only projected/grouped values remain visible. WHERE applies after ORDER BY, OFFSET and LIMIT. Each projection has its own grouping and ordering state, so one stage's aliases never validate a later stage. Function detection applies to every new value position, including row-evaluated pattern maps. Pattern maps evaluate scalar expressions against each row; list/map syntax keeps its graph-storage COHDBL001 and composite values remain COHDBG003.
 
-Every stage materializes eagerly in source order. Unknown labels empty their MATCH stage only, and names introduced by an earlier INSERT are treated as available. A statement sees its own writes under Snapshot and ReadCommitted. A write anywhere takes the writer lock before the first stage. FOR and matching share the 100,000-row bound. Only the final columns determine Execute admission; a scalar LET/FOR variable is scalar, possible composites require negotiation, and carried entities still require ExecutePaths. ExecutePaths accepts a read-only composed statement with one mandatory entity/path final column and rejects any write stage.
+Read stages stream borrowed slot bindings in source order; retention acquires explicit value ownership. Mutation target tables materialize before applying their write stage. Unknown labels empty their MATCH stage only, and names introduced by an earlier INSERT are treated as available. A statement sees its own writes under Snapshot and ReadCommitted. A write anywhere takes the writer lock before the first stage. FOR elements and selected MATCH candidates share the physical-work budget; retained tables/results share the memory budget (#1533). Only the final columns determine Execute admission; a scalar LET/FOR variable is scalar, possible composites require negotiation, and carried entities still require ExecutePaths. ExecutePaths accepts a read-only composed statement with one mandatory entity/path final column and rejects any write stage.
 
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1965-1970` defines WITH's incoming scope;
@@ -1261,3 +1261,12 @@ The root DatabaseException.Diagnostics carrier preserves the complete parser lis
 factories and session boundaries, including parsed typed requests. DatabaseParseException
 retains the existing first-error message and no error-recovery AST executes. Graph's path
 request factory shares this contract. Diagnostics remain plain Database.Types data.
+
+## Execution budgets (#1533)
+
+The engine streams internal read bindings and applies deterministic retained-memory and physical-work
+budgets. Unordered read LIMIT may stop expansion (D4); final results stay materialized until statement
+completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, with positive engine
+ceilings of 64 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
+Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
+COHDBG020/COHDBG021 and the preserved 64-hop trail limit.

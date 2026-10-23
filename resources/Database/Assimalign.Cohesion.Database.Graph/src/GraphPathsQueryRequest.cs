@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -24,6 +25,28 @@ public sealed class GraphPathsQueryRequest : GraphRequest
         : base(statement, parameters, paths: true)
     {
     }
+
+    /// <summary>Creates a parsed path request with explicit lower execution limits.</summary>
+    /// <param name="statement">The parsed statement.</param>
+    /// <param name="parameters">Optional named bindings.</param>
+    /// <param name="limits">The requested limits.</param>
+    /// <exception cref="ArgumentNullException">The statement or limits are null.</exception>
+    public GraphPathsQueryRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, GraphQueryLimits limits)
+        : base(statement, parameters, paths: true, limits: limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+    }
+
+    /// <summary>Parses a path request with explicit lower execution limits.</summary>
+    /// <param name="gql">The statement text.</param>
+    /// <param name="parameters">Optional named bindings.</param>
+    /// <param name="limits">The requested limits.</param>
+    /// <returns>The parsed request.</returns>
+    /// <exception cref="ArgumentNullException">The limits are null.</exception>
+    /// <exception cref="ArgumentException">The statement is empty.</exception>
+    /// <exception cref="DatabaseParseException">The statement cannot be parsed.</exception>
+    public static GraphPathsQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters, GraphQueryLimits limits)
+        => new(GraphQueryRequest.FromGql(gql, parameters).Statement, parameters, limits);
 
     /// <summary>Parses a MATCH statement for path execution.</summary>
     /// <param name="gql">The GQL statement text.</param>

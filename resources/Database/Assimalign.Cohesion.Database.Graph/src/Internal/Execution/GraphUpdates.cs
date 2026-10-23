@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Statement-local entity versions, published once after all stages have run.</summary>
-internal sealed class GraphUpdates
+internal sealed class GraphUpdates : IDisposable
 {
     private readonly GraphDatabase _database;
     private readonly GraphOperation _operation;
@@ -27,6 +27,8 @@ internal sealed class GraphUpdates
     private readonly Dictionary<GqlRelationshipPattern, Guid[]?> _typeSelections = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<(bool Node, ulong Id)> _created = [];
     private readonly HashSet<(bool Node, ulong Id)> _changed = [];
+    private readonly Dictionary<(bool Node, ulong Id), object> _entityValues = [];
+    private GraphMemoryOwner? _memory;
 
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
@@ -38,7 +40,7 @@ internal sealed class GraphUpdates
             Array.AsReadOnly(labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
         _created.Add((true, node.Id.Value));
-        RememberNode(node);
+        RememberNode(node, token);
         return node;
     }
 
@@ -50,6 +52,8 @@ internal sealed class GraphUpdates
         var edge = new GraphRelationship(new GraphRelationshipId((ulong)_database.DataStorage.ReserveTransactionSequence()), type, from, to,
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
         _created.Add((false, edge.Id.Value));
+        AccountEntity(false, edge.Id.Value, edge, token);
+        Charge(512); // Created identity, type and the two incident-list entries.
         _relationships.Add(edge.Id.Value, edge);
         _createdTypes.Add(edge.Id.Value, typeId);
         AddIncident(from.Value, GraphIncidentDirection.Outgoing);
@@ -85,8 +89,9 @@ internal sealed class GraphUpdates
     internal StoredGraphNode? FindNode(ulong id) => _nodes.TryGetValue(id, out var node)
         ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, _operation.Context.Snapshot);
 
-    private void RememberNode(GraphNode node)
+    private void RememberNode(GraphNode node, CancellationToken token = default)
     {
+        AccountEntity(true, node.Id.Value, node, token);
         if (_nodes.TryGetValue(node.Id.Value, out var previous)) { ForgetLabels(previous); }
         _nodes[node.Id.Value] = node;
         foreach (string label in node.Labels)
@@ -94,6 +99,29 @@ internal sealed class GraphUpdates
             if (!_nodeLabels.TryGetValue(label, out var ids)) { _nodeLabels.Add(label, ids = []); }
             ids.Add(node.Id.Value);
         }
+    }
+
+    private void Charge(long bytes)
+    {
+        if (_operation.QueryBudget is not { } budget) { return; }
+        (_memory ??= new GraphMemoryOwner(budget.Memory)).Add(bytes);
+    }
+
+    private void AccountEntity(bool node, ulong id, object value, CancellationToken token)
+    {
+        if (_operation.QueryBudget is null) { return; }
+        if (_entityValues.TryGetValue((node, id), out var previous)) { _memory!.ReleaseValue(previous); }
+        else { Charge(256); }
+        _memory!.RetainValue(value, token);
+        _entityValues[(node, id)] = value;
+    }
+
+    public void Dispose()
+    {
+        _nodes.Clear(); _nodeLabels.Clear(); _relationships.Clear(); _createdIncident.Clear();
+        _createdTypes.Clear(); _typeSelections.Clear(); _created.Clear(); _changed.Clear(); _entityValues.Clear();
+        _memory?.Dispose();
+        _memory = null;
     }
 
     private void ForgetLabels(GraphNode node)
@@ -118,6 +146,50 @@ internal sealed class GraphUpdates
 
     internal IReadOnlyList<StoredGraphNode> GetUnionNodes(IReadOnlyList<string> labels, CancellationToken token)
         => MergeNodes(_database.Store.ScanLabels(labels, _operation.Context.Snapshot, token), PendingNodes(labels));
+
+    internal async IAsyncEnumerable<StoredGraphNode> StreamAnchorAsync(GraphAnchor anchor,
+        GraphPlanExecutor.ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
+    {
+        using var memory = new GraphMemoryOwner(budget.Memory);
+        memory.Add(32 + 16L * _nodes.Count);
+        var pending = _nodes.Values.Where(node =>
+            (anchor.UnionLabels is { } labels ? node.Labels.Any(label => labels.Contains(label, StringComparer.Ordinal))
+                : anchor.Label is null || node.Labels.Contains(anchor.Label, StringComparer.Ordinal)) &&
+            (anchor.Property is null || node.Properties.TryGetValue(anchor.Property, out var value) &&
+                GraphValueComparer.Instance.Equals(value, anchor.Value))).OrderBy(node => node.Id.Value).ToArray();
+        var snapshot = _operation.Context.Snapshot;
+        IAsyncEnumerable<StoredGraphNode> persisted = anchor.Property is { } property
+            ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)
+            : StreamStored();
+        int position = 0;
+        await foreach (var stored in persisted.ConfigureAwait(false))
+        {
+            while (position < pending.Length && pending[position].Id.Value <= stored.Id)
+            {
+                var node = pending[position++];
+                budget.Consume();
+                yield return new(node.Id.Value, node.Labels, node.Properties);
+            }
+            if (!_nodes.ContainsKey(stored.Id)) { yield return stored; }
+        }
+        while (position < pending.Length)
+        {
+            token.ThrowIfCancellationRequested();
+            var node = pending[position++];
+            budget.Consume();
+            yield return new(node.Id.Value, node.Labels, node.Properties);
+        }
+
+        async IAsyncEnumerable<StoredGraphNode> StreamStored()
+        {
+            IEnumerable<StoredGraphNode> nodes = anchor.UnionLabels is { } labels
+                ? _database.Store.StreamLabels(labels, snapshot, token, budget.Consume, memory.Add)
+                : anchor.Label is { } label ? _database.Store.StreamLabels([label], snapshot, token, budget.Consume, memory.Add)
+                : _database.Store.StreamAllNodes(snapshot, token, budget.Consume, memory.Add);
+            foreach (var node in nodes) { yield return node; }
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
+    }
 
     private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels)
     {
@@ -197,6 +269,8 @@ internal sealed class GraphUpdates
         IReadOnlyCollection<Guid>? typeIds, [EnumeratorCancellation] CancellationToken token, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         token.ThrowIfCancellationRequested();
+        using var memory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
+        memory?.Add(512);
         var snapshot = _operation.Context.Snapshot;
         var selectedTypes = typeIds?.Distinct().ToArray();
         var directions = direction == GraphIncidentDirection.Both
@@ -255,21 +329,36 @@ internal sealed class GraphUpdates
         async ValueTask PrimeAsync(GraphIncidentDirection selected, Guid type)
         {
             token.ThrowIfCancellationRequested();
-            var stream = _database.Store.StreamIncidentRangeAsync(id, selected, [type], snapshot, Reserve, token).GetAsyncEnumerator(token);
+            memory?.Add(8192); // A 64-entry adjacency-key batch and its merge/cursor state.
+            var stream = StreamRange(selected, type).GetAsyncEnumerator(token);
             streams.Add(stream);
             if (await stream.MoveNextAsync().ConfigureAwait(false)) { pending.Enqueue(stream, stream.Current.Id); }
+        }
+
+        async IAsyncEnumerable<StoredGraphRelationship> StreamRange(GraphIncidentDirection selected, Guid type)
+        {
+            using var headMemory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
+            headMemory?.Add(128);
+            await foreach (var edge in _database.Store.StreamIncidentRangeAsync(id, selected, [type], snapshot, Reserve, token).ConfigureAwait(false))
+            {
+                headMemory?.RetainValue(edge.Properties, token);
+                try { yield return edge; }
+                finally { headMemory?.ReleaseValue(edge.Properties); }
+            }
         }
 
         async IAsyncEnumerable<StoredGraphRelationship> CreatedIncident()
         {
             // Only the bounded statement-local overlay is sorted; persisted ranges stay streaming.
             var ids = new HashSet<ulong>();
+            using var overlayMemory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
             foreach (var selected in directions)
             {
                 if (!_createdIncident.TryGetValue((id, selected), out var types)) { continue; }
                 foreach (Guid type in selectedTypes ?? (IEnumerable<Guid>)types.Keys)
                 {
-                    if (types.TryGetValue(type, out var incident)) { ids.UnionWith(incident); }
+                    if (types.TryGetValue(type, out var incident))
+                    { foreach (ulong edgeId in incident) { if (ids.Add(edgeId)) { overlayMemory?.Add(80); } } }
                 }
             }
             await Task.CompletedTask.ConfigureAwait(false);
@@ -293,7 +382,7 @@ internal sealed class GraphUpdates
     }
 
     internal async ValueTask ApplyAsync(GqlStage stage, List<Dictionary<string, object?>> bindings,
-        IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, GraphMemoryOwner? bindingMemory = null)
     {
         var touchedNodes = new HashSet<ulong>();
         var touchedRelationships = new HashSet<ulong>();
@@ -341,7 +430,7 @@ internal sealed class GraphUpdates
                     if (!node.Labels.SequenceEqual(replacement.Labels) || !Identical(node.Properties, replacement.Properties))
                     {
                         _changed.Add((true, node.Id.Value));
-                        RememberNode(replacement);
+                        RememberNode(replacement, token);
                         touchedNodes.Add(node.Id.Value);
                     }
                 }
@@ -353,6 +442,7 @@ internal sealed class GraphUpdates
                     if (!Identical(relationship.Properties, replacement.Properties))
                     {
                         _changed.Add((false, relationship.Id.Value));
+                        AccountEntity(false, relationship.Id.Value, replacement, token);
                         _relationships[relationship.Id.Value] = replacement;
                         touchedRelationships.Add(relationship.Id.Value);
                     }
@@ -369,8 +459,10 @@ internal sealed class GraphUpdates
         var refreshed = new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
         foreach (var binding in bindings)
         {
+            bindingMemory?.ReleaseValue(binding);
             foreach (string name in binding.Keys.ToArray())
             { binding[name] = Refresh(binding[name], touchedNodes, touchedRelationships, refreshed); }
+            bindingMemory?.RetainValue(binding, token);
         }
     }
 

@@ -4,6 +4,7 @@ using System.Linq;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -22,6 +23,31 @@ public sealed class GraphQueryRequest : GraphRequest
     public GraphQueryRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters = null)
         : base(statement, parameters)
     {
+    }
+
+    /// <summary>Creates a parsed row request with explicit lower execution limits.</summary>
+    /// <param name="statement">The parsed statement.</param>
+    /// <param name="parameters">Optional named bindings.</param>
+    /// <param name="limits">The requested limits.</param>
+    /// <exception cref="ArgumentNullException">The statement or limits are null.</exception>
+    public GraphQueryRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, GraphQueryLimits limits)
+        : base(statement, parameters, limits: limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+    }
+
+    /// <summary>Parses a row request with explicit lower execution limits.</summary>
+    /// <param name="gql">The statement text.</param>
+    /// <param name="parameters">Optional named bindings.</param>
+    /// <param name="limits">The requested limits.</param>
+    /// <returns>The parsed request.</returns>
+    /// <exception cref="ArgumentNullException">The limits are null.</exception>
+    /// <exception cref="ArgumentException">The statement is empty.</exception>
+    /// <exception cref="DatabaseParseException">The statement cannot be parsed.</exception>
+    public static GraphQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters, GraphQueryLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+        return new(FromGql(gql, parameters).Statement, parameters, limits);
     }
 
     /// <summary>Parses GQL text into an executable graph statement request.</summary>

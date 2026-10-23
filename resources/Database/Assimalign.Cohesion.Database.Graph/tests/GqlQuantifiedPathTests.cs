@@ -213,18 +213,22 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:Other]->(:V {k:65})");
         (await Rows(session, "MATCH (a:V {k:0})-[:T]->+(b) RETURN count(*)")).ShouldHaveSingleItem()[0].ShouldBe(64L);
         await session.ExecuteAsync("MATCH (a:V {k:64}) INSERT (a)-[:T]->(:V {k:66})");
-        foreach (string tail in new[] { "RETURN b.k", "WHERE b.k=-1 RETURN b.k", "RETURN b.k LIMIT 1" })
+        foreach (string tail in new[] { "RETURN b.k", "WHERE b.k=-1 RETURN b.k", "RETURN b.k ORDER BY b.k LIMIT 1" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:V {k:0})-[:T]->+(b) " + tail));
             error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
             error.Message.ShouldContain("64 relationships", Case.Sensitive);
         }
+        // D4 permits an unordered LIMIT to leave later branches unvisited. A visited 65th hop
+        // still fails above, including when ORDER BY needs the complete expansion.
+        (await Rows(session, "MATCH (a:V {k:0})-[:T]->+(b) RETURN b.k LIMIT 1")).ShouldHaveSingleItem()[0].ShouldBe(1L);
+        session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Quantified paths: both expansion and binding budgets apply to repeated segments")]
-    [InlineData(18, "", "100000 path matches")]
-    [InlineData(32, " {k:-1}", "1000000 candidate expansions")]
-    public async Task Execute_ExpansionBudgets_ShouldFailWithoutTruncatingAsync(int count, string endpoint, string message)
+    [InlineData(18, "", "retained execution-memory budget", "COHDBG020")]
+    [InlineData(32, " {k:-1}", "1000000 candidate expansions", "COHDBG004")]
+    public async Task Execute_ExpansionBudgets_ShouldFailWithoutTruncatingAsync(int count, string endpoint, string message, string code)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -234,10 +238,13 @@ public sealed class GqlQuantifiedPathTests
         await session.ExecuteAsync("FOR k IN [" + string.Join(',', Enumerable.Range(0, count)) + "] INSERT (:V {k:k})", cancellationToken: timeout.Token);
         await session.ExecuteAsync("MATCH (a:V),(b:V) INSERT (a)-[:T]->(b)", cancellationToken: timeout.Token);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a:V)-[:T]->{1,3}(b:V" + endpoint + ") RETURN a.k", cancellationToken: timeout.Token));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql("MATCH (a:V)-[:T]->{1,3}(b:V" + endpoint + ") RETURN a.k", null,
+            new() { MemoryBytes = code == "COHDBG020" ? 65536 : null }), timeout.Token));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Message.ShouldContain(message, Case.Sensitive);
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Quantified paths: cancellation is observed after expansion has started")]

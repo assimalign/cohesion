@@ -69,7 +69,7 @@
   <data name="GroupBindingConflict" xml:space="preserve"><value>A group variable cannot also bind a singleton or another quantified segment.</value></data>
   <data name="GroupPropertyReference" xml:space="preserve"><value>A property map inside a quantified segment cannot reference a group variable.</value></data>
   <data name="PathHopLimitExceeded" xml:space="preserve"><value>The query requires a trail exceeding 64 relationships.</value></data>
-  <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded 1000000 candidate expansions (physical={0}, viable={1}).</value></data>
+  <data name="ExpansionLimitExceeded" xml:space="preserve"><value>The query exceeded {2} candidate expansions (physical={0}, viable={1}).</value></data>
   <data name="FunctionArity" xml:space="preserve"><value>Function {0} has an invalid identity or argument count.</value></data>
   <data name="FunctionKind" xml:space="preserve"><value>Function {0} argument {1} has an incompatible kind.</value></data>
   <data name="FunctionValue" xml:space="preserve"><value>Function {0} cannot evaluate the supplied value.</value></data>
@@ -119,4 +119,7 @@
   <data name="RegistrationLengthInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration length.</value></data>
   <data name="RegistrationHeaderInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration header.</value></data>
   <data name="RegistrationIdentityInvalid" xml:space="preserve"><value>Invalid graph B+Tree registration identity.</value></data>
+  <data name="QueryMemoryBudgetExceeded" xml:space="preserve"><value>The query exceeded its retained execution-memory budget of {0} bytes.</value></data>
+  <data name="QueryLimitsInvalid" xml:space="preserve"><value>Query memory and work limits must be positive and must not exceed the engine ceilings.</value></data>
+  <data name="QueryBudgetOptionInvalid" xml:space="preserve"><value>COHDBG021: Query budget ceilings must be positive.</value></data>
 </root>

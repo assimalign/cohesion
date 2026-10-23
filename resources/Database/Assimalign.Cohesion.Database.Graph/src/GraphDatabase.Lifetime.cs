@@ -63,7 +63,9 @@ public sealed partial class GraphDatabase
         var operation = await BeginOperationAsync(session, token).ConfigureAwait(false);
         try
         {
-            var result = await action(operation).ConfigureAwait(false);
+            T result;
+            try { result = await action(operation).ConfigureAwait(false); }
+            finally { operation.Updates.Dispose(); }
             await operation.CompleteAsync().ConfigureAwait(false);
             return result;
         }

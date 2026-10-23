@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// </summary>
 internal sealed class GraphOperation
 {
+    internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
     private readonly GraphDatabase _database;
     private readonly GraphDatabaseSession _session;
     private readonly GraphDatabaseTransaction? _transaction;

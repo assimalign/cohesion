@@ -80,7 +80,10 @@ public sealed class GraphUpdateConcurrencyTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var token = timeout.Token;
-        await using var engine = GraphDatabaseEngine.Create("updates", new());
+        // This allocation regression deliberately retains 30,000 write targets and a second
+        // collected copy. Give that fixture an explicit execution ceiling; keep its measured
+        // allocation assertion below unchanged. Ordinary queries retain the 64 MiB default.
+        await using var engine = GraphDatabaseEngine.Create("updates", new() { QueryMemoryBudget = 256L * 1024 * 1024 });
         var db = await engine.CreateDatabaseAsync("graph", token);
         await using var session = await db.CreateSessionAsync(token);
         await session.ExecuteAsync("FOR i IN $ids INSERT (:P {k:i})", new Dictionary<string, object?> { ["ids"] = Enumerable.Range(0, 30_000).ToArray() }, token);

@@ -86,7 +86,7 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
 
-GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over an eagerly materialized binding table. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).
+GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over streaming owned slot bindings for reads and bounded materialized mutation-target tables. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).
 
 
 ## Catalog component
@@ -184,3 +184,19 @@ copies report the existing corruption code with page and slot. Direct catalog AP
 their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
 16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
 adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Query resource budgets (#1533)
+
+Read LIMIT without ORDER BY can stop upstream expansion; grouping consumes rows incrementally,
+and ordered finite pages retain only OFFSET + LIMIT candidates. Final result rows/paths remain
+materialized until statement completion. QueryMemoryBudget defaults to 64 MiB and QueryWorkBudget
+to 1,000,000 physical units after relationship type/direction selection; FOR elements also consume
+work. Engines can explicitly set higher positive ceilings. GraphQueryLimits supplies optional lower
+MemoryBytes/WorkUnits to the three-argument request constructors/factories or GraphTraversal.Limits.
+Remote Execute statements use server ceilings; wire payloads are unchanged. Memory exhaustion is
+COHDBG020, invalid limits COHDBG021, and work/hop exhaustion COHDBG004. Shared containers and large values are
+counted once across operators (small leaves use conservative per-reference estimates) and every ownership lease is released on completion or failure.
+
+A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
+are discarded and disposal drops the cache. Retained values and budget ownership do not escape
+into that cache. The unchanged TCP path-allocation test guards the combined engine/client cost.

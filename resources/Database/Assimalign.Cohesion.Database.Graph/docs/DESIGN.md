@@ -528,7 +528,7 @@ WITH WHERE validates independently of ORDER BY expression reuse. DISTINCT or agg
 
 Behavior consulted, no code copied, relative to C:/Source/repos/neo4j/neo4j: community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/Clause.scala:1723-1724,1965,1998-2030; front-end/rewriting/src/main/scala/org/neo4j/cypher/internal/rewriting/rewriters/PropertyPredicateNormalizer.scala:35-41; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:101-103; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticError.scala:725; front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:495 and interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/commands/expressions/Property.scala:43-79 (the latter paths are also under community/cypher).
 
-The executor materializes every stage eagerly in source order and acquires the writer lock before any stage when the statement contains a write. Each stage shares the 100,000-row bound; FOR fan-out uses the same AddBinding guard as path matching. Candidate expansion has its separate budget. Statements observe their own writes at both supported isolation levels. NEXT after a write without RETURN seeds one empty binding. Entity-kind proofs and nullable element shapes survive WITH/NEXT and nested list access. COLLECT omits null operands; nullable literal elements retain optional path restrictions. Runtime FOR elements and carried MATCH/DELETE bindings are checked before graph operations: incompatible values raise COHDBG013, while scalar binding rejections remain COHDBG003 during planning. The pipeline uses typed dispatch without reflection or runtime code generation.
+Read stages exchange one owned slot binding at a time in source order. Writes acquire the writer lock before any stage and materialize each mutation's complete target table before applying it; paging never reduces an already admitted mutation set. Both paths use the statement's retained-memory and physical-work budgets (#1533). FOR elements consume physical work units. Statements observe their own writes at both supported isolation levels. NEXT after a write without RETURN seeds one empty binding. Entity-kind proofs and nullable element shapes survive WITH/NEXT and nested list access. COLLECT omits null operands; nullable literal elements retain optional path restrictions. Runtime FOR elements and carried MATCH/DELETE bindings are checked before graph operations: incompatible values raise COHDBG013, while scalar binding rejections remain COHDBG003 during planning. The pipeline uses typed dispatch without reflection or runtime code generation.
 
 
 MATCH and OPTIONAL MATCH execute as source-ordered joins over a nullable binding table. Each
@@ -541,8 +541,7 @@ undirected pattern. Each input row runs all paths of a clause, then its WHERE; m
 discard failures and optional joins preserve exactly
 one row with explicit NULL entries for all new variables when none survives. The initial table has
 one empty row, including for a leading OPTIONAL MATCH. Earlier variables are preserved, and
-trail uniqueness resets for every path. Both the 100,000 materialized-binding limit and the shared
-1,000,000 candidate-expansion budget apply across clauses. A null-bound node or relationship
+trail uniqueness resets for every path. The retained-memory and physical-work budgets are shared across clauses. A null-bound node or relationship
 refuses a later pattern before reading candidates, including when it is not the selected anchor.
 
 Property access and RETURN expressions over null-extended variables yield NULL using #1140/#1141's
@@ -742,11 +741,70 @@ including property discovery. Neither physical size limit counts expression leng
 GQL patterns include quantified relationships and parenthesized subpaths; the sum of finite upper bounds (or unbounded lower bounds) is at most 64 relationships. Each matched path is a trail: an edge
 identity is used at most once within that path; a node may recur. Separate comma-separated paths
 have separate edge sets and share variable bindings. This makes a three-edge cycle a valid
-three-hop result but forbids reusing its first edge on a fourth hop. At most 100,000 intermediate
-path matches materialize per pattern, and a statement examines at most 1,000,000 node/edge
-candidates, including dead ends; either overflow fails with `COHDBG004`, never silent truncation.
+three-hop result but forbids reusing its first edge on a fourth hop. Intermediate read bindings stream;
+retained results and operator state share a 64 MiB default statement memory budget. Physical work
+defaults to 1,000,000 selected node/edge candidates or FOR elements, including dead ends. Memory
+exhaustion is `COHDBG020`; work or the 64-hop trail limit is `COHDBG004`, never silent truncation.
 Cancellation is observed during expansion and materialization. Repeated node/relationship
 variables enforce identity equality, and conflicting variable kinds fail before execution.
+
+
+### Retained execution memory and explicit query limits (#1533, D4)
+
+`GraphDatabaseEngineOptions.QueryMemoryBudget` defaults to 67,108,864 bytes and
+`QueryWorkBudget` to 1,000,000 units. The engine snapshots both positive ceilings at construction.
+Applications may explicitly configure higher ceilings for a known workload without changing a
+process memory limit. `GraphQueryLimits` has optional `long? MemoryBytes` and `long? WorkUnits`;
+omitted members use the engine ceiling, and a request may only lower it. Existing two-argument
+request constructors/factories remain; GraphQueryRequest and GraphPathsQueryRequest add
+three-argument `(statement/query, parameters, limits)` overloads. `GraphTraversal.Limits` applies
+the same policy to typed traversal. These lower-limit DTOs are currently an in-process request
+surface; Execute wire payloads and capabilities do not change. Remote statements receive their
+server engine's safe defaults. Plain EXPLAIN stays nonexecuting and reports the effective work
+ceiling in Expand details, with null actual counts.
+
+Each FOR and MATCH operator owns one reusable slot row, borrowed only until its consumer requests the next
+row. Retaining operators copy values or acquire value ownership before that move. Mutation tables
+release/reacquire their value ownership when INSERT, SET/REMOVE or DELETE changes a binding.
+
+Accounting is deterministic and statement-local: owned row/slot containers, group/aggregate and
+DISTINCT state, ordered results, writer overlays, scan identity arrays, bounded cursor batches,
+merge heads and DFS state all consume the same grant. Constructed FOR lists and projected values
+remain charged while a downstream iterator holds them. Parameter/variable input lists are borrowed
+from their existing input scope. Reference-counted ownership charges shared containers and large
+immutable leaves once across operators; smaller leaves are conservatively charged per retained
+reference, avoiding a larger identity-table entry for each small scalar. Typed entity collections
+are traversed by index without boxing each node/relationship.
+Decoded anchors have lexical grants; each incident cursor owns one decoded target grant until
+that child's complete subtree finishes. Backtracking and iterator disposal release those grants.
+Scalar property sizes are measured once per decoded node, while retaining operators use the
+shared-value ledger. Simple Node/StartLeft continuations keep one active frame and resize its
+metadata grant instead of repeatedly releasing and reacquiring the same ownership.
+Container estimates include tracking/collection overhead and intentionally bound retained storage;
+they are not GC heap samples or process working-set limits. Each active value traversal and
+operator observes cancellation. Partial value-retention failures unwind successful increments;
+exception identity and cancellation tokens pass through unchanged. No process-wide per-frame or
+per-pass atomics, public interfaces, disk format changes or new events/counters are added.
+
+A session reuses cleared accounting storage to preserve the existing TCP path-allocation budget.
+Its cache holds at most one identity table with capacity 1,024, pending/journal buffers with
+capacity 256 each, and eight owner maps with capacity 128 each. Larger high-water buffers are
+discarded. Cached collections contain no query values; these bounded free buffers are session
+cache storage rather than live statement state. Completed metrics drop their leased buffers and
+retain totals only. Session disposal drops cache references without mutating actively rented
+collections. The execution action disposes its overlay ownership in its own finally, before normal
+completion releases session admission; teardown cannot concurrently clear the running action's
+value ledger. No global buffer pool or per-state lock/atomic is introduced.
+
+
+Local reference behavior consulted, no code copied: Neo4j
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/VarLengthExpandPipe.scala:74-87`
+passes operator memory tracking into a closing expansion iterator;
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/TopPipe.scala:58-85`
+uses a scoped top table and releases evicted row memory. Cohesion keeps materialized final results
+and uses engine ceilings plus optional lower request limits. External SF0.01/R4 digest verification
+and a controlled SF10 peak/work profile remain required acceptance evidence; local deterministic
+fan-out/ownership tests establish neither external result digests nor SF10 measurements.
 
 ### Indexed adjacency and expansion work (#1532)
 
@@ -758,11 +816,11 @@ counters: physical includes visited anchor candidates and selected relationship 
 including heads required to initialize the identity-ordered merge, after type/direction selection
 from storage or the overlay. A discovered type and its first stream head share one charge;
 returning a primed head does not charge it again. Viable counts hops passing trail, binding, relationship and safe node
-checks before copying state. Physical work keeps the 1,000,000 safety cap, including dead ends.
+checks before copying state. Physical work defaults to a 1,000,000-unit ceiling, including dead ends; explicit engine/query limits are described below.
 Its COHDBG004 message includes actual physical and viable totals; no EventSource counters are added.
-The 100,000-binding and 64-hop caps remain. Public TraverseAsync uses the filtered lookup without
-a candidate-expansion cap; traversal work budgets belong to #1533 (D4). The #1533 budget redesign and external R4/SF10
-acceptance remain separate work; filtering does not guarantee a bound on genuine matching fan-out.
+The 64-hop trail cap remains. TraverseAsync shares the configurable memory/work budgets and selected-range streaming;
+its start lookup consumes one work unit, followed by selected merge heads. Its results remain materialized
+before the statement releases its snapshot. Genuine matching fan-out can still exhaust an explicit budget.
 
 EXPLAIN's Expand detail names the adjacency tuple, effective seek direction and type expression,
 physical/viable counting rules and physical limit. EXPLAIN does not execute, so these are counting
@@ -825,8 +883,9 @@ Finite upper-bound sums and unbounded lower-bound sums cannot exceed 64. An unbo
 explores at most 64 successful hops; an unused 65th relationship passing direction, type,
 bound-variable identity and its own property checks (including deferred maps)
 raises COHDBG004 before testing its endpoint. Failed filters do not trigger the hop cap, and
-LIMIT cannot suppress it. AddBinding and the shared statement ExpansionBudget also apply to
-every repeated branch. The internal per-budget OnConsume test hook cancels deterministically
+An unordered read LIMIT may stop before an unvisited branch reaches it (D4); an ORDER BY or
+aggregate that needs the complete expansion still observes it. The shared memory/work budgets
+apply to every visited repeated branch. The internal per-budget OnConsume test hook cancels deterministically
 after expansion begins; tests assert the consumed count. The high-fan-out regression observes
 all pending DFS states through a per-budget hook: 20,000 successful one-hop descents must retain
 only the parent cursor plus one child, for fixed and quantified edges. This structural bound is
@@ -954,8 +1013,8 @@ and column metadata. Other aggregate metadata retains unknown (DatabaseType.Null
 property groups can have heterogeneous result types. Full typing and empty-input rules are in
 the [language design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#aggregates-and-grouping-1147).
 
-The existing 100,000-binding bound caps hash-group and DISTINCT cardinality; grouping and LIMIT
-never bypass matching's bounds. COLLECT_LIST additionally checks depth 64, 65,536 total values
+Hash-group keys, aggregate state and DISTINCT sets consume retained-memory budget. Streaming
+aggregation does not retain its complete input; an unordered LIMIT may stop upstream read work (D4). COLLECT_LIST additionally checks depth 64, 65,536 total values
 and 16,777,216 encoded bytes while appending. Its wire result requires graph.composite-values;
 no new capability is added. Negotiated value tag 7 preserves Decimal scale without changing
 the shared sortable scalar codec. Numeric and collection overflow uses COHDBG013
@@ -980,12 +1039,16 @@ named parameters; invalid dynamic graph counts are COHDBG013 before reads or wri
 non-finite and unsupported CLR inputs are COHDBG003 during binding.
 EXPLAIN maps SortPage and SortKey records explicitly and never executes the stage.
 
-The executor materializes all matches and applies every mutation before projecting. The common
-row/path tail eliminates duplicates, caches each sort key once, sorts, offsets and limits before
-converting entity/path columns to GraphPath results. Paging never reduces the mutation set or
-the 100,000-match / 1,000,000-candidate bounds: LIMIT 1 over the cap remains COHDBG004 (owner
-default). The cap test uses 317 nodes in a cross-product; the performance case orders 10,000
-bindings and checks the first ten rows. Each map key, including maps nested inside lists or
+Read execution streams bindings into projection and aggregates. Without ORDER BY, OFFSET/LIMIT
+can stop upstream expansion, including LIMIT 0 before its first move (D4). DISTINCT is evaluated
+before paging. ORDER BY consumes every required input, caches each key once, and retains a bounded
+heap of OFFSET + LIMIT rows when the end is finite, with source ordinals preserving stable ties.
+WITH applies its WHERE after ordering/paging as before. All final rows and paths remain materialized
+until statement completion; this is internal streaming, with unchanged wire result ownership.
+Mutation target tables and writes complete before final paging. The former 100,000-result/group/
+DISTINCT guard is replaced by retained-memory accounting; affordable complete results may exceed it.
+The 317-by-317 scalar-result test checks all 100,489 rows under the unchanged 64 MiB default.
+Each map key, including maps nested inside lists or
 maps, gets canonical ordinal key/value arrays during key materialization. Map comparisons use
 those arrays without re-sorting or allocating.
 Mixed numeric comparisons cross-multiply fixed 192-bit limbs (the maximum product is 162 bits)
@@ -1236,7 +1299,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `COHDBG002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `COHDBG010` and `COHDBG011` |
 | `COHDBG003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
-| `COHDBG004` | Path materialization, candidate-expansion or 64-hop trail limit exceeded |
+| `COHDBG004` | Physical-work budget or 64-hop trail limit exceeded |
 | `COHDBG005` | Session/database binding mismatch |
 | `COHDBG006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `COHDBG007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
@@ -1252,6 +1315,8 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBG019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
+| `COHDBG020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
+| `COHDBG021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
 | `COHDBS003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |

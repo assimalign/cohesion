@@ -52,8 +52,8 @@ graph node, unlike Neo4j. Mixing Cypher lengths and ISO subpaths in one clause i
 The sum of upper bounds, or lower bounds for unbounded segments, times body hop counts is at most
 64 (GQL0005 for text, COHDBG001 for direct ASTs). Unbounded segments use implicit trails, a deliberate
 ISO deviation from the requirement for a mode/selector. An eligible 65th relationship after type
-and direction, bound-identity and own-property filtering raises COHDBG004; LIMIT and endpoint predicates do not hide it. The
-100,000-binding and 1,000,000-expansion budgets also apply. Results materialize before wire output.
+and direction, bound-identity and own-property filtering raises COHDBG004; endpoint predicates do not hide a visited 65th hop. An unordered read LIMIT may stop before visiting that branch (D4). The
+64 MiB default retained-memory and 1,000,000-unit physical-work budgets also apply. Results materialize before wire output.
 
 Variables inside quantifiers are lists in source order, including under RETURN * and WITH *.
 FOR/UNWIND preserve the singleton entity kind; list expressions and aggregates can consume them.
@@ -91,7 +91,7 @@ matches once in an either-direction hop. Safe relationship and endpoint constrai
 viable descent; deferred predicates retain their final checks. Physical work counts anchor
 candidates plus selected visible relationships and retains its 1,000,000 safety cap even for
 dead ends. COHDBG004 includes actual physical and viable totals when that cap is exceeded;
-100,000-binding and 64-hop limits remain. The separate #1533 budget redesign is deferred.
+The 64-hop trail limit remains. #1533 replaces the fixed binding count with a 64 MiB default retained-memory budget (COHDBG020); explicit engine ceilings and lower request limits are supported.
 Incident ranges are read incrementally with cancellation, merging type/direction streams in
 relationship identity order. Reaching the expansion cap closes every active parent cursor;
 only bounded index batches and one decoded head per selected range are prefetched (#1542).
@@ -181,7 +181,7 @@ WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT
 
 NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is COHDBG003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
 
-LET/FOR cannot rebind a name in scope (COHDBG003). Dropped or unaliased variables are unbound (COHDBG001). Standalone ordering/page stages remain COHDBL001, including after the new clauses. Immediate RETURN after DELETE remains COHDBL001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Every stage materializes eagerly under the shared 100,000-row bound. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
+LET/FOR cannot rebind a name in scope (COHDBG003). Dropped or unaliased variables are unbound (COHDBG001). Standalone ordering/page stages remain COHDBL001, including after the new clauses. Immediate RETURN after DELETE remains COHDBL001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 
@@ -239,8 +239,10 @@ or `$name`/`@name` parameters. Invalid literal forms are GQL0002 and overflow is
 Parameters must hold non-negative integral values in the signed 64-bit range; invalid
 graph values, including NULL and floating types, fail COHDBG013 before reads or writes. Non-finite and unsupported CLR values fail COHDBG003 during binding.
 
-Paging never reduces mutation inputs. Full materialization still applies: LIMIT 1 over
-more than 100,000 matches raises COHDBG004. Row and path requests share this stage.
+Paging never reduces mutation inputs. For reads, LIMIT without ORDER BY can stop upstream work,
+while ordered finite pages retain a top set bounded by OFFSET + LIMIT. Grouping consumes its
+input incrementally. Final rows and paths remain materialized within the statement memory budget;
+the former 100,000-result guard is removed. Row and path requests share this stage (#1533, D4).
 Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
 ## Core functions and CAST

@@ -18,6 +18,14 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// </remarks>
 public sealed class GraphDatabaseEngineOptions
 {
+    /// <summary>Gets or sets the retained execution-memory ceiling per statement; defaults to 64 MiB.</summary>
+    /// <remarks>Positive. A request may select a lower limit. Raising this ceiling explicitly opts into a larger budget.</remarks>
+    public long QueryMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>Gets or sets the physical-work ceiling per statement; defaults to 1,000,000 units.</summary>
+    /// <remarks>Positive. Candidates count after direction/type filtering; merge heads and dead ends count.</remarks>
+    public long QueryWorkBudget { get; set; } = 1_000_000;
+
     /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
     /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
@@ -183,6 +191,8 @@ public sealed class GraphDatabaseEngineOptions
     /// </remarks>
     internal GraphDatabaseEngineOptions Snapshot() => new()
     {
+        QueryMemoryBudget = QueryMemoryBudget,
+        QueryWorkBudget = QueryWorkBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,

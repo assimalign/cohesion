@@ -168,18 +168,28 @@ public sealed class GqlLinearCompositionTests
         await tx.RollbackAsync(CancellationToken.None);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: FOR fan-out shares the 100000 binding cap with MATCH")]
-    public async Task Execute_Expansion_ShouldFailAtSharedRowCapAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Composition: affordable FOR results may exceed the former 100000 binding cap (#1533)")]
+    public async Task Execute_Expansion_ShouldMaterializeWithinMemoryBudgetAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("linear", new());
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("FOR x IN $xs FOR y IN $xs RETURN x, y",
-            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() }, CancellationToken.None));
-        // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync("FOR x IN $xs FOR y IN $xs RETURN x, y",
+            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 317).ToArray() }, CancellationToken.None);
+        int count = 0;
+        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        {
+            Convert.ToInt64(row.GetValue(0)).ShouldBe(count / 317);
+            Convert.ToInt64(row.GetValue(1)).ShouldBe(count % 317);
+            count++;
+        }
+        // Every result is verified; no hidden truncation or default memory-ceiling increase.
+        count.ShouldBe(100489);
+        session.LastStatementMetrics!.Memory.PeakRetainedBytes.ShouldBeLessThanOrEqualTo(64L * 1024 * 1024);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Composition: EXPLAIN maps every stage and never executes writes")]

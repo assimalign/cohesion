@@ -257,6 +257,9 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
         ArgumentNullException.ThrowIfNull(options);
         string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
 
+        if (options.QueryMemoryBudget <= 0) { throw new ArgumentOutOfRangeException(nameof(options.QueryMemoryBudget), ErrorMessages.QueryBudgetOptionInvalid); }
+        if (options.QueryWorkBudget <= 0) { throw new ArgumentOutOfRangeException(nameof(options.QueryWorkBudget), ErrorMessages.QueryBudgetOptionInvalid); }
+
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));

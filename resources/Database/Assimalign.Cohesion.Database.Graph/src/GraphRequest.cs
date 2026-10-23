@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
@@ -31,6 +32,7 @@ public abstract class GraphRequest : DatabaseRequest
     private readonly bool _paths;
     private readonly GqlQueryStatement _statement;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly GraphQueryLimits? _limits;
 
     /// <summary>
     /// Initializes a graph request over a parsed GQL statement.
@@ -38,19 +40,25 @@ public abstract class GraphRequest : DatabaseRequest
     /// <param name="statement">The parsed statement.</param>
     /// <param name="parameters">The parameter values, or null when the statement binds none.</param>
     /// <param name="paths">Whether the request returns paths instead of rows.</param>
+    /// <param name="limits">Optional lower limits for this statement.</param>
     /// <exception cref="ArgumentNullException"><paramref name="statement"/> is null.</exception>
-    private protected GraphRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, bool paths = false)
+    private protected GraphRequest(GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters,
+        bool paths = false, GraphQueryLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(statement);
         _paths = paths;
         _statement = statement;
         _parameters = parameters;
+        _limits = limits;
     }
 
     /// <summary>
     /// Gets the parsed GQL statement.
     /// </summary>
     public GqlQueryStatement Statement => _statement;
+
+    /// <summary>Gets optional lower execution limits for this statement.</summary>
+    public GraphQueryLimits? Limits => _limits;
 
     /// <summary>Gets whether this request returns paths instead of rows.</summary>
     internal bool Paths => _paths;

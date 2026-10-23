@@ -201,10 +201,10 @@ public sealed class GqlOptionalMatchTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - MATCH: materialization and candidate budgets remain effective across clauses")]
-    [InlineData(317, "MATCH (a:N) MATCH (b:N) RETURN a", "100000 path matches")]
-    [InlineData(317, "MATCH (a:N) OPTIONAL MATCH (b:N) RETURN a", "100000 path matches")]
-    [InlineData(1001, "MATCH (a:N) OPTIONAL MATCH (b:N) WHERE FALSE RETURN a", "1000000 candidate expansions")]
-    public async Task Execute_AcrossClauseBounds_ShouldKeepLimitsAsync(int nodes, string source, string message)
+    [InlineData(317, "MATCH (a:N) MATCH (b:N) RETURN a", "retained execution-memory budget", "COHDBG020")]
+    [InlineData(317, "MATCH (a:N) OPTIONAL MATCH (b:N) RETURN a", "retained execution-memory budget", "COHDBG020")]
+    [InlineData(1001, "MATCH (a:N) OPTIONAL MATCH (b:N) WHERE FALSE RETURN a", "1000000 candidate expansions", "COHDBG004")]
+    public async Task Execute_AcrossClauseBounds_ShouldKeepLimitsAsync(int nodes, string source, string message, string code)
     {
         // Arrange
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -213,10 +213,13 @@ public sealed class GqlOptionalMatchTests
         await using var session = await database.CreateSessionAsync(cancellation.Token);
         await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N)", nodes)), cancellationToken: cancellation.Token);
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: cancellation.Token));
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(GraphQueryRequest.FromGql(source, null,
+            new() { MemoryBytes = code == "COHDBG020" ? 32768 : null }), cancellation.Token));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
         error.Message.ShouldContain(message, Case.Sensitive);
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - OPTIONAL MATCH: numeric equality, ordering and IN retain exact mixed numeric comparisons")]
@@ -256,7 +259,7 @@ public sealed class GqlOptionalMatchTests
         string source = "MATCH (a:N) " + later + " RETURN a, b";
         var plan = await PlanAsync(database, session, source);
         // Act
-        int expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
+        long expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
         // Assert
         expansions.ShouldBe(2002);
         plan.MatchClauses.SelectMany(clause => clause.Paths).Last().Anchor.NodeIndex.ShouldBe(1);
@@ -282,7 +285,7 @@ public sealed class GqlOptionalMatchTests
         string source = "MATCH (a:N) " + clause + " " + pattern + " RETURN a, b";
         var plan = await PlanAsync(database, session, source);
         // Act
-        int expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
+        long expansions = await CountCandidatesAsync(database, session, plan, cancellation.Token);
         var rows = await QueryAsync(session, source);
         // Assert
         expansions.ShouldBe(2002);
@@ -338,7 +341,7 @@ public sealed class GqlOptionalMatchTests
         string source = "MATCH ()-[r:" + type + "]->() " + later + " RETURN x.name, y.name";
         // Act
         var plan = await PlanAsync(database, session, source);
-        int expansions = await CountCandidatesAsync(database, session, plan, CancellationToken.None);
+        long expansions = await CountCandidatesAsync(database, session, plan, CancellationToken.None);
         var rows = await QueryAsync(session, source);
         // Assert
         var anchor = plan.MatchClauses.SelectMany(clause => clause.Paths).Last().Anchor;
@@ -350,14 +353,14 @@ public sealed class GqlOptionalMatchTests
 
     // Measure each input separately so a regression reports its full candidate count, even when
     // the statement's shared budget would stop execution before all 1,001 inputs were visited.
-    private static ValueTask<int> CountCandidatesAsync(GraphDatabase database, GraphDatabaseSession session, GraphPlan plan, CancellationToken token)
+    private static ValueTask<long> CountCandidatesAsync(GraphDatabase database, GraphDatabaseSession session, GraphPlan plan, CancellationToken token)
         => database.RunAsync(session, async operation =>
         {
             var paths = plan.MatchClauses.SelectMany(clause => clause.Paths).ToArray();
             var input = new List<Dictionary<string, object?>>();
             var first = new GraphPlanExecutor.ExpansionBudget();
             await GraphPlanExecutor.MatchAsync(database, operation, paths[0], new(StringComparer.Ordinal), input, first, null, token);
-            int consumed = first.Consumed;
+            long consumed = first.Consumed;
             foreach (var binding in input)
             {
                 var budget = new GraphPlanExecutor.ExpansionBudget();

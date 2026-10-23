@@ -311,8 +311,8 @@ public sealed class GqlOrderPagingTests
         rows.Select(row => row[0]).ShouldBe(["Alice", "Isolated", "Bob"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: LIMIT does not bypass the materialization cap")]
-    public async Task Execute_LimitOnOversizedMatch_ShouldKeepCapAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: LIMIT stops an oversized match before retaining its fan-out (#1533, D4)")]
+    public async Task Execute_LimitOnOversizedMatch_ShouldStopUpstreamAsync()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -323,11 +323,12 @@ public sealed class GqlOrderPagingTests
         await session.ExecuteAsync("INSERT " + string.Join(",", Enumerable.Repeat("(:N)", 317)), cancellationToken: timeout.Token);
         var watch = Stopwatch.StartNew();
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(async () =>
-            await session.ExecuteAsync("MATCH (a:N), (b:N) RETURN a LIMIT 1", cancellationToken: timeout.Token));
+        var rows = await RowsAsync(session, "MATCH (a:N), (b:N) RETURN a LIMIT 1");
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG004");
-        _output.WriteLine($"100,000-match cap: {watch.Elapsed.TotalMilliseconds:F1} ms");
+        rows.ShouldHaveSingleItem();
+        session.LastStatementMetrics!.Physical.ShouldBe(2);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        _output.WriteLine($"LIMIT 1 over a 100,489-match fan-out: {watch.Elapsed.TotalMilliseconds:F1} ms");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Ordering and paging: ten thousand rows sort before LIMIT ten")]

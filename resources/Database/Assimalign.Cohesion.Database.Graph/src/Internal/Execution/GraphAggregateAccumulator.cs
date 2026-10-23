@@ -32,10 +32,12 @@ internal sealed class GraphAggregateAccumulator
     private long _listBytes = 5;
     private int _listValues = 1;
     private int _sumScale;
+    private readonly GraphMemoryOwner? _memory;
 
-    internal GraphAggregateAccumulator(GqlAggregateExpression expression)
+    internal GraphAggregateAccumulator(GqlAggregateExpression expression, GraphMemoryOwner? memory = null)
     {
         _expression = expression;
+        _memory = memory;
         _distinct = expression.Distinct ? new HashSet<object?>(GraphValueComparer.Instance) : null;
         _list = expression.Function == GqlAggregateFunction.CollectList ? [] : null;
     }
@@ -43,6 +45,7 @@ internal sealed class GraphAggregateAccumulator
     internal void Add(object? value, CancellationToken token)
     {
         if (value is null || _distinct is not null && !_distinct.Add(value)) { return; }
+        if (_distinct is not null) { _memory?.Add(64); _memory?.RetainValue(value, token); }
         try
         {
             _count = checked(_count + 1);
@@ -56,7 +59,13 @@ internal sealed class GraphAggregateAccumulator
                     var ordered = GraphOrderComparer.Prepare(value, token);
                     int comparison = _extreme is null ? 0 : GraphOrderComparer.Compare(ordered, _orderedExtreme, token);
                     if (_extreme is null || (_expression.Function == GqlAggregateFunction.Min ? comparison < 0 : comparison > 0))
-                    { _extreme = value; _orderedExtreme = ordered; }
+                    {
+                        _memory?.ReleaseValue(_extreme);
+                        _memory?.ReleaseValue(_orderedExtreme);
+                        _memory?.RetainValue(value, token);
+                        _memory?.RetainValue(ordered, token);
+                        _extreme = value; _orderedExtreme = ordered;
+                    }
                     break;
                 default:
                     AddNumber(value);
@@ -177,6 +186,8 @@ internal sealed class GraphAggregateAccumulator
             else if (item.Value is IReadOnlyDictionary<string, object?> map)
             { foreach (var child in map.Values) { pending.Push((child, item.Depth + 1)); } }
         }
+        _memory?.Add(32);
+        _memory?.RetainValue(value, token);
         _list!.Add(value);
     }
 

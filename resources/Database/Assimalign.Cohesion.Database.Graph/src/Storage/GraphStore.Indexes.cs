@@ -117,26 +117,32 @@ public sealed partial class GraphStore
     public async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string propertyKey, object? value,
         TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
     {
-        // Checked here, not only per definition: a store without index definitions never reads one.
+        var result = new List<StoredGraphNode>();
+        await foreach (var node in StreamIndexAsync(label, propertyKey, value, snapshot, cancellationToken).ConfigureAwait(false))
+        { result.Add(node); }
+        return result;
+    }
+
+    internal async IAsyncEnumerable<StoredGraphNode> StreamIndexAsync(string label, string propertyKey, object? value,
+        TransactionSnapshot snapshot, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken,
+        Action? visit = null, Action<long>? reserve = null)
+    {
         ArgumentNullException.ThrowIfNull(snapshot);
         var definition = Definition(label, propertyKey, snapshot)
             ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
-        // Every write and backfill refuses a value whose key does not fit, so no entry, and no
-        // indexed node, holds one: the search matches nothing rather than failing the query.
-        if (!GraphRecordCodec.TryKey(value, out var key)) { return []; }
-        var result = new List<StoredGraphNode>();
+        if (!GraphRecordCodec.TryKey(value, out var key)) { yield break; }
+        // Exact-key postings contain the scalar key and one identity suffix. Bound a full 64-entry cursor batch.
+        reserve?.Invoke(4096L + 64L * (key.Length + 72));
         await using var cursor = ResolveIndex(definition.Id).OpenCursor(snapshot,
             new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true), cancellationToken: cancellationToken);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {
+            visit?.Invoke();
             if (ReadAt(cursor.CurrentEntryReference, snapshot)?.Record.Node is { } node
                 && node.Labels.Contains(label, StringComparer.Ordinal) && node.Properties.TryGetValue(propertyKey, out var actual)
                 && GraphRecordCodec.ScalarEquals(actual, value) && cursor.CurrentKey.Equals(Composite(key, node.Id)))
-            {
-                result.Add(node);
-            }
+            { yield return node; }
         }
-        return result;
     }
 
     /// <summary>Scrubs unproven index writers after coordinator record recovery and before checkpoint.</summary>
