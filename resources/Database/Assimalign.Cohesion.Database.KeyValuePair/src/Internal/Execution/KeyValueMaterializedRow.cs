@@ -28,7 +28,7 @@ internal sealed class KeyValueMaterializedRow : DatabaseRow
     {
         null => ReadOnlyMemory<byte>.Empty,
         byte[] bytes => bytes,
-        _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValueMaterializedRowGetBytesDatabase, ordinal)),
+        _ => throw DatabaseException.CreateKeyValuePairFailure("CK02001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValueMaterializedRowGetBytesDatabase, ordinal)),
     };
 
     /// <inheritdoc />
@@ -55,5 +55,5 @@ internal sealed class KeyValueMaterializedRow : DatabaseRow
     public override object? GetValue(int ordinal) => _values[ordinal];
 
     private object RequireValue(int ordinal)
-        => _values[ordinal] ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
+        => _values[ordinal] ?? throw DatabaseException.CreateKeyValuePairFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
 }

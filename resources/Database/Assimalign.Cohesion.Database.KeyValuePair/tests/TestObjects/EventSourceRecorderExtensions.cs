@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Testing;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
-internal static class EventSourceRecorderExtensions
+internal static partial class EventSourceRecorderExtensions
 {
     extension(EventSourceRecorder recorder)
     {

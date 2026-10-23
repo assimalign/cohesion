@@ -204,14 +204,14 @@ public sealed class KeyValueCatalog
                         break;
 
                     default:
-                        throw new KeyValueCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueCatalogLoadKeyValueCatalog, kind));
+                        throw new KeyValueCatalogException("CV06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.KeyValueCatalogLoadKeyValueCatalog, kind));
                 }
             }
             catch (Exception error) when (error is KeyValueCatalogException or DatabaseTypeException
                 or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException)
             {
                 var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
-                throw new KeyValueCatalogException(corruption.Message, corruption);
+                throw new KeyValueCatalogException("CV06105", corruption.Message, corruption);
             }
         }
     }

@@ -133,7 +133,7 @@ internal sealed class KeyValueOperationExecutor
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
             KeyValuePutRequest put => await ExecutePutAsync(put, context, cancellationToken).ConfigureAwait(false),
             KeyValueDeleteRequest delete => await ExecuteDeleteAsync(delete, context, cancellationToken).ConfigureAwait(false),
-            _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OperationExecutorExecuteAsyncDatabase, request.GetType().Name)),
+            _ => throw DatabaseException.CreateKeyValuePairFailure("CV05002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OperationExecutorExecuteAsyncDatabase, request.GetType().Name)),
         };
     }
 

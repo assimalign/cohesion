@@ -120,7 +120,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
         _database.ThrowIfOffline();
         if (isolationLevel == IsolationLevel.Serializable)
         {
-            throw new DatabaseException(
+            throw DatabaseException.CreateKeyValuePairFailure("CK04001",
                 ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 

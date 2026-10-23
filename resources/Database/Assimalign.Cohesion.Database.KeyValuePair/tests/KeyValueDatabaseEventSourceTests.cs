@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 [Collection(nameof(KeyValueDatabaseEventSourceCollection))]
 public sealed class KeyValueDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - KeyValueDatabaseEventSource: Should be named for its assembly")]
     public void GetName_KeyValueDatabaseEventSource_ShouldEqualAssemblyName()
@@ -99,7 +99,7 @@ public sealed class KeyValueDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);

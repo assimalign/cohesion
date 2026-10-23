@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Internal;
 using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
@@ -473,7 +474,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
             ThrowIfDisposed();
             if (_databases.ContainsKey(name))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineCreateDatabaseFilesDatabase, name));
+                throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineCreateDatabaseFilesDatabase, name));
             }
 
             // The data set claims the database: the strategy refuses it when the database exists in
@@ -573,7 +574,7 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
 
             if (!_strategy.StorageExists(name, catalog: false))
             {
-                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineOpenDatabaseFailure, name));
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineOpenDatabaseFailure, name));
             }
 
             string catalogLabel = KeyValueStorageStrategy.GetLabel(name, catalog: true);

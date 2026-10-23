@@ -25,6 +25,13 @@ public sealed class KeyValueCatalogDecodeLocationTests
         corruption.PageId.ShouldBe(location.PageId);
         corruption.SlotIndex.ShouldBe(location.SlotIndex);
         corruption.InnerException.ShouldNotBeNull();
+        failure.Diagnostics.Count.ShouldBe(1);
+        var diagnostic = failure.Diagnostics[0];
+        diagnostic.Code.ShouldBe("CV06105");
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
         failure.Message.ShouldContain($"page {(long)location.PageId}", Case.Sensitive);
         failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
 

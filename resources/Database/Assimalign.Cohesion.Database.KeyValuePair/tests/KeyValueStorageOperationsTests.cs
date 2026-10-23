@@ -27,7 +27,7 @@ using static KeyValueTestHarness;
 /// </summary>
 public sealed class KeyValueStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
@@ -392,7 +392,7 @@ public sealed class KeyValueStorageOperationsTests
         // counting the checkpoints that truncated it.
         var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average. The measured values are in the messages, so a failure on
@@ -441,7 +441,7 @@ public sealed class KeyValueStorageOperationsTests
         // The engine handed the coordinator its first retry delay: the retry is due within it.
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
-        var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(Timeout);
+        var put = await database.PutAsync(other, Bytes("hot"), Bytes("next")).AsTask().WaitAsync(_timeout);
         watch.Stop();
 
         // Assert

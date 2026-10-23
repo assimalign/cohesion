@@ -129,3 +129,10 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Model failure producer completion
+
+Existing engine refusals now retain their [producer identities](COMMANDS.md#model-failure-producer-completion)
+in Diagnostics. ExecutionFailure still carries the same category and string payload, formatted
+as `CODE: message` once; an engine-carried identity takes precedence over `CV04019`. No
+Diagnostics frame, capability, message type or protocol version is added.

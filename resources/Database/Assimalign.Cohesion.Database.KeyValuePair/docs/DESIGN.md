@@ -1611,3 +1611,55 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+The file-system refusal for an existing database uses the generated `FileStorageAlreadyExists` resource and current-culture formatting. It preserves the previous text, exception type and diagnostics. Assembly-local Engine resource bindings live under `src/Internal/` while retaining the shared module's marked namespace exception. Private field and constant names change without changing their values or storage behavior.
+
+## Direct catalog diagnostic carriers
+
+`KeyValueCatalogException` retains its existing `DatabaseException` ancestry and inherited non-null
+`Diagnostics` collection. Catalog producers attach `CV06105` for malformed catalog data.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+An orphan directory without its data file refuses creation with CK06004 and the unchanged remedy.
+A directly opened missing physical data/catalog set carries CK06005. In-memory and file-backed
+strategies share the same condition identities. The orphan-directory format text is resourced
+through this assembly's existing Engine binding; no new public helper or reference is required.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CV06107` | Unsupported entry-space format; opening refuses it with the existing recreate/restore remedy |
+| `CV07001` | Session belongs to a different database |
+| `CV05001` | A completed put returned no outcome row |
+| `CV05002` | No executor exists for the request type |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04003` | The transaction has no active applying statement bracket |
+| `CK02001` | Result field does not support the requested byte accessor |
+| `CK02002` | Required result field is NULL |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+The existing wire formatter prefers an engine diagnostic over the `CV04019` fallback and
+emits its prefix once. The entry-space format remains unchanged; the refusal only gains its
+own structured identity.
+Handshake refusal descriptions resolve through resources with their existing text and numeric
+protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.

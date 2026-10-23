@@ -257,7 +257,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             ? ErrorMessages.ThrowIfFormatIsNotCurrentDatabase
             : ErrorMessages.ThrowIfFormatIsNotCurrentDatabase2;
 
-        throw new DatabaseException(
+        throw DatabaseException.CreateKeyValuePairFailure("CV06107",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfFormatIsNotCurrentDatabase3, name, version, current, remedy));
     }
 
@@ -575,7 +575,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             }
         }
 
-        throw new DatabaseException(ErrorMessages.KeyValueDatabasePutAsyncDatabase);
+        throw DatabaseException.CreateKeyValuePairFailure("CV05001", ErrorMessages.KeyValueDatabasePutAsyncDatabase);
     }
 
     /// <summary>
@@ -661,7 +661,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
 
         if (!ReferenceEquals(session.Database, this))
         {
-            throw new DatabaseException(ErrorMessages.DatabaseRequireOwnSessionDatabase);
+            throw DatabaseException.CreateKeyValuePairFailure("CV07001", ErrorMessages.DatabaseRequireOwnSessionDatabase);
         }
 
         return session;
@@ -745,7 +745,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
             return transaction;
         }
 
-        throw new DatabaseException(
+        throw DatabaseException.CreateKeyValuePairFailure("CK04003",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence));
     }
 }

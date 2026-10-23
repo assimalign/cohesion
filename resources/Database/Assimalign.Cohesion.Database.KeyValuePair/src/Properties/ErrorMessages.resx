@@ -96,5 +96,11 @@
   <data name="DatabaseNameTrailingDot" xml:space="preserve"><value>The name ends with a dot.</value></data>
   <data name="DatabaseNameConsecutiveDots" xml:space="preserve"><value>The name holds two dots in a row.</value></data>
   <data name="DatabaseNameDeviceReserved" xml:space="preserve"><value>'{0}' is a Windows device name.</value></data>
+  <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
+  <data name="StartupExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
 </root>

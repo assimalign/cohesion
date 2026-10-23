@@ -175,3 +175,22 @@ is `KeyValueKeySpacesRequest`, executed through the existing session interface.
   gated on the model roadmap.
 - No database-management verbs — the wire carries none by area principle
   (code-first provisioning, DESIGN §2.4).
+
+## Model failure producer completion
+
+The engine adds structured identities to existing runtime refusals; parser codes and command
+semantics are unchanged.
+
+| Code | Refusal |
+| --- | --- |
+| `CV06107` | Unsupported entry-space format on open; existing remedy preserved |
+| `CV07001` | Session belongs to another database |
+| `CV05001` | A completed put supplies no outcome row |
+| `CV05002` | Request type has no executor |
+| `CK04001` | Unsupported isolation |
+| `CK04003` | No active applying statement bracket |
+| `CK02001` | Result field has the wrong value type for byte access |
+| `CK02002` | Required result field is NULL |
+
+Messages remain code-free in-process and the wire includes the carrier code once. These codes
+add no SQLSTATE mapping and do not change the entry-space format, protocol layout or version.

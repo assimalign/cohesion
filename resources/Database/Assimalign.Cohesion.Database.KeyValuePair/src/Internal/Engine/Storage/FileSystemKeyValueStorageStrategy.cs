@@ -1,4 +1,5 @@
 using System.IO;
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
@@ -40,9 +41,11 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
         // drop deletes; a create takes over neither, so a stale catalog set never meets new data.
         if (!catalog && Directory.Exists(directory))
         {
-            throw new DatabaseException(File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data)
-                ? $"Storage for database '{databaseName}' already exists."
-                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory));
+            bool exists = File.Exists(DatabaseFileNames.GetFiles(directory, GetFileSet(catalog)).Data);
+            string message = exists
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FileStorageAlreadyExists, databaseName)
+                : DatabaseFileNames.GetLeftoverRefusal(databaseName, directory);
+            throw DatabaseException.CreateEngineFailure(exists ? "CK03001" : "CK06004", message);
         }
 
         Directory.CreateDirectory(directory);
@@ -75,7 +78,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
 
         if (!File.Exists(files.Data))
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
+            throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase, GetLabel(databaseName, catalog)));
         }
 
         var catalogFiles = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog: true));
