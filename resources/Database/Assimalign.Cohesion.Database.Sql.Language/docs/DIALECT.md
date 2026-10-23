@@ -3582,3 +3582,5 @@ returns the existing eight-column plan description. `actual_rows` counts candida
 residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and
 probe/heuristic qualifications appear in access and JoinStep nodes. Plain EXPLAIN never runs its
 wrapped statement and has NULL actual counts. Unmeasured counts remain NULL in either form.
+Repeated correlated invocations accumulate on the child nodes. A parent's candidate count
+excludes descendant work, while statement-wide physical-work totals include every invocation.

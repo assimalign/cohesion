@@ -351,4 +351,6 @@ The positive StatementMemoryBudget engine option defaults to 64 MiB and limits c
 hash builds per statement; COHSQLE067 (SQLSTATE 53200) refuses excess memory, without spill.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
 executes to report candidate work in the same eight-column description; unavailable counts remain
-NULL. No standalone ANALYZE, persisted statistics, format change or new wire message is added.
+NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
+statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
+format change or new wire message is added.

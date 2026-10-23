@@ -7483,6 +7483,27 @@ Repeated probes/child executions accumulate, and unmeasured nodes remain NULL. A
 are absent during normal execution. Join-only telemetry and live-memory accounting reuse the
 existing metrics path slot; ordinary statement/context instance layouts do not grow.
 
+Each analyzed invocation has a nested frame. A select/join node subtracts its direct children's
+inclusive physical work before accumulating its own candidates; wrapper frames propagate work
+even when they have no reported count. Correlated invocations accumulate on the child node without
+inflating the outer node. Frame unwinding runs in finally on success, cancellation and failure.
+Statement-wide record/pair totals still include all invocations. The extra state and frames exist
+only during analysis, using the existing join-telemetry reference slot.
+PostgreSQL postgres/postgres/src/backend/executor/instrument.c:196-217 likewise counts tuples
+on a node's own instrumentation and accumulates repeated cycles. Cohesion reports cumulative
+candidate work rather than PostgreSQL's output-row average; no code was copied.
+
+On Windows ARM64 .NET 10.0.13, the two-row correlated select and join fixtures each add
+368 B per analyzed query (analysis state and invocation frames); ordinary query allocations
+are unchanged. Twelve sequential batches of fifty executions, after one warmup, measured
+median ExecuteAsync durations of 40056 -> 37722 ns for select and 76431 -> 67770 ns for join;
+9/12 and 10/12 after samples respectively were at or below the old median. Tiering/background
+GC were disabled. Description enumeration and exact work-count verification were outside the
+timed/allocation interval. These shared-host durations are descriptive, not a speed claim.
+Raw samples, harness and hashes are retained under Temp/Wave11AnalysisOverheadProbe and
+Temp/Wave11AnalysisFixCostProbe. Both fixtures verify the corrected outer count and unchanged
+child work; ordinary-query output digests and allocations also match before/after.
+
 Reference consultation, no copied code (clones under C:/Source/repos):
 PostgreSQL postgres/postgres/src/backend/utils/errcodes.txt:119,409 defines 0A000
 (feature_not_supported) and 53200 (out_of_memory), respectively.

@@ -82,14 +82,22 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteAnalyzedAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        long before = plan is SqlJoinPlan ? statement.Metrics.JoinCandidatePairs : statement.Metrics.RecordsExamined;
-        var result = await ExecuteCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false);
-        if (plan is SqlSelectPlan or SqlJoinPlan)
+        var metrics = statement.Metrics;
+        var frame = metrics.BeginAnalysisFrame();
+        try
         {
-            statement.Metrics.Analysis(plan)!.Candidates +=
-                (plan is SqlJoinPlan ? statement.Metrics.JoinCandidatePairs : statement.Metrics.RecordsExamined) - before;
+            var result = await ExecuteCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+            if (plan is SqlSelectPlan)
+            {
+                metrics.Analysis(plan)!.Candidates += metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords;
+            }
+            else if (plan is SqlJoinPlan)
+            {
+                metrics.Analysis(plan)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs;
+            }
+            return result;
         }
-        return result;
+        finally { metrics.EndAnalysisFrame(frame); }
     }
 
     private async Task<DatabaseResult> ExecuteCoreAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

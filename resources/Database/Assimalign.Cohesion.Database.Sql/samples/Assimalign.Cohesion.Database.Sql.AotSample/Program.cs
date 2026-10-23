@@ -364,6 +364,20 @@ internal static class Program
         Check("in process: plain hash EXPLAIN has no actual counts", hashPlan.Any(row => Equals(row[2], "HashJoin")) && hashPlan.All(row => row[7] is null), true);
         var hashAnalysis = await RowsAsync(session, "EXPLAIN ANALYZE " + hashQuery);
         Check("in process: hash analysis actual candidates", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L)), true);
+        foreach (string table in new[] { "analysis_outer", "analysis_outer_join", "analysis_inner", "analysis_inner_join" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE {table}(id INT)");
+            await session.ExecuteAsync($"INSERT INTO {table} VALUES (1),(2)");
+        }
+        foreach (bool joins in new[] { false, true })
+        {
+            string nestedQuery = joins
+                ? "SELECT o.id,(SELECT COUNT(*) FROM analysis_inner i JOIN analysis_inner_join r ON i.id=r.id WHERE i.id<=o.id) AS n FROM analysis_outer o JOIN analysis_outer_join p ON o.id=p.id ORDER BY o.id"
+                : "SELECT o.id,(SELECT COUNT(*) FROM analysis_inner i WHERE i.id<=o.id) AS n FROM analysis_outer o ORDER BY o.id";
+            var nestedAnalysis = await RowsAsync(session, "EXPLAIN ANALYZE " + nestedQuery);
+            Check($"in process: correlated {(joins ? "join" : "select")} analysis excludes child candidates",
+                nestedAnalysis.Any(row => Equals(row[1], 0) && Equals(row[2], joins ? "HashJoin" : "Select") && Equals(row[7], 2L)), true);
+        }
         await session.ExecuteAsync("CREATE TABLE binary_keys (key_bytes VARBINARY(4))");
         await session.ExecuteAsync("CREATE INDEX by_bytes ON binary_keys (key_bytes)");
         await using (var description = (DatabaseResultSet)await session.ExecuteAsync(

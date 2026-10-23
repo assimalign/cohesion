@@ -120,19 +120,37 @@ internal sealed class SqlStatementMetrics
     internal void BeginAnalysis()
     {
         if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
-        work.Operators = new(ReferenceEqualityComparer.Instance);
+        work.Operators = new();
     }
 
     internal SqlOperatorWork? Analysis(object operation)
     {
-        if ((_accessPath as JoinWork)?.Operators is not { } operators) { return null; }
+        if ((_accessPath as JoinWork)?.Operators?.Work is not { } operators) { return null; }
         if (!operators.TryGetValue(operation, out var work)) { work = new(); operators.Add(operation, work); }
         return work;
     }
 
     internal long? ActualCandidates(object operation)
-        => (_accessPath as JoinWork)?.Operators is { } operators && operators.TryGetValue(operation, out var work)
+        => (_accessPath as JoinWork)?.Operators?.Work is { } operators && operators.TryGetValue(operation, out var work)
             ? work.Candidates : null;
+
+    internal SqlAnalysisFrame BeginAnalysisFrame()
+    {
+        var state = ((JoinWork)_accessPath).Operators!;
+        return state.Active = new(state.Active, RecordsExamined, JoinCandidatePairs);
+    }
+
+    internal void EndAnalysisFrame(SqlAnalysisFrame frame)
+    {
+        ((JoinWork)_accessPath).Operators!.Active = frame.Parent;
+        if (frame.Parent is { } parent)
+        {
+            // Propagate inclusive work once to the immediate parent. Each node
+            // subtracts its direct children's inclusive work from its own total.
+            parent.ChildRecords += RecordsExamined - frame.StartRecords;
+            parent.ChildPairs += JoinCandidatePairs - frame.StartPairs;
+        }
+    }
 
     internal void ReserveHashMemory(long bytes, long budget)
     {
@@ -160,7 +178,13 @@ internal sealed class SqlStatementMetrics
         internal long CandidatePairs;
         internal long MemoryBytes;
         internal long PeakMemoryBytes;
-        internal Dictionary<object, SqlOperatorWork>? Operators;
+        internal AnalysisState? Operators;
+    }
+
+    private sealed class AnalysisState
+    {
+        internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
+        internal SqlAnalysisFrame? Active;
     }
 
     /// <summary>
