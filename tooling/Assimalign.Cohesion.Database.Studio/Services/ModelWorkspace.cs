@@ -202,7 +202,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
                     await Engine.OpenDatabaseAsync(name, token).ConfigureAwait(false);
                 }
 
-                await OpenWireAsync(name, WireEndPoint ?? throw new InvalidOperationException("No wire endpoint."), token).ConfigureAwait(false);
+                await OpenWireAsync(name, WireEndPoint ?? throw new InvalidOperationException(ErrorMessages.WireEndpointMissing), token).ConfigureAwait(false);
             }
 
             CurrentDatabase = name;
@@ -230,7 +230,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
             }
 
             DatabaseTransaction transaction = RequireSession().CurrentTransaction
-                ?? throw new InvalidOperationException("No transaction is active.");
+                ?? throw new InvalidOperationException(ErrorMessages.TransactionMissing);
             await transaction.CommitAsync(token).ConfigureAwait(false);
         }, cancellationToken);
 
@@ -244,15 +244,15 @@ internal abstract class ModelWorkspace : IAsyncDisposable
             }
 
             DatabaseTransaction transaction = RequireSession().CurrentTransaction
-                ?? throw new InvalidOperationException("No transaction is active.");
+                ?? throw new InvalidOperationException(ErrorMessages.TransactionMissing);
             await transaction.RollbackAsync(token).ConfigureAwait(false);
         }, cancellationToken);
 
     protected virtual Task BeginWireTransactionAsync(CancellationToken cancellationToken)
-        => throw new NotSupportedException($"{Model.DisplayName} has no wire transaction verbs; explicit transactions are embedded-only.");
+        => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.WireTransactionsUnsupported, Model.DisplayName));
 
     protected virtual Task EndWireTransactionAsync(bool commit, CancellationToken cancellationToken)
-        => throw new NotSupportedException($"{Model.DisplayName} has no wire transaction verbs; explicit transactions are embedded-only.");
+        => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.WireTransactionsUnsupported, Model.DisplayName));
 
     /// <summary>
     /// Opens <paramref name="database"/> on the typed engine and keeps a session on it as
@@ -271,7 +271,7 @@ internal abstract class ModelWorkspace : IAsyncDisposable
     {
         if (!CanManageDatabases)
         {
-            throw new NotSupportedException("An external server exposes no catalog/admin verbs for this model over the wire.");
+            throw new NotSupportedException(ErrorMessages.ExternalCatalogUnsupported);
         }
 
         return RequireDatabase();
@@ -282,16 +282,16 @@ internal abstract class ModelWorkspace : IAsyncDisposable
     protected abstract ValueTask CloseWireAsync();
 
     protected DatabaseSession RequireSession()
-        => Session ?? throw new InvalidOperationException("Select a database first.");
+        => Session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected string RequireDatabase()
-        => CurrentDatabase ?? throw new InvalidOperationException("Select a database first.");
+        => CurrentDatabase ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     private void RequireManagement()
     {
         if (!CanManageDatabases)
         {
-            throw new NotSupportedException("Database create/drop/list is engine-side only; the external wire exposes no database-management verbs.");
+            throw new NotSupportedException(ErrorMessages.ExternalManagementUnsupported);
         }
     }
 

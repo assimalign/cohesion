@@ -66,7 +66,7 @@ internal sealed class BlobWorkspace : ModelWorkspace
     public override BlobDatabaseSession? Session => _session;
 
     // The session runs its own container operations (option B, concrete-types plan §6.6).
-    private BlobDatabaseSession BlobSession => _session ?? throw new InvalidOperationException("Select a database first.");
+    private BlobDatabaseSession BlobSession => _session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {

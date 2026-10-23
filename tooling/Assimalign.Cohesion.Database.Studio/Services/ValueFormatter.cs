@@ -193,7 +193,7 @@ internal static class Bytes
 
         if (compact.Length % 2 != 0)
         {
-            throw new FormatException("Hex input must contain an even number of digits.");
+            throw new FormatException(ErrorMessages.HexLengthInvalid);
         }
 
         return Convert.FromHexString(compact);

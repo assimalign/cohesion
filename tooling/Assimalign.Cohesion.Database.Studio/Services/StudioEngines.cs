@@ -186,7 +186,7 @@ internal sealed class StudioEngines : IAsyncDisposable
     {
         if (!model.HasWireServer)
         {
-            throw new NotSupportedException($"{model.DisplayName} has no wire server.");
+            throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.WireServerUnsupported, model.DisplayName));
         }
 
         if (GetServerEndPoint(model) is { } existing)
@@ -220,7 +220,7 @@ internal sealed class StudioEngines : IAsyncDisposable
             await Task.Delay(25, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException($"The {model.DisplayName} loopback listener did not bind within 15 seconds.");
+        throw new TimeoutException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LoopbackBindTimeout, model.DisplayName));
     }
 
     public async Task StopServerAsync(StudioModel model)

@@ -135,3 +135,17 @@ The Documents editor remains **embedded only**. Its smoke run separately exercis
   start/end bounds".
 - No KEYSPACES verb on `KeyValueConnection`; no container verbs on `BlobConnection`.
 - OQL `COUNT(*)` is typed `Decimal`, while SQL `COUNT(*)` is `Int64`.
+
+## Repository conventions audit
+
+Workspace refusals and smoke assertion templates use the build-generated internal ErrorMessages
+accessor from Properties/ErrorMessages.resx. Existing exception types, messages, model diagnostics
+and smoke pass/fail decisions are preserved. Extension containers are partial. The documented
+throw-away layout, documentation and MAUI dependency exceptions still apply; this tool is excluded
+from the repository debugger-proxy rule. No runtime Database error identity is added for a Studio
+assertion.
+
+The Studio project generates that accessor before WinUI's early C# XamlPreCompile pass. WinUI
+otherwise reaches that pass before ordinary resource generation, leaving the internal accessor
+unavailable. The local target runs PrepareResourceNames and ResGen directly, preserving the
+resource text and avoiding a cycle through PrepareResources.
