@@ -97,7 +97,7 @@ public sealed class DatabaseCommandClient : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(bearerToken);
         if (controlPlaneAddress.Scheme != Uri.UriSchemeHttp && controlPlaneAddress.Scheme != Uri.UriSchemeHttps)
         {
-            throw new ArgumentException("The database control-plane address must use HTTP or HTTPS.", nameof(controlPlaneAddress));
+            throw new ArgumentException(ErrorMessages.ClientValidateArgumentsArgument, nameof(controlPlaneAddress));
         }
     }
 

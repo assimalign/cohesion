@@ -22,7 +22,7 @@ public sealed class TransactionCommitCancellationTests
     {
         // Arrange
         var log = new TransactionCommitLog();
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var versions = VersionStore.CreateInMemory();
         await using var manager = TransactionManager.Create(log, locks, versions);
         var context = await manager.BeginAsync();
@@ -60,7 +60,7 @@ public sealed class TransactionCommitCancellationTests
         // Arrange
         using var canceled = new CancellationTokenSource();
         var log = new TransactionCommitLog { DuringCommit = canceled.Cancel };
-        await using var manager = TransactionManager.Create(log, LockManager.Create(), VersionStore.CreateInMemory());
+        await using var manager = TransactionManager.Create(log, new LockManager(), VersionStore.CreateInMemory());
         var context = await manager.BeginAsync();
         if (duringApply) { manager.EnterApply(context); }
 
@@ -94,7 +94,7 @@ public sealed class TransactionCommitCancellationTests
             DuringCommit = canceled.Cancel,
             Failure = unconfirmed ? new TransactionCommitUnconfirmedException("Injected unconfirmed commit.", failure) : failure,
         };
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         await using var manager = TransactionManager.Create(log, locks, VersionStore.CreateInMemory());
         var context = await manager.BeginAsync();
         var row = LockResource.Entry(1, 1);
@@ -138,7 +138,7 @@ public sealed class TransactionCommitCancellationTests
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var log = new TransactionCommitLog { Entered = entered, Release = release };
-            var locks = LockManager.Create();
+            var locks = new LockManager();
             await using var manager = TransactionManager.Create(log, locks, VersionStore.CreateInMemory());
             var context = await manager.BeginAsync();
             await locks.AcquireAsync(context.Sequence, row, LockMode.Exclusive);

@@ -114,7 +114,7 @@ public sealed class OqlProjectionParserTests
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
     }
 

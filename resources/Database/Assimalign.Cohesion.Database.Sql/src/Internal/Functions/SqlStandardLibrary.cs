@@ -188,7 +188,7 @@ internal static class SqlStandardLibrary
     /// <summary>
     /// Whether the SQL dialect declares an executable function or recognizes an unsupported
     /// spelling (<c>RANK</c>, <c>LEAD</c>, ...). Unsupported calls already carry a
-    /// parse-time COHDBL001; only names in neither list are unknown (#1068, #1103). Read on
+    /// parse-time CK00001; only names in neither list are unknown (#1068, #1103). Read on
     /// the failure path only, for a name the catalog does not hold.
     /// </summary>
     /// <param name="name">The name as written.</param>

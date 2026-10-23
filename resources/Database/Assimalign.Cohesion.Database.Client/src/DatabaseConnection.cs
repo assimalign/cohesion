@@ -157,7 +157,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             ArgumentNullException.ThrowIfNull(exchange);
             if (!ReferenceEquals(_connector.Family, exchange.Family))
             {
-                throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+                throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
             }
             if (!_connector.CanExecute)
             {
@@ -165,7 +165,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             }
             if (_operation is not null)
             {
-                throw new InvalidOperationException("An exchange is already active on this connection.");
+                throw new InvalidOperationException(ErrorMessages.DatabaseConnectionExecuteAsyncFailure);
             }
             operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

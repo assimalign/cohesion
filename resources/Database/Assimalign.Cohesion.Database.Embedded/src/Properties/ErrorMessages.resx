@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="EmbeddedDatabaseCreateDatabase" xml:space="preserve"><value>An embedded database requires at least one engine.</value></data>
+  <data name="EmbeddedDatabaseCreateDatabase2" xml:space="preserve"><value>Registered engines cannot be null.</value></data>
+  <data name="EmbeddedDatabaseCreateDatabase3" xml:space="preserve"><value>An engine named '{0}' is already registered.</value></data>
+  <data name="EmbeddedDatabaseDisposeAsyncAggregate" xml:space="preserve"><value>One or more embedded engines failed to dispose.</value></data>
+</root>

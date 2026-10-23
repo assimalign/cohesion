@@ -139,7 +139,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        error.Message.ShouldContain(action == "ALTER COLUMN" ? "COHDBL001" : "SQL0003", Case.Sensitive);
+        error.Message.ShouldContain(action == "ALTER COLUMN" ? "CK00001" : "SQL0003", Case.Sensitive);
         error.ShouldContainMessage(action, Case.Sensitive);
         (await SnapshotAsync(session)).ShouldBe(before);
         (await RowsAsync(session, "SELECT name, age FROM t WHERE id = 1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { "ann", 36 });
@@ -275,7 +275,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// <summary>
     /// Pins the boundary with #1103: a declared name is not unknown, so this check leaves
     /// it to the parse-time recognized-unsupported guard. #1103 rejects these names
-    /// with COHDBL001 and flips this pin in the same change.
+    /// with CK00001 and flips this pin in the same change.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declared name that does not execute is not an unknown function")]
     public async Task ExecuteAsync_DeclaredNonExecutingFunction_ShouldNotBeRejectedAsUnknown()
@@ -294,7 +294,7 @@ public sealed class SqlStatementCompletenessExecutionTests
         // Assert
         foreach (var failure in new[] { empty, populated })
         {
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
             failure.Message.ShouldContain("RANK", Case.Sensitive);
             failure.Message.ShouldNotContain("Unknown function", Case.Sensitive);
         }

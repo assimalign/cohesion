@@ -64,7 +64,7 @@ public sealed partial class StorageFreeBytesTests
         using var storage = TornStorage.Create();
         var target = Insert(storage, Filled(6000, 0x11));
         Insert(storage, Filled(7000, 0x33));
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         using (var bracket = storage.BeginTransaction())
         {
             if (latched)

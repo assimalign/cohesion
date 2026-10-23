@@ -103,7 +103,7 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
         // it; the root words its cause, as it does for every other offline message.
         string failure = StorageOfflineException.Find(cause) is { } offline
             ? DatabaseOfflineException.DescribeFailure(offline)
-            : $"the durable flush of its commit record failed ({cause.InnerException?.Message ?? cause.Message})";
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnconfirmedExceptionCreateFailure, cause.InnerException?.Message ?? cause.Message);
         return new DatabaseTransactionCommitUnconfirmedException(
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitUnconfirmed, database, failure),
             code,

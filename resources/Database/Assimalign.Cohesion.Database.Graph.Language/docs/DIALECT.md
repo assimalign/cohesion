@@ -18,7 +18,7 @@ documented owner default for #1235, preserving #1146's value contract.
 
 ## Storage integrity errors (#1160)
 
-A read that detects storage corruption fails with `COHDBS003`, naming the database and
+A read that detects storage corruption fails with `CK06003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
 The error is an execution failure over the wire; the connection remains usable. A
 legitimately reclaimed location retains its existing absence semantics. The engine's
@@ -65,8 +65,8 @@ expressions and container access. Project scalar values
 after FOR/UNWIND, or project a full named path through ExecutePaths. No wire format is added.
 
 Node and INSERT/CREATE quantifiers are GQL0002. Questioned paths after an edge or subpath,
-subpath assignments, inner WHERE and nested quantifiers remain named COHDBL001. Explicit TRAIL
-remains COHDBL001. A touching `--` after `}`, `+`, `*` or a subpath's `)` is GQL0008.
+subpath assignments, inner WHERE and nested quantifiers remain named CK00001. Explicit TRAIL
+remains CK00001. A touching `--` after `}`, `+`, `*` or a subpath's `)` is GQL0008.
 Subpath parsing uses GQL0009 on stack exhaustion, with no separate text nesting cap; direct AST
 nesting beyond 128, cycles and repeated path instances in one walk are COHDBG001.
 
@@ -80,8 +80,8 @@ ExecutePaths rejects a projected variable bound only by optional clauses with CO
 planning, even when every row would match. A mandatory binding remains projectable. Scalar
 Execute already represents NULL without a wire change. EXPLAIN describes ordered clause joins
 and optional filters/null extension. ISO `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands
-remain recognized but outside T1 (COHDBL001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
-remains COHDBL001. MATCH after INSERT or DELETE is a supported linear stage.
+remain recognized but outside T1 (CK00001 naming OPTIONAL BLOCK OPERAND). MANDATORY MATCH
+remains CK00001. MATCH after INSERT or DELETE is a supported linear stage.
 
 ## Adjacency work and EXPLAIN (#1532)
 
@@ -120,8 +120,8 @@ all carried occurrences, including entities inside lists, maps and paths. New la
 use INSERT's catalog discovery and schema validation; later MATCH stages see them.
 
 Only literal whole maps are supported: `$p` and `properties(other)` as whole-map operands
-are COHDBL001. Literal composite properties, including parenthesized literals, are COHDBL001; computed composite property values
-are COHDBG003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one COHDBL001
+are CK00001. Literal composite properties, including parenthesized literals, are CK00001; computed composite property values
+are COHDBG003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one CK00001
 naming MERGE. `+=` must touch; GQL combines it into one operator token without changing the
 shared lexer. SHOW remains read-only (GQL0007).
 
@@ -169,11 +169,11 @@ Duplicates raise planning diagnostic COHDBG015 before reads or mutations, even u
 or on empty matches. Path-request shape errors retain precedence. Thus `RETURN 1 AS x, 2 AS x`
 fails, while `RETURN 1 AS x, 2 AS X` succeeds.
 Unbound projection variables/parameters are COHDBG001; `p.name` on a path is COHDBG003.
-`RETURN a {.name}` is COHDBL001 naming MAP PROJECTION. Immediate return-after-delete remains COHDBL001. NEXT and WITH, including WITH DISTINCT, execute as described below. CASE and composite values are described below.
+`RETURN a {.name}` is CK00001 naming MAP PROJECTION. Immediate return-after-delete remains CK00001. NEXT and WITH, including WITH DISTINCT, execute as described below. CASE and composite values are described below.
 
 ## LET, FILTER, FOR/UNWIND, NEXT and WITH
 
-A statement is an ordered binding-table pipeline. LET binds one or more new variables (`LET x = 1, y = x + 1`); FILTER and FILTER WHERE keep TRUE only. FOR x IN list and Cypher UNWIND list AS x expand lists and preserve NULL elements. A NULL list produces zero rows. Non-lists, including strings and byte[], give COHDBG013. This deliberately differs from Neo4j's scalar UNWIND, which produces one row. FOR WITH ORDINALITY/OFFSET is outside T1 (COHDBL001).
+A statement is an ordered binding-table pipeline. LET binds one or more new variables (`LET x = 1, y = x + 1`); FILTER and FILTER WHERE keep TRUE only. FOR x IN list and Cypher UNWIND list AS x expand lists and preserve NULL elements. A NULL list produces zero rows. Non-lists, including strings and byte[], give COHDBG013. This deliberately differs from Neo4j's scalar UNWIND, which produces one row. FOR WITH ORDINALITY/OFFSET is outside T1 (CK00001).
 
 RETURN ... NEXT and Cypher WITH project a new scope using the same expressions, aliases, star and DISTINCT/ALL as final RETURN. Only aliases and bare variables are referenceable afterward; unaliased computed columns are allowed but unreferenceable, an explicit superset divergence from Cypher. WITH DISTINCT compares tuples with RETURN's exact numeric comparer. RETURN * includes LET/FOR variables and expands carried columns in projection order. NEXT and FOR are also accepted as variable names and AS aliases.
 
@@ -181,7 +181,7 @@ WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT
 
 NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is COHDBG003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
 
-LET/FOR cannot rebind a name in scope (COHDBG003). Dropped or unaliased variables are unbound (COHDBG001). Standalone ordering/page stages remain COHDBL001, including after the new clauses. Immediate RETURN after DELETE remains COHDBL001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
+LET/FOR cannot rebind a name in scope (COHDBG003). Dropped or unaliased variables are unbound (COHDBG001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 
@@ -215,7 +215,7 @@ so ordering by an aggregate alias sees the computed group value. Neither paging 
 reduces the input match bound. Nested aggregates, aggregates in WHERE/GROUP BY, unequal
 GROUP BY keys and ungrouped ORDER BY references fail at planning with COHDBG001.
 ExecutePaths retains its existing COHDBG001 projection message. HAVING, STDDEV_SAMP,
-STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are COHDBL001; WITH uses the same aggregation stage.
+STDDEV_POP, PERCENTILE_CONT and PERCENTILE_DISC are CK00001; WITH uses the same aggregation stage.
 
 ## ORDER BY, OFFSET, SKIP and LIMIT
 
@@ -243,7 +243,7 @@ Paging never reduces mutation inputs. For reads, LIMIT without ORDER BY can stop
 while ordered finite pages retain a top set bounded by OFFSET + LIMIT. Grouping consumes its
 input incrementally. Final rows and paths remain materialized within the statement memory budget;
 the former 100,000-result guard is removed. Row and path requests share this stage (#1533, D4).
-Standalone ORDER BY/page statements before RETURN remain COHDBL001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
+Standalone ORDER BY/page statements before RETURN remain CK00001. WITH and aggregate ordering execute through the same per-stage pipeline. See [ordering design](DESIGN.md#ordering-and-paging-1142).
 
 ## Core functions and CAST
 
@@ -279,7 +279,7 @@ raises COHDBG013. Nonzero DOUBLE/REAL underflow to zero also raises COHDBG013; D
 converts directly through invariant text to REAL, avoiding double rounding. Timestamp-to-string
 uses optional fractional digits (SQL FFFFFFF), omitting whole-second fractions. INT32, SMALLINT,
 FLOAT32, TIMESTAMP WITHOUT TIME ZONE and LOCAL DATETIME are recognized unsupported CAST
-targets (one COHDBL001 naming the complete type). Cypher toString/toInteger/toFloat/toBoolean are extensions: toInteger truncates
+targets (one CK00001 naming the complete type). Cypher toString/toInteger/toFloat/toBoolean are extensions: toInteger truncates
 fractions, Boolean converts to 1/0, and unparsable conversion strings give NULL. Numeric
 string/Decimal overflow still fails; toInteger saturates finite floating overflow as Neo4j does. CAST renders Boolean strings uppercase; toString renders them lowercase.
 
@@ -303,8 +303,8 @@ CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifie
 `MATCH (cast:Movie) RETURN cast.title`.
 Recognized unsupported calls (reduce, temporal constructors, head/last/tail/reverse/range,
 ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
-toStringList/toIntegerList/toFloatList/toBooleanList) keep COHDBL001 in call position, preserving variables such as date.
-CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain COHDBL001.
+toStringList/toIntegerList/toFloatList/toBooleanList) keep CK00001 in call position, preserving variables such as date.
+CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain CK00001.
 Runtime errors precede ResultHeader and retain the pooled session. Every declared function
 and alias has live evidence in the profile coverage guard.
 
@@ -321,8 +321,8 @@ IReadOnlyDictionary<string, object?> maps, and preserve scalar element types. Re
 object arrays and read-only ordinal maps. Negative indexes count from the end; out-of-range
 indexes and missing fields yield NULL. {k:{j:1}}.k.j and $m.k access fields; $l[0] indexes
 a list. Invalid index/key/container types use COHDBG013. Stored a.b.c, comprehensions and
-slicing remain COHDBL001. INSERT/CREATE composite properties stay unsupported: syntax is
-COHDBL001 naming graph storage, parameters are COHDBG003. (n $props) remains COHDBL001.
+slicing remain CK00001. INSERT/CREATE composite properties stay unsupported: syntax is
+CK00001 naming graph storage, parameters are COHDBG003. (n $props) remains CK00001.
 
 Equality is structural and three-valued: differing lengths/key sets or a FALSE field yields
 FALSE; otherwise a NULL field comparison yields UNKNOWN. IN, simple CASE and NULLIF
@@ -354,7 +354,7 @@ or non-finite values with COHDBG003, all while planning. EXPLAIN applies the sam
 Runtime scalar types are preserved (including Int32 and Decimal); schema type matching uses the
 typed graph API's promotion. Lists/maps are admitted in value positions; pattern property maps remain scalar-only. See
 [DESIGN.md](DESIGN.md#named-scalar-parameters-1102-1138) for the complete contract and hand-offs.
-`$$name` and `(n $props)` remain COHDBL001; bare sigils and parameters in
+`$$name` and `(n $props)` remain CK00001; bare sigils and parameters in
 identifier/DELETE positions are GQL0002. #1102's `?` and `:name` diagnostics are unchanged.
 
 ## WHERE expressions
@@ -364,7 +364,7 @@ NULL/TRUE/FALSE/UNKNOWN, numeric + - * /, % (Cypher MOD spelling), `||`, string 
 labeled predicates and parentheses. IN [items], STARTS WITH, ENDS WITH and CONTAINS
 are Cohesion extensions. String predicates are ordinal, case-sensitive and UNKNOWN unless
 both operands are strings. IN accepts a list-valued expression, including parameters. LIKE, BETWEEN, =~,
-EXISTS, quantified predicates and nested property access remain COHDBL001; IN (1, 2)
+EXISTS, quantified predicates and nested property access remain CK00001; IN (1, 2)
 is GQL0002 naming a list value.
 
 WHERE keeps TRUE only. Logical operators use three-valued logic. Incomparable non-null values

@@ -138,7 +138,7 @@ public sealed class BTreeIndexManager
 
         if (definition.Kind != IndexKind.BTree)
         {
-            throw new IndexException($"Index kind {definition.Kind} is not supported yet; only BTree indexes exist in the MVP.");
+            throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TreeIndexManagerCreateIndexAsyncIndex, definition.Kind));
         }
 
         var storageTransaction = _options.TransactionSource(transaction);
@@ -150,7 +150,7 @@ public sealed class BTreeIndexManager
 
             if (_indexes.ContainsKey(key))
             {
-                throw new IndexException($"An index named '{definition.Name}' already exists on object {objectId}.");
+                throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TreeIndexManagerCreateIndexAsyncIndex2, definition.Name, objectId));
             }
 
             long rootPageId = BTreeIndex.CreateRoot(_options.Storage, storageTransaction, objectId);
@@ -182,7 +182,7 @@ public sealed class BTreeIndexManager
         {
             if (!_indexes.Remove((objectId, name), out var removed))
             {
-                throw new IndexException($"No index named '{name}' exists on object {objectId}.");
+                throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexManagerDropIndexAsyncIndex, name, objectId));
             }
             int position = _maintenancePositions[removed];
             var last = _maintenanceIndexes[^1];

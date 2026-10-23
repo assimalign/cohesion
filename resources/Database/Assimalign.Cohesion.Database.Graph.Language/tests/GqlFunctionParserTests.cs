@@ -189,6 +189,6 @@ public sealed class GqlFunctionParserTests
         // Arrange / Act
         var error = new GqlQueryParser().Parse($"RETURN CAST(NULL AS {target})").Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("COHDBL001"); error.Message!.ShouldContain("CAST " + target, Case.Sensitive);
+        error.Code.ShouldBe("CK00001"); error.Message!.ShouldContain("CAST " + target, Case.Sensitive);
     }
 }

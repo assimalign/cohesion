@@ -159,8 +159,7 @@ internal static class StorageRecovery
                 {
                     throw new StorageCorruptionException(
                         record.PageId,
-                        $"Recovery cannot rebuild page {pageId}: the committed {Describe(record.Type)} at LSN {record.Lsn} has no full page " +
-                        "image before it in the journal, so the page's chain of records has a gap.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure, pageId, Describe(record.Type), record.Lsn));
                 }
 
                 page = cache.Get(pageId);
@@ -175,8 +174,7 @@ internal static class StorageRecovery
                 {
                     throw new StorageCorruptionException(
                         record.PageId,
-                        $"Recovery cannot rebuild page {pageId}: the committed {Describe(record.Type)} at LSN {record.Lsn} follows LSN {baseLsn}, " +
-                        $"but the page rebuilt so far carries LSN {pageLsn}, so the page's chain of records has a gap.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryRunFailure2, pageId, Describe(record.Type), record.Lsn, baseLsn, pageLsn));
                 }
 
                 var runs = payload[PageImageCodec.BaseLsnSize..];
@@ -221,7 +219,7 @@ internal static class StorageRecovery
     private static StorageCorruptionException Malformed(JournalRecord record, string problem)
         => new(
             record.PageId,
-            $"Recovery cannot apply the {Describe(record.Type)} of page {(long)record.PageId} at LSN {record.Lsn}: {problem}.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRecoveryMalformedFailure, Describe(record.Type), (long)record.PageId, record.Lsn, problem));
 
     /// <summary>
     /// The pages the replay is rebuilding, at most a capacity of them in memory: a page enters with

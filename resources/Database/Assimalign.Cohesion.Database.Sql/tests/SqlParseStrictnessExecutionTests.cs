@@ -57,10 +57,10 @@ public sealed class SqlParseStrictnessExecutionTests
     /// <summary>
     /// ~ used to parse as bitwise NOT, whose evaluator returned NULL for a NULL operand and
     /// threw per row otherwise, so SELECT ~NULL and ~ over an empty table succeeded. Prefix and
-    /// infix ~ now report COHDBL001 at parse time.
+    /// infix ~ now report CK00001 at parse time.
     /// </summary>
     /// <param name="sql">A statement using ~.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: ~ reports COHDBL001 and nothing executes, whatever the rows")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: ~ reports CK00001 and nothing executes, whatever the rows")]
     [InlineData("SELECT ~NULL;")]
     [InlineData("SELECT ~a FROM t;")]
     [InlineData("SELECT a FROM t WHERE a ~ 'x';")]
@@ -73,7 +73,7 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("UPDATE t SET a = 1 WHERE b ~* 'x';")]
     [InlineData("SELECT a FROM t WHERE a = ~ ~a;")]
     public async Task ExecuteAsync_Tilde_ShouldReportUnsupportedOperatorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "COHDBL001");
+        => await AssertRejectedAsync(sql, "CK00001");
 
     private static async Task AssertRejectedAsync(string sql, string code)
     {

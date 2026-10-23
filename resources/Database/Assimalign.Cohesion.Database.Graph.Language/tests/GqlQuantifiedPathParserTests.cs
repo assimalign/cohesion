@@ -107,7 +107,7 @@ public sealed class GqlQuantifiedPathParserTests
         // Act
         var error = Parse(source).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
         error.Start.ShouldBe(source.IndexOf(first, StringComparison.Ordinal));
     }

@@ -58,7 +58,7 @@ public sealed class SqlAlterTableParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Single(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
     }
 
@@ -88,7 +88,7 @@ public sealed class SqlAlterTableParserTests
 
         // Assert
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: syntax diagnostics list every supported action family")]

@@ -95,4 +95,17 @@
   <data name="PhysicalRegistrationNameMissing" xml:space="preserve"><value>Missing physical index name.</value></data>
   <data name="PhysicalRegistrationInvalid" xml:space="preserve"><value>Invalid physical index registration.</value></data>
   <data name="CatalogFormatRefusalLocation" xml:space="preserve"><value>{2} (page {0}, slot {1})</value></data>
+  <data name="DeclarationsAlreadyDeclaredFailure" xml:space="preserve"><value>{0} engine '{1}' already declares database '{2}'.</value></data>
+  <data name="DatabaseDeclarationsRefuseDropFailure" xml:space="preserve"><value>{0} engine '{1}' declares database '{2}' ({3}.AddDatabase), so DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.</value></data>
+  <data name="DatabaseDeclarationsDeclareFailure" xml:space="preserve"><value>Engine '{0}' already declares its databases.</value></data>
+  <data name="BuilderStateEnsureMutableFailure" xml:space="preserve"><value>{0} engine '{1}': composition is frozen after a build attempt.</value></data>
+  <data name="EngineBuilderStateBeginBuildFailure" xml:space="preserve"><value>{0} engine '{1}': the builder supports one build attempt.</value></data>
+  <data name="EngineBuilderStateCompleteFailure" xml:space="preserve"><value>The compose method returned before it attached every product.</value></data>
+  <data name="EngineBuilderStateProduceFailure" xml:space="preserve"><value>The compose method read a product sequence twice.</value></data>
+  <data name="EngineBuilderStateProduceFailure2" xml:space="preserve"><value>The compose method requested a server before it attached every worker.</value></data>
+  <data name="StateThrowIfPendingUnattachedFailure" xml:space="preserve"><value>The compose method read past a product it did not attach.</value></data>
+  <data name="EngineOptionChecksRefuseFailure" xml:space="preserve"><value>{0}: {1} {2}</value></data>
+  <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
+  <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
 </root>

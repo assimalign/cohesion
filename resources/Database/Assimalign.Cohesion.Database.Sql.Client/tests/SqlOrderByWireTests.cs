@@ -297,7 +297,7 @@ public sealed class SqlOrderByWireTests
 
     /// <summary>Excluded ordering forms return the capability diagnostic and preserve the connection.</summary>
     /// <param name="statement">The excluded form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ORDER BY: excluded forms report COHDBL001 over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - ORDER BY: excluded forms report CK00001 over the wire")]
     [InlineData("SELECT id, COUNT(*) FROM users GROUP BY 1")]
     public async Task QueryAsync_UnsupportedOrdering_ShouldReportCapabilityDiagnosticOverTheWire(string statement)
     {
@@ -308,7 +308,7 @@ public sealed class SqlOrderByWireTests
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, statement));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await QueryAsync(connection, "SELECT name FROM users WHERE id = 1")).ShouldHaveSingleItem()[0].ShouldBe("ada");
     }

@@ -41,7 +41,7 @@ public sealed partial class SqlSubqueryExecutionTests
 
         // Assert
         result.Status.ShouldBe(DatabaseResultStatus.Error);
-        result.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "COHDBL001" && d.Message!.Contains("outer", StringComparison.OrdinalIgnoreCase));
+        result.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "CK00001" && d.Message!.Contains("outer", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Correlation: nested local dependencies keep mixed aggregates at their own level")]
@@ -154,7 +154,7 @@ public sealed partial class SqlSubqueryExecutionTests
         var result = await ExecuteAsync(session, sql);
 
         // Assert
-        result.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "COHDBL001" && d.Message!.Contains("LATERAL", StringComparison.Ordinal));
+        result.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "CK00001" && d.Message!.Contains("LATERAL", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Correlation: derived sibling diagnostics distinguish grouped ancestors and outward bindings")]
@@ -173,7 +173,7 @@ public sealed partial class SqlSubqueryExecutionTests
 
         // Act / Assert
         var lateral = await ExecuteAsync(session, "SELECT (SELECT 1 FROM u, (SELECT k FROM v) d) FROM t GROUP BY t.g");
-        lateral.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "COHDBL001" && d.Message!.Contains("LATERAL", StringComparison.Ordinal));
+        lateral.Diagnostics.ShouldNotBeNull().ShouldContain(d => d.Code == "CK00001" && d.Message!.Contains("LATERAL", StringComparison.Ordinal));
         var unknown = await Should.ThrowAsync<SqlPlanningException>(() => RowsAsync(session,
             "SELECT (SELECT 1 FROM u, (SELECT missing FROM v) d) FROM t GROUP BY t.g"));
         unknown.Diagnostics.ShouldContain(d => d.Code == "COHSQLE015");

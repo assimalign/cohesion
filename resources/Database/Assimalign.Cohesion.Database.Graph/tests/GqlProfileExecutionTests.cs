@@ -348,13 +348,13 @@ public sealed class GqlProfileExecutionTests
     [InlineData("MATCH (a)<~(b) RETURN a")]
     public async Task Profile_UnsupportedForms_ReportCapabilityDiagnosticAsync(string source)
     {
-        new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        new GqlQueryParser().Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("boundary", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
     }
 
     private static readonly IReadOnlyDictionary<string, ExecutionCase> _functionCases =

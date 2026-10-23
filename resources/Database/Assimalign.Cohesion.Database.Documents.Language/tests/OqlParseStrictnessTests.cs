@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 /// <summary>
 /// Parse strictness (#1101): a stray character is one OQL0002 that binds nothing, a
-/// recognized-unsupported word is one COHDBL001 at its own span wherever a clause can start,
+/// recognized-unsupported word is one CK00001 at its own span wherever a clause can start,
 /// and every statement form still rejects leftover text.
 /// </summary>
 public sealed class OqlParseStrictnessTests
@@ -60,11 +60,11 @@ public sealed class OqlParseStrictnessTests
 
     /// <summary>
     /// Each used to fall through to OQL0002, or to bind a word as an alias and then fail at
-    /// the next token. Each is now one COHDBL001 at the word that names the construct.
+    /// the next token. Each is now one CK00001 at the word that names the construct.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one COHDBL001 and no OQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one CK00001 and no OQL0002")]
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
     [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
@@ -88,7 +88,7 @@ public sealed class OqlParseStrictnessTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldBe($"The {construct} clause is not supported by the OQL surface of this database model.");
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(end);

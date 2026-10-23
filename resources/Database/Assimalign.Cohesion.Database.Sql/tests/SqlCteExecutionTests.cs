@@ -269,7 +269,7 @@ public sealed partial class SqlCteExecutionTests
             "WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d;", cancellationToken: CancellationToken.None));
 
         // Assert
-        result.Message.ShouldContain("COHDBL001");
+        result.Message.ShouldContain("CK00001");
         (await RowsAsync(session, "SELECT id FROM t;")).Count.ShouldBe(3);
     }
 

@@ -48,7 +48,7 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
 
         if (options.Engines.Count == 0)
         {
-            throw new DatabaseException("An embedded database requires at least one engine.");
+            throw new DatabaseException(ErrorMessages.EmbeddedDatabaseCreateDatabase);
         }
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -56,11 +56,11 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
         {
             if (engine is null)
             {
-                throw new DatabaseException("Registered engines cannot be null.");
+                throw new DatabaseException(ErrorMessages.EmbeddedDatabaseCreateDatabase2);
             }
             if (!names.Add(engine.Name))
             {
-                throw new DatabaseException($"An engine named '{engine.Name}' is already registered.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EmbeddedDatabaseCreateDatabase3, engine.Name));
             }
         }
 
@@ -130,7 +130,7 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
         }
         if (failures is not null)
         {
-            throw new AggregateException("One or more embedded engines failed to dispose.", failures);
+            throw new AggregateException(ErrorMessages.EmbeddedDatabaseDisposeAsyncAggregate, failures);
         }
     }
 }

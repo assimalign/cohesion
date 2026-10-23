@@ -21,7 +21,7 @@ public sealed class LockQueueReorderTests
     {
         // Thirty seconds is only a hang guard; completion/grants determine correctness.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var one = new TransactionSequence(1);
         var two = new TransactionSequence(2);
         var three = new TransactionSequence(3);
@@ -59,7 +59,7 @@ public sealed class LockQueueReorderTests
     public async Task AcquireAsync_OwnerWaitsOnTwoResources_ShouldRepairOnlyWhenTheHardGraphIsAcyclic(bool hard)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         TransactionSequence one = new(1), two = new(2), three = new(3), four = new(4);
         var resource = LockResource.Entry(1420, 3);
         var q = LockResource.Entry(1420, 4);
@@ -111,7 +111,7 @@ public sealed class LockQueueReorderTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var cancellation = new CancellationTokenSource();
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         TransactionSequence one = new(1), two = new(2), three = new(3);
         var resource = LockResource.Entry(1420, 6);
         var q = LockResource.Entry(1420, 7);
@@ -151,7 +151,7 @@ public sealed class LockQueueReorderTests
     public async Task AcquireAsync_RepairElsewhere_ShouldNotLetAnUnrelatedReaderPassItsQueuedWriter()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         TransactionSequence one = new(1), two = new(2), three = new(3), five = new(5), six = new(6), seven = new(7);
         var unrelated = LockResource.Object(1420);
         await locks.AcquireAsync(five, unrelated, LockMode.Shared, timeout.Token);

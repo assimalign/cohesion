@@ -37,7 +37,7 @@ public sealed class SqlSetOperationParserTests
 
         // Assert
         var error = diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message!.ShouldContain(construct, Case.Sensitive);
     }
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Set operations: every quantifier and query position parses")]
@@ -94,10 +94,10 @@ public sealed class SqlSetOperationParserTests
     [InlineData("SELECT a FROM t ORDER BY a UNION SELECT a FROM u", "SQL0003")]
     [InlineData("SELECT a FROM t LIMIT 1 UNION SELECT a FROM u", "SQL0003")]
     [InlineData("SELECT a FROM t OFFSET 1 UNION SELECT a FROM u", "SQL0003")]
-    [InlineData("SELECT a FROM t UNION CORRESPONDING SELECT a FROM u", "COHDBL001")]
-    [InlineData("SELECT a FROM t EXCEPT ALL CORRESPONDING SELECT a FROM u", "COHDBL001")]
-    [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS ();", "COHDBL001")]
-    [InlineData("SELECT a FROM t WHERE a = ALL (SELECT a FROM u UNION SELECT a FROM v)", "COHDBL001")]
+    [InlineData("SELECT a FROM t UNION CORRESPONDING SELECT a FROM u", "CK00001")]
+    [InlineData("SELECT a FROM t EXCEPT ALL CORRESPONDING SELECT a FROM u", "CK00001")]
+    [InlineData("SELECT id FROM t UNION SELECT id FROM u WINDOW w AS ();", "CK00001")]
+    [InlineData("SELECT a FROM t WHERE a = ALL (SELECT a FROM u UNION SELECT a FROM v)", "CK00001")]
     public void Parse_RejectedSetForm_ShouldReportCode(string sql, string code)
     {
         // Arrange / Act

@@ -54,7 +54,7 @@ internal static class KeyComponentEncoding
         {
             if (position >= source.Length)
             {
-                throw new DatabaseTypeException("Malformed key: unterminated variable-length component.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingReadEscapedDatabaseType);
             }
 
             byte value = source[position++];
@@ -67,7 +67,7 @@ internal static class KeyComponentEncoding
 
             if (position >= source.Length)
             {
-                throw new DatabaseTypeException("Malformed key: truncated escape sequence.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingReadEscapedDatabaseType2);
             }
 
             byte marker = source[position++];
@@ -82,7 +82,7 @@ internal static class KeyComponentEncoding
             }
             else
             {
-                throw new DatabaseTypeException($"Malformed key: invalid escape marker 0x{marker:X2}.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingReadEscapedDatabaseType3, marker));
             }
         }
     }
@@ -99,13 +99,13 @@ internal static class KeyComponentEncoding
             int escape = source[position..].IndexOf(Escape);
             if (escape < 0)
             {
-                throw new DatabaseTypeException("Malformed key: unterminated variable-length component.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingReadEscapedDatabaseType);
             }
 
             position += escape + 1;
             if (position >= source.Length)
             {
-                throw new DatabaseTypeException("Malformed key: truncated escape sequence.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingReadEscapedDatabaseType2);
             }
 
             byte marker = source[position++];
@@ -116,7 +116,7 @@ internal static class KeyComponentEncoding
 
             if (marker != EscapedZero)
             {
-                throw new DatabaseTypeException($"Malformed key: invalid escape marker 0x{marker:X2}.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingReadEscapedDatabaseType3, marker));
             }
         }
     }
@@ -130,7 +130,7 @@ internal static class KeyComponentEncoding
     {
         if (position >= source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated decimal component.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType);
         }
 
         byte sign = source[position++];
@@ -142,14 +142,14 @@ internal static class KeyComponentEncoding
 
         if (sign is not (decimalNegative or decimalPositive))
         {
-            throw new DatabaseTypeException($"Malformed key: invalid decimal sign byte 0x{sign:X2}.");
+            throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingSkipDecimalDatabaseType2, sign));
         }
 
         bool negative = sign == decimalNegative;
 
         if (position >= source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated decimal exponent.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType3);
         }
 
         position++;
@@ -159,7 +159,7 @@ internal static class KeyComponentEncoding
         {
             if (position >= source.Length)
             {
-                throw new DatabaseTypeException("Malformed key: unterminated decimal digits.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType4);
             }
 
             byte raw = source[position++];
@@ -172,7 +172,7 @@ internal static class KeyComponentEncoding
 
             if (encoded is < 1 or > 10)
             {
-                throw new DatabaseTypeException($"Malformed key: invalid decimal digit byte 0x{raw:X2}.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingSkipDecimalDatabaseType5, raw));
             }
 
             digits++;
@@ -180,7 +180,7 @@ internal static class KeyComponentEncoding
 
         if (digits == 0)
         {
-            throw new DatabaseTypeException("Malformed key: decimal component has no digits.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType6);
         }
     }
 
@@ -279,7 +279,7 @@ internal static class KeyComponentEncoding
     {
         if (position >= source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated decimal component.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType);
         }
 
         byte sign = source[position++];
@@ -291,14 +291,14 @@ internal static class KeyComponentEncoding
 
         if (sign is not (decimalNegative or decimalPositive))
         {
-            throw new DatabaseTypeException($"Malformed key: invalid decimal sign byte 0x{sign:X2}.");
+            throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingSkipDecimalDatabaseType2, sign));
         }
 
         bool negative = sign == decimalNegative;
 
         if (position >= source.Length)
         {
-            throw new DatabaseTypeException("Malformed key: truncated decimal exponent.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType3);
         }
 
         byte exponentByte = source[position++];
@@ -310,7 +310,7 @@ internal static class KeyComponentEncoding
         {
             if (position >= source.Length)
             {
-                throw new DatabaseTypeException("Malformed key: unterminated decimal digits.");
+                throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType4);
             }
 
             byte raw = source[position++];
@@ -323,7 +323,7 @@ internal static class KeyComponentEncoding
 
             if (encoded is < 1 or > 10)
             {
-                throw new DatabaseTypeException($"Malformed key: invalid decimal digit byte 0x{raw:X2}.");
+                throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EncodingSkipDecimalDatabaseType5, raw));
             }
 
             digits.Append((char)('0' + encoded - 1));
@@ -331,7 +331,7 @@ internal static class KeyComponentEncoding
 
         if (digits.Length == 0)
         {
-            throw new DatabaseTypeException("Malformed key: decimal component has no digits.");
+            throw new DatabaseTypeException(ErrorMessages.EncodingSkipDecimalDatabaseType6);
         }
 
         string text = string.Create(CultureInfo.InvariantCulture, $"{digits[0]}.{(digits.Length > 1 ? digits.ToString(1, digits.Length - 1) : "0")}E{exponent}");

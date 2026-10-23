@@ -74,7 +74,7 @@ the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol cha
 Existing execute/query exchanges carry inserted-plus-updated affected counts and RETURNING
 rows. DO NOTHING-skipped proposals return no row. Wire tests cover InMemory and TCP,
 untargeted inserts without unique indexes, and reusable connections after arbiter,
-repeated-row and constraint failures (ExecutionFailure) or excluded spellings (COHDBL001
+repeated-row and constraint failures (ExecutionFailure) or excluded spellings (CK00001
 ParseFailure). There is no client API, payload or protocol change.
 
 ## Derived relations and DML predicate subqueries (#1113, part b)
@@ -158,7 +158,7 @@ still carries no nullability field. No client API or wire format changes.
 
 The existing execute exchange carries results ordered with per-key NULLS FIRST/LAST,
 including outer ordering over derived outputs. Wire tests assert all four direction and
-placement combinations; GROUP BY ordinals keep COHDBL001 with a reusable connection.
+placement combinations; GROUP BY ordinals keep CK00001 with a reusable connection.
 No protocol or client API change is needed.
 
 ## Pagination (#1107)
@@ -166,7 +166,7 @@ No protocol or client API change is needed.
 OFFSET/FETCH, OFFSET before LIMIT and TOP use the existing SQL execute exchange and
 result metadata. SqlPagingWireTests verifies exact windows and column names/types over
 InMemory and TCP, plus coded parse/count refusals and subsequent connection reuse.
-INSERT, UPDATE and DELETE TOP retain COHDBL001 naming DML TOP; bare FETCH arithmetic
+INSERT, UPDATE and DELETE TOP retain CK00001 naming DML TOP; bare FETCH arithmetic
 receives SQL0003, matching the language grammar.
 No wire or client API changes.
 
@@ -222,7 +222,7 @@ dependency closure contains no SQL engine, catalog or storage implementation. Th
 DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL and X binary literals use the existing
 DateOnly, TimeOnly, DateTime, DateTimeOffset, TimeSpan and byte[] tuple encodings and DatabaseType
 metadata. N strings remain String. No protocol format changes. SQL0008 content errors and
-COHDBL001 year-month exclusions arrive as ParseFailure and leave the connection usable.
+CK00001 year-month exclusions arrive as ParseFailure and leave the connection usable.
 TIMESTAMP assignment returns Kind Unspecified; TIMESTAMPTZ preserves its offset, following the
 [dialect normalization rule](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#timestamp-normalization-1110).
 
@@ -442,14 +442,14 @@ The package has no public interface left and no `Abstractions/` folder
 
 COUNT/SUM DISTINCT and ordered STRING_AGG use the existing statement/result framing.
 The live wire corpus verifies values, nullable String metadata and independent aggregate
-slots; excluded grouping/window forms continue to report usable-connection COHDBL001.
+slots; excluded grouping/window forms continue to report usable-connection CK00001.
 There is no client ABI or protocol change.
 
 ## E4 SQL definitions
 
 Typed-literal wire theories run over both InMemory and loopback TCP. Temporal, interval,
 binary and national-string values retain the same runtime types and metadata. Malformed
-literals (SQL0008), year-month forms (COHDBL001) and interval overflow retain their parse
+literals (SQL0008), year-month forms (CK00001) and interval overflow retain their parse
 diagnostics and permit a subsequent query on the same connection.
 
 Function/domain DDL and calls use the existing statement transport and server environment without
@@ -485,11 +485,11 @@ the existing ParseFailure message; SqlClientException reports ParseFailure with 
 true. No client ABI or wire format changes. Typed schema and declared-script validation happen at
 host declaration/Build, before a server starts; these host APIs have no remote declaration verb.
 
-Recognized but unsupported temporal precision uses COHDBL001 in the same ParseFailure exchange,
+Recognized but unsupported temporal precision uses CK00001 in the same ParseFailure exchange,
 including CAST, naming the declaration and modifier. FLOAT(p) returns the resolved Float32
 (1..24 bits) or Float64 (25..53 bits) in catalog queries and result headers; bare FLOAT stays
 Float64. Invalid FLOAT precision remains SQL0005. INTERVAL field/range qualifiers, including
-SECOND(p), likewise report COHDBL001 at every declaration site and CAST, naming the complete
+SECOND(p), likewise report CK00001 at every declaration site and CAST, naming the complete
 qualifier; no-precision forms are also unsupported. Neither path changes the wire format.
 
 ## Negotiated statement diagnostics (#1105)

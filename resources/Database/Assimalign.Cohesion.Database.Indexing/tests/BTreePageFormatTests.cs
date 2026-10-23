@@ -15,9 +15,9 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// The B-tree page format gate (#1194): every node page carries a magic and the page
 /// format version, the index manager checks each existing tree's root when it attaches
 /// it, and a tree in any other format — format 1, written before the entry order
-/// changed, or a newer one — is refused with <c>COHDBI001</c> instead of misread. A
+/// changed, or a newer one — is refused with <c>CK06101</c> instead of misread. A
 /// page that is not a current-format node, reached inside an attached tree, fails the
-/// operation with <see cref="IndexCorruptionException"/> (<c>COHDBI002</c>).
+/// operation with <see cref="IndexCorruptionException"/> (<c>CK06102</c>).
 /// </summary>
 public class BTreePageFormatTests
 {
@@ -80,7 +80,7 @@ public class BTreePageFormatTests
         count.ShouldBe(2_000);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a tree whose root is in format 1 is refused at attach with COHDBI001")]
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a tree whose root is in format 1 is refused at attach with CK06101")]
     [InlineData(10)]     // the root is a leaf
     [InlineData(2_000)]  // the root is an internal node
     public async Task Attach_RootInFormat1_ShouldRefuse(int entries)
@@ -195,7 +195,7 @@ public class BTreePageFormatTests
         refusal.IndexName.ShouldBe("ix_legacy");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a damaged node inside an attached tree fails the lookup and the delete with IndexCorruptionException (COHDBI002)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Page format: a damaged node inside an attached tree fails the lookup and the delete with IndexCorruptionException (CK06102)")]
     public async Task Read_DamagedLeaf_ShouldFailWithCorruption()
     {
         // Arrange: a tree with an internal root; one of its leaves loses its stamp.

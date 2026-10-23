@@ -353,7 +353,7 @@ again, verifying the exact server session survives both.
 Path completion diagnostics follow Neo4j's completion metadata model
 (community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/response/metadata/DefaultMetadataHandler.java:206).
 The concrete result stream preserves bounded streaming and adds no public interface.
-COHDBP001 reports diagnostic overflow without turning successful reads into failures.
+CK07001 reports diagnostic overflow without turning successful reads into failures.
 
 ## Linear composition (#1145)
 

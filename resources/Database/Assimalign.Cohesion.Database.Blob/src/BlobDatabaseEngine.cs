@@ -356,7 +356,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the database was opened.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseException">The database's file set is in another storage format (COHDBS001).</exception>
+    /// <exception cref="DatabaseException">The database's file set is in another storage format (CK06001).</exception>
     /// <remarks>
     /// A database a holder closed is forgotten once its close ends (owner decision 33, #1289), and
     /// this opens it again, with recovery over its files, in memory as on disk. An open that finds

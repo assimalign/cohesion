@@ -25,8 +25,8 @@ when formatting a response message; embedded messages remain ordinary explanator
 Classification searches inner exceptions and every aggregate branch. A wrapped `IOException`
 is still I/O. Corruption takes precedence over I/O, and existing coded failures are retained.
 `DatabaseCorruptionException.Create` also accepts the genuine index-corruption variant:
-it retains the `IndexCorruptionException` and page, leads with `COHDBS003`, and carries
-`COHDBI002` plus the engine's model code as additional diagnostics. This owning-root operation
+it retains the `IndexCorruptionException` and page, leads with `CK06003`, and carries
+`CK06102` plus the engine's model code as additional diagnostics. This owning-root operation
 serves every B-tree model without a new child-to-root dependency or visibility grant.
 The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped failures.
 
@@ -38,7 +38,7 @@ The abort remains a base because the shipped deadlock exception derives from it.
 
 ## Storage corruption (#1160)
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -51,11 +51,11 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
-Lifecycle translation removes an existing `COHDBS003` from the carried diagnostics before
+Lifecycle translation removes an existing `CK06003` from the carried diagnostics before
 adding the common corruption diagnostic, so coded and aggregate wrappers report it once.
 
 Lifecycle integrity translation preserves synchronous core throws and returns successful
@@ -956,7 +956,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -989,7 +989,7 @@ commit whose record was written but whose fsync failed: the work may have commit
 so retrying it could apply it twice. `DatabaseOfflineException` (#1243) is what every
 operation gets after such a failure, or after any failed fsync of a database's journal
 or data files: the storage stopped writing (the storage's `StorageOfflineException`,
-`COHDBS002`, is its inner exception), and the database refuses everything until
+`CK06002`, is its inner exception), and the database refuses everything until
 `DatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
 the process. Its `Diagnostics` carry the model code (also exposed by the existing `Code` getter): `COHSQLT004`,
@@ -1370,14 +1370,14 @@ integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays r
 Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
 
 Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
-loopback, wildcard -> Any; DNS names are refused synchronously with COHDBTCP001. Endpoint URIs
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
 must be absolute, have a host and explicit positive port, and have no user information, query or
 fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
 remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
 was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
 
 Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
-option as ParamName, with kernel resx codes COHDBO001, COHDBO002 and COHDBO003. Existing timer
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
 policies are retained: Documents permits zero authentication/idle values; Blob requires positive
 values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
 idle policy. All models require positive finite shutdown/linger values no greater than
@@ -1387,3 +1387,13 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.
+
+The convention review also inspected Neo4j `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:877-886` (portable classification/category/title identities) and RavenDB `src/Raven.Client/Exceptions/RavenException.cs:26-29` (exception-owned construction). Cohesion keeps the approved short numeric identities and generated resources; neither engine's code or naming scheme is copied.

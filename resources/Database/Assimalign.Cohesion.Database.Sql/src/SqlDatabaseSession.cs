@@ -392,7 +392,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     {
         // The abort path retains this exact coded cause (#1364). Location attachment must not
         // substitute another exception for a storage failure already recorded on the transaction.
-        if (failure.Diagnostics is [{ Code: "COHSQLT005" or "COHSQLE041" or "COHDBS003" }, ..]
+        if (failure.Diagnostics is [{ Code: "COHSQLT005" or "COHSQLE041" or "CK06003" }, ..]
             || SqlDatabase.IsStorageFailure(failure)) { return failure; }
         if (failure is SqlConstraintViolationException constraint) { return constraint.At(location); }
         if (failure is SqlExecutionException execution) { return execution.At(location); }

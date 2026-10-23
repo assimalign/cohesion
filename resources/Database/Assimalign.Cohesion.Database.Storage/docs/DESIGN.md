@@ -143,7 +143,7 @@ Open reads page 0 in two independent 4 KiB halves (#1270), completing short read
 each half. An `IOException` or `StorageIOException` (including a premature zero-byte read)
 invalidates that whole half, including any partially read
 bytes; the other slot can supply the identity and checkpoint state. If no slot verifies,
-the open throws page-0 `StorageCorruptionException` (`COHDBS003`) when a completely read
+the open throws page-0 `StorageCorruptionException` (`CK06003`) when a completely read
 half has a damaged slot, attaching the other half's read error as its inner exception so
 `StorageCorruptionException.Find` and the engine corruption translation recognize it.
 If both halves are unreadable, no checksum damage is established and the original I/O
@@ -259,7 +259,7 @@ never misread.
 - **The fence reads the raw bytes first.** Open reads magic (page offset 96) and format
   version (100) from the raw page-0 bytes before it verifies any checksum. With the magic in
   place, any version but the current one is refused with `StorageFormatException`, whose
-  message leads with `COHDBS001`, names the version found and the version supported, and
+  message leads with `CK06001`, names the version found and the version supported, and
   points at #1152 (export with the engine that wrote the file, or open it with the newer
   engine). Only then are the slots' and the identity block's checksums verified. A wrong
   magic is "not a storage file" (`StorageIOException`) unless a header slot verifies, in
@@ -274,7 +274,7 @@ never misread.
   to accept any positive version.
 - **Engines name the database.** Every model engine catches the refusal around its storage
   open and rethrows it with the database's name, as it already does for an index-format
-  refusal: "Database 'x' cannot be opened. COHDBS001: …". The SQL and key-value engines open
+  refusal: "Database 'x' cannot be opened. CK06001: …". The SQL and key-value engines open
   two file sets per database and name the one refused ("its catalog file set 'x/catalog' was
   refused"); SQL carries it in its format exception, which its server forwards to the client.
 - **Journal frames are fenced too.** A frame whose length, magic and CRC-32C verify but whose
@@ -296,7 +296,7 @@ This follows PostgreSQL's `PageIsVerified` all-zero exception
 (`src/backend/storage/page/bufpage.c:148-152`): an apparently new header alone cannot prove
 that the whole block is empty. `StoragePageIntegrityTests` covers a zeroed first sector,
 a missing checksum, a false free header with a matching checksum, legitimate reclamation
-and an all-zero extension page. `StorageCorruptionException.Code` is `COHDBS003` and its
+and an all-zero extension page. `StorageCorruptionException.Code` is `CK06003` and its
 `PageId` identifies page-scoped damage; engines translate it to the database boundary.
 `StorageCorruptionException.Find` searches inner chains and all aggregate branches with an
 iterative, cycle-safe walk, so deeply wrapped integrity failures and shared aggregate branches
@@ -308,7 +308,7 @@ Storage format 3 (#1253), superseded by format 4 above, changed what the journal
 records mean: a full page image once per checkpoint interval and byte-range deltas at commit,
 replayed in order ("Write ordering rules", "Page records", "Recovery replay rules"). The page and
 page-0 layouts are format 2's. Journal frames are version 4. The bump goes through #1251's fence
-unchanged: a format-2 data file names version 2 at page offset 100 and is refused with `COHDBS001`
+unchanged: a format-2 data file names version 2 at page offset 100 and is refused with `CK06001`
 before any checksum is verified and before its journal is read, so the open writes nothing and the
 file set stays byte-identical for the engine that wrote it (`StorageFormatTests`, "a format-2 file
 set is refused"). A format-2 journal frame (version 3) keeps the CRC-32C its format 3 successor
@@ -1540,7 +1540,7 @@ the journal"); `DataFlush`; or `HeaderWrite`. The engines' coded refusals word i
 flush of the journal", "a durable flush of the data file", "a write of the file header"); a
 caller that tells the causes apart reads the enum, never the message:
 
-- **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
+- **The failing call throws `StorageOfflineException`** (`CK06002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
   append can slip in behind the failed flush; a data-file or header failure, and
   `TakeOffline`, latch the journal too. The journal's latch is the storage's only one: it keeps
@@ -1627,7 +1627,7 @@ Exception)` is that entry point:
 - **The message names the worker; the inner exception is its last failure.** The engine passes
   the reason ("the engine's checkpoint worker 'orders/checkpoint' failed on database 'orders' on
   101 passes in a row over 100 s, at least the engine's window of 100 s"), and the storage's
-  `COHDBS002` message reads "The
+  `CK06002` message reads "The
   storage is offline: {reason} (last failure: {message}). Its engine stopped retrying, …".
 - **Everything else is the offline storage of #1243.** The journal latches the error under its
   lock, the group-commit waiters are released, `OnOffline` is raised once (so a second file set
@@ -2790,13 +2790,13 @@ the others) stay as they were; the counters are their process-wide totals for to
 
 `StorageException` is the child root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
-`StorageCorruptionException` (`COHDBS003`, checksum/header integrity failures, and since #1253 a gap
+`StorageCorruptionException` (`CK06003`, checksum/header integrity failures, and since #1253 a gap
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
-`COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a
+`CK06001`, carrying the found and supported versions), `StorageOfflineException` (a
 durable flush of the journal or the data file, a write of the journal's append buffer or a
 header slot write failed, or the engine gave up on the storage (owner decision 25), and the
-storage writes nothing more until it is reopened, coded `COHDBS002`, carrying the I/O failure
+storage writes nothing more until it is reopened, coded `CK06002`, carrying the I/O failure
 or the engine worker's last failure; `Cause` names which; `Find` locates one in an
 inner-exception or aggregate chain, and
 `CommitRecordWritten` says the throwing bracket's commit record was appended before the flush
@@ -2877,7 +2877,7 @@ cases check negative sentinels and the next real allocation; no test reads sourc
 The public overload
 `StorageCorruptionException(PageId pageId, int slotIndex, string message, Exception? inner = null)`
 and nullable `SlotIndex` property add structured record context. The existing nullable PageId,
-COHDBS003 code and page-only constructors retain their contracts. The resx context template
+CK06003 code and page-only constructors retain their contracts. The resx context template
 contains no code prefix. This is an exception API change only; the frame sequence and file
 formats do not change.
 
@@ -2910,3 +2910,11 @@ Blob 64-byte chunk download: 10,000 warmups, 100,000 complete streams/sample,
 add no process-wide atomic or allocation. One-time sample bookkeeping is listed in the external
 summary; no budget or threshold is relaxed. Temporary Compile links/source substitutions restore
 in finally, and CSVs are outside the repository in Temp/wave11-1372-probes.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`StoragePageLatch()` is public; the parameterless `Create()` factory is removed. Its creation-order rule is unchanged.

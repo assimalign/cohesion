@@ -165,3 +165,10 @@ without a principal-mutation capability returns a named rejection.
 
 Source-generated JSON metadata produces canonical payload bytes through ApplicationModel.
 `Build()` validates accepted kinds and graph ownership; no verb contacts the database.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

@@ -126,7 +126,7 @@ public sealed class StorageFreeSpaceMap
         {
             if (id < 0 || id >= _nextPageId)
             {
-                throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFreeSpaceMapFreeStorageIO, id));
             }
 
             _reserved.Remove(id);

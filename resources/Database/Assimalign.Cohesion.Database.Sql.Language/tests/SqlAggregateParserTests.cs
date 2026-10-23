@@ -62,7 +62,7 @@ public class SqlAggregateParserTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain("SQL");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
@@ -143,7 +143,7 @@ public class SqlAggregateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         sql[error.Start!.Value..error.End!.Value].ShouldBe("ON OVERFLOW");
     }
 

@@ -6,7 +6,7 @@ it does not add backtick quoting. A missing closing delimiter is OQL0003 (#1235)
 
 ## Storage integrity errors (#1160)
 
-A read that detects storage corruption fails with `COHDBS003`, naming the database and
+A read that detects storage corruption fails with `CK06003`, naming the database and
 page and recommending a verified backup. It never succeeds with the damaged data omitted.
 The error is an execution failure over the wire; the connection remains usable. A
 legitimately reclaimed location retains its existing absence semantics. The engine's
@@ -31,8 +31,8 @@ signed integer literal or a parameter with an integral, non-negative signed Int6
 NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give OQL0007
 at the operand; literal 2.0/1e2, LIMIT ALL and arbitrary expressions are also invalid.
 Integral decimal/JSON numeric parameters normalize before checking. Missing names retain COHDOC005.
-Missing operands and duplicate clauses give OQL0002; LIMIT m, n gives one COHDBL001 before
-validating m, including ALL, negative and string operands. FETCH FIRST gives one COHDBL001
+Missing operands and duplicate clauses give OQL0002; LIMIT m, n gives one CK00001 before
+validating m, including ALL, negative and string operands. FETCH FIRST gives one CK00001
 only when FETCH starts a construct; c.fetch FIRST and c.limit ALL still reject FIRST and ALL.
 LIMIT/OFFSET are reserved: quote field names or use d.limit/d.offset; SELECT a AS limit is valid.
 UPDATE/DELETE and INSERT/UPSERT VALUES paging stays unsupported, naming the statement and clause
@@ -46,7 +46,7 @@ The [function table](DESIGN.md#supported-clause-matrix) declares META, five aggr
 SQL++ scalar functions (#1137). Scalars execute in projections, WHERE, GROUP BY, HAVING, ORDER BY,
 UPDATE expressions and INSERT/UPSERT SELECT; VALUES remains constant-only. Unknown calls report
 OQL0008 and invalid arities report OQL0006. ARRAY_AGG and the deferred REGEXP functions retain
-COHDBL001. Function tokens stay usable as fields and iteration aliases.
+CK00001. Function tokens stay usable as fields and iteration aliases.
 
 LENGTH counts Unicode scalars. SUBSTR and POSITION use zero-based code-point positions;
 POSITION returns -1 for no match. SUBSTR permits a negative start from the end, clamps starts
@@ -118,10 +118,10 @@ following [Couchbase ANY](https://github.com/couchbase/query/blob/master/express
 and [EVERY](https://github.com/couchbase/query/blob/master/expression/coll_every.go).
 UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES stay contextual names. END remains reserved.
 UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, ARRAY/FIRST comprehensions, NEST,
-JOIN, WITHIN and ANY AND EVERY remain deferred with COHDBL001.
+JOIN, WITHIN and ANY AND EVERY remain deferred with CK00001.
 The DML refusal applies at an UNNEST clause, so `DELETE FROM items WHERE ANY x IN tags
 SATISFIES unnest END` and UPDATE predicates/values may read a field named unnest. A MERGE INTO
-inside a CASE result in SATISFIES receives one COHDBL001 naming MERGE.
+inside a CASE result in SATISFIES receives one CK00001 naming MERGE.
 
 UPSERT INTO collection [AS alias] (KEY, VALUE) VALUES (key, value) [, ...] and
 UPSERT INTO collection (KEY outputName [, VALUE outputName]) SELECT ... execute with
@@ -129,7 +129,7 @@ INSERT's validation and MISSING rules. Existing identities receive complete repl
 absent properties disappear and each written identity receives a fresh version. Without VALUE,
 the complete projected row becomes the document. Every source row is staged before writes.
 A repeated key fails the whole statement with DocumentDuplicateKeyException (COHDOC012).
-OPTIONS and RETURNING remain COHDBL001 at their tokens. INSERT and UPSERT both reject
+OPTIONS and RETURNING remain CK00001 at their tokens. INSERT and UPSERT both reject
 (KEY k, OPTIONS o) SELECT ... with one diagnostic naming OPTIONS, including its expression form. No statement-level version precondition is available;
 PutAsync(expectedVersion) and UPDATE WHERE META().version = $v provide optimistic replacement.
 EXPLAIN UPSERT returns Upsert or UpsertSelect; completion reports affected count without rows.
@@ -144,7 +144,7 @@ count through Complete with no Document frames. Conflicts or cancellation roll b
 statement; failure inside an explicit transaction aborts the whole transaction. System
 collections remain read-only and Schema-owned collection contents remain mutable.
 EXPLAIN DELETE reports Delete plus CollectionScan or IndexSeek without writing. USE KEYS,
-RETURNING and DELETE LIMIT remain COHDBL001 at their tokens. DocumentDeleteTests and the
+RETURNING and DELETE LIMIT remain CK00001 at their tokens. DocumentDeleteTests and the
 advertised-clause corpus cover embedded execution; wire and NativeAOT checks cover completion.
 
 UPDATE collection [AS alias | alias] SET path = expression [, ...] [UNSET path [, ...]]
@@ -162,13 +162,13 @@ Untouched values and property-name spellings retain their bytes; rewritten-conta
 may be normalized. A successful UPDATE returns the matched count, including unchanged matches,
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
 above. EXPLAIN UPDATE describes the access without writing. USE KEYS, RETURNING, LIMIT and FOR
-remain COHDBL001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
+remain CK00001. DocumentUpdateTests covers paths, atomicity, serialization and matched counts.
 
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON collection (path [, path ...]) and
 DROP INDEX [IF EXISTS] name ON collection execute. Indexes have 1..32 distinct ordered paths;
 root bracket-string names such as ['x.y'], nested members and integer array subscripts work.
 UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (SELECT UNIQUE(a)
-is COHDBL001). Conditional creation skips an existing name regardless of its definition.
+is CK00001). Conditional creation skips an existing name regardless of its definition.
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
 Unconditional duplicate creation fails with COHDOC024; an absent unconditional DROP fails with
 COHDOC025. An encoded composite key beyond 1024 bytes fails with COHDOC026. These errors
@@ -184,7 +184,7 @@ array/object UNIQUE components fail COHDOC021 naming index and path. Constraints
 per row, so key swaps may fail. A failed explicit transaction requires RollbackAsync before reuse.
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
 The path-count cap reports OQL0009 at the 33rd key (COHDOC022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
-WHERE and INCLUDE MISSING receive OQL0002. ALL and DISTINCT ARRAY index keys get one COHDBL001
+WHERE and INCLUDE MISSING receive OQL0002. ALL and DISTINCT ARRAY index keys get one CK00001
 at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;

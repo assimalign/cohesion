@@ -197,7 +197,7 @@ public sealed class SqlUpsertExecutionTests
         var failure = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(sql));
 
         // Assert
-        failure.Diagnostics.Count(diagnostic => diagnostic.Code == "COHDBL001").ShouldBe(1);
+        failure.Diagnostics.Count(diagnostic => diagnostic.Code == "CK00001").ShouldBe(1);
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[1, 10]]);
     }
 

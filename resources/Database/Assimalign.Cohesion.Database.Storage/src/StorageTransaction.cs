@@ -319,7 +319,7 @@ public sealed class StorageTransaction : IDisposable
     {
         if (!_active)
         {
-            throw new StorageTransactionException($"Storage transaction {Sequence} has already completed.");
+            throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageValidateTransactionFailure, Sequence));
         }
     }
 }

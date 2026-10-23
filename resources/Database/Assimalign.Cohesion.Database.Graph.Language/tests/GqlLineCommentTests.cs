@@ -133,7 +133,7 @@ public sealed class GqlLineCommentTests
         var diagnostic = Parse(gql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(gql.IndexOf("CALL", StringComparison.Ordinal));
         diagnostic.Line.ShouldBe(3);
     }

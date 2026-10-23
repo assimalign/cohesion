@@ -262,7 +262,7 @@ public sealed class SqlReturningExecutionTests
         var failure = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        failure.Diagnostics.ShouldContain(item => item.Code == (sql.StartsWith("SELECT", StringComparison.Ordinal) ? "SQL0003" : "COHDBL001"));
+        failure.Diagnostics.ShouldContain(item => item.Code == (sql.StartsWith("SELECT", StringComparison.Ordinal) ? "SQL0003" : "CK00001"));
         await using var result = await QueryAsync(session, "SELECT * FROM t");
         CheckRows(await ReadAsync(result), [[1, 1]]);
     }

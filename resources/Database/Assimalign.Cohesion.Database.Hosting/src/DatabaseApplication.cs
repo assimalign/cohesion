@@ -69,7 +69,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
 
         if (_startAttempted)
         {
-            throw new InvalidOperationException("A database application supports only one start lifecycle.");
+            throw new InvalidOperationException(ErrorMessages.ApplicationOnStartingAsyncFailure);
         }
 
         _startAttempted = true;
@@ -136,7 +136,7 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
         if (failures.Count > 0)
         {
             DatabaseHostingEventSource.Log.ApplicationDisposeFailed(_context, failures.Count, failures[0]);
-            throw new AggregateException("Database application disposal failed.", failures);
+            throw new AggregateException(ErrorMessages.ApplicationDisposeCoreAsyncAggregate, failures);
         }
     }
 

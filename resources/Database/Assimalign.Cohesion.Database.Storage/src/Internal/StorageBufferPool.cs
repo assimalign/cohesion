@@ -58,7 +58,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     {
         if (capacity < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(capacity), "Buffer pool capacity must be at least one page.");
+            throw new ArgumentOutOfRangeException(nameof(capacity), ErrorMessages.BufferPoolValidateCapacityFailure);
         }
     }
 
@@ -277,7 +277,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
         if (writing) { return null; }
         StorageEventSource.Log.BufferPoolExhausted(this, _capacity);
-        throw new StorageIOException("Buffer pool is full and all pages are pinned.");
+        throw new StorageIOException(ErrorMessages.PoolReserveVictimLockedStorageIO);
     }
 
     private void WaitForIoLocked()
@@ -309,7 +309,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 if (_loads.ContainsKey(id)) { WaitForIoLocked(); continue; }
                 if (!_entries.TryGetValue(id, out entry!)) { return; }
                 if (entry.WriteInProgress) { WaitForIoLocked(); continue; }
-                if (!entry.TryReserve()) { throw new StorageIOException($"Cannot evict page {id}: page is pinned."); }
+                if (!entry.TryReserve()) { throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolEvictStorageIO, id)); }
                 entry.WriteInProgress = true;
                 _activeIo++;
                 break;
@@ -352,7 +352,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 {
                     _maintenance = false;
                     Monitor.PulseAll(_syncRoot);
-                    throw new StorageIOException($"Cannot shrink the buffer pool to {capacity} pages: {pinned} pages are pinned.");
+                    throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, pinned));
                 }
                 try
                 {
@@ -363,7 +363,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     {
                         var victim = ReserveVictimLocked();
                         if (victim is not null) { victims.Add(victim); }
-                        else { throw new StorageIOException($"Cannot shrink the buffer pool to {capacity} pages: {_entries.Count - victims.Count} pages are pinned."); }
+                        else { throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, _entries.Count - victims.Count)); }
                     }
                 }
                 catch
@@ -721,7 +721,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
     private static void FailInvariantLocked(string violation)
     {
-        throw new InvalidOperationException($"Buffer pool invariant violated: {violation}.");
+        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BufferPoolFailInvariantLockedFailure, violation));
     }
 
     private void CheckInvariantsLocked()

@@ -39,8 +39,8 @@ public sealed class SqlSchemaWireTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Schema failures preserve codes and leave the wire connection usable")]
     [InlineData("CREATE TABLE missing.t(id INT)", "COHSQLE028")]
-    [InlineData("CREATE SCHEMA s AUTHORIZATION owner", "COHDBL001")]
-    [InlineData("CREATE SCHEMA s CREATE TABLE t(id INT)", "COHDBL001")]
+    [InlineData("CREATE SCHEMA s AUTHORIZATION owner", "CK00001")]
+    [InlineData("CREATE SCHEMA s CREATE TABLE t(id INT)", "CK00001")]
     [InlineData("DROP SCHEMA dbo", "COHSQLE031")]
     [InlineData("CREATE SCHEMA INFORMATION_SCHEMA", "COHSQLE021")]
     public async Task ExecuteAsync_RejectedSchemaDdl_ShouldCarryDiagnostic(string sql, string code)

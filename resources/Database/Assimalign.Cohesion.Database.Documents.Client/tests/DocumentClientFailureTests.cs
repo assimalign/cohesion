@@ -76,7 +76,7 @@ public sealed class DocumentClientFailureTests
             {
                 var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(statement, cancellationToken: harness.Token));
                 error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-                error.Diagnostics.ShouldContain(d => d.Code == "COHDBL001");
+                error.Diagnostics.ShouldContain(d => d.Code == "CK00001");
                 error.Diagnostics.ShouldAllBe(d => d.Start.HasValue && d.End.HasValue && d.Line > 0);
                 connection.IsOpen.ShouldBeTrue();
             }

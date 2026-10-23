@@ -37,7 +37,7 @@ SELECT, INSERT, UPSERT, UPDATE and DELETE. UPDATE accepts SET and/or UNSET over 
 array indexes; SET-to-MISSING removes a property. USE KEYS, RETURNING, FOR comprehensions and
 UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
-produce `COHDBL001`; all three remain usable field names. Subqueries remain unsupported.
+produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 

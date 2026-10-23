@@ -174,7 +174,7 @@ change. The callback follows the current manager after catalog/store reattachmen
 A present graph record with an unknown kind or zero identity fails as corruption with its
 page and slot; it cannot become an absent node through cached-reference cleanup. A valid
 replacement identity still invalidates the old reference. This fixes the defect found during
-#1372 without changing graph format 4, public signatures or diagnostic code COHDBS003.
+#1372 without changing graph format 4, public signatures or diagnostic code CK06003.
 
 
 ## Confirmed decode failures (#1372)
@@ -204,3 +204,11 @@ into that cache. The unchanged TCP path-allocation test guards the combined engi
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

@@ -14,5 +14,14 @@
   <data name="FrameWriterFaulted" xml:space="preserve">
     <value>The batched frame writer cannot be reused after a failed transport write.</value>
   </data>
-  <data name="TransactionStatusInvalid" xml:space="preserve"><value>COHDBP002: Invalid transaction-status Ready payload.</value></data>
+  <data name="TransactionStatusInvalid" xml:space="preserve"><value>CK07002: Invalid transaction-status Ready payload.</value></data>
+  <data name="ProtocolChannelValidateProtocol" xml:space="preserve"><value>Message identifier {0} is not defined by endpoint family '{1}'.</value></data>
+  <data name="FrameWriterWriteFrameAsyncProtocol" xml:space="preserve"><value>Frame payload of {0} bytes exceeds the {1}-byte maximum.</value></data>
+  <data name="ProtocolMessageFamilyArgument" xml:space="preserve"><value>Message identifier {0} is reserved or duplicated.</value></data>
+  <data name="ProtocolPayloadReadStringProtocol" xml:space="preserve"><value>Malformed payload: invalid string length.</value></data>
+  <data name="ProtocolPayloadReadInt32Protocol" xml:space="preserve"><value>Malformed payload: truncated integer.</value></data>
+  <data name="StreamFrameReaderReadAsyncProtocol" xml:space="preserve"><value>The connection ended inside a frame header.</value></data>
+  <data name="StreamFrameReaderReadAsyncProtocol2" xml:space="preserve"><value>Invalid frame header: declared payload of {0} bytes exceeds the {1}-byte maximum.</value></data>
+  <data name="StreamFrameReaderReadAsyncProtocol3" xml:space="preserve"><value>The connection ended inside a frame payload.</value></data>
+  <data name="ProtocolFrameHeaderWriteToArgument" xml:space="preserve"><value>Destination must be at least {0} bytes.</value></data>
 </root>

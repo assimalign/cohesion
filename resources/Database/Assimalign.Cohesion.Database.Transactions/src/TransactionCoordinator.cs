@@ -126,8 +126,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
-        // factory class name inside this scope.
-        var locks = Transactions.LockManager.Create();
+        // type name inside this scope.
+        var locks = new Transactions.LockManager();
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
 
@@ -876,8 +876,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         if (_insideApply.Value)
         {
             throw new StorageTransactionException(
-                "A checkpoint cannot run inside a statement apply: the statement holds the apply gate the checkpoint waits for. " +
-                "Checkpoint after the statement completes.");
+                ErrorMessages.CoordinatorThrowIfInsideApplyFailure);
         }
     }
 

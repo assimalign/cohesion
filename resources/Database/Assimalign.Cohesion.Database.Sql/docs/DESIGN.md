@@ -84,7 +84,7 @@ this parsing boundary; the catalog encoding and storage format are unchanged.
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
 and aggregate causes, use `COHSQLE041`. Offline and format refusals retain their specific codes.
-Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHSQLE041`;
+Attached-index damage leads with `CK06003` and retains `CK06102` and `COHSQLE041`;
 other index failures use `COHSQLE041`. Begin, statement, commit and rollback share classification.
 Create and open also code child failures before publication. Known format refusals retain their
 authored types, messages and source diagnostics. Snapshot release and transaction abort preserve
@@ -238,7 +238,7 @@ upgrade path. No new interface, visibility grant, project reference or wire form
 The common column parser refuses explicit NULL with NOT NULL, PRIMARY KEY or IDENTITY
 in either order using SQL0003 and the column name, including table primary keys. ALTER of
 an existing primary key uses that coded refusal too. SERIAL/BIGSERIAL/SMALLSERIAL are
-rejected when SQL or native domains are created, with COHDBL001 and an IDENTITY suggestion.
+rejected when SQL or native domains are created, with CK00001 and an IDENTITY suggestion.
 
 ## N-way joins (#1109)
 
@@ -637,7 +637,7 @@ ordering freeze child values per outer row before sorting. Grouped references bi
 to grouping slots; ungrouped outer columns fail with COHSQLE017 naming the column.
 Aggregate levels use the lowest variable or aggregate dependency, descending into
 nested query bodies and adjusting levels as PostgreSQL `parse_agg.c:646-690,762,850`
-does. Outer-only aggregates report COHDBL001 before grouped-column validation,
+does. Outer-only aggregates report CK00001 before grouped-column validation,
 including explicitly and implicitly grouped ancestors; a nested local dependency
 keeps a mixed aggregate local. A nested aggregate's dependency summary is consumed
 once, avoiding repeated argument walks. Arguments of an aggregate of the grouped level
@@ -1760,7 +1760,7 @@ flowchart LR
   populated one. CAST reuses the binder's existing result inference, including aggregate slots,
   while parameter-dependent result types keep evaluation-time checks. Parameters in CASE conditions
   do not make a statically typed result dynamic. NULLIF still has no bound result type: its existing
-  COHDBL001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
+  CK00001 language refusal precedes planning. PostgreSQL checks the transformed operand's type in
   src/backend/parser/parse_expr.c:2764-2788. Before E3 the parser refused these targets outright; E3 made every built-in
   type a target, so the planner owns the refusal.
 - **Failures.** A `FormatException`, `OverflowException` or `InvalidCastException` a conversion
@@ -1850,13 +1850,13 @@ signatures, CAST and provisioning of typed SQL names. Catalog metadata records R
 with INFORMATION_SCHEMA reporting REAL or DOUBLE PRECISION; no decimal modifier remains.
 Precision 0 or greater than 53 is SQL0005 with PostgreSQL's bit-range reason. Temporal precision
 is recognized but lacks fractional-second rounding, so declarations, scripts and CAST fail closed
-with COHDBL001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
+with CK00001 naming the object and modifier. Malformed arguments still use SQL0005. The wire
 keeps its ParseFailure category and usable connection. See DIALECT.md for the PostgreSQL difference.
 
 INTERVAL field qualifiers (the six individual fields and seven PostgreSQL X TO Y ranges), with
 optional precision on SECOND, follow the same unsupported-modifier path. The parser consumes the
 complete qualifier at columns, domain bases, function signatures and CAST; shared validation
-reports COHDBL001 with the object and qualifier before provisioning or script execution. Typed
+reports CK00001 with the object and qualifier before provisioning or script execution. Typed
 SQL names and SDK extraction use that rule too. Delimited domain names remain identifiers.
 
 ## Declared column bounds (#1418)
@@ -2431,7 +2431,7 @@ COHSQLE028 (3F000). DROP TABLE IF EXISTS retains its no-op and declared-script a
 PostgreSQL anchors are namespace.c:673-683,3605-3616, tablecmds.c:1498-1506,4534-4539,
 utility.c:1480-1483 and namespace.c:526-531.
 
-AUTHORIZATION and nested schema elements are rejected with COHDBL001. Atomic nested statements
+AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
 Record-space format 26 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
@@ -2478,7 +2478,7 @@ planning with located COHSQLE015 before any row changes, leaving an explicit tra
 active. This follows PostgreSQL `src/backend/parser/parse_relation.c:3759`. Correlated and uncorrelated
 UPDATE/DELETE WHERE subqueries execute, including aggregates inside child queries;
 aggregates outside children remain rejected. UPDATE SET subqueries
-retain COHDBL001.
+retain CK00001.
 
 ## Virtual system relations (C1)
 
@@ -2952,7 +2952,7 @@ project reference or InternalsVisibleTo change is required.
   resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
   call is the one reported. A recognized name that does not execute yet (`NULLIF`,
   `TRIM`, ...) is absent from the executable profile and rejects at parse time with
-  `COHDBL001`; it is not also reported as an unknown function (#1103).
+  `CK00001`; it is not also reported as an unknown function (#1103).
 - **One catalog of functions (#1189, E2).** The engine's `SqlFunctionCatalog` holds
   every executable function, the standard library's and the application's alike
   ([Functions (E2)](#functions-e2)). Its readers are the planner walk above; the
@@ -3163,15 +3163,15 @@ project reference or InternalsVisibleTo change is required.
   registrations, before recovery's scrub or checkpoint writes anything. A marker
   that does not describe its trees — a damaged root, or pages another engine build
   wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
-  format 6, but one of its index trees does not: COHDBI001: …", the index manager's
+  format 6, but one of its index trees does not: CK06101: …", the index manager's
   `IndexFormatException` as its inner exception), and the files are left
   byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
   index pages. **Below the gate, each file set has its own storage format (#1251).**
   The storage refuses a file set in another storage format with
-  `StorageFormatException` (`COHDBS001`) when it opens, before recovery reads its
+  `StorageFormatException` (`CK06001`) when it opens, before recovery reads its
   journal. A database has two file sets, so `OpenDatabaseAsync` carries the refusal
   in `SqlDataStorageFormatException` naming the database and the file set: "Database
-  'x' cannot be opened: its catalog file set 'x/catalog' was refused. COHDBS001: …"
+  'x' cannot be opened: its catalog file set 'x/catalog' was refused. CK06001: …"
   (or its data file set 'x'). The server forwards it to the client like the gate's
   own refusals, and the files stay byte-identical.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
@@ -3485,7 +3485,7 @@ project reference or InternalsVisibleTo change is required.
   (ISO SQLSTATE class 42, syntax error or access rule violation). It then rejects an
   aggregate and `*` with uncoded messages naming the clause, and runs
   `ValidateExpression` against an empty column scope, which raises `COHSQLE003` for a
-  sign over a non-numeric literal or parameter and `COHDBL001` for a subquery. The
+  sign over a non-numeric literal or parameter and `CK00001` for a subquery. The
   column check runs first, so `-a` and `SUM(a)` report the column, not the
   operand type or the aggregate. Every row is checked before planning returns, so a
   fault in a later row leaves the earlier rows unwritten. As defense in depth,
@@ -3495,7 +3495,7 @@ project reference or InternalsVisibleTo change is required.
   with a column reference already failed while planning, as `Unknown column`, or,
   inside a subquery, as an error result: `PlanSubqueries` turned the child's
   `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
-  returns as a `DatabaseResultStatus.Error` result carrying `COHDBL001`'s
+  returns as a `DatabaseResultStatus.Error` result carrying `CK00001`'s
   correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
   for a reference to the subquery's own columns or the outer query's: ISO SQL's
   fetch-first count is a simple value specification, which no column of any scope
@@ -4804,7 +4804,7 @@ snapshot fixed at the transaction's begin, every child version in that closure m
 be one the snapshot sees
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
 updates are restricted while referenced. `ON UPDATE` is unsupported and returns
-`COHDBL001`.
+`CK00001`.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
@@ -5351,7 +5351,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -5419,7 +5419,7 @@ reference clone, `src/backend/access/heap/hio.c:527-534`. Live size-limit confor
 execution boundaries, statement atomicity, exact limits and a repeated, observed upsert row wait.
 
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
-diagnostic COHSQLE041 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+diagnostic COHSQLE041 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
 The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
 member is introduced. These failures abort an explicit transaction, retain the coded cause,
@@ -5433,7 +5433,7 @@ and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.
 The implementation uses static type checks and the existing transaction abort mechanism.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -5446,7 +5446,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
@@ -5577,7 +5577,7 @@ from the row fetch as "the row was reclaimed beneath its entry" and dropped the
 row. Only a reclaimed row is skipped now, through the positive check
 `Storage.TryReadRecord` makes (see "Seek execution is snapshot-anchored"), as
 PostgreSQL's heap fetch returns "not found" for a dead line pointer and raises
-`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`COHDBS003`), naming the
+`ERRCODE_DATA_CORRUPTED` for an invalid page. Corruption is translated to `DatabaseCorruptionException` (`CK06003`), naming the
 database and page, and reaches the wire as `ExecutionFailure` without closing the session.
 Other I/O failures retain their existing handling.
 The read-only creation emptiness probe uses the same wrapped-corruption search before its
@@ -6343,7 +6343,7 @@ ordering and preserve every code, severity, message, nullable offset and source 
 The owning SQL test assembly supplies a result double through an internal server-session execution hook to verify success warnings and Information filtering. This adds no public seam or friend assembly.
 
 Diagnostic overflow is preflighted before output and retains a source-order prefix plus
-COHDBP001 with exact retained/omitted counts; the original Error category/message or
+CK07001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
@@ -7331,7 +7331,7 @@ timeout and existing storage exception identities are not caught by decoder-only
 No file format, version, protocol frame, event, counter or diagnostic number changes.
 
 Malformed persisted catalog records now carry storage corruption through the engine boundary,
-so OpenDatabaseAsync reports DatabaseCorruptionException with COHDBS003, page and slot instead
+so OpenDatabaseAsync reports DatabaseCorruptionException with CK06003, page and slot instead
 of leaking a catalog/parser exception. Direct SqlCatalog.Open retains SqlCatalogException,
 including for malformed key components, with the original DatabaseTypeException underneath
 its location-bearing corruption cause. The existing marker probe still distinguishes genuine
@@ -7570,14 +7570,14 @@ integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays r
 Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
 
 Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
-loopback, wildcard -> Any; DNS names are refused synchronously with COHDBTCP001. Endpoint URIs
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
 must be absolute, have a host and explicit positive port, and have no user information, query or
 fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
 remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
 was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
 
 Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
-option as ParamName, with kernel resx codes COHDBO001, COHDBO002 and COHDBO003. Existing timer
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
 policies are retained: Documents permits zero authentication/idle values; Blob requires positive
 values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
 idle policy. All models require positive finite shutdown/linger values no greater than
@@ -7587,3 +7587,11 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

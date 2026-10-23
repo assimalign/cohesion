@@ -209,8 +209,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (capacityBytes < MinimumBufferPoolBytes || capacityBytes % Page.Size != 0 || capacityBytes / Page.Size > int.MaxValue)
         {
             throw new ArgumentOutOfRangeException(paramName, capacityBytes,
-                $"A buffer pool capacity must be a whole number of {Page.Size}-byte pages, at least {MinimumBufferPoolBytes} bytes " +
-                $"({MinimumBufferPoolBytes / Page.Size} pages) and at most {(long)int.MaxValue * Page.Size} bytes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageGetBufferPoolPageCountFailure, Page.Size, MinimumBufferPoolBytes, MinimumBufferPoolBytes / Page.Size, (long)int.MaxValue * Page.Size));
         }
 
         return (int)(capacityBytes / Page.Size);
@@ -292,20 +291,20 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// against the <see cref="Data"/> stream.
     /// </summary>
     public StoragePageManager PageManager =>
-        _pageManager ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _pageManager ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the buffer pool that caches pages in memory with pin-counting and LRU eviction.
     /// Only the storage itself and its own tests read it.
     /// </summary>
     internal StorageBufferPool BufferPool =>
-        _bufferPool ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _bufferPool ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the free space map that tracks allocated and free pages in the data file.
     /// </summary>
     public StorageFreeSpaceMap FreeSpaceMap =>
-        _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _freeSpaceMap ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets or sets the number of pages the buffer pool may hold; 8 KiB each
@@ -462,7 +461,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (!StorageOfflineException.IsEngineCause(cause))
         {
             throw new ArgumentOutOfRangeException(nameof(cause), cause,
-                "An engine takes a storage offline only with a cause of its own: a worker whose work kept failing, or the journal size limit.");
+                ErrorMessages.StorageTakeOfflineFailure);
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -565,7 +564,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// page images directly.
     /// </remarks>
     protected StorageJournal WriteAheadLog =>
-        _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _journal ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the logical transaction sequences the last checkpoint recorded as in flight,
@@ -821,7 +820,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             if (value is not (StorageCommitDurability.Synchronous or StorageCommitDurability.Grouped or StorageCommitDurability.None))
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown commit durability setting.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.StorageFailure2);
             }
 
             lock (_transactionLock)
@@ -831,9 +830,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     && (current == StorageCommitDurability.None) != (value == StorageCommitDurability.None))
                 {
                     throw new InvalidOperationException(
-                        $"Storage '{_name}' cannot change CommitDurability from '{current}' to '{value}' once it is initialized: 'None' " +
-                        "checkpoints truncate the journal without flushing the data file durably, so a change into or out of 'None' " +
-                        "could make a truncation durable ahead of its pages. Reopen it with the new mode configured before the open.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFailure3, _name, current, value));
                 }
 
                 Volatile.Write(ref _commitDurability, (int)value);
@@ -867,13 +864,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (resolved is not (StorageCommitDurability.Synchronous or StorageCommitDurability.Grouped or StorageCommitDurability.None))
         {
-            throw new ArgumentOutOfRangeException(nameof(durability), durability, "Unknown commit durability setting.");
+            throw new ArgumentOutOfRangeException(nameof(durability), durability, ErrorMessages.StorageFailure2);
         }
 
         if (resolved != StorageCommitDurability.None && !SupportsDurableFlush)
         {
             throw new NotSupportedException(
-                $"Storage '{storageName}' cannot provide Durability '{resolved}': its backing store does not support durable flush (SupportsDurableFlush = false).");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConfigureCommitDurabilityNotSupported, storageName, resolved));
         }
 
         CommitDurability = resolved;
@@ -898,7 +895,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         AwaitCommitDurable(lsn, CommitDurability);
@@ -926,7 +923,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 return;
             default:
                 // The setter accepts only defined values.
-                throw new InvalidOperationException($"Unknown commit durability setting '{durability}'.");
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageAwaitCommitDurableFailure, durability));
         }
     }
 
@@ -1327,7 +1324,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1374,7 +1371,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1402,7 +1399,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1527,7 +1524,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (!latch.IsWriteHeld)
         {
             throw new InvalidOperationException(
-                $"Storage transaction {transaction.Sequence} cannot change a page of a latched structure without holding the structure's latch exclusively.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageEnlistLatchFailure, transaction.Sequence));
         }
 
         transaction.EnlistLatch(latch);
@@ -1620,7 +1617,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             if (_activeTransactionCount > 0)
             {
-                throw new StorageTransactionException("Checkpoint requires no active transactions.");
+                throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
             }
 
             // Zero unless the event source is listening. A refused checkpoint (above) changed
@@ -1781,7 +1778,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (data.Length > SlottedPage.MaxRecordSize)
         {
             throw new SlottedPageException(
-                $"Record of {data.Length} bytes exceeds the maximum record size of {SlottedPage.MaxRecordSize} bytes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageInsertRecordSlottedPage, data.Length, SlottedPage.MaxRecordSize));
         }
 
         StoragePageHandle handle;
@@ -2481,9 +2478,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (awaitDurability && durability != StorageCommitDurability.None && !Journal.SupportsDurableFlush)
         {
             throw new NotSupportedException(
-                $"Storage transaction {transaction.Sequence} cannot commit with CommitDurability '{durability}': the journal's backing " +
-                "handle does not support a durable flush (SupportsDurableFlush = false). Nothing was journaled; the transaction is still " +
-                "active and can be rolled back.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageCommitTransactionNotSupported, transaction.Sequence, durability));
         }
 
         // Deterministic page order keeps the journal replayable and testable.
@@ -2654,7 +2649,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             // The runs were encoded by this process (or verified by their frame's checksum when
             // read back), so this is a defect, not damage on disk.
-            throw new InvalidOperationException($"A storage transaction's pre-image does not decode: {problem}.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageLoadPreImageFailure, problem));
         }
 
         BinaryPrimitives.WriteInt64LittleEndian(destination[Page.LsnFieldOffset..], preImage.BaseLsn);
@@ -2725,8 +2720,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (pageLsn != baseLsn)
         {
             throw new InvalidOperationException(
-                $"Page {pageId} carries LSN {pageLsn}, but its storage transaction found it at LSN {baseLsn}: the page was changed outside " +
-                "the transaction, and its changes cannot be journaled.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageThrowIfLsnMovedFailure, pageId, pageLsn, baseLsn));
         }
     }
 
@@ -2802,8 +2796,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // always ends committed (CommitTransaction), because recovery redoes it. Rolling it back
             // would restore bases its deltas moved past and break the pages' chains (#1018).
             throw new InvalidOperationException(
-                $"Storage transaction {transaction.Sequence} cannot roll back: its commit record (LSN {transaction.CommitRecordLsn}) is in " +
-                "the journal, so recovery redoes its changes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRollbackTransactionFailure, transaction.Sequence, transaction.CommitRecordLsn));
         }
 
         byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
@@ -3127,7 +3120,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (!transaction.IsActive)
         {
-            throw new StorageTransactionException($"Storage transaction {transaction.Sequence} has already completed.");
+            throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageValidateTransactionFailure, transaction.Sequence));
         }
 
         // A record change would extend the file or dirty a page that can never be written.
@@ -3302,7 +3295,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 if (!alreadyLocked)
                 {
                     throw new StorageTransactionException(
-                        $"Page {pageId} is write-locked by transaction {owner!.Sequence}.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRegisterTouchFailure, pageId, owner!.Sequence));
                 }
             }
             else
@@ -3786,7 +3779,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (Data.Length < Page.Size)
         {
             throw new StorageIOException(
-                $"Invalid storage file: it holds {Data.Length} bytes, less than its {Page.Size}-byte header page.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadHeaderStorageIO, Data.Length, Page.Size));
         }
 
         var page0 = new byte[Page.Size];
@@ -3859,11 +3852,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             if (newest is null)
             {
                 throw magic != StorageFileHeader.ExpectedMagic
-                    ? new StorageIOException("Invalid storage file: header magic number mismatch, and no header slot verifies.")
+                    ? new StorageIOException(ErrorMessages.StorageReadHeaderStorageIO2)
                     : new StorageCorruptionException(
                         (PageId)0L,
-                        "Invalid storage file: the identity block of page 0 failed checksum verification, and neither header slot " +
-                        "verifies to restore it from.");
+                        ErrorMessages.StorageReadHeaderFailure);
             }
 
             identity = StorageHeaderPage.SlotIdentity(page0.AsSpan(StorageHeaderPage.SlotOffset(newestSlot), StorageHeaderPage.SlotSize));
@@ -3872,8 +3864,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)0L,
-                    $"Invalid storage file: the identity block of page 0 does not verify, and neither does the copy header slot " +
-                    $"{newestSlot} (generation {newest.Generation}) carries.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadHeaderFailure2, newestSlot, newest.Generation));
             }
 
             if (copyVersion != StorageFileHeader.CurrentFormatVersion)
@@ -3887,8 +3878,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             throw new StorageCorruptionException(
                 (PageId)0L,
-                "Invalid storage file: neither header slot of page 0 verifies. Each header write leaves the other slot intact, " +
-                "so both failing means page 0 was damaged outside a header write.");
+                ErrorMessages.StorageReadHeaderFailure3);
         }
 
         _identity = identity.ToArray();
@@ -3984,8 +3974,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)pageId,
-                    $"Invalid storage file: header slot {slot} (generation {header.Generation}) chains checkpoint anchor page {pageId} " +
-                    $"at position {index}, which is not a page of the file or repeats one.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure, slot, header.Generation, pageId, index));
             }
 
             Data.ReadPage((PageId)pageId, buffer);
@@ -3999,7 +3988,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)pageId,
-                    $"Invalid storage file: checkpoint anchor page {pageId} of header slot {slot} (generation {header.Generation}) does not verify: {problem}.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure2, pageId, slot, header.Generation, problem));
             }
 
             StorageHeaderPage.ReadAnchorEntries(buffer, destination.Slice(read, count));
@@ -4012,8 +4001,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             throw new StorageCorruptionException(
                 (PageId)0L,
-                $"Invalid storage file: header slot {slot} (generation {header.Generation}) records {destination.Length} anchor entries " +
-                $"on its chain, but the chain holds {read}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure3, slot, header.Generation, destination.Length, read));
         }
 
         return chain;

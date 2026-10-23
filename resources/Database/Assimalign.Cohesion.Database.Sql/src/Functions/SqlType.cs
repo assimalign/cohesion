@@ -245,7 +245,7 @@ public sealed class SqlType : IEquatable<SqlType>
     /// The name DDL and CAST write, matched ignoring case: an ASCII identifier (an ASCII letter or
     /// underscore, then ASCII letters, digits and underscores, the rule the typed schema applies) that
     /// is neither a SQL keyword nor a built-in type name or alias (<c>INT</c>, <c>VARCHAR</c>,
-    /// <c>DATE</c>, ...). SERIAL, BIGSERIAL and SMALLSERIAL are refused with COHDBL001 and an
+    /// <c>DATE</c>, ...). SERIAL, BIGSERIAL and SMALLSERIAL are refused with CK00001 and an
     /// IDENTITY suggestion because the type grammar reserves those spellings.
     /// </param>
     /// <param name="baseType">

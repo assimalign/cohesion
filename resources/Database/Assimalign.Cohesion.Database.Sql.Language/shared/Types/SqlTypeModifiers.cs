@@ -117,7 +117,7 @@ internal static class SqlTypeModifiers
         code = DiagnosticCode;
         if (!isDelimited && Rejection(name) is { } rejection)
         {
-            if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL") { code = "COHDBL001"; }
+            if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL") { code = "CK00001"; }
             return rejection;
         }
         if (!isDelimited && IsIntervalQualifiedName(name))
@@ -127,7 +127,7 @@ internal static class SqlTypeModifiers
             {
                 return "Only the SECOND interval field accepts one nonnegative precision argument.";
             }
-            code = "COHDBL001";
+            code = "CK00001";
             string modifier = first is null ? name : string.Create(CultureInfo.InvariantCulture, $"{name}({first})");
             return $"Interval field modifier '{modifier}' is recognized but not supported by the SQL model surface; field restrictions are not enforced, so use bare INTERVAL.";
         }
@@ -149,7 +149,7 @@ internal static class SqlTypeModifiers
             }
             // PostgreSQL accepts temporal precision and clamps values above six with a warning:
             // date.c:57-81; timestamp.c:110-132,1096-1110. We do not implement that rounding yet.
-            code = "COHDBL001";
+            code = "CK00001";
             return string.Create(CultureInfo.InvariantCulture,
                 $"Temporal precision modifier '{name}({first})' is recognized but not supported by the SQL model surface.");
         }

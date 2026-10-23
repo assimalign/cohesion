@@ -448,7 +448,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         File.ReadAllBytes(dataPath).ShouldBe(before);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: A database whose primary index is in B-tree page format 1 is refused at open with CK06101, its files untouched (#1194)")]
     public async Task Open_PrimaryIndexInFormatOne_ShouldBeRefused()
     {
         // Arrange: a closed database whose index pages are rewritten into the layout
@@ -480,11 +480,11 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
     }
 
     /// <summary>
-    /// The storage refuses a file set in another storage format with <c>COHDBS001</c> (#1251).
+    /// The storage refuses a file set in another storage format with <c>CK06001</c> (#1251).
     /// A database has a data and a catalog file set, so the engine names the database and the
     /// one that was refused.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming the database and the file set, its files untouched (#1251, #1253)")]
+    [Theory(DisplayName = "Cohesion Test [Database.KeyValuePair] - Format: a file set in storage format 2 (the format before #1253) is refused at open with CK06001 naming the database and the file set, its files untouched (#1251, #1253)")]
     [InlineData("data")]
     [InlineData("catalog")]
     public async Task Open_FileSetInStorageFormatTwo_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)

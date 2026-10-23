@@ -46,7 +46,7 @@ representation — model-specific layouts live in the Storage components of each
 - **Offline on a failed journal write, fsync or header write** — a durable flush of the journal
   or the data file (#1243), a write of the journal's buffer (#1252), or a header slot write
   that fails once issued (#1268) takes the storage offline (`StorageOfflineException`,
-  `COHDBS002`): nothing more is written to either file, closing included, until the file set
+  `CK06002`): nothing more is written to either file, closing included, until the file set
   is reopened and its recovery
   decides every unconfirmed commit (PostgreSQL's PANIC on a failed WAL fsync).
   `StorageOfflineException.Cause` (`StorageOfflineCause`: `JournalFlush`, `DataFlush`,
@@ -61,9 +61,9 @@ representation — model-specific layouts live in the Storage components of each
   separately checksummed header slots (LSN and sequence floors, checkpoint anchor, and a
   copy of the identity block), so a torn header write cannot make a file set unopenable.
   A half-page read error permits fallback only with verified journal coverage and emits a
-  Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`COHDBS003`).
+  Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`CK06003`).
   Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 4;
-  any other format is refused with `StorageFormatException` (`COHDBS001`), with no upgrade
+  any other format is refused with `StorageFormatException` (`CK06001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
   (`.log`), and backup (`.bak`), wrapped by `StorageStream`.
@@ -162,3 +162,11 @@ copies report the existing corruption code with page and slot. Direct catalog AP
 their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
 16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
 adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`StoragePageLatch()` is public; the parameterless `Create()` factory is removed. Its creation-order rule is unchanged.

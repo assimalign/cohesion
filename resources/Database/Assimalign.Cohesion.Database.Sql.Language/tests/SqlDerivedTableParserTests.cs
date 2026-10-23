@@ -65,7 +65,7 @@ public sealed class SqlDerivedTableParserTests
         var statement = new SqlQueryParser().Parse("INSERT INTO (SELECT id FROM t) d VALUES (1);");
 
         // Assert
-        statement.Diagnostics.ShouldContain(d => d.Code == "COHDBL001");
+        statement.Diagnostics.ShouldContain(d => d.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Derived tables: reference classification waits for catalog binding")]
@@ -100,6 +100,6 @@ public sealed class SqlDerivedTableParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.Any(d => d.Code == "COHDBL001" && d.Message!.Contains("limit of 32 levels")).ShouldBe(rejected);
+        statement.Diagnostics.Any(d => d.Code == "CK00001" && d.Message!.Contains("limit of 32 levels")).ShouldBe(rejected);
     }
 }

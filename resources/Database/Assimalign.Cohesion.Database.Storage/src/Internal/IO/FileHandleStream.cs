@@ -90,7 +90,7 @@ internal sealed class FileHandleStream : Stream
         };
         if (position < 0)
         {
-            throw new IOException("Cannot seek before the beginning of the file.");
+            throw new IOException(ErrorMessages.FileHandleStreamSeekIO);
         }
         Position = position;
         return position;

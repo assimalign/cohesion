@@ -60,7 +60,7 @@ public sealed class DatabaseTcpTests
         Should.Throw<ArgumentException>(() => options.Listen(new Uri("relative", UriKind.Relative)));
         Should.Throw<ArgumentException>(() => options.Listen(new Uri("cohesion-db://127.0.0.1:0")));
         var dns = Should.Throw<InvalidOperationException>(() => options.Listen(new Uri("cohesion-db://example.test:5740")));
-        dns.Message.ShouldStartWith("COHDBTCP001:", Case.Sensitive);
+        dns.Message.ShouldStartWith("CK07101:", Case.Sensitive);
         options.Listener.ShouldBeNull();
     }
 
@@ -75,7 +75,7 @@ public sealed class DatabaseTcpTests
         failure.ParamName.ShouldBe(missingListener ? "Listener" : "MaxSessions");
         failure.Message.ShouldContain(TcpServerSmoke.Models[model], Case.Sensitive);
         failure.Message.ShouldContain(engine.Name.ToString(), Case.Sensitive);
-        failure.Message.ShouldStartWith(missingListener ? "COHDBO001:" : "COHDBO002:", Case.Sensitive);
+        failure.Message.ShouldStartWith(missingListener ? "CK08001:" : "CK08002:", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Tcp] - Drain refusals retain timer bounds and identify their option (#1391)")]
@@ -88,7 +88,7 @@ public sealed class DatabaseTcpTests
         failure.ParamName.ShouldBe("ShutdownDrainTimeout");
         failure.Message.ShouldContain(engine.Name.ToString(), Case.Sensitive);
         failure.Message.ShouldContain(TcpServerSmoke.Models[model], Case.Sensitive);
-        failure.Message.ShouldStartWith("COHDBO003:", Case.Sensitive);
+        failure.Message.ShouldStartWith("CK08003:", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Tcp] - Shared options preserve model-specific zero and infinite timer policies (#1391)")]

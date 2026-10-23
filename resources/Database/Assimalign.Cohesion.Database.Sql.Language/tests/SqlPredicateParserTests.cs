@@ -118,7 +118,7 @@ public sealed class SqlPredicateParserTests
         var statement = new SqlQueryParser().Parse("SELECT " + text + ";");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain(form, Case.Sensitive);
         error.Start.ShouldBe(text.Contains(' ') ? 9 : 8);
         error.End.ShouldBe(error.Start + (text.Contains("::", System.StringComparison.Ordinal) ? 2 : form.Length));

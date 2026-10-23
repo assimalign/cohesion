@@ -59,7 +59,7 @@ public sealed class GqlValueParserTests
         // Arrange / Act
         var errors = new GqlQueryParser().Parse("MATCH (a) RETURN " + value).Diagnostics;
         // Assert
-        errors.ShouldContain(error => error.Code == "COHDBL001");
+        errors.ShouldContain(error => error.Code == "CK00001");
         errors.ShouldNotContain(error => error.Code == "GQL0002");
     }
 
@@ -87,6 +87,6 @@ public sealed class GqlValueParserTests
         // Act
         var diagnostics = new GqlQueryParser().Parse("MATCH (a) RETURN " + expression).Diagnostics;
         // Assert
-        diagnostics.ShouldContain(item => item.Code == "COHDBL001" && item.Message!.Contains(construct));
+        diagnostics.ShouldContain(item => item.Code == "CK00001" && item.Message!.Contains(construct));
     }
 }

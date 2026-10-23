@@ -14,7 +14,7 @@ internal sealed class DatabaseResourceDescriptor : IDatabaseResourceDescriptor
     {
         ArgumentNullException.ThrowIfNull(inner);
         _inner = inner as IResourceCommandDescriptor ?? throw new ArgumentException(
-            "The descriptor must support declarative command authoring.", nameof(inner));
+            ErrorMessages.DatabaseResourceDescriptorArgument, nameof(inner));
     }
 
     public IApplicationResource Resource => _inner.Resource;

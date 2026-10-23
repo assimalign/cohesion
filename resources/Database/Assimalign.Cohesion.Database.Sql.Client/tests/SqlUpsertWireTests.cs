@@ -80,7 +80,7 @@ public sealed class SqlUpsertWireTests
         rows.Select(row => (row.GetInt32(0), row.GetInt32(1))).ShouldBe([(1, 10), (2, 20)]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: excluded spellings carry COHDBL001 ParseFailure without writes")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: excluded spellings carry CK00001 ParseFailure without writes")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON DUPLICATE KEY UPDATE age = 3", "ON DUPLICATE KEY UPDATE")]
     [InlineData("INSERT OR IGNORE INTO t VALUES (2, 20)", "ON CONFLICT")]
     [InlineData("INSERT OR REPLACE INTO t VALUES (2, 20)", "ON CONFLICT")]
@@ -104,7 +104,7 @@ public sealed class SqlUpsertWireTests
 
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        failure.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        failure.Message.ShouldContain("CK00001", Case.Sensitive);
         failure.Message.ShouldContain(construct, Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         var rows = await connection.QueryAsync("SELECT id, age FROM t", cancellationToken: SqlClientTestHarness.Timeout());

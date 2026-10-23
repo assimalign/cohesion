@@ -223,7 +223,7 @@ public sealed partial class SqlSubqueryExecutionTests
         // Act / Assert
         (await RowsAsync(session, query)).ShouldHaveSingleItem()[0].ShouldBe(1);
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, $"SELECT ({query}) FROM candidates WHERE id = 1"));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         error.Message.ShouldContain("32", Case.Sensitive);
     }
 

@@ -22,7 +22,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   bases, which own the end state machine: a failed statement leaves the transaction
   active, and a transaction the kernel ended under its caller refuses work with
   `COHSQLT005` until it is rolled back. A storage, I/O or index failure (`COHSQLE041`, or
-  `COHDBS003` for corruption) is the exception: it aborts the explicit transaction, which
+  `CK06003` for corruption) is the exception: it aborts the explicit transaction, which
   then refuses work with `COHSQLT005` naming that cause until it is rolled back (#1364). In
   autocommit the next statement can run. Writing statements prepare wire headers/rows before
   commit; encoding failures roll back only the statement. Read-only statements encode during
@@ -360,3 +360,11 @@ Pool return now rolls back unfinished SQL/Graph transactions using negotiated se
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

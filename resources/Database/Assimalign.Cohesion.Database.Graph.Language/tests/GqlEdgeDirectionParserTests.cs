@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
 /// ISO/IEC 39075 16.7 edge patterns (#1139): every full and abbreviated directed form maps to its
-/// <see cref="GqlPatternDirection"/>. The tilde (undirected) forms are rejected with COHDBL001,
+/// <see cref="GqlPatternDirection"/>. The tilde (undirected) forms are rejected with CK00001,
 /// pinned in <c>GqlParseStrictnessTests</c>.
 /// </summary>
 public sealed class GqlEdgeDirectionParserTests

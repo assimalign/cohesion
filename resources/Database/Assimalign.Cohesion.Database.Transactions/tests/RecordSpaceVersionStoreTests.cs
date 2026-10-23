@@ -44,7 +44,7 @@ public class RecordSpaceVersionStoreTests
 
             // Assert
             failure.PageId.ShouldBe(location.PageId);
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
         }
         finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
@@ -71,7 +71,7 @@ public class RecordSpaceVersionStoreTests
 
         // Assert
         failure.PageId.ShouldBe(location.PageId);
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
         CountRecords(storage).ShouldBe(1);
     }
@@ -194,7 +194,7 @@ public class RecordSpaceVersionStoreTests
 
         // Assert: failed loads never enter the cache; a repaired device returns the version.
         failure.PageId.ShouldBe(location.PageId);
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         media.GetBuffer()[offset] ^= 0x80;
         (await coordinator.VersionStore.GetVisibleVersionAsync(0,
             storage.PackLocation(location.PageId, location.SlotIndex), reader.Snapshot, CancellationToken.None)).HasValue.ShouldBeTrue();

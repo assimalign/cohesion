@@ -105,7 +105,7 @@ public sealed class OqlIndexDdlParserTests
     [InlineData("ALTER INDEX ix", "ALTER", 0)]
     public void UnsupportedClause_StillReportsCohdbl001(string query, string clause, int start)
     {
-        var diagnostic = Parse(query).Diagnostics.First(item => item.Code == "COHDBL001");
+        var diagnostic = Parse(query).Diagnostics.First(item => item.Code == "CK00001");
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);

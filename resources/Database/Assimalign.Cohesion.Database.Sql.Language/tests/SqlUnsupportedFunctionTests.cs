@@ -21,7 +21,7 @@ public sealed class SqlUnsupportedFunctionTests
         {
             var statement = new SqlQueryParser().Parse($"SELECT {entry.Spelling}(a) FROM t;");
             var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Message.ShouldNotBeNull().ShouldContain(entry.Spelling, Case.Sensitive);
             diagnostic.Start.ShouldBe(7);
             diagnostic.End.ShouldBe(7 + entry.Spelling.Length);

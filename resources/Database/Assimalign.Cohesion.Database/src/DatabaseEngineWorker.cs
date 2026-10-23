@@ -625,7 +625,7 @@ public abstract class DatabaseEngineWorker
         if (cause is < StorageOfflineCause.CheckpointFailures or > StorageOfflineCause.JournalSizeLimit)
         {
             throw new ArgumentOutOfRangeException(nameof(cause), cause,
-                "A worker gives up on a database only with a cause an engine owns: a worker whose work kept failing, or the journal size limit.");
+                ErrorMessages.WorkerTakeDatabaseOfflineFailure);
         }
 
         return Volatile.Read(ref _owner) is { } engine && engine.GiveUpOnDatabase(this, database, cause, reason, failure);
@@ -1057,7 +1057,7 @@ public abstract class DatabaseEngineWorker
         if (!_passRunning)
         {
             throw new InvalidOperationException(
-                "A worker reports on a database only from within a pass (RunIterationCore).");
+                ErrorMessages.WorkerThrowIfNoPassLockedFailure);
         }
     }
 

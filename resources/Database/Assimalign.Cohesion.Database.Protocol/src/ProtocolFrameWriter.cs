@@ -105,7 +105,7 @@ public abstract class ProtocolFrameWriter : IAsyncDisposable
         if ((uint)frame.Payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {
             throw new ProtocolException(
-                $"Frame payload of {frame.Payload.Length} bytes exceeds the {ProtocolFrameHeader.MaxPayloadLength}-byte maximum.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FrameWriterWriteFrameAsyncProtocol, frame.Payload.Length, ProtocolFrameHeader.MaxPayloadLength));
         }
 
         return WriteFrameCoreAsync(frame, cancellationToken);

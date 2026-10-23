@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// </summary>
 public sealed class GqlLabelExpressionParserTests
 {
-    /// <summary>The ISO forms #1101 pinned as COHDBL001 and the precedence cases, with their trees.</summary>
+    /// <summary>The ISO forms #1101 pinned as CK00001 and the precedence cases, with their trees.</summary>
     public static TheoryData<string, GqlLabelExpression, string[]> NodeExpressions => new()
     {
         { "MATCH (n:A|B) RETURN n", Or(Name("A"), Name("B")), [] },

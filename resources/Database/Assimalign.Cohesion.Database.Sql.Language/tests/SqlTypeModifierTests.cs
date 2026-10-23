@@ -46,7 +46,7 @@ public sealed class SqlTypeModifierTests
 
             // Assert
             var error = errors.ShouldHaveSingleItem(sql);
-            error.Code.ShouldBe("COHDBL001");
+            error.Code.ShouldBe("CK00001");
             error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
             error.Message.ShouldContain("interval day to second(3)", Case.Sensitive);
         }
@@ -85,7 +85,7 @@ public sealed class SqlTypeModifierTests
 
         // Assert
         var error = errors.ShouldHaveSingleItem(sql);
-        error.Code.ShouldBe("COHDBL001", sql);
+        error.Code.ShouldBe("CK00001", sql);
         error.Message.ShouldNotBeNull().ShouldContain(subject, Case.Sensitive);
         error.Message.ShouldContain(type, Case.Sensitive);
         error.Message.ShouldContain("modifier", Case.Sensitive);

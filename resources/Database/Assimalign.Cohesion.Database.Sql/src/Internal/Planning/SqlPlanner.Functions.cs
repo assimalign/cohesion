@@ -12,7 +12,7 @@ internal sealed partial class SqlPlanner
     /// Checks every function call in the statement, in every expression position, before binding
     /// reads the catalog or execution reads a row. A name the engine's function catalog does not hold
     /// is unknown (#1068) unless it is an evaluator form or the SQL dialect declares it. Recognized
-    /// non-executing names such as <c>RANK</c> reject at parse time with <c>COHDBL001</c> (#1103);
+    /// non-executing names such as <c>RANK</c> reject at parse time with <c>CK00001</c> (#1103);
     /// a call whose argument count, or <c>*</c>, no overload
     /// of its function accepts fails with <c>COHSQLE006</c> (#1189): <c>ABS(1, 2)</c>, <c>UPPER()</c>,
     /// <c>COALESCE()</c>, <c>COUNT(a, b)</c>, <c>SUM(*)</c>. The evaluator used to find an unknown name

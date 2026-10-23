@@ -139,7 +139,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "typed diagnostics");
+                Check(exception.Code == ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "CK00001"), "typed diagnostics");
             }
             var paged = await connection.QueryAsync("SELECT name AS n FROM items ORDER BY n LIMIT @n OFFSET 0",
                 new Dictionary<string, object?> { ["n"] = 1 }, token);

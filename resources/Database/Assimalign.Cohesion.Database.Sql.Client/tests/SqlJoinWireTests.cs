@@ -90,7 +90,7 @@ public sealed class SqlJoinWireTests
 
     /// <summary>Unimplemented join forms produce the capability diagnostic before planning over the wire.</summary>
     /// <param name="statement">The excluded join form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report COHDBL001 over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - JOIN: excluded forms report CK00001 over the wire")]
     [InlineData(false, "SELECT u.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id")]
     [InlineData(true, "SELECT u.id FROM users u RIGHT OUTER JOIN users v ON u.id = v.id")]
     [InlineData(false, "SELECT u.id FROM users u FULL OUTER JOIN users v ON u.id = v.id")]
@@ -111,7 +111,7 @@ public sealed class SqlJoinWireTests
         var error = await Should.ThrowAsync<SqlClientException>(async () =>
             await connection.QueryAsync(statement, cancellationToken: SqlClientTestHarness.Timeout()));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         (await connection.QueryAsync("SELECT u.id FROM users u JOIN users v ON u.id = v.id ORDER BY u.id",
             cancellationToken: SqlClientTestHarness.Timeout())).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }

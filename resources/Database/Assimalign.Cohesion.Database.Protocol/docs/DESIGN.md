@@ -348,7 +348,7 @@ translated by the endpoint/client to ProtocolViolation. Outbound overflow follow
 Outbound SQL and Graph diagnostics are preflighted before any result or Error output.
 If the filtered Warning/Error list exceeds 4,096 entries or 1,048,576 encoded bytes,
 the endpoint retains the longest leading prefix that fits both limits with a final
-Warning notice, code COHDBP001. The notice counts toward both limits and states the
+Warning notice, code CK07001. The notice counts toward both limits and states the
 retained count, original filtered count and omitted count. Once an entry does not fit,
 it and every following entry are omitted, even if a later entry would fit. Entries
 are never shortened. A 4,097-entry list of small diagnostics therefore keeps the first
@@ -397,7 +397,7 @@ ends with an existing Ready frame (byte 4) after ResultComplete/PathsComplete or
 Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
 transaction failed. No new message identifier, protocol version or on-disk format is introduced.
 Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
-postamble. Malformed status payloads use COHDBP002 and are protocol violations.
+postamble. Malformed status payloads use CK07002 and are protocol violations.
 
 The capability also defines parameterless reset: Execute byte 5 carries the usual length-prefixed
 UTF-8 `ROLLBACK` followed by a zero Int32 parameter count. Success is ResultComplete byte 8 with
@@ -407,3 +407,10 @@ the connector. Clients never determine transaction state by recognizing user com
 PostgreSQL reports the same idle/active/failed distinction after a command cycle in
 `src/backend/tcop/dest.c:268-281` and `src/backend/access/transam/xact.c:5058-5090` (local PostgreSQL
 clone). This copies the state contract only; no source code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

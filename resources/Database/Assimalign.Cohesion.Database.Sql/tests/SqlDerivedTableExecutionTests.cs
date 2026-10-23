@@ -269,7 +269,7 @@ public sealed class SqlDerivedTableExecutionTests
         // Assert
         result.Status.ShouldBe(DatabaseResultStatus.Error);
         var diagnostic = result.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain("LATERAL", Case.Sensitive);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(reference);
     }

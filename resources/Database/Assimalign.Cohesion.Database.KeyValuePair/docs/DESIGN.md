@@ -65,7 +65,7 @@ empty when there is nothing to report (#1264). Supplied command diagnostics rema
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
 and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes.
-Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHDBK005`;
+Attached-index damage leads with `CK06003` and retains `CK06102` and `COHDBK005`;
 other index failures use `COHDBK005`. Begin, command, commit and rollback share classification.
 Create and open also code child failures before publication. Known format refusals retain their
 authored messages, source diagnostics and inner causes. A failed command aborts an explicit
@@ -185,7 +185,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   it. **Behind the marker, the index manager checks the tree itself**: it reads
   the root page's B-tree page format when the instance attaches the
   registration, and a tree the marker does not describe is refused with
-  `DatabaseException` "Database 'x' cannot be opened. COHDBI001: Index … uses
+  `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
   B-tree page format 1, but this engine supports only format 2 …", the index
   manager's `IndexFormatException` as its inner exception. A cleanly closed
   database is left byte-identical by either refusal; a crashed one has had only
@@ -194,9 +194,9 @@ and explicit-transaction cases are regression guards, not proof of that session 
   refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
   **Below both, each file set has its own storage format (#1251):** the storage refuses
   a data or catalog file set in another storage format with `StorageFormatException`
-  (`COHDBS001`) before its journal is read, and the engine names the database and the
+  (`CK06001`) before its journal is read, and the engine names the database and the
   file set: `DatabaseException` "Database 'x' cannot be opened: its catalog file set
-  'x/catalog' was refused. COHDBS001: …" (or its data file set 'x'), the files left
+  'x/catalog' was refused. CK06001: …" (or its data file set 'x'), the files left
   byte-identical (`KeyValueEngineLifecycleTests`).
   With entries ordered by location, a PUT's tombstone of the key's previous
   version descends to it instead of walking the key's dead versions; the unique
@@ -871,7 +871,7 @@ leak), repaired by re-bootstrapping on the next open.
 ## Error model
 
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
-diagnostic COHDBK005 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+diagnostic COHDBK005 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
 The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
 member is introduced. These failures abort an explicit transaction, retain the coded cause,
@@ -885,7 +885,7 @@ and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.
 The implementation uses static type checks and the existing transaction abort mechanism.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -898,7 +898,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
@@ -917,7 +917,7 @@ An entry page the command cannot read fails the command. Storage reports
 StorageCorruptionException (with the page id) for checksum or slot geometry damage,
 StorageIOException for a cut-short page or a pool whose frames are all pinned, and
 IOException for device failures. The engine translates corruption to DatabaseCorruptionException
-(COHDBS003), and I/O to DatabaseException with COHDBK005. Every command resolves its key by a
+(CK06003), and I/O to DatabaseException with COHDBK005. Every command resolves its key by a
 primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
@@ -1564,14 +1564,14 @@ integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays r
 Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
 
 Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
-loopback, wildcard -> Any; DNS names are refused synchronously with COHDBTCP001. Endpoint URIs
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
 must be absolute, have a host and explicit positive port, and have no user information, query or
 fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
 remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
 was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
 
 Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
-option as ParamName, with kernel resx codes COHDBO001, COHDBO002 and COHDBO003. Existing timer
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
 policies are retained: Documents permits zero authentication/idle values; Blob requires positive
 values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
 idle policy. All models require positive finite shutdown/linger values no greater than
@@ -1581,3 +1581,11 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

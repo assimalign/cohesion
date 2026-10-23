@@ -28,10 +28,10 @@ public sealed class IndexFailureTranslationTests
         var translated = database.TranslateFailure(error).ShouldBeOfType<DatabaseCorruptionException>();
 
         // Assert
-        translated.Diagnostics.Select(d => d.Code).ShouldBe(["COHDBS003", "COHDBI002", "COHDBD005"]);
+        translated.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "COHDBD005"]);
         translated.InnerException.ShouldBeSameAs(cause);
         translated.PageId.ShouldBe((PageId)42);
-        translated.Message.ShouldNotStartWith("COHDBS003:", Case.Sensitive);
+        translated.Message.ShouldNotStartWith("CK06003:", Case.Sensitive);
         database.TranslateFailure(translated).ShouldBeSameAs(translated);
         var coded = new DatabaseException("Coded wrapper.", [new Types.Diagnostic
         { Code = "COHDBD005", Message = "Coded wrapper.", Severity = Types.DiagnosticSeverity.Error }], cause);

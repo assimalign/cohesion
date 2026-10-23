@@ -21,7 +21,7 @@ public sealed partial class SqlQueryParser
     //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
     //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
     //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary
-    //                            (a prefix ~ reports COHDBL001; a + directly before a
+    //                            (a prefix ~ reports CK00001; a + directly before a
     //                            numeric literal is part of the literal, see ParsePrimary)
     //   ParseCollate            → ParseUnary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)

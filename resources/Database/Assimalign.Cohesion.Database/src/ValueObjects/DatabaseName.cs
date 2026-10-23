@@ -18,7 +18,7 @@ public readonly struct DatabaseName : IEquatable<DatabaseName>
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Database name cannot be null or empty.", nameof(value));
+            throw new ArgumentException(ErrorMessages.DatabaseNameArgument, nameof(value));
         }
 
         _value = value;

@@ -169,3 +169,10 @@ preserves the original cancellation or timeout, and detached delayed-build clean
 a secondary failure to the already-completed caller. Temporary-directory deletion is best effort.
 Those catches remain silent; the complete classification and the detached-cleanup observability
 trade-off are recorded in [the tracing plan, section 10](../../../../docs/programs/DATABASE_EVENT_SOURCES_PLAN.md#10-swallowed-exceptions-d9).
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

@@ -27,7 +27,7 @@ public class TransactionRecoveryTests
         using var stream = new SimulatedDurableFileHandle();
         using var journal = StorageJournal.Create(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
-            TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
+            TransactionLog.CreateJournalBound(journal), new LockManager(), VersionStore.CreateInMemory());
         await using var _ = manager;
 
         var transaction = await manager.BeginAsync();
@@ -78,7 +78,7 @@ public class TransactionRecoveryTests
             using var journal = StorageJournal.Create(stream, leaveOpen: true);
             var versions = VersionStore.CreateInMemory();
             var manager = TransactionManager.Create(
-                TransactionLog.CreateJournalBound(journal), LockManager.Create(), versions);
+                TransactionLog.CreateJournalBound(journal), new LockManager(), versions);
 
             var committed = await manager.BeginAsync();
             manager.EnterApply(committed).ExitApply();
@@ -133,7 +133,7 @@ public class TransactionRecoveryTests
         using var stream = new MemoryStream();
         using var journal = StorageJournal.Create(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
-            TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
+            TransactionLog.CreateJournalBound(journal), new LockManager(), VersionStore.CreateInMemory());
         await using var _ = manager;
 
         var transaction = await manager.BeginAsync();

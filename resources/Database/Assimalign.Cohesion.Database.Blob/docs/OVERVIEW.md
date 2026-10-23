@@ -205,3 +205,11 @@ with page/slot context appended. Malformed current-format metadata uses located 
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

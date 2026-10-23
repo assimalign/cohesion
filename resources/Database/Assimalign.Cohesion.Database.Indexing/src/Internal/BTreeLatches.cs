@@ -13,5 +13,5 @@ internal static class BTreeLatches
     private static readonly ConditionalWeakTable<Storage.Storage, ConcurrentDictionary<long, StoragePageLatch>> _storages = new();
 
     internal static StoragePageLatch Get(Storage.Storage storage, long rootPageId)
-        => _storages.GetValue(storage, static _ => new()).GetOrAdd(rootPageId, static _ => StoragePageLatch.Create());
+        => _storages.GetValue(storage, static _ => new()).GetOrAdd(rootPageId, static _ => new StoragePageLatch());
 }

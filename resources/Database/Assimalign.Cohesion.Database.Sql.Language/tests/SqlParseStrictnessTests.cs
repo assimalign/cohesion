@@ -136,11 +136,11 @@ public sealed class SqlParseStrictnessTests
 
     /// <summary>
     /// <c>~</c> is recognized but outside the executable subset. Prefix (bitwise NOT) and infix
-    /// (PostgreSQL regular-expression match) each report one COHDBL001 at the operator.
+    /// (PostgreSQL regular-expression match) each report one CK00001 at the operator.
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="form">The operator form the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: ~ reports one COHDBL001 naming the operator")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: ~ reports one CK00001 naming the operator")]
     [InlineData("SELECT «~»a FROM t;", "prefix")]
     [InlineData("SELECT «~»NULL;", "prefix")]
     [InlineData("SELECT «~» -a FROM t;", "prefix")]
@@ -170,7 +170,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe(form == "prefix"
@@ -184,7 +184,7 @@ public sealed class SqlParseStrictnessTests
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="meaning">The match the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: compound ~ operators report one COHDBL001 naming the whole operator")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: compound ~ operators report one CK00001 naming the whole operator")]
     [InlineData("SELECT a FROM t WHERE a «~*» 'x';", "regular-expression match")]
     [InlineData("SELECT a FROM t WHERE a «!~» 'x';", "regular-expression match")]
     [InlineData("SELECT a FROM t WHERE a «!~*» 'x';", "regular-expression match")]
@@ -202,20 +202,20 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"The infix {sql[start..end]} operator ({meaning}) is not supported by the SQL surface.");
     }
 
     /// <summary>
-    /// Each used to report its COHDBL001 plus a second diagnostic from the text after it: a
+    /// Each used to report its CK00001 plus a second diagnostic from the text after it: a
     /// quantified operand parsed as a call to a function named ANY, LATERAL bound as a table
     /// name, and WITHIN read as a column alias.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a recognized construct is one COHDBL001 and its text is skipped")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a recognized construct is one CK00001 and its text is skipped")]
     [InlineData("SELECT a FROM t WHERE a = «ANY» (SELECT b FROM u);", "ANY quantified comparison")]
     [InlineData("SELECT a FROM t WHERE a <> «SOME» (SELECT b FROM u) AND a > 1;", "SOME quantified comparison")]
     [InlineData("SELECT a FROM t WHERE a >= «ALL» (SELECT b FROM u);", "ALL quantified comparison")]
@@ -234,7 +234,7 @@ public sealed class SqlParseStrictnessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message.ShouldBe($"The {construct} clause is not supported by the SQL surface of this database model.");
@@ -252,8 +252,8 @@ public sealed class SqlParseStrictnessTests
         // Assert
         errors.Select(error => (error.Code, error.Message)).ShouldBe(
         [
-            ("COHDBL001", "The ALL quantified comparison clause is not supported by the SQL surface of this database model."),
-            ("COHDBL001", "The ANY quantified comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ALL quantified comparison clause is not supported by the SQL surface of this database model."),
+            ("CK00001", "The ANY quantified comparison clause is not supported by the SQL surface of this database model."),
         ], ignoreOrder: true);
     }
 

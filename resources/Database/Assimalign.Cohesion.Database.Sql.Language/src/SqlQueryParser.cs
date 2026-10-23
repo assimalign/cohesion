@@ -187,7 +187,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // A supported expression parser may deliberately stop at a clause outside
-        // this profile, which already carries COHDBL001, so the text from that clause
+        // this profile, which already carries CK00001, so the text from that clause
         // on adds no second diagnostic. Otherwise every statement kind must have
         // consumed its whole text: a leftover token means the parse dropped part of
         // what was written (#1068). That includes text the parser stopped at before

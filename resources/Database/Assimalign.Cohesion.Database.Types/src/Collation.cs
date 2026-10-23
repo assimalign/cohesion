@@ -63,7 +63,7 @@ public sealed class Collation
         1 => Invariant,
         2 => CaseInsensitive,
         3 => CaseAccentInsensitive,
-        _ => throw new DatabaseTypeException($"Unknown collation identifier {id}."),
+        _ => throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollationFromIdDatabaseType, id)),
     };
 
     /// <summary>Resolves a built-in SQL collation name, ignoring ASCII letter case.</summary>
@@ -89,7 +89,7 @@ public sealed class Collation
         {
             return CaseAccentInsensitive;
         }
-        throw new DatabaseTypeException($"Unknown or unsupported collation '{name}'. Culture-aware and user-defined collations are not supported.");
+        throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollationFromNameDatabaseType, name));
     }
 
     /// <summary>Compares two strings under this collation.</summary>
@@ -121,7 +121,7 @@ public sealed class Collation
         ArgumentNullException.ThrowIfNull(value);
         if (!IsIndexBacked)
         {
-            throw new DatabaseTypeException($"Collation '{Name}' is not index-backed and has no deterministic byte transform.");
+            throw new DatabaseTypeException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollationNormalizeDatabaseType, Name));
         }
 
         StringBuilder? result = Id == Binary.Id ? null : new StringBuilder(value.Length);
@@ -130,7 +130,7 @@ public sealed class Collation
         {
             if (Rune.DecodeFromUtf16(remaining, out Rune rune, out int consumed) != OperationStatus.Done)
             {
-                throw new DatabaseTypeException("Collated strings must contain valid UTF-16 Unicode scalar values.");
+                throw new DatabaseTypeException(ErrorMessages.CollationNormalizeDatabaseType2);
             }
 
             remaining = remaining[consumed..];
@@ -182,7 +182,7 @@ public sealed class Collation
                 && (setting == "1" || setting.Equals("true", StringComparison.OrdinalIgnoreCase));
         if (invariant)
         {
-            throw new DatabaseTypeException("The legacy invariant linguistic collation is unavailable under invariant globalization; use an index-backed collation.");
+            throw new DatabaseTypeException(ErrorMessages.LinguisticGlobalizationDatabaseType);
         }
     }
 

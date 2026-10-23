@@ -66,14 +66,14 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
 
         if (headerRead < ProtocolFrameHeader.Size)
         {
-            throw new ProtocolException("The connection ended inside a frame header.");
+            throw new ProtocolException(ErrorMessages.StreamFrameReaderReadAsyncProtocol);
         }
 
         if (!ProtocolFrameHeader.TryParse(_header, out var header))
         {
             uint declared = BinaryPrimitives.ReadUInt32BigEndian(_header);
             throw new ProtocolException(
-                $"Invalid frame header: declared payload of {declared} bytes exceeds the {ProtocolFrameHeader.MaxPayloadLength}-byte maximum.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StreamFrameReaderReadAsyncProtocol2, declared, ProtocolFrameHeader.MaxPayloadLength));
         }
 
         if (header.PayloadLength == 0)
@@ -90,7 +90,7 @@ internal sealed class ProtocolStreamFrameReader : ProtocolFrameReader
 
             if (payloadRead < length)
             {
-                throw new ProtocolException("The connection ended inside a frame payload.");
+                throw new ProtocolException(ErrorMessages.StreamFrameReaderReadAsyncProtocol3);
             }
 
             ProtocolEventSource.Log.FrameRead(header.Type, length);

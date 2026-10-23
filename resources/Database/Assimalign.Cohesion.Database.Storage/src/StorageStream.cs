@@ -92,7 +92,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
     {
         if (durable && !SupportsDurableFlush)
         {
-            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+            throw new NotSupportedException(ErrorMessages.StorageStreamFlushNotSupported);
         }
         _handle.Flush(durable);
     }
@@ -105,7 +105,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
     {
         if (durable && !SupportsDurableFlush)
         {
-            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+            throw new NotSupportedException(ErrorMessages.StorageStreamFlushNotSupported);
         }
         return _handle.FlushAsync(durable, cancellationToken);
     }
@@ -178,7 +178,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = _handle.Read(buffer.AsSpan(totalRead, Page.Size - totalRead), offset + totalRead);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }
@@ -211,7 +211,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = _handle.Read(buffer[totalRead..Page.HeaderSize], offset + totalRead);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading the header of page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageHeaderStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }
@@ -233,7 +233,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = await _handle.ReadAsync(buffer.Slice(totalRead, Page.Size - totalRead), offset + totalRead, cancellationToken);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }

@@ -77,7 +77,7 @@ DatabaseException with structured COHDBB005 diagnostics (#1364). Open releases a
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -90,7 +90,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
@@ -298,7 +298,7 @@ disk, asserting the exact directory names it leaves with ordinal comparison.
 `TryGetDatabase` addresses the open instance set. Container and blob names are ordinal and
 case-sensitive; a slash in a blob name is ordinary name content, never a database selector.
 A file set in another storage format (#1251) is refused by the storage before its journal is
-read, and the engine names the database: "Database 'x' cannot be opened. COHDBS001: …", the
+read, and the engine names the database: "Database 'x' cannot be opened. CK06001: …", the
 storage's `StorageFormatException` as its inner exception, the files byte-identical
 (`BlobEngineTests`).
 
@@ -1178,7 +1178,7 @@ SQL and Key-Value execution-completion cases prove the session cancellation fix 
 
 Child-root storage and catalog failures cross the engine boundary as DatabaseException with
 Error entries in Diagnostics and the original InnerException (#1247). Offline and common
-COHDBS003 corruption translations take precedence. A failed operation aborts an explicit
+CK06003 corruption translations take precedence. A failed operation aborts an explicit
 transaction; after rollback the in-process session remains usable. Blob wire errors remain terminal: the Error message receives the first diagnostic code only when it lacks that prefix, then the connection closes.
 
 
@@ -1704,7 +1704,7 @@ No file format, version, protocol frame, event, counter or diagnostic number cha
 Recognized unsupported blob catalog versions keep the existing model refusal COHDBB006 and
 terminal wire behavior. An internal format-refusal marker preserves that identity while the
 original message gains page/slot context. Malformed current-format metadata still carries
-located COHDBS003. No public type/member, format version or frame is added by this distinction.
+located CK06003. No public type/member, format version or frame is added by this distinction.
 
 ## Shared server options and TCP composition (#1391, D7 B)
 
@@ -1723,14 +1723,14 @@ integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays r
 Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
 
 Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
-loopback, wildcard -> Any; DNS names are refused synchronously with COHDBTCP001. Endpoint URIs
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
 must be absolute, have a host and explicit positive port, and have no user information, query or
 fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
 remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
 was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
 
 Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
-option as ParamName, with kernel resx codes COHDBO001, COHDBO002 and COHDBO003. Existing timer
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
 policies are retained: Documents permits zero authentication/idle values; Blob requires positive
 values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
 idle policy. All models require positive finite shutdown/linger values no greater than
@@ -1740,3 +1740,11 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

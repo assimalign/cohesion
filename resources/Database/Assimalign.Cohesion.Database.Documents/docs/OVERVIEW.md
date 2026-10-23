@@ -134,7 +134,7 @@ Its B+Trees come from `Database.Indexing`, and every data/index mutation joins t
 `DocumentCatalog.Open(storage, coordinator)` opens the metadata directory and persisted physical
 trees. `DocumentCatalog.EnsureIndexFormat(storage)` checks, before the coordinator's recovery
 scrub and without writing, that every persisted tree is in the B-tree page format this engine
-reads, and throws `IndexFormatException` (`COHDBI001`) when one is not (#1194). Read methods
+reads, and throws `IndexFormatException` (`CK06101`) when one is not (#1194). Read methods
 accept an explicit visibility snapshot. Mutation methods neither begin nor
 commit the caller's transaction. The engine takes the logical database's exclusive writer lock,
 rejects write conflicts and stale index definitions, and enforces schema ownership before calling
@@ -215,3 +215,11 @@ changes. See DESIGN for probe budgets, eligibility thresholds and the limits of 
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

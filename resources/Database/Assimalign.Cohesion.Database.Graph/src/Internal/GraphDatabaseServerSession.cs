@@ -733,9 +733,9 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
             {
                 string notice = FormattableString.Invariant($"Diagnostic overflow: retained the first {entries.Count} of {total} Warning/Error entries in source order; omitted the remaining {total - entries.Count}. Limits: 4096 entries and 1048576 encoded bytes.");
                 if (entries.Count < ProtocolDiagnosticsMessage.MaxEntryCount &&
-                    DiagnosticSize("COHDBP001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
+                    DiagnosticSize("CK07001", notice) <= ProtocolDiagnosticsMessage.MaxPayloadLength - size)
                 {
-                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "COHDBP001", notice, null, null, 1));
+                    entries.Add(new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Warning, "CK07001", notice, null, null, 1));
                     break;
                 }
                 ProtocolDiagnostic last = entries[^1];

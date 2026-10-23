@@ -207,7 +207,7 @@ public sealed class BlobDatabaseEngineBuilder
     /// </exception>
     /// <exception cref="DatabaseException">
     /// A declared database's storage format was refused, or opening it failed with corruption
-    /// (<c>COHDBS003</c>) or coded I/O failure (<c>COHDBB005</c>); the engine was disposed.
+    /// (<c>CK06003</c>) or coded I/O failure (<c>COHDBB005</c>); the engine was disposed.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled; a created engine was disposed.</exception>
     /// <exception cref="AggregateException">The failure, together with a failure to dispose what it rejected.</exception>

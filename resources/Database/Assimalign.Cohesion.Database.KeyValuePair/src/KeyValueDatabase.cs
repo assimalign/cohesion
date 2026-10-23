@@ -471,7 +471,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     // Offline/unconfirmed and area-wide corruption classifications take precedence over I/O.
     internal Exception TranslateFailure(Exception error)
     {
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBS003" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CK06003" }, ..] }) { return error; }
         // A transaction refusal owns its diagnostic even when its cause is storage corruption.
         if (error is DatabaseException { Diagnostics: [{ Code: "COHDBK001" }, ..] }) { return error; }
         var translated = TranslateOffline(error);

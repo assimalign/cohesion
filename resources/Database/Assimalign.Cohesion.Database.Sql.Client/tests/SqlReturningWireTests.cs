@@ -105,7 +105,7 @@ public sealed class SqlReturningWireTests
 
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        failure.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        failure.Message.ShouldContain("CK00001", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         var result = await connection.QueryAsync("SELECT id, age FROM t", cancellationToken: SqlClientTestHarness.Timeout());
         result.ShouldHaveSingleItem()["age"].ShouldBe(5);

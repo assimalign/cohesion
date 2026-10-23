@@ -24,10 +24,10 @@ engines translate at their boundary.
 
 The package owns the B-tree page format (`BTreeIndexManager.FormatVersion`, format
 2 since #1194: entries ordered by key, entry reference and writer). Attaching a
-tree written in any other format fails with `IndexFormatException` (`COHDBI001`);
+tree written in any other format fails with `IndexFormatException` (`CK06101`);
 each model's open surfaces that refusal — see [DESIGN.md](DESIGN.md), "Page format
 2 and the format gate". An attached tree that reaches a damaged page fails the
-operation with `IndexCorruptionException` (`COHDBI002`).
+operation with `IndexCorruptionException` (`CK06102`).
 
 ## Consumers
 
@@ -68,3 +68,10 @@ Both limits must be positive. Cancellation preserves its token and releases all 
 An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
 It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
 D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

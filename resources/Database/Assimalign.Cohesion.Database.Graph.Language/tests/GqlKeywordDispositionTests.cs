@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the GQL profile lexes as a keyword, every entry of
 /// the recognized-unsupported table, contextual EXPLAIN, and every executable label-expression spelling (#1139)
-/// either parses inside a supported clause or is rejected with exactly one <c>COHDBL001</c>
+/// either parses inside a supported clause or is rejected with exactly one <c>CK00001</c>
 /// naming its construct. A word added to any of those lists without a case here fails the
 /// coverage test.
 /// </summary>
@@ -183,7 +183,7 @@ public sealed class GqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -208,10 +208,10 @@ public sealed class GqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Gql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Gql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Gql}' but found {found}");
             }
             else if (GqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
                      !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
@@ -273,7 +273,7 @@ public sealed class GqlKeywordDispositionTests
         var statement = parser.Parse(source);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     private static void RequireCoverage(IEnumerable<string> words, IReadOnlyDictionary<string, KeywordCase> corpus)

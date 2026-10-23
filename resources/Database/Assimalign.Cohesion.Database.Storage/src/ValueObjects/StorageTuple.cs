@@ -120,7 +120,7 @@ public readonly struct StorageTuple
     {
         if (data.Length < sizeof(int))
         {
-            throw new ArgumentException("Tuple payload is too small.", nameof(data));
+            throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument, nameof(data));
         }
 
         int offset = 0;
@@ -129,7 +129,7 @@ public readonly struct StorageTuple
 
         if (fieldCount < 0)
         {
-            throw new ArgumentException("Tuple field count cannot be negative.", nameof(data));
+            throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument2, nameof(data));
         }
 
         var fields = new StorageTupleField[fieldCount];
@@ -138,7 +138,7 @@ public readonly struct StorageTuple
         {
             if (offset + sizeof(int) > data.Length)
             {
-                throw new ArgumentException("Tuple payload is truncated while reading field name length.", nameof(data));
+                throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument3, nameof(data));
             }
 
             int nameLen = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, sizeof(int)));
@@ -146,7 +146,7 @@ public readonly struct StorageTuple
 
             if (nameLen <= 0 || offset + nameLen > data.Length)
             {
-                throw new ArgumentException("Tuple payload contains an invalid field name length.", nameof(data));
+                throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument4, nameof(data));
             }
 
             string name = Encoding.UTF8.GetString(data.Slice(offset, nameLen));
@@ -154,7 +154,7 @@ public readonly struct StorageTuple
 
             if (offset + sizeof(int) > data.Length)
             {
-                throw new ArgumentException("Tuple payload is truncated while reading field value length.", nameof(data));
+                throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument5, nameof(data));
             }
 
             int valueLen = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(offset, sizeof(int)));
@@ -162,7 +162,7 @@ public readonly struct StorageTuple
 
             if (valueLen < 0 || offset + valueLen > data.Length)
             {
-                throw new ArgumentException("Tuple payload contains an invalid field value length.", nameof(data));
+                throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument6, nameof(data));
             }
 
             byte[] value = data.Slice(offset, valueLen).ToArray();
@@ -173,7 +173,7 @@ public readonly struct StorageTuple
 
         if (offset != data.Length)
         {
-            throw new ArgumentException("Tuple payload contains trailing bytes.", nameof(data));
+            throw new ArgumentException(ErrorMessages.StorageTupleFromBytesArgument7, nameof(data));
         }
 
         return new StorageTuple(fields);

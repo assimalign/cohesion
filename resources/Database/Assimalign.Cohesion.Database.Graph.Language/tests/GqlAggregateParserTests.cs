@@ -66,7 +66,7 @@ public sealed class GqlAggregateParserTests
         var statement = new GqlQueryParser().Parse($"RETURN [{name} IN [1,2] | {name}]");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain("LIST COMPREHENSION", Case.Sensitive);
     }
 

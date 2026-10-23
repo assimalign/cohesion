@@ -42,7 +42,7 @@ public sealed class DocumentInsertTests
         Encoding.UTF8.GetString((await destination.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull().Content.Span).ShouldBe(expected);
         var refused = await Should.ThrowAsync<DatabaseParseException>(async () =>
             await session.ExecuteAsync(statement + " RETURNING *", cancellationToken: CancellationToken.None));
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         (await RowsAsync(session, "SELECT META().id FROM returning")).ShouldHaveSingleItem()[0].ShouldBe("a");
     }
 

@@ -42,7 +42,7 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
         diagnostic.Message!.ShouldContain("INNER, LEFT [OUTER] and CROSS JOIN");
@@ -58,7 +58,7 @@ public class SqlExecutionSurfaceDiagnosticTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(message);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
@@ -119,7 +119,7 @@ public class SqlExecutionSurfaceDiagnosticTests
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain(form);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);

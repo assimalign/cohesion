@@ -19,7 +19,7 @@ public static class QueryDiagnostics
         ArgumentNullException.ThrowIfNull(syntaxCode);
         ArgumentNullException.ThrowIfNull(location);
         return new Diagnostic(syntaxCode,
-            "Unsupported parameter form; use $name, @name, or $1. Names must be an identifier (a letter or _, then letters, digits or _) or digits only.",
+            ErrorMessages.UnsupportedParameterFormDiagnostic,
             location.Start, location.End, DiagnosticSeverity.Error)
         {
             Line = location.StartLine,
@@ -27,10 +27,10 @@ public static class QueryDiagnostics
         };
     }
 
-    private const string UnsupportedClauseCode = "COHDBL001";
+    private const string UnsupportedClauseCode = "CK00001";
 
     /// <summary>
-    /// Creates a <c>COHDBL001</c> diagnostic whose message is
+    /// Creates a <c>CK00001</c> diagnostic whose message is
     /// "The <c>{clause}</c> clause is not supported by the <c>{language}</c> surface of this
     /// database model."
     /// </summary>
@@ -47,7 +47,7 @@ public static class QueryDiagnostics
 
         return new Diagnostic(
             UnsupportedClauseCode,
-            $"The {clause} clause is not supported by the {language} surface of this database model.",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnsupportedClauseDiagnostic, clause, language),
             location.Start,
             location.End,
             DiagnosticSeverity.Error)

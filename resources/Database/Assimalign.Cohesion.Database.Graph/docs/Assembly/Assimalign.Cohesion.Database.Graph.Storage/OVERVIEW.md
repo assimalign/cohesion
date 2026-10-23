@@ -14,7 +14,7 @@ records.
 
 `GraphStore.EnsureIndexFormat(GraphStorage)` checks, without opening the store or writing
 anything, that every registered index tree is in the B-tree page format this engine reads,
-and throws `IndexFormatException` (`COHDBI001`) when one is not (#1194). An engine calls it
+and throws `IndexFormatException` (`CK06101`) when one is not (#1194). An engine calls it
 before its recovery scrub; `Open` checks again as it attaches the trees.
 
 Write conflicts surface as `TransactionAbortedException`; invalid names and properties use

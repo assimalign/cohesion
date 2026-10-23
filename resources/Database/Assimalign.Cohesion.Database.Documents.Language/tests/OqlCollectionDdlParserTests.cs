@@ -70,7 +70,7 @@ public sealed class OqlCollectionDdlParserTests
         errors.ShouldNotBeEmpty();
         errors[0].Code.ShouldBe(code);
         errors[0].Start.ShouldBe(offset);
-        errors.ShouldAllBe(error => error.Code != "COHDBL001");
+        errors.ShouldAllBe(error => error.Code != "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Collection DDL: unsupported constructs stay positional")]
@@ -89,7 +89,7 @@ public sealed class OqlCollectionDdlParserTests
         var error = Parse(text).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(offset);
         error.End.ShouldBe(offset + construct.Length);
         error.Message!.ShouldContain($"The {construct} clause", Case.Sensitive);

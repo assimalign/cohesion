@@ -852,7 +852,7 @@ internal sealed partial class SqlExpressionEvaluator
     private static SqlBoundFailure ResolutionFailure(SqlEvaluationException exception) => new(() => throw exception.Duplicate());
 
     private static SqlBoundFailure UnsupportedFunction(string name, Location? location)
-        => new(() => throw new SqlPlanningException("COHDBL001", $"Function '{name}' is not supported by the executor yet.", location));
+        => new(() => throw new SqlPlanningException("CK00001", $"Function '{name}' is not supported by the executor yet.", location));
 
     private static SqlBoundFailure CastTargetFailure(SqlCastExpression cast, SqlTypeCatalog types)
         => new(() => SqlPlanner.ResolveCastTarget(cast, types));

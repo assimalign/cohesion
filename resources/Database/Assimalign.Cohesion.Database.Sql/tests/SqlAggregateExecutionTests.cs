@@ -695,7 +695,7 @@ public sealed class SqlAggregateExecutionTests
     [InlineData("COUNT(DISTINCT x, id)", "COHSQLE006", "COUNT")]
     [InlineData("STRING_AGG(name)", "COHSQLE006", "delimiter")]
     [InlineData("STRING_AGG(name ORDER BY id, ',')", "COHSQLE006", "delimiter")]
-    [InlineData("STRING_AGG(name, name)", "COHDBL001", "delimiter")]
+    [InlineData("STRING_AGG(name, name)", "CK00001", "delimiter")]
     [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY id)", "COHSQLE032", "argument list")]
     [InlineData("STRING_AGG(x, ',')", "COHSQLE006", "CAST")]
     [InlineData("STRING_AGG(CAST(name AS JSON), ',')", "COHSQLE006", "CAST")]
@@ -713,7 +713,7 @@ public sealed class SqlAggregateExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (x INT, id INT, name TEXT);");
         // Act
-        if (code == "COHDBL001")
+        if (code == "CK00001")
         {
             var result = await ExecuteAsync(session, $"SELECT {expression} FROM t;");
             // Assert: capability refusals use the statement-result carrier.

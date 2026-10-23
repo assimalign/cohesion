@@ -93,7 +93,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                 return engine;
             }
         }
-        throw new KeyNotFoundException($"No database engine named '{name}' is registered.");
+        throw new KeyNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ContextGetEngineKeyNotFound, name));
     }
 
     /// <summary>

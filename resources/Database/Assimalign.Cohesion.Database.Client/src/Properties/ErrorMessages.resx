@@ -10,4 +10,31 @@
   <data name="TerminalFrameUnexpected" xml:space="preserve"><value>Expected a terminal error before a new exchange but received {0}.</value></data>
   <data name="TransactionStatusMissing" xml:space="preserve"><value>The server did not complete Execute with a transaction-status Ready frame.</value></data>
   <data name="TransactionResetInvalid" xml:space="preserve"><value>The server did not acknowledge transaction rollback with an empty successful result.</value></data>
+  <data name="DatabaseClientCreateArgument" xml:space="preserve"><value>Connection settings are required.</value></data>
+  <data name="DatabaseClientCreateArgument2" xml:space="preserve"><value>A connection factory is required.</value></data>
+  <data name="DatabaseClientCreateArgument3" xml:space="preserve"><value>The settings must name a database.</value></data>
+  <data name="DatabaseClientCreateArgument4" xml:space="preserve"><value>The settings must carry an endpoint (an Endpoint=host[:port] connection string key, or a typed EndPoint).</value></data>
+  <data name="DatabaseClientCreateArgument5" xml:space="preserve"><value>The pool size must be positive.</value></data>
+  <data name="DatabaseClientCreateArgument6" xml:space="preserve"><value>A model message family is required.</value></data>
+  <data name="ClientExecuteStreamingAsyncArgument" xml:space="preserve"><value>The exchange belongs to a different message family.</value></data>
+  <data name="ClientValidateArgumentsArgument" xml:space="preserve"><value>The database control-plane address must use HTTP or HTTPS.</value></data>
+  <data name="DatabaseConnectionExecuteAsyncFailure" xml:space="preserve"><value>An exchange is already active on this connection.</value></data>
+  <data name="ConnectionSettingsParseDatabaseClient" xml:space="preserve"><value>Malformed connection string segment '{0}'; expected key=value.</value></data>
+  <data name="ConnectionSettingsParseDatabaseClient2" xml:space="preserve"><value>Invalid MaxPoolSize value '{0}'; expected a positive integer.</value></data>
+  <data name="ConnectionSettingsParseDatabaseClient3" xml:space="preserve"><value>Unknown connection string key '{0}'.</value></data>
+  <data name="SettingsParseEndPointDatabaseClient" xml:space="preserve"><value>Invalid endpoint port in '{0}'.</value></data>
+  <data name="SettingsParseEndPointDatabaseClient2" xml:space="preserve"><value>Invalid endpoint '{0}'; expected host or host:port.</value></data>
+  <data name="FrameWriterWriteFrameCoreAsyncIO" xml:space="preserve"><value>The connection closed while sending a request.</value></data>
+  <data name="ClientFrameWriterFlushCoreAsyncIO" xml:space="preserve"><value>The connection closed while flushing a request.</value></data>
+  <data name="ConnectorOpenAsyncDatabaseClient" xml:space="preserve"><value>Expected an authenticate challenge but received {0}.</value></data>
+  <data name="ConnectorOpenAsyncDatabaseClient2" xml:space="preserve"><value>Expected a ready frame but received {0}.</value></data>
+  <data name="ConnectorDialAsyncDatabaseClient" xml:space="preserve"><value>Failed to connect to {0}: the connection attempt timed out.</value></data>
+  <data name="DatabaseConnectorDialAsyncFailure" xml:space="preserve"><value>The connection attempt was canceled.</value></data>
+  <data name="ConnectorDialAsyncDatabaseClient2" xml:space="preserve"><value>Failed to connect to {0}: {1}</value></data>
+  <data name="ConnectorExecuteAsyncDatabaseClient" xml:space="preserve"><value>The server sent the client-local {0} code: {1}</value></data>
+  <data name="ConnectorExecuteAsyncDatabaseClient2" xml:space="preserve"><value>The connection failed during an exchange.</value></data>
+  <data name="WriteFrameAsyncDatabaseClient" xml:space="preserve"><value>The connection failed while sending a frame.</value></data>
+  <data name="ExpectFrameAsyncDatabaseClient" xml:space="preserve"><value>The connection failed while awaiting a frame.</value></data>
+  <data name="DownloadStreamReadAsyncFailure" xml:space="preserve"><value>Concurrent reads are not supported on a database download stream.</value></data>
+  <data name="DownloadDestinationWriteAsyncFailure" xml:space="preserve"><value>The download content destination is complete.</value></data>
 </root>

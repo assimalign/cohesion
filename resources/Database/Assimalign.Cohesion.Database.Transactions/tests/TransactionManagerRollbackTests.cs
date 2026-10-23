@@ -433,7 +433,7 @@ public class TransactionManagerRollbackTests
         {
             var log = new ControlledLog();
             var versions = new ControlledVersionStore();
-            var locks = LockManager.Create();
+            var locks = new LockManager();
             return new Kernel(log, versions, locks, TransactionManager.Create(log, locks, versions));
         }
 

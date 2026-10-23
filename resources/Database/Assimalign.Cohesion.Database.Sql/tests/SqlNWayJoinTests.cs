@@ -43,7 +43,7 @@ public sealed class SqlNWayJoinTests
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE018");
         var qualified = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT a.*, a.id AS sort" + from + "ORDER BY sort;", cancellationToken: CancellationToken.None));
-        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LEFT: UNKNOWN, ON filters and WHERE filters retain SQL semantics")]

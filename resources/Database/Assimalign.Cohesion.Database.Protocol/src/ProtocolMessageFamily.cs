@@ -25,7 +25,7 @@ public sealed class ProtocolMessageFamily
         {
             if (type is not (>= 5 and <= 9 or >= 64) || _types[type])
             {
-                throw new ArgumentException($"Message identifier {type} is reserved or duplicated.", nameof(messageTypes));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolMessageFamilyArgument, type), nameof(messageTypes));
             }
             _types[type] = true;
         }

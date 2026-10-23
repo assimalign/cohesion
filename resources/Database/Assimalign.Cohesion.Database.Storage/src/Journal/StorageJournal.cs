@@ -295,7 +295,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
         if (!stream.CanRead || !stream.CanWrite || !stream.CanSeek)
         {
-            throw new ArgumentException("Journal stream must support read, write, and seek.", nameof(stream));
+            throw new ArgumentException(ErrorMessages.StorageJournalValidateStreamArgument, nameof(stream));
         }
     }
 
@@ -532,12 +532,12 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     {
         if (type is not (JournalRecordType.FullPageImage or JournalRecordType.CommittedPageImage))
         {
-            throw new ArgumentOutOfRangeException(nameof(type), type, "Page image records must be full page images or committed page images.");
+            throw new ArgumentOutOfRangeException(nameof(type), type, ErrorMessages.StorageJournalAppendPageImageFailure);
         }
 
         if (image.Length != Units.Page.Size)
         {
-            throw new ArgumentException($"A page image is {Units.Page.Size} bytes, not {image.Length}.", nameof(image));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalAppendPageImageArgument, Units.Page.Size, image.Length), nameof(image));
         }
 
         byte[] payload = ArrayPool<byte>.Shared.Rent(PageImageCodec.MaximumPayloadLength);
@@ -644,8 +644,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 || BinaryPrimitives.ReadInt64LittleEndian(body[1..]) != location.Lsn)
             {
                 throw new StorageCorruptionException(
-                    $"The journal frame of record {location.Lsn} at offset {location.Offset} does not verify: it was overwritten or damaged " +
-                    "while the storage transaction that appended it was still active.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadPageRecordFailure, location.Lsn, location.Offset));
             }
 
             var source = body[BodyHeaderSize..];
@@ -711,7 +710,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         EnsureInitialized();
         if (activeTransactions.Length > MaximumPayloadLength / sizeof(long))
         {
-            throw new JournalException($"A checkpoint record cannot list {activeTransactions.Length} transactions: its frame would exceed {int.MaxValue} bytes.");
+            throw new JournalException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalCheckpointJournal, activeTransactions.Length, int.MaxValue));
         }
 
         try
@@ -1105,7 +1104,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         EnsureInitialized();
         if (payload.Length > MaximumPayloadLength)
         {
-            throw new JournalException($"A journal record cannot carry {payload.Length} bytes: its frame would exceed {int.MaxValue} bytes.");
+            throw new JournalException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalAppendJournal, payload.Length, int.MaxValue));
         }
 
         long lsn;
@@ -1121,7 +1120,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     ThrowIfOfflineLocked();
                     if (_appendPauses > 0 && Monitor.IsEntered(_mediumLock))
                     {
-                        throw new InvalidOperationException("Cannot append while this thread is enumerating the journal.");
+                        throw new InvalidOperationException(ErrorMessages.StorageJournalAppendFailure);
                     }
                     if (_appendPauses == 0 && size <= _maximumBufferSize && _buffered <= _maximumBufferSize - size)
                     {
@@ -1222,7 +1221,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
         if (end > bufferStart)
         {
-            throw new StorageCorruptionException($"The journal frame of record {location.Lsn} at offset {location.Offset} lies outside the journal's {_length} bytes.");
+            throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JournalCopyBufferedFrameLockedFailure, location.Lsn, location.Offset, _length));
         }
         return false;
     }
@@ -1855,7 +1854,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             if (read <= 0)
             {
                 throw new StorageCorruptionException(
-                    $"The journal holds {_handle.Length} bytes; reading {destination.Length} bytes at offset {offset} passed its end.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadAtCoreFailure, _handle.Length, destination.Length, offset));
             }
 
             total += read;

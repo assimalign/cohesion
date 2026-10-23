@@ -132,7 +132,7 @@ public sealed class SqlDmlQualifierTests
             : await Should.ThrowAsync<SqlPlanningException>(() => session.ExecuteAsync(statement, cancellationToken: CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == (assignment ? "COHDBL001" : "COHSQLE015") && diagnostic.Start.HasValue);
+        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == (assignment ? "CK00001" : "COHSQLE015") && diagnostic.Start.HasValue);
         transaction.State.ShouldBe(TransactionState.Active);
         (await ReadAsync(session)).ShouldBe(new[] { 1 });
     }

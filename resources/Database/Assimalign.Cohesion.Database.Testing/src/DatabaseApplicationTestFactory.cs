@@ -72,21 +72,21 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.StartupTimeout,
-                "The startup timeout must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure);
         }
         if (options.ShutdownTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ShutdownTimeout,
-                "The shutdown timeout must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure2);
         }
         if (options.ProbeInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(options),
                 options.ProbeInterval,
-                "The probe interval must be greater than zero.");
+                ErrorMessages.DatabaseApplicationTestFactoryFailure3);
         }
 
         _assembly = entryPoint.DeclaringType!.Assembly;
@@ -107,7 +107,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         if (!ResourceContext.Endpoints.ContainsKey(AdminEndpointName))
         {
             throw new ArgumentException(
-                $"The test resource context must provide the Database '{AdminEndpointName}' endpoint.",
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationTestFactoryArgument, AdminEndpointName),
                 nameof(options));
         }
     }
@@ -215,7 +215,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             _startupCancellation.Cancel();
             await TryAbortStartAsync().ConfigureAwait(false);
             throw new TimeoutException(
-                $"The Database resource did not report ready within {_startupTimeout}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryStartAsyncTimeout, _startupTimeout));
         }
     }
 
@@ -331,7 +331,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             {
                 await program.ConfigureAwait(false);
                 throw new InvalidOperationException(
-                    "The resource program exited before its Database control plane reported ready.");
+                    ErrorMessages.FactoryWaitForReadinessAsyncFailure);
             }
 
             try
@@ -374,7 +374,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
                 }
 
                 throw new HttpRequestException(
-                    $"The Database control plane rejected graceful stop with HTTP {(int)response.StatusCode}.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FactoryRequestStopAsyncHttpRequest, (int)response.StatusCode));
             }
             catch (HttpRequestException) when (!program.IsCompleted)
             {
@@ -450,17 +450,16 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         Type programType = typeof(TProgram);
         MethodInfo entryPoint = programType.Assembly.EntryPoint
             ?? throw new InvalidOperationException(
-                $"Assembly '{programType.Assembly.GetName().Name}' has no executable entry point.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure, programType.Assembly.GetName().Name));
 
         if (!ReferenceEquals(entryPoint.DeclaringType, programType))
         {
             throw new InvalidOperationException(
-                $"Type '{programType.FullName}' is not the entry-point Program for assembly " +
-                $"'{programType.Assembly.GetName().Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure2, programType.FullName, programType.Assembly.GetName().Name));
         }
         if (!entryPoint.IsStatic)
         {
-            throw new InvalidOperationException("The resource program entry point must be static.");
+            throw new InvalidOperationException(ErrorMessages.TestFactoryResolveEntryPointFailure3);
         }
 
         ParameterInfo[] parameters = entryPoint.GetParameters();
@@ -468,7 +467,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             (parameters.Length == 1 && parameters[0].ParameterType != typeof(string[])))
         {
             throw new InvalidOperationException(
-                "The resource program entry point must accept no parameters or one string[] parameter.");
+                ErrorMessages.TestFactoryResolveEntryPointFailure4);
         }
 
         Type returnType = entryPoint.ReturnType;
@@ -478,7 +477,7 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             returnType != typeof(Task<int>))
         {
             throw new InvalidOperationException(
-                $"The resource program entry point return type '{returnType.FullName}' is not supported.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryResolveEntryPointFailure5, returnType.FullName));
         }
 
         return entryPoint;

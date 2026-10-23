@@ -395,13 +395,13 @@ public sealed class GqlLabelDirectionExecutionTests
     /// <param name="gql">A tilde edge or Cypher left arrow.</param>
     /// <param name="code">The parse code it reports.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Edges: tilde edges and Cypher left arrows fail at parse time and change nothing")]
-    [InlineData("MATCH (a:Person)~[r]~(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH (a:Person)<~[r]~(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH (a:Person)~[r]~>(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH (a:Person)~(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH (a:Person)<~(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH (a:Person)~>(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("INSERT (:Person)~>(:Person)", "COHDBL001")]
+    [InlineData("MATCH (a:Person)~[r]~(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH (a:Person)<~[r]~(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH (a:Person)~[r]~>(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH (a:Person)~(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH (a:Person)<~(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH (a:Person)~>(b) DETACH DELETE a", "CK00001")]
+    [InlineData("INSERT (:Person)~>(:Person)", "CK00001")]
     [InlineData("MATCH (a:Person)<--(b) DETACH DELETE a", "GQL0002")]
     [InlineData("MATCH (a:Person)<-->(b) DETACH DELETE a", "GQL0002")]
     public async Task Execute_UnsupportedEdge_ShouldFailWithoutEffectAsync(string gql, string code)

@@ -76,7 +76,7 @@ public sealed class ExplainContractTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database] - EXPLAIN: unsupported prefixes fail at parse time with COHDBL001")]
+    [Theory(DisplayName = "Cohesion Test [Database] - EXPLAIN: unsupported prefixes fail at parse time with CK00001")]
     [InlineData("SQL", "EXPLAIN CREATE TABLE t (id INT)")]
     [InlineData("SQL", "EXPLAIN BEGIN")]
     [InlineData("SQL", "EXPLAIN EXPLAIN SELECT * FROM t")]
@@ -100,7 +100,7 @@ public sealed class ExplainContractTests
             _ => new GqlQueryParser().Parse(source),
         };
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001" && diagnostic.Severity == DiagnosticSeverity.Error);
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001" && diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - EXPLAIN ANALYZE: SQL retains the shared columns and reports executed candidates (#1522)")]

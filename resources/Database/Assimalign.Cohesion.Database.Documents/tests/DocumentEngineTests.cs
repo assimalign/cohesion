@@ -257,7 +257,7 @@ public sealed class DocumentEngineTests
         await Should.ThrowAsync<ArgumentException>(async () => await engine.CreateDatabaseAsync(name));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database whose indexes are in B-tree page format 1 is refused at open with CK06101, its files untouched (#1194)")]
     public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-format-" + Guid.NewGuid().ToString("N"));
@@ -372,7 +372,7 @@ public sealed class DocumentEngineTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Format: a database in storage format 2 (the format before #1253) is refused at open with CK06001 naming it, its files untouched (#1251, #1253)")]
     public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-storage-format-" + Guid.NewGuid().ToString("N"));

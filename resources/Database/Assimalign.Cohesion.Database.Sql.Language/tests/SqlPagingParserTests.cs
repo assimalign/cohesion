@@ -122,7 +122,7 @@ public sealed class SqlPagingParserTests
 
         // Assert
         statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Paging: exclusions name the paging form and retain first-match scanning")]
@@ -147,7 +147,7 @@ public sealed class SqlPagingParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem();
+        var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
         diagnostic.Message!.ShouldNotContain("CTE");
     }

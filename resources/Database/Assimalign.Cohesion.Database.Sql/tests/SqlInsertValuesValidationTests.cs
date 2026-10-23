@@ -202,7 +202,7 @@ public sealed class SqlInsertValuesValidationTests
     /// reference there is the same coded error, over an empty result as over a full one. A subquery's
     /// count is no different: a reference to its own columns or to the outer query's fails with the
     /// same code, thrown like any other planning error, where it used to come back as an error result
-    /// carrying <c>COHDBL001</c>'s correlated-subquery diagnosis.
+    /// carrying <c>CK00001</c>'s correlated-subquery diagnosis.
     /// </summary>
     /// <param name="sql">The query.</param>
     /// <param name="reference">The reference as the diagnostic names it.</param>
@@ -279,7 +279,7 @@ public sealed class SqlInsertValuesValidationTests
 
         // Assert
         failure.ShouldBeOfType<DatabaseParseException>();
-        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         failure.Message.ShouldContain(function.ToUpperInvariant(), Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });

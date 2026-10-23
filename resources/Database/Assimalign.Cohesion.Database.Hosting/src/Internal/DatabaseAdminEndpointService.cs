@@ -48,7 +48,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"The ambient Database endpoint 'admin' must use http or https, not '{endpoint.Scheme}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAdminEndpointServiceFailure, endpoint.Scheme));
         }
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
@@ -58,7 +58,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             if (ResourceRuntime.Current is not ResourceContext certificateContext ||
                 !certificateContext.TryGetEndpointCertificate("admin", out _serverCertificate, out _serverCertificateChain))
             {
-                throw new InvalidOperationException("The Database https endpoint 'admin' requires its certificate Secret mount (default 'tls').");
+                throw new InvalidOperationException(ErrorMessages.DatabaseAdminEndpointServiceFailure2);
             }
             SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(_serverCertificate, _serverCertificateChain, offline: true);
             builder.Server.UseServer(options => options.UseHttp1s(
@@ -233,6 +233,6 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         return IPAddress.TryParse(host, out IPAddress? address)
             ? address
             : throw new InvalidOperationException(
-                $"The ambient Database admin endpoint host '{host}' is not a bindable IP address.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServiceResolveBindAddressFailure, host));
     }
 }

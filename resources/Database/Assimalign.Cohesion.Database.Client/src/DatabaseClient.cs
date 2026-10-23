@@ -63,28 +63,28 @@ public sealed class DatabaseClient : IAsyncDisposable
 
         if (options.Settings is null)
         {
-            throw new ArgumentException("Connection settings are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument, nameof(options));
         }
         if (options.ConnectionFactory is null)
         {
-            throw new ArgumentException("A connection factory is required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument2, nameof(options));
         }
         if (string.IsNullOrWhiteSpace(options.Settings.Database))
         {
-            throw new ArgumentException("The settings must name a database.", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument3, nameof(options));
         }
         if (options.Settings.EndPoint is null)
         {
-            throw new ArgumentException("The settings must carry an endpoint (an Endpoint=host[:port] connection string key, or a typed EndPoint).", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument4, nameof(options));
         }
         if (options.Settings.MaxPoolSize <= 0)
         {
-            throw new ArgumentException("The pool size must be positive.", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument5, nameof(options));
         }
 
         if (options.Family is null)
         {
-            throw new ArgumentException("A model message family is required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.DatabaseClientCreateArgument6, nameof(options));
         }
 
         return new DatabaseClient(options.Settings, options.ConnectionFactory, options.Family);
@@ -213,7 +213,7 @@ public sealed class DatabaseClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(exchange);
         if (!ReferenceEquals(_family, exchange.Family))
         {
-            throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+            throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
         }
         DatabaseConnection connection = await RentAsync(cancellationToken).ConfigureAwait(false);
         return await DatabaseDownloadStream.CreateAsync(connection, exchange, cancellationToken,

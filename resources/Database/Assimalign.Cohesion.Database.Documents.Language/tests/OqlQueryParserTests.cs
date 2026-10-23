@@ -127,7 +127,7 @@ public sealed class OqlQueryParserTests
     [InlineData("USE other", "USE", 0)]
     public void UnsupportedCorpus_ReportsCapabilityCodeAndExactToken(string query, string clause, int start)
     {
-        var diagnostic = Parse(query).Diagnostics.First(d => d.Code == "COHDBL001");
+        var diagnostic = Parse(query).Diagnostics.First(d => d.Code == "CK00001");
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);

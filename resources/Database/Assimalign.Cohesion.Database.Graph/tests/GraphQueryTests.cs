@@ -242,7 +242,7 @@ public sealed class GraphQueryTests
         await using var session = await database.CreateSessionAsync();
         var parsed = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH (a) RETURN a CALL p");
         var exception = await Should.ThrowAsync<DatabaseParseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(parsed)));
-        exception.Message.ShouldContain("COHDBL001");
+        exception.Message.ShouldContain("CK00001");
     }
 
     [Fact]

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 /// <summary>
 /// Parse strictness (#1101): a stray character is one GQL0002 that binds nothing, an ISO
-/// construct outside the subset is one COHDBL001 at its own span, and every statement form
+/// construct outside the subset is one CK00001 at its own span, and every statement form
 /// still rejects leftover text. #1139 flipped the label-expression and <c>IS</c> pins to
 /// supported cases (<c>GqlLabelExpressionParserTests</c>) and added the tilde-edge pins;
 /// <c>GqlCypherArrowTests</c> owns <c>--</c> after a pattern element.
@@ -48,11 +48,11 @@ public sealed class GqlParseStrictnessTests
 
     /// <summary>
     /// Each used to fail with GQL0002 at a downstream token, or with two COHDBL001s. Each is now
-    /// exactly one COHDBL001 at the construct's span, named as the construct.
+    /// exactly one CK00001 at the construct's span, named as the construct.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one COHDBL001 at their span and no GQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Strictness: ISO constructs report one CK00001 at their span and no GQL0002")]
     // Undirected (tilde) edges (#1139 pins): the engine stores only directed relationships.
     [InlineData("MATCH (a)«~[r]~»(b) RETURN a", "UNDIRECTED EDGE")]
     [InlineData("MATCH (a)«<~[r:T]~»(b) RETURN a", "UNDIRECTED EDGE")]
@@ -83,7 +83,7 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH (a) «CALL» db.labels() YIELD label RETURN label", "CALL")]
     // Delete without detaching (pin)
     [InlineData("MATCH (n) «NODETACH DELETE» n", "NODETACH DELETE")]
-    // MERGE (pin; already COHDBL001 before #1101)
+    // MERGE (pin; already CK00001 before #1101)
     [InlineData("«MERGE» (n)", "MERGE")]
     public void Parse_IsoConstruct_ShouldReportOneCapabilityDiagnostic(string marked, string construct)
     {
@@ -95,7 +95,7 @@ public sealed class GqlParseStrictnessTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldBe($"The {construct} clause is not supported by the GQL surface of this database model.");
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(end);

@@ -28,7 +28,7 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 - **Dialect contract** — [DIALECT.md](DIALECT.md) is the authoritative supported /
   recognized / rejected matrix. `SqlLanguageProfile.Instance` carries its lexical
   tables and implemented clause set; recognized clauses outside that set report
-  `COHDBL001` rather than an undifferentiated parse failure.
+  `CK00001` rather than an undifferentiated parse failure.
 - **Literal text** — public `SqlLiteralText` reads strict invariant dates, times, timestamps,
   day-time intervals and hexadecimal bytes. Typed literals normalize before binding;
   `N'...'` is String.

@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Client.Internal;
 // An authenticated transport. Only the pool owns connectors; callers receive a new lease per rent.
 internal sealed class DatabaseConnector
 {
+    private static readonly string _errorDatabaseConnectorDialAsyncFailure = ErrorMessages.DatabaseConnectorDialAsyncFailure;
+
     private readonly IDuplexConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
 
@@ -117,7 +119,7 @@ internal sealed class DatabaseConnector
 
             if (challenge.Type != ProtocolMessageType.Authenticate)
             {
-                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate challenge but received {challenge.Type}."));
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorOpenAsyncDatabaseClient, challenge.Type)));
             }
 
             // MVP trust method: the challenge carries no payload and the response
@@ -135,7 +137,7 @@ internal sealed class DatabaseConnector
 
             if (ready.Type != ProtocolMessageType.Ready)
             {
-                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Expected a ready frame but received {ready.Type}."));
+                throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorOpenAsyncDatabaseClient2, ready.Type)));
             }
             try
             {
@@ -210,18 +212,18 @@ internal sealed class DatabaseConnector
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {Describe(endPoint)}: the connection attempt timed out.", exception);
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorDialAsyncDatabaseClient, Describe(endPoint)), exception);
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested && exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
         {
-            throw new OperationCanceledException("The connection attempt was canceled.", exception, cancellationToken);
+            throw new OperationCanceledException(_errorDatabaseConnectorDialAsyncFailure, exception, cancellationToken);
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or ObjectDisposedException or OutOfMemoryException))
         {
             // Broad on purpose: IDuplexConnectionFactory is an open seam and each transport throws its
             // own types (SocketException, IOException, AuthenticationException, TimeoutException,
             // ConnectionAbortedException), so a list would let the next transport's failure escape.
-            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, $"Failed to connect to {Describe(endPoint)}: {exception.Message}", exception);
+            throw new DatabaseClientException(ProtocolErrorCode.ConnectionFailure, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorDialAsyncDatabaseClient2, Describe(endPoint), exception.Message), exception);
         }
     }
 
@@ -292,7 +294,7 @@ internal sealed class DatabaseConnector
             // from a server's error frame: a peer that is not a conforming server. The decoded
             // exception is not kept as the inner exception, so no exception chain carries the code
             // for anything but a failed dial.
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"The server sent the client-local {nameof(ProtocolErrorCode.ConnectionFailure)} code: {exception.Message}"));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorExecuteAsyncDatabaseClient, nameof(ProtocolErrorCode.ConnectionFailure), exception.Message)));
         }
         catch (DatabaseClientException exception)
         {
@@ -311,7 +313,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed during an exchange.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ConnectorExecuteAsyncDatabaseClient2, exception));
         }
         catch (OperationCanceledException)
         {
@@ -466,7 +468,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed while sending a frame.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.WriteFrameAsyncDatabaseClient, exception));
         }
     }
 
@@ -497,7 +499,7 @@ internal sealed class DatabaseConnector
         }
         catch (Exception exception) when (IsTransportFailure(exception))
         {
-            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed while awaiting a frame.", exception));
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExpectFrameAsyncDatabaseClient, exception));
         }
 
         if (frame is null)
@@ -544,7 +546,7 @@ internal sealed class DatabaseConnector
 
         if (error.Code == ProtocolErrorCode.ConnectionFailure)
         {
-            return MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"The server sent the client-local {nameof(ProtocolErrorCode.ConnectionFailure)} code: {error.Message}"));
+            return MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectorExecuteAsyncDatabaseClient, nameof(ProtocolErrorCode.ConnectionFailure), error.Message)));
         }
 
         return MarkBroken(new DatabaseClientException(error.Code, error.Message));

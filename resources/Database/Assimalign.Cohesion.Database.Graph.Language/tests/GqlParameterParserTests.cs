@@ -53,7 +53,7 @@ public sealed class GqlParameterParserTests
         var errors = new GqlQueryParser().Parse(source).Diagnostics;
 
         // Assert
-        errors.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        errors.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         errors.Single().Message!.ShouldContain(form, Case.Sensitive);
     }
 

@@ -75,7 +75,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 
-The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields COHDBL001.
+The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields CK00001.
 
 The Documents editor remains **embedded only**. Its smoke run separately exercises the shipped Documents server/client over TCP; editor connection-mode integration is a later UI task.
 

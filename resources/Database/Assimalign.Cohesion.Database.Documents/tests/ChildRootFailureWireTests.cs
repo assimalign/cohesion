@@ -73,12 +73,12 @@ public sealed class ChildRootFailureWireTests
         // Assert
         embedded.PageId.ShouldBe((PageId)child);
         embedded.InnerException.ShouldBeOfType<IndexCorruptionException>().PageId.ShouldBe(child);
-        embedded.Diagnostics.Select(d => d.Code).ShouldBe(["COHDBS003", "COHDBI002", "COHDBD005"]);
+        embedded.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "COHDBD005"]);
         frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
         var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Diagnostics.Select(d => d.Code).ShouldBe(embedded.Diagnostics.Select(d => d.Code));
-        failure.Message.ShouldStartWith("COHDBS003: ", Case.Sensitive);
+        failure.Message.ShouldStartWith("CK06003: ", Case.Sensitive);
         await SendAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
             new DocumentProtocolExecuteMessage("CREATE COLLECTION reusable", "{}"u8.ToArray()).Encode(), token);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);

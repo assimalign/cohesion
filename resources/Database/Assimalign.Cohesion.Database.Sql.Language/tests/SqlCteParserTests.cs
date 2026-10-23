@@ -88,7 +88,7 @@ public sealed class SqlCteParserTests
         var statement = parser.Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem();
+        var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
         if (construct == "RECURSIVE")

@@ -209,7 +209,7 @@ public sealed class SqlTransactionAndConstraintParserTests
     public void OnUpdate_RemainsUnsupported(string sql)
     {
         SqlLanguageProfile.Instance.Supports("ON UPDATE").ShouldBeFalse();
-        Parse(sql).Diagnostics.Single(diagnostic => diagnostic.Code == "COHDBL001")
+        Parse(sql).Diagnostics.Single(diagnostic => diagnostic.Code == "CK00001")
             .Message!.ShouldContain("ON UPDATE");
     }
 

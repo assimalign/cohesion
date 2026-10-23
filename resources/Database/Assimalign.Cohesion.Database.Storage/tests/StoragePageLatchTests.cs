@@ -27,7 +27,7 @@ public sealed class StoragePageLatchTests
     public async Task EnterRead_CanceledBehindWriter_ShouldReleaseEveryQueuedAcquisition()
     {
         // Arrange
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         int queued = 0;
         int canceled = 0;
         var elapsed = Stopwatch.StartNew();
@@ -84,7 +84,7 @@ public sealed class StoragePageLatchTests
     {
         // Arrange: a committed latched page holding 0x11s, changed to 0x22s by an open bracket.
         using var storage = TornStorage.Create();
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         var pageId = CommitLatchedPage(storage, latch, 0x11);
         var transaction = storage.BeginTransaction();
         Write(storage, transaction, latch, pageId, 0x22);
@@ -107,7 +107,7 @@ public sealed class StoragePageLatchTests
         // Arrange: a committed latched page holding 0x11s and a committed record; an open bracket
         // changes the latched page to 0x22s and inserts a record beside the committed one.
         using var storage = TornStorage.Create();
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         var pageId = CommitLatchedPage(storage, latch, 0x11);
         (PageId PageId, int SlotIndex) committed;
         using (var setup = storage.BeginTransaction())
@@ -147,8 +147,8 @@ public sealed class StoragePageLatchTests
         // Arrange: first is created before second. One bracket changes a page of each in the order
         // first, second; the other in the order second, first.
         using var storage = TornStorage.Create();
-        var first = StoragePageLatch.Create();
-        var second = StoragePageLatch.Create();
+        var first = new StoragePageLatch();
+        var second = new StoragePageLatch();
         var firstPages = (CommitLatchedPage(storage, first, 0x11), CommitLatchedPage(storage, first, 0x12));
         var secondPages = (CommitLatchedPage(storage, second, 0x21), CommitLatchedPage(storage, second, 0x22));
         var forward = storage.BeginTransaction();
@@ -178,7 +178,7 @@ public sealed class StoragePageLatchTests
     {
         // Arrange
         using var storage = TornStorage.Create();
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         var pageId = CommitLatchedPage(storage, latch, 0x11);
         var transaction = storage.BeginTransaction();
 
@@ -211,7 +211,7 @@ public sealed class StoragePageLatchTests
     {
         // Arrange
         using var storage = TornStorage.Create();
-        var latch = StoragePageLatch.Create();
+        var latch = new StoragePageLatch();
         var pageId = CommitLatchedPage(storage, latch, 0x11);
         long pageCount = storage.PageManager.PageCount;
         using var transaction = storage.BeginTransaction();

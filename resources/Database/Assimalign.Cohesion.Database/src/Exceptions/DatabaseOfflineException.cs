@@ -41,7 +41,7 @@ namespace Assimalign.Cohesion.Database;
 /// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
 /// <c>COHSQLT004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
 /// <c>COHDBG012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
-/// <c>COHDBS002</c> error is the inner exception.
+/// <c>CK06002</c> error is the inner exception.
 /// </para>
 /// </remarks>
 public sealed class DatabaseOfflineException : DatabaseException
@@ -104,8 +104,8 @@ public sealed class DatabaseOfflineException : DatabaseException
     {
         string detail = offline.InnerException?.Message ?? offline.Message;
         return offline.Cause is StorageOfflineCause.JournalFlush or StorageOfflineCause.DataFlush or StorageOfflineCause.HeaderWrite
-            ? $"{Describe(offline.Cause)} of its storage failed ({detail})"
-            : $"{Describe(offline.Cause)} ({detail})";
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DescribeFailureDatabaseOffline, Describe(offline.Cause), detail)
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DescribeFailureDatabaseOffline2, Describe(offline.Cause), detail);
     }
 
     /// <summary>
@@ -122,14 +122,14 @@ public sealed class DatabaseOfflineException : DatabaseException
     /// </remarks>
     internal static string Describe(StorageOfflineCause cause) => cause switch
     {
-        StorageOfflineCause.JournalFlush => "a write or flush of the journal",
-        StorageOfflineCause.DataFlush => "a durable flush of the data file",
-        StorageOfflineCause.HeaderWrite => "a write of the file header",
-        StorageOfflineCause.CheckpointFailures => "its checkpoints kept failing and its engine gave up on it",
-        StorageOfflineCause.PageWriteBackFailures => "its page write-backs kept failing and its engine gave up on it",
-        StorageOfflineCause.WriteAheadFlushFailures => "its write-ahead flushes kept failing and its engine gave up on it",
-        StorageOfflineCause.VersionPurgeFailures => "its version purge kept failing and its engine gave up on it",
-        StorageOfflineCause.JournalSizeLimit => "its journal grew past its engine's limit while its checkpoints kept failing",
-        _ => "a write",
+        StorageOfflineCause.JournalFlush => ErrorMessages.ExceptionDescribeDatabaseOffline,
+        StorageOfflineCause.DataFlush => ErrorMessages.ExceptionDescribeDatabaseOffline2,
+        StorageOfflineCause.HeaderWrite => ErrorMessages.ExceptionDescribeDatabaseOffline3,
+        StorageOfflineCause.CheckpointFailures => ErrorMessages.ExceptionDescribeDatabaseOffline4,
+        StorageOfflineCause.PageWriteBackFailures => ErrorMessages.ExceptionDescribeDatabaseOffline5,
+        StorageOfflineCause.WriteAheadFlushFailures => ErrorMessages.ExceptionDescribeDatabaseOffline6,
+        StorageOfflineCause.VersionPurgeFailures => ErrorMessages.ExceptionDescribeDatabaseOffline7,
+        StorageOfflineCause.JournalSizeLimit => ErrorMessages.ExceptionDescribeDatabaseOffline8,
+        _ => ErrorMessages.ExceptionDescribeDatabaseOffline9,
     };
 }

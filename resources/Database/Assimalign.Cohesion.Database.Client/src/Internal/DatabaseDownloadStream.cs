@@ -52,7 +52,7 @@ internal sealed class DatabaseDownloadStream : Stream
             ArgumentNullException.ThrowIfNull(exchange);
             if (!ReferenceEquals(connection.Family, exchange.Family))
             {
-                throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+                throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
             }
         }
         catch
@@ -108,7 +108,7 @@ internal sealed class DatabaseDownloadStream : Stream
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (Interlocked.Exchange(ref _reading, 1) != 0)
         {
-            throw new InvalidOperationException("Concurrent reads are not supported on a database download stream.");
+            throw new InvalidOperationException(ErrorMessages.DownloadStreamReadAsyncFailure);
         }
         try
         {
@@ -362,7 +362,7 @@ internal sealed class DatabaseDownloadStream : Stream
                 // Wait before copying, so even a model's very large write cannot grow queued content.
                 if (!await _owner._chunks.Writer.WaitToWriteAsync(operationToken).ConfigureAwait(false))
                 {
-                    throw new InvalidOperationException("The download content destination is complete.");
+                    throw new InvalidOperationException(ErrorMessages.DownloadDestinationWriteAsyncFailure);
                 }
                 int count = Math.Min(buffer.Length, chunkSize);
                 await _owner._chunks.Writer.WriteAsync(buffer[..count].ToArray(), operationToken).ConfigureAwait(false);

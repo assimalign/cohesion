@@ -77,7 +77,7 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
     {
         if (Volatility == SqlFunctionVolatility.Stable && args.Context.TransactionStart is null)
         {
-            throw new SqlPlanningException("COHDBL001", "Datetime value functions require an executing SQL transaction; datetime DEFAULT expressions are not supported yet.");
+            throw new SqlPlanningException("CK00001", "Datetime value functions require an executing SQL transaction; datetime DEFAULT expressions are not supported yet.");
         }
         switch (Name)
         {

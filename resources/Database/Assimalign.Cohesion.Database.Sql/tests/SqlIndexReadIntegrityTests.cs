@@ -99,8 +99,8 @@ public sealed class SqlIndexReadIntegrityTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHSQLE041: ", Case.Sensitive);
-            error.Message.ShouldNotContain("COHDBS003: COHDBS003:", Case.Sensitive);
+            error.Message.ShouldStartWith(failureKind == 0 ? "CK06003: " : "COHSQLE041: ", Case.Sensitive);
+            error.Message.ShouldNotContain("CK06003: CK06003:", Case.Sensitive);
             if (failureKind == 0)
             {
                 error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
@@ -113,7 +113,7 @@ public sealed class SqlIndexReadIntegrityTests
                     await engineSession.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
                 refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT005");
                 refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
-                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHSQLE041");
+                    .ShouldBe(failureKind == 0 ? "CK06003" : "COHSQLE041");
             }
         }
         finally { faults.Clear(); }
@@ -181,7 +181,7 @@ public sealed class SqlIndexReadIntegrityTests
         // cached, so once the device returns the page whole the same seek finds its row.
         failure.PageId.ShouldBe(rowPage);
         failure.Database.ShouldBe((DatabaseName)"rot-db");
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
         failure.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe(rowPage);
         failure.Message.ShouldContain("rot-db", Case.Sensitive);
@@ -302,7 +302,7 @@ public sealed class SqlIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHSQLE041");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "CK06003" : "COHSQLE041");
             if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
             transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(failure);
             var cleanup = recorder.Events.Where(item => item.EventId == 25).ShouldHaveSingleItem();

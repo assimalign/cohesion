@@ -25,7 +25,7 @@ ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
 `INSERT`, `CREATE` as an insertion compatibility extension, SET/REMOVE properties and node labels,
 literal-map replacement and D3 merge (`+=`), and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
-`COHDBL001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
+`CK00001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `GQL0008`. The parser does not throw for
 malformed query text. As in Neo4j, label expressions and predicates have no length or nesting
 limit: `:A:B:...`, `A|B|...` and AND/OR/XOR runs are each one n-ary node of any length, and

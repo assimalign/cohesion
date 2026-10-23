@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// </summary>
 /// <remarks>
 /// A tree is attached only after its root page passed the format check
-/// (<see cref="IndexFormatException"/>, <c>COHDBI001</c>), and a tree is written by one
+/// (<see cref="IndexFormatException"/>, <c>CK06101</c>), and a tree is written by one
 /// engine from its root down, so a page below the root that fails the same check is
 /// damage, not an older format: a torn or overwritten page, or a pointer to one.
 /// PostgreSQL reports the same condition as index corruption (<c>nbtpage.c</c>
@@ -23,7 +23,7 @@ public sealed class IndexCorruptionException : IndexException
     /// <summary>
     /// The code that leads the message: an attached index reached a damaged page.
     /// </summary>
-    public const string ErrorCode = "COHDBI002";
+    public const string ErrorCode = "CK06102";
 
     /// <summary>
     /// Initializes a new <see cref="IndexCorruptionException"/>.
@@ -33,8 +33,7 @@ public sealed class IndexCorruptionException : IndexException
     /// <param name="foundVersion">The page format the page claims, or 0 when it is no B-tree page of any known format.</param>
     public IndexCorruptionException(string indexName, long pageId, int foundVersion)
         : base(
-            $"{ErrorCode}: Index '{indexName}' reached page {pageId}, which is not a B-tree node of page format " +
-            $"{BTreeIndexManager.FormatVersion} (found format {foundVersion}); the index is damaged.")
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexCorruptionExceptionIndex, ErrorCode, indexName, pageId, BTreeIndexManager.FormatVersion, foundVersion))
     {
         IndexName = indexName;
         PageId = pageId;

@@ -37,7 +37,7 @@ internal static class DatabaseEngineOptionChecks
     /// <param name="requirement">What the option must be, completing "<c>{option} …</c>".</param>
     /// <returns>The exception to throw.</returns>
     internal static ArgumentOutOfRangeException Refuse(string engine, string option, object? value, string requirement)
-        => new(option, value, $"{engine}: {option} {requirement}");
+        => new(option, value, string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.EngineOptionChecksRefuseFailure, engine, option, requirement));
 
     /// <summary>Refuses a cadence or timeout that is zero or negative.</summary>
     /// <param name="value">The value.</param>

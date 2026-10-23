@@ -11,7 +11,7 @@ ASCII digits only. Bare `$`/`@`, numeric-name junk, and parameters in name or DE
 are GQL0002. Operand `?` and `:name` retain #1102's supported-form message and complete span.
 References are validated before projection or whole-map capability checks: a bare sigil in
 `RETURN $`, `RETURN @`, `(n $)` or an edge filler is GQL0002 at that sigil. Valid references
-in those unsupported positions retain their named COHDBL001 capability diagnostic.
+in those unsupported positions retain their named CK00001 capability diagnostic.
 
 `GqlParameterExpression` exposes the bare `Name` and complete reference `Location`.
 **Breaking AST change:** `GqlNodePattern.Properties` and `GqlRelationshipPattern.Properties`
@@ -29,7 +29,7 @@ Decimal and finite floating values are supported. List and map parameters are ad
 non-finite leaf values use COHDBG003. Pattern property maps remain scalar-only. No reflection or
 runtime code generation is involved.
 
-`$$name` (ISO substituted reference) and whole-map `(n $props)` remain COHDBL001 naming the
+`$$name` (ISO substituted reference) and whole-map `(n $props)` remain CK00001 naming the
 form. `RETURN $p` is a live value expression since #1141; paging parameters execute in #1142's
 shared ordering/paging stage. #1146 lifts list/map parameters in value positions; property maps remain scalar.
 `GqlParameterParserTests`, `GraphParameterTests`, the clause execution corpus and client/server
@@ -134,8 +134,8 @@ inspection facades. ISO sections 13.3 and 13.4 supply property, all-property and
 GQL token; SQL/OQL lexer behavior is unchanged. GRAPH and SCHEMA are contextual label names.
 The private token uses a parser-only spelling and is consumed only by whole-map SET, so it
 cannot become unary addition, property assignment or a quantified path elsewhere.
-Whole-map parameters and expressions remain COHDBL001, as do literal composite properties.
-MERGE with either ON CREATE SET or ON MATCH SET produces exactly one COHDBL001 naming MERGE.
+Whole-map parameters and expressions remain CK00001, as do literal composite properties.
+MERGE with either ON CREATE SET or ON MATCH SET produces exactly one CK00001 naming MERGE.
 Leading SET/REMOVE and nested assignment targets are GQL0002. See [DIALECT.md](DIALECT.md#set-and-remove)
 for row ordering, NULL, no-op and count semantics. `GqlUpdateParserTests` pins the AST and
 diagnostics; the live profile corpus covers node properties/labels and relationship properties
@@ -183,7 +183,7 @@ bracketed relationships and edge label expressions such as `-[r:T|U]->`. The lex
 `<-` then `>`, and the parser joins the two only when they touch, so `(a)<- >(b)` and `(a)- >(b)` are
 `GQL0002`. An abbreviated edge carries no variable, label expression or property map (`-r->`,
 `-:T->`, `-IS T->`, `-{k: 1}->` are `GQL0002`; the capability scan reads the names after such a
-`:` or `IS` as labels, so neither `IS` nor a keyword-spelled label reports `COHDBL001` there). Scalar literals are null, Boolean, signed 64-bit integer,
+`:` or `IS` as labels, so neither `IS` nor a keyword-spelled label reports `CK00001` there). Scalar literals are null, Boolean, signed 64-bit integer,
 finite double, and single-quoted string with doubled-quote escaping. Names are case-sensitive;
 keywords are case-insensitive, and a label name may spell a keyword (`(n:Order)`, `n:A|Order`).
 Double-quoted names preserve spaces and decode doubled `""` to one embedded double quote
@@ -273,7 +273,7 @@ writes it, so `!!A` is `GQL0002` and `!(!A)` parses. Each `(...)*` repetition in
 A truncated list, including a final [ before a trailing comment, reports GQL0002 at EOF.
 The pattern-comprehension probe requires a relationship before the bar and stops at the first
 item comma; label disjunctions in later list items remain ordinary values. Map key separators
-do not start label scans, so unsupported map values retain their COHDBL001 diagnostics.
+do not start label scans, so unsupported map values retain their CK00001 diagnostics.
 
 A linear statement may start with MATCH, OPTIONAL MATCH, INSERT/CREATE, LET, FILTER, FOR/UNWIND, WITH or RETURN. Each read segment requires RETURN; a modifying segment may omit it. RETURN is terminal within its segment, and NEXT must have a following segment. WITH requires a following stage. Deletion requires an entity binding.
 Standalone RETURN evaluates against one empty binding, so `RETURN 1 + 1 AS two` returns one row.
@@ -341,11 +341,11 @@ provably empty and projects as `[]`; scalar projections after FOR/UNWIND use the
 
 INSERT/CREATE quantifiers and node quantifiers are GQL0002 before writes. Questioned paths
 after an edge or parenthesized path, subpath assignments, WHERE inside a parenthesized path,
-and nested quantifiers each produce one named COHDBL001. Elsewhere `?` retains the stray-character
+and nested quantifiers each produce one named CK00001. Elsewhere `?` retains the stray-character
 or unsupported-parameter diagnostic. Explicit TRAIL and other path modes/search prefixes remain
-COHDBL001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
+CK00001. A `--` touching a subpath's `)` or quantifier's `}`, `+` or `*` is GQL0008, just as
 after a node or edge filler, including the bracketed Cypher star and its bounds. A nested `?`
-retains COHDBL001; path modes inside subpaths receive the same named capability diagnostic. Recursive
+retains CK00001; path modes inside subpaths receive the same named capability diagnostic. Recursive
 subpath parsing uses the GQL0009 stack guard. Hand-built subpath nesting beyond 128 levels, cycles and repeated path instances in one walk are refused
 iteratively with COHDBG001 before shape traversal. Parsed text has no nesting cap beyond GQL0009.
 
@@ -379,7 +379,7 @@ projected variable at plan time (COHDBG001), independently of the data; a mandat
 is safe. Scalar NULLs use the existing wire encoding.
 
 ISO 14.4's `OPTIONAL { ... }` and `OPTIONAL ( ... )` block operands remain recognized outside T1.
-Their one COHDBL001 names OPTIONAL BLOCK OPERAND, including after WHERE. MANDATORY MATCH remains
+Their one CK00001 names OPTIONAL BLOCK OPERAND, including after WHERE. MANDATORY MATCH remains
 unsupported. MATCH after INSERT or DELETE is a supported stage (#1145).
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/OptionalExpandAllPipe.scala:54-68`
@@ -406,11 +406,11 @@ The parser describes only the metadata subject; it never accesses or caches cata
 
 The stage list is the planner/executor input. A leading NEXT or WITH immediately followed by NEXT is GQL0002. A hand-built RETURN predicate is COHDBG001; predicates belong to WITH. The original constructors retain the owner-selected single-segment facade for hand-built ASTs; SHOW composition is rejected through either shape. Empty or missing mandatory stage operands are refused by the planner with COHDBG001. NEXT and FOR are profile keywords and also remain legal variable names and aliases, so `RETURN a AS next NEXT ...` and property keys named next or for remain valid.
 
-LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is COHDBG003 during planning; an invalid runtime container is COHDBG013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is COHDBG013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one COHDBL001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL, NEXT YIELD and UNION remain capability refusals. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain COHDBL001 under the owner default.
+LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is COHDBG003 during planning; an invalid runtime container is COHDBG013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is COHDBG013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one CK00001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL, NEXT YIELD and UNION remain capability refusals. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain CK00001 under the owner default.
 
 RETURN followed by NEXT and WITH retain only aliased columns and bare-variable projections. Carried names are decoded variable names, including under star; displayed quotes and grouping do not create different bindings. Duplicate carried bindings are COHDBG015 during planning, including EXPLAIN. Star expands all current bindings in scope order, including LET/FOR values and the preceding projection's order. Unaliased computed columns are accepted but cannot be referenced in a later stage; this is an explicit superset divergence from Cypher. WITH DISTINCT uses the same exact numeric tuple comparer as RETURN DISTINCT. Entity kinds, optionality, possible composite values and Int64 COUNT types survive boundaries. An unbound variable is COHDBG001; LET/FOR rebinding, a scalar used as an entity, or a later reference to a deleted variable is COHDBG003. A NEXT after a modifying segment without RETURN starts with one empty binding and no scope.
 
-WITH's ORDER BY and WHERE see both projected aliases and the incoming scope when neither DISTINCT nor grouping is present. Aliases shadow incoming names. With DISTINCT or grouping, only projected/grouped values remain visible. WHERE applies after ORDER BY, OFFSET and LIMIT. Each projection has its own grouping and ordering state, so one stage's aliases never validate a later stage. Function detection applies to every new value position, including row-evaluated pattern maps. Pattern maps evaluate scalar expressions against each row; list/map syntax keeps its graph-storage COHDBL001 and composite values remain COHDBG003.
+WITH's ORDER BY and WHERE see both projected aliases and the incoming scope when neither DISTINCT nor grouping is present. Aliases shadow incoming names. With DISTINCT or grouping, only projected/grouped values remain visible. WHERE applies after ORDER BY, OFFSET and LIMIT. Each projection has its own grouping and ordering state, so one stage's aliases never validate a later stage. Function detection applies to every new value position, including row-evaluated pattern maps. Pattern maps evaluate scalar expressions against each row; list/map syntax keeps its graph-storage CK00001 and composite values remain COHDBG003.
 
 Read stages stream borrowed slot bindings in source order; retention acquires explicit value ownership. Mutation target tables materialize before applying their write stage. Unknown labels empty their MATCH stage only, and names introduced by an earlier INSERT are treated as available. A statement sees its own writes under Snapshot and ReadCommitted. A write anywhere takes the writer lock before the first stage. FOR elements and selected MATCH candidates share the physical-work budget; retained tables/results share the memory budget (#1533). Only the final columns determine Execute admission; a scalar LET/FOR variable is scalar, possible composites require negotiation, and carried entities still require ExecutePaths. ExecutePaths accepts a read-only composed statement with one mandatory entity/path final column and rejects any write stage.
 
@@ -427,7 +427,7 @@ GqlLinearCompositionParserTests, GqlKeywordDispositionTests, GqlProfileExecution
 ISO/IEC 39075 defines no EXPLAIN. This is a Cohesion extension on the same footing as SHOW,
 not a D3 Cypher alias. The parser recognizes the prefix before SHOW dispatch, marks the parsed
 `GqlQueryExpression.IsExplain`, and retains normal statement completeness. EXPLAIN SHOW,
-transaction control, nested EXPLAIN, EXPLAIN ANALYZE and PROFILE receive `COHDBL001`.
+transaction control, nested EXPLAIN, EXPLAIN ANALYZE and PROFILE receive `CK00001`.
 `EXPLAIN` is contextual only at the statement prefix, matching PostgreSQL's unreserved keyword
 classification (`src/include/parser/kwlist.h:167` in the local clone). It is not a lexer keyword;
 unquoted `explain` remains a variable, label, relationship type, property or projection alias.
@@ -505,8 +505,8 @@ kind dispatch, including under list/map constructors and field references (#1146
 one named binding. Computed, multiple and multi-binding star projections use the existing
 COHDBG001 request-shape diagnostic. GraphPathResult completion diagnostics remain unchanged.
 
-Cypher map projection (`a {.name}`) remains COHDBL001 naming MAP PROJECTION. NEXT and WITH, including WITH DISTINCT, execute through the linear pipeline. Immediate return-after-delete remains
-COHDBL001. No catalog format or protocol frame changes are involved. `GqlReturnParserTests`,
+Cypher map projection (`a {.name}`) remains CK00001 naming MAP PROJECTION. NEXT and WITH, including WITH DISTINCT, execute through the linear pipeline. Immediate return-after-delete remains
+CK00001. No catalog format or protocol frame changes are involved. `GqlReturnParserTests`,
 the keyword-disposition corpus, `GqlProfileExecutionTests`, `GraphReturnTests` and
 `GraphReturnWireTests` cover this surface and its boundaries.
 
@@ -543,7 +543,7 @@ before reads or writes. All values allow depth 64, 65536 total values including 
 COHDBG013, including in-process execution, so a refused result rolls back its writes. Strings
 count real UTF-8 bytes, zero escaping and framing.
 INSERT/CREATE and MATCH pattern property maps remain scalar-only (COHDBG003 for composite
-parameters, COHDBL001 naming storage for list/map syntax); whole-map (n $props) stays COHDBL001.
+parameters, CK00001 naming storage for list/map syntax); whole-map (n $props) stays CK00001.
 
 Negative list indexes count from the end. Out-of-range indexes, missing map fields and
 NULL containers/indexes yield NULL. Lists require integral indexes; maps require string
@@ -551,8 +551,8 @@ keys. Node and relationship values also accept string subscripts and member acce
 (a).name, COALESCE(b,a).name and a['name'] read scalar stored properties and pass Execute.
 Only containers that are neither entities nor maps fail member lookup. Invalid accesses,
 including (a.name).x on a string, use #1140's COHDBG013.
-The parser keeps a.b.c on a stored property as COHDBL001 while {k:{j:1}}.k.j and $m.k
-are field access. Comprehensions, pattern comprehensions and slicing remain named COHDBL001.
+The parser keeps a.b.c on a stored property as CK00001 while {k:{j:1}}.k.j and $m.k
+are field access. Comprehensions, pattern comprehensions and slicing remain named CK00001.
 UNWIND/FOR expand literal and parameter lists through the linear pipeline (#1145).
 
 List equality requires equal lengths and element-wise equality. Map equality requires
@@ -613,7 +613,7 @@ cannot silently create COLLECT_LIST. Names are case-insensitive, bindings remain
 
 The static language signatures check parsed arity with **GQL0002**, exactly where #1147 checks
 aggregate arity. Hand-built calls are checked again during planning with COHDBG001. Unknown
-calls use **GQL0010** naming the function. Recognized unsupported calls keep COHDBL001 naming
+calls use **GQL0010** naming the function. Recognized unsupported calls keep CK00001 naming
 FUNCTION and the spelling; these table entries apply only before `(` in value positions, so
 `date` and `duration` remain legal variables. `id(n)` specifically directs callers to element_id.
 CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP are recognized unsupported niladic expressions.
@@ -673,7 +673,7 @@ DOUBLE [PRECISION] (Double), DECIMAL/NUMERIC, STRING/CHAR/VARCHAR (unbounded str
 BOOLEAN, DATE, ZONED DATETIME and TIMESTAMP WITH TIME ZONE (DateTimeOffset). Type modifiers,
 LIST, DURATION, BYTES, ZONED TIME, INT32, SMALLINT, FLOAT32, TIMESTAMP WITHOUT TIME ZONE
 and LOCAL DATETIME are outside this subset; recognized unsupported target
-families use COHDBL001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
+families use CK00001, unknown target spellings use GQL0002. Numeric-to-integer CAST rejects
 fractions, including fractional text; it never truncates or rounds. It follows SQL #1119's
 shared storage types and value rules. Numeric text is invariant without grouping, and exact
 numeric text cannot silently round into a whole integer. DOUBLE/REAL reject nonzero underflow
@@ -761,7 +761,7 @@ introduce an ungrouped variable. RETURN aliases are available in GROUP BY as pla
 names and in ORDER BY, where they shadow input variables. RETURN itself retains input scope.
 Computed-expression reuse in ORDER BY excludes expressions referencing redefined variables;
 aggregate operands retain input scope. Function-named list comprehensions keep the recognized
-COHDBL001 LIST COMPREHENSION diagnostic. Recursive aggregate parsing checks the thread stack.
+CK00001 LIST COMPREHENSION diagnostic. Recursive aggregate parsing checks the thread stack.
 
 All functions skip NULL values; COUNT(*) counts input rows, including OPTIONAL MATCH's
 null-extended rows. DISTINCT and grouping reuse RETURN's exact numeric, composite and
@@ -792,7 +792,7 @@ ORDER BY references are COHDBG001 before reading data, including under EXPLAIN. 
 inside aggregate operands are validated even on empty input. ExecutePaths rejects a final
 aggregate projection with its existing COHDBG001 path-request message; an intermediate
 aggregate such as WITH collect(n) AS ns UNWIND ns AS n feeds later stages (#1145). HAVING, STDDEV_SAMP, STDDEV_POP,
-PERCENTILE_CONT and PERCENTILE_DISC remain precise COHDBL001 capability diagnostics.
+PERCENTILE_CONT and PERCENTILE_DISC remain precise CK00001 capability diagnostics.
 WITH aggregates execute through the same per-stage grouping plan (#1145).
 
 Neo4j behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`, under
@@ -846,7 +846,7 @@ Mutations run for every matched binding before projection. DISTINCT precedes sor
 OFFSET precedes LIMIT. LIMIT 0 returns no rows; large offsets return no rows without overflow.
 The owner default is full materialization: LIMIT 1 over more than 100,000 matches still fails
 COHDBG004. Sorting does not change wire or catalog formats. Standalone ORDER BY/page statements
-before RETURN remain COHDBL001 naming STANDALONE ORDER BY AND PAGE STATEMENT (T2).
+before RETURN remain CK00001 naming STANDALONE ORDER BY AND PAGE STATEMENT (T2).
 WITH ordering/paging executes through the same stage, and aggregate aliases follow its grouping stage.
 
 Behavior consulted, no code copied, relative to `C:/Source/repos/neo4j/neo4j`:
@@ -872,7 +872,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, comprehensions, slicing, map projections, questioned paths, subpath variables, parenthesized-path WHERE, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
 | `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
@@ -895,7 +895,7 @@ to the Graph planner, which knows the database schema.
 ### Keyword disposition (#1101)
 
 The capability scan reads one static recognized-unsupported table, `GqlUnsupportedVocabulary`.
-Each entry has a spelling, the construct its `COHDBL001` names, and a position. Each construct is
+Each entry has a spelling, the construct its `CK00001` names, and a position. Each construct is
 reported once, at its own span:
 
 | Written | Construct named | Span | Who lifts it |
@@ -927,7 +927,7 @@ before `DELETE`, they name the construct. Elsewhere they are names, so `MATCH tr
 and `MATCH (nodetach) DELETE nodetach` still parse.
 `GqlKeywordDispositionTests` enumerates the profile's keywords, the table, and the executable
 label-expression spellings `GqlLabelVocabulary` lists (`|`, `&`, `!`, `%` and the positional
-`LABELED`). Every word needs a supported parse case or a case with exactly one `COHDBL001` naming its
+`LABELED`). Every word needs a supported parse case or a case with exactly one `CK00001` naming its
 construct, and for a table entry that diagnostic must also name the construct the table records. A
 word added without a case fails. `~` is a table entry (`UNDIRECTED EDGE`); `--` after a pattern
 element is `GQL0008`, which "Label expressions and edge directions" below describes.
@@ -1034,7 +1034,7 @@ reads HasLabels selections for any pattern node (relative to C:/Source/repos/neo
 | `<-[]-`, `<-` | `Incoming` | the stored edge into the preceding node | yes, with one type |
 | `-[]-`, `-` | `Undirected` (any direction) | either orientation | `COHDBG001` |
 | `<-[]->`, `<->` | `LeftOrRight` | either orientation, exactly as `Undirected` | `COHDBG001` |
-| `~[]~`, `<~[]~`, `~[]~>`, `~`, `<~`, `~>` | none | `COHDBL001` `UNDIRECTED EDGE` | `COHDBL001` |
+| `~[]~`, `<~[]~`, `~[]~>`, `~`, `<~`, `~>` | none | `CK00001` `UNDIRECTED EDGE` | `CK00001` |
 
 One stored `A`-to-`B` edge therefore yields the rows `(A,B)` and `(B,A)` for `-[r]-`, `-`, `<-[r]->`
 and `<->`, and a self-loop yields one row. The tilde forms are rejected rather than matched: `~[]~`

@@ -20,7 +20,7 @@ public sealed class ProtocolTransactionStatusTests
     public void Decode_InvalidStatus_ShouldRejectUnknownTruncatedAndTrailingBytes()
     {
         foreach (byte[] payload in new byte[][] { [], [0], [(byte)'I', 0], [(byte)'X'] })
-        { Should.Throw<ProtocolException>(() => ProtocolTransactionStatusMessage.Decode(payload)).Message.ShouldContain("COHDBP002"); }
+        { Should.Throw<ProtocolException>(() => ProtocolTransactionStatusMessage.Decode(payload)).Message.ShouldContain("CK07002"); }
         Should.Throw<ProtocolException>(() => new ProtocolTransactionStatusMessage((ProtocolTransactionStatus)0).Encode());
     }
 }

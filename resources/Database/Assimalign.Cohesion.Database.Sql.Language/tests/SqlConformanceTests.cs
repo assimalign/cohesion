@@ -94,7 +94,7 @@ public class SqlConformanceTests
 
         statement.SqlExpression.CommandType.ShouldBe(expected);
         statement.Diagnostics.ShouldContain(d =>
-            d.Code == "COHDBL001" && d.Severity == DiagnosticSeverity.Error);
+            d.Code == "CK00001" && d.Severity == DiagnosticSeverity.Error);
         statement.SqlExpression.Text.ShouldBe(sql); // the raw text is stamped (#170)
     }
 
@@ -105,9 +105,9 @@ public class SqlConformanceTests
     [InlineData("(1,2,3)", "SQL0005")]
     [InlineData("(x, (1))", "SQL0005")]
     [InlineData("( /*arg*/ x)", "SQL0005")]
-    [InlineData("(0)", "COHDBL001")]
-    [InlineData("(6)", "COHDBL001")]
-    [InlineData("(7)", "COHDBL001")]
+    [InlineData("(0)", "CK00001")]
+    [InlineData("(6)", "CK00001")]
+    [InlineData("(7)", "CK00001")]
     public void Parse_TemporalModifierBeforeSuffix_ShouldReportOnlyModifierDiagnostic(string modifier, string code)
     {
         // Arrange
@@ -262,7 +262,7 @@ public class SqlConformanceTests
 
     // ── Builtin function recognition (#173) ────────────────────────────
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report COHDBL001")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report CK00001")]
     [InlineData("COUNT", "SELECT COUNT(*) FROM t;")]
     [InlineData("SUM", "SELECT SUM(x) FROM t;")]
     [InlineData("COALESCE", "SELECT COALESCE(a, b, 0) FROM t;")]
@@ -277,7 +277,7 @@ public class SqlConformanceTests
         if (!SqlLanguageProfile.Instance.Functions.Contains(function, StringComparer.OrdinalIgnoreCase))
         {
             var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Message.ShouldNotBeNull().ShouldContain(function, Case.Sensitive);
             return;
         }

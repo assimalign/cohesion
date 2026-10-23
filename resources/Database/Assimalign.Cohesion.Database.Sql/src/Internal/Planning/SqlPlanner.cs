@@ -1502,12 +1502,12 @@ internal sealed partial class SqlPlanner
                 ValidateCast(cast, evaluator, boundSubqueries, boundValues);
                 break;
             case SqlSubqueryExpression or SqlExistsExpression when !isBound:
-                throw new SqlPlanningException("COHDBL001", "Subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
+                throw new SqlPlanningException("CK00001", "Subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // resolves innermost first, then enclosing query scopes
                 break;
             case SqlInExpression { Values: null } when !isBound:
-                throw new SqlPlanningException("COHDBL001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
+                throw new SqlPlanningException("CK00001", "IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.", expression.Location);
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
                 when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type) && !(sign.Operator == SqlUnaryOperator.Negate && type == DatabaseType.TimeSpan):
                 // A sign over a value the plan already knows is not a number fails here, the same

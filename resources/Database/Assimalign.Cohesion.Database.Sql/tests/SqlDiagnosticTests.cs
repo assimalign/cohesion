@@ -60,7 +60,7 @@ public sealed class SqlDiagnosticTests
         diagnostic.End.ShouldBe(13);
         failure.Message.ShouldBe("Unknown column 'absent'.");
         failure.Message.ShouldNotContain("COHSQLE", Case.Sensitive);
-        failure.Message.ShouldNotContain("COHDBL001:", Case.Sensitive);
+        failure.Message.ShouldNotContain("CK00001:", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Functions: unsupported and unknown calls have distinct single diagnostics")]
@@ -68,7 +68,7 @@ public sealed class SqlDiagnosticTests
     {
         // Arrange
         var unsupported = new SqlQueryParser().Parse("SELECT RANK() FROM t;");
-        unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         new SqlQueryParser().Parse("SELECT FOO(a) FROM t;").Diagnostics.ShouldBeEmpty();
         await using var engine = SqlDatabaseEngine.Create("diagnostics", new());
         var database = await engine.CreateDatabaseAsync("diagnostics", CancellationToken.None);

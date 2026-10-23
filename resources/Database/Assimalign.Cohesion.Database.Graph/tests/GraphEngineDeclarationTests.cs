@@ -280,7 +280,7 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<GraphDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
         failure.ParamName.ShouldBe(nameof(GraphDatabaseServerOptions.Listener));
-        failure.Message.ShouldStartWith("COHDBO001: Graph server for engine 'unserved': Listener is required.", Case.Sensitive);
+        failure.Message.ShouldStartWith("CK08001: Graph server for engine 'unserved': Listener is required.", Case.Sensitive);
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

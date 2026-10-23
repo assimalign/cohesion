@@ -255,7 +255,7 @@ internal sealed class SmokeRunner
             }
             catch (Documents.Client.DocumentClientException exception)
             {
-                Require(exception.Code == Protocol.ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "COHDBL001"), "diagnostic code lost on wire");
+                Require(exception.Code == Protocol.ProtocolErrorCode.ParseFailure && exception.Diagnostics.Any(d => d.Code == "CK00001"), "diagnostic code lost on wire");
             }
             Require(await connection.DeleteAsync("wire_items", "one", saved.Version, token).ConfigureAwait(false), "delete after statement failure failed");
             Require(await connection.GetAsync("wire_items", "one", token).ConfigureAwait(false) is null, "deleted document still visible");

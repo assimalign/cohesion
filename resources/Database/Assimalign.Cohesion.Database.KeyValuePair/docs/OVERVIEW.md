@@ -41,7 +41,7 @@ keys order by unsigned lexicographic byte comparison.
   `KeyValueDatabaseTransaction` are its typed session and explicit transaction.
 - Explicit transactions: a failed command writes nothing and leaves the transaction
   active, so later commands stay inside it until the caller commits or rolls back. The
-  exception is a storage, I/O or index failure (`COHDBK005`, or `COHDBS003` for corruption):
+  exception is a storage, I/O or index failure (`COHDBK005`, or `CK06003` for corruption):
   it aborts the transaction, which then refuses commands and COMMIT with `COHDBK001` naming
   that cause until the caller rolls back (#1364). In autocommit the next command can run. A
   rollback can be repeated, and a started rollback always ends the transaction, even when
@@ -223,3 +223,11 @@ adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

@@ -35,3 +35,10 @@ non-generic creation-state parameter), its disposal core recording
 the disposal order (`database-area.md`, "Test doubles"). Embedded composition continues to own the engines
 explicitly supplied to `EmbeddedDatabase`; this existing aggregate is separate
 from the hosting builder's instance-borrowed registration contract.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

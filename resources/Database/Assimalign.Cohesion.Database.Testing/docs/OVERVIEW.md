@@ -87,3 +87,10 @@ graceful-stop routes. Principal mutation currently returns an explicit provider 
   control plane. It is not a dependency of this testing library.
 
 See [`DESIGN.md`](DESIGN.md) for lifecycle, entry-point, isolation, and AOT details.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

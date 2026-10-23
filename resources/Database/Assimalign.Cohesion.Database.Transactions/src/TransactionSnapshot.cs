@@ -36,7 +36,7 @@ public sealed class TransactionSnapshot
     {
         if (minimum > maximum)
         {
-            throw new ArgumentException("Snapshot minimum cannot exceed its maximum.", nameof(minimum));
+            throw new ArgumentException(ErrorMessages.TransactionSnapshotArgument, nameof(minimum));
         }
         ArgumentNullException.ThrowIfNull(active);
 

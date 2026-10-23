@@ -43,3 +43,10 @@ Database names cannot contain `/`, which keeps ownership keys unambiguous.
 The project is guarded by COHAM001 and never references Database runtime, gateway, or
 platform packages; its built closure holds no other Database assembly. It emits no legacy resource-specific environment variables; runtime
 endpoint and mount values flow through the `Hosting.Resources` `ResourceContext`.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

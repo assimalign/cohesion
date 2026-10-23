@@ -115,7 +115,7 @@ public sealed partial class SqlQueryParser
             }
             else if (IsKeyword(ref lexer, "UPDATE"))
             {
-                // The preflight scanner emits COHDBL001. Consume this action only
+                // The preflight scanner emits CK00001. Consume this action only
                 // for error recovery; it is never an accepted referential action.
                 Advance(ref lexer);
                 if (IsKeyword(ref lexer, "CASCADE") || IsKeyword(ref lexer, "RESTRICT"))

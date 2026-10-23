@@ -31,7 +31,7 @@ public sealed class GraphDiagnosticOverflowTests
         {
             diagnostics.Count.ShouldBe(4096);
             diagnostics.Take(4095).ShouldAllBe(item => item.Code == "COHDBG010");
-            diagnostics[^1].Code.ShouldBe("COHDBP001");
+            diagnostics[^1].Code.ShouldBe("CK07001");
             diagnostics[^1].Message!.ShouldContain("first 4095 of 4097", Case.Sensitive);
             diagnostics[^1].Message!.ShouldContain("remaining 2", Case.Sensitive);
             new ProtocolDiagnosticsMessage(diagnostics).Encode().Length.ShouldBeLessThanOrEqualTo(ProtocolDiagnosticsMessage.MaxPayloadLength);

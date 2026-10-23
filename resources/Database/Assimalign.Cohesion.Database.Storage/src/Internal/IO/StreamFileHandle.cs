@@ -123,7 +123,7 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
     {
         if (durable)
         {
-            throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
+            throw new NotSupportedException(ErrorMessages.StreamFileHandleFlushNotSupported);
         }
 
         _gate.Wait();
@@ -138,7 +138,7 @@ internal sealed class StreamFileHandle : IFileSystemFileHandle
     {
         if (durable)
         {
-            throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
+            throw new NotSupportedException(ErrorMessages.StreamFileHandleFlushNotSupported);
         }
 
         return FlushGatedAsync(cancellationToken);

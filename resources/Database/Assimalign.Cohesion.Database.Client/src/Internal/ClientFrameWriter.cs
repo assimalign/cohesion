@@ -28,7 +28,7 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         }
         catch (InvalidOperationException exception)
         {
-            throw new IOException("The connection closed while sending a request.", exception);
+            throw new IOException(ErrorMessages.FrameWriterWriteFrameCoreAsyncIO, exception);
         }
     }
 
@@ -40,7 +40,7 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         }
         catch (InvalidOperationException exception)
         {
-            throw new IOException("The connection closed while flushing a request.", exception);
+            throw new IOException(ErrorMessages.ClientFrameWriterFlushCoreAsyncIO, exception);
         }
     }
 

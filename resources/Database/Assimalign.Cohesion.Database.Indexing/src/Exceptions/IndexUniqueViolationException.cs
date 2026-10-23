@@ -12,7 +12,7 @@ public sealed class IndexUniqueViolationException : IndexException
     /// <param name="indexName">The unique index that rejected the key.</param>
     /// <param name="key">The duplicate key.</param>
     public IndexUniqueViolationException(string indexName, IndexKey key)
-        : base($"Unique index '{indexName}' already contains an entry for key {key}.")
+        : base(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexUniqueViolationExceptionIndex, indexName, key))
     {
         IndexName = indexName;
         Key = key;

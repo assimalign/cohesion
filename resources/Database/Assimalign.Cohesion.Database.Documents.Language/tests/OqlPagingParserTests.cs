@@ -186,7 +186,7 @@ public sealed class OqlPagingParserTests
         // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldBe($"The {construct} clause is not supported by the OQL surface of this database model.");
         diagnostic.Start.ShouldBe(text.IndexOf(word, StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + word.Length);

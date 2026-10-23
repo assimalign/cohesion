@@ -59,7 +59,7 @@ public sealed class SqlReturningParserTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.Where(item => item.Code == "COHDBL001").ShouldHaveSingleItem();
+        var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
     }
 

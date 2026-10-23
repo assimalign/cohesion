@@ -106,7 +106,7 @@ public sealed class OqlLineCommentTests
         var diagnostic = Parse(oql).Diagnostics.ShouldHaveSingleItem();
 
         // Assert
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(oql.IndexOf("MERGE", StringComparison.Ordinal));
         diagnostic.Line.ShouldBe(3);
     }

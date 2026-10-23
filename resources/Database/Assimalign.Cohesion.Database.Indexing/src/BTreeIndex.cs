@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Indexing;
 /// An entry is identified by its key, its entry reference and its writer stamp, and
 /// that identity is unique: inserting an identity that is already present is a defect
 /// in the caller and fails with <see cref="IndexException"/>. Any operation fails with
-/// <see cref="IndexCorruptionException"/> (<c>COHDBI002</c>) when it reaches a damaged
+/// <see cref="IndexCorruptionException"/> (<c>CK06102</c>) when it reaches a damaged
 /// index page.
 /// </para>
 /// <para>
@@ -214,7 +214,7 @@ public sealed class BTreeIndex
 
         if (key.Length > MaxKeyLength)
         {
-            throw new IndexException($"Index key of {key.Length} bytes exceeds the {MaxKeyLength}-byte maximum.");
+            throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexInsertAsyncIndex, key.Length, MaxKeyLength));
         }
 
         // Unique keys arbitrate concurrent writers through the lock manager before
@@ -440,7 +440,7 @@ public sealed class BTreeIndex
 
         if (key.Length > MaxKeyLength)
         {
-            throw new IndexException($"Index key of {key.Length} bytes exceeds the {MaxKeyLength}-byte maximum.");
+            throw new IndexException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexInsertAsyncIndex, key.Length, MaxKeyLength));
         }
 
         _latch.EnterWrite();
@@ -1113,8 +1113,7 @@ public sealed class BTreeIndex
                 if (at < node.EntryCount && node.CompareToEntry(position, at) == 0)
                 {
                     throw new IndexException(
-                        $"Index '{Name}' already holds the entry for reference {entryReference} written by transaction {writer} under this key; " +
-                        "an entry's (key, reference, writer) identity must be unique.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexInsertCoreIndex, Name, entryReference, writer));
                 }
 
                 int needed = BTreeNode.LeafEntrySize(key.Length);
@@ -1210,7 +1209,7 @@ public sealed class BTreeIndex
             {
                 // Unreachable while inserts compact orphaned bytes first: a compacted
                 // leaf with fewer than two entries always has room for one more.
-                throw InvariantViolated(leafId, $"Index '{Name}' cannot split leaf page {leafId} holding {count} entries.");
+                throw InvariantViolated(leafId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexSplitLeafIndex, Name, leafId, count));
             }
 
             bool endOfRun = at == count && leaf.GetKey(0).SequenceEqual(position.Key)
@@ -1487,7 +1486,7 @@ public sealed class BTreeIndex
             if (count < 2)
             {
                 // Unreachable: a full internal node holds several maximum-size separators.
-                throw InvariantViolated(nodeId, $"Index '{Name}' cannot split internal page {nodeId} holding {count} entries.");
+                throw InvariantViolated(nodeId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexSplitIndex, Name, nodeId, count));
             }
 
             var sibling = BTreeNode.Initialize(siblingHandle.Page.AsBodySpan(), BTreeNode.InternalKind);
@@ -1569,7 +1568,7 @@ public sealed class BTreeIndex
         if (leaf.CompareToEntry(bound, mid - 1) <= 0 || leaf.CompareToEntry(bound, mid) > 0)
         {
             throw InvariantViolated(
-                leafId, $"Index '{Name}' cannot split leaf page {leafId}: its entries {mid - 1} and {mid} are out of order.");
+                leafId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexEnsureLeafSeparatorIndex, Name, leafId, mid - 1, mid));
         }
     }
 
@@ -1589,7 +1588,7 @@ public sealed class BTreeIndex
         if (position < 0 || position > node.EntryCount)
         {
             throw InvariantViolated(
-                pageId, $"Index '{Name}' split would insert a separator at position {position} of the {node.EntryCount}-entry directory on page {pageId}.");
+                pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexEnsureSeparatorOrderIndex, Name, position, node.EntryCount, pageId));
         }
 
         var bound = separator.AsSearchKey();
@@ -1597,7 +1596,7 @@ public sealed class BTreeIndex
         if ((position > 0 && node.CompareToSeparator(bound, position - 1) <= 0)
             || (position < node.EntryCount && node.CompareToSeparator(bound, position) >= 0))
         {
-            throw InvariantViolated(pageId, $"Index '{Name}' split would misorder separators on page {pageId}.");
+            throw InvariantViolated(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BTreeIndexEnsureSeparatorOrderIndex2, Name, pageId));
         }
     }
 

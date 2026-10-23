@@ -63,6 +63,12 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// </remarks>
 public sealed class LockManager
 {
+    private static readonly string _errorLockManagerFailEndedFailure = ErrorMessages.LockManagerFailEndedFailure;
+
+    private static readonly string _errorLockManagerAcquireCoreAsyncFailure = ErrorMessages.LockManagerAcquireCoreAsyncFailure;
+
+    private static readonly string _errorLockManagerAbandonedFailure = ErrorMessages.LockManagerAbandonedFailure;
+
     // Compatibility matrix indexed [held, requested]:
     // Shared, Update, Exclusive, IntentShared, IntentExclusive. It is symmetric.
     private static readonly bool[,] _compatible =
@@ -163,7 +169,8 @@ public sealed class LockManager
     private const int MaxNestedBlockersDescribed = 4;
     private const int MaxQueuedDescribed = 4;
 
-    internal LockManager()
+    /// <summary>Initializes a standalone FIFO lock table with deadlock detection.</summary>
+    public LockManager()
     {
     }
 
@@ -172,15 +179,7 @@ public sealed class LockManager
     internal Action? BeforeWaitOutcome { get; set; }
     internal Action? BeforeGrantNotification { get; set; }
 
-    /// <summary>
-    /// Creates a standalone lock manager: a mode-compatibility lock table with a FIFO queue per
-    /// resource and wait-for-graph deadlock detection that aborts the requester whose wait would
-    /// close a cycle.
-    /// </summary>
-    /// <returns>The lock manager.</returns>
-    public static LockManager Create() => new();
-
-    /// <summary>
+/// <summary>
     /// Acquires a lock on the specified resource for the specified transaction,
     /// waiting until the lock is granted, the wait times out, or a deadlock is resolved.
     /// </summary>
@@ -273,7 +272,7 @@ public sealed class LockManager
 
         if (_abandon is not null)
         {
-            throw new InvalidOperationException("The lock manager is already in engine mode.");
+            throw new InvalidOperationException(ErrorMessages.LockManagerEnterEngineModeFailure);
         }
 
         _releaseOwedByManager = releaseOwedByManager;
@@ -293,7 +292,7 @@ public sealed class LockManager
     {
         ArgumentNullException.ThrowIfNull(cause);
 
-        var abandon = _abandon ?? throw new InvalidOperationException("Only a lock manager in engine mode abandons its waits.");
+        var abandon = _abandon ?? throw new InvalidOperationException(ErrorMessages.LockManagerAbandonFailure);
         if (Interlocked.CompareExchange(ref _abandonCause, cause, null) is null)
         {
             // Asynchronously: the storage's offline hook may run under its locks.
@@ -337,12 +336,10 @@ public sealed class LockManager
     }
 
     private static TransactionAbortedException Abandoned(TransactionSequence owner, LockResource resource, LockMode mode, StorageOfflineException cause)
-        => new($"Transaction {owner}'s request for {mode} on {resource} was refused: the database's storage went offline, " +
-            "so no lock of it is released until it is reopened.", cause);
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerAbandonedFailure, owner, mode, resource), cause);
 
     private static InvalidOperationException WaitInsideApply(TransactionSequence owner, LockResource resource, LockMode mode)
-        => new($"Transaction {owner}'s request for {mode} on {resource} would wait inside a statement apply, which holds the " +
-            "database's apply gate; the request was refused. A statement acquires every lock its apply needs before the apply begins.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LockManagerWaitInsideApplyFailure, owner, mode, resource));
 
     /// <remarks>
     /// An owner whose pending requests were abandoned (<see cref="AbandonPending"/>) is refused
@@ -376,7 +373,7 @@ public sealed class LockManager
             {
                 RemoveIfUnusedLocked(entry);
                 throw new TransactionAbortedException(
-                    $"Transaction {owner} has ended; its request for {mode} on {resource} was refused.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerAcquireCoreAsyncFailure, owner, mode, resource));
             }
 
             if (CanGrantNewLocked(entry, owner.Value, mode, out int place))
@@ -475,7 +472,7 @@ public sealed class LockManager
     });
 
     private static TransactionDeadlockException Deadlock(TransactionSequence owner, LockResource resource, LockMode mode)
-        => new($"Transaction {owner} was chosen as the deadlock victim requesting {mode} on {resource}.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LockManagerDeadlockFailure, owner, mode, resource));
 
     /// <summary>
     /// Attempts to acquire a lock without waiting.
@@ -710,7 +707,7 @@ public sealed class LockManager
         foreach (var waiter in ended)
         {
             waiter.Completion.TrySetException(new TransactionAbortedException(
-                $"Transaction {owner} ended while it waited for {waiter.Mode} on {waiter.Resource}; the request was not granted."));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorLockManagerFailEndedFailure, owner, waiter.Mode, waiter.Resource)));
         }
     }
 

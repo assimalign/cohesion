@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the OQL profile lexes as a keyword, and every
 /// entry of the recognized-unsupported table, and contextual EXPLAIN either parses inside a supported clause or is
-/// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
+/// rejected with exactly one <c>CK00001</c> naming its construct. A word added to either list
 /// without a case here fails the coverage test.
 /// </summary>
 public sealed class OqlKeywordDispositionTests
@@ -138,7 +138,7 @@ public sealed class OqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -163,10 +163,10 @@ public sealed class OqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Oql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Oql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Oql}' but found {found}");
             }
             else if (OqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
                      !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
@@ -226,7 +226,7 @@ public sealed class OqlKeywordDispositionTests
         var statement = parser.Parse(source);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Keyword disposition: words matched anywhere are lexer keywords or functions")]

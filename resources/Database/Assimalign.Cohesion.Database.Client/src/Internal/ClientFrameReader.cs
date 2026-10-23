@@ -30,7 +30,7 @@ internal sealed class ClientFrameReader : ProtocolFrameReader
         }
         catch (InvalidOperationException exception)
         {
-            throw new IOException("The connection closed while reading a response.", exception);
+            throw new IOException(ErrorMessages.ResponseReadClosed, exception);
         }
     }
 

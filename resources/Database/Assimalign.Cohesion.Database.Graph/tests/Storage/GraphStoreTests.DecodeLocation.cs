@@ -105,7 +105,7 @@ public sealed partial class GraphStoreTests
             });
             failure.PageId.ShouldBe(unit.PageId);
             failure.SlotIndex.ShouldBe(unit.SlotIndex);
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Message.ShouldContain($"slot {unit.SlotIndex}", Case.Sensitive);
         }
         finally

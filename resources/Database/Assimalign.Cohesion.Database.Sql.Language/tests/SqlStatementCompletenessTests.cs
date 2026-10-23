@@ -384,20 +384,20 @@ public sealed class SqlStatementCompletenessTests
             .Operator.ShouldBe(SqlUnaryOperator.Negate);
 
         // ~ is outside the dialect since #1101; its signed operand still leaves no text behind.
-        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     /// <summary>
-    /// A recognized clause outside the profile reports COHDBL001, and text from that clause
+    /// A recognized clause outside the profile reports CK00001, and text from that clause
     /// on adds no second diagnostic. Text the parser stopped at before reaching the clause
     /// still reports SQL0003, so fixing the clause does not reveal a new error.
     /// </summary>
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "SQL0003", "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "SQL0003", "CK00001" })]
     // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]

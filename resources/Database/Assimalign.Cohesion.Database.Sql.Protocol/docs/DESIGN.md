@@ -21,7 +21,7 @@ ends with an existing Ready frame (byte 4) after ResultComplete/PathsComplete or
 Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
 transaction failed. No new message identifier, protocol version or on-disk format is introduced.
 Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
-postamble. Malformed status payloads use COHDBP002 and are protocol violations.
+postamble. Malformed status payloads use CK07002 and are protocol violations.
 
 The capability also defines parameterless reset: Execute byte 5 carries the usual length-prefixed
 UTF-8 `ROLLBACK` followed by a zero Int32 parameter count. Success is ResultComplete byte 8 with

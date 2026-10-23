@@ -152,7 +152,7 @@ public readonly unsafe struct SlottedPage
 
         if (slot.IsDeleted)
         {
-            throw new SlottedPageException("Cannot read a deleted slot.");
+            throw new SlottedPageException(ErrorMessages.SlottedPageReadSlotSlottedPage);
         }
 
         // Reads may run beside the page's single writer (scans take a pin, not a latch),
@@ -160,7 +160,7 @@ public readonly unsafe struct SlottedPage
         // page passes through, and it is what keeps a read inside the buffer.
         if (slot.Offset < BodyOffset || slot.Offset + slot.Length > Page.Size)
         {
-            throw Corruption($"slot {index} addresses bytes {slot.Offset}..{slot.Offset + slot.Length}, outside the page body");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageReadSlotFailure, index, slot.Offset, slot.Offset + slot.Length));
         }
 
         int length = Math.Min(slot.Length, destination.Length);
@@ -192,7 +192,7 @@ public readonly unsafe struct SlottedPage
 
         if (slotCount > maxSlotCount)
         {
-            throw Corruption($"the header records {slotCount} slots; a page holds at most {maxSlotCount}");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageTryReadSlotFailure, slotCount, maxSlotCount));
         }
 
         // One snapshot of the entry, as in ReadSlot: the checks and the copy use the same values.
@@ -210,7 +210,7 @@ public readonly unsafe struct SlottedPage
 
         if (slot.Offset < BodyOffset || slot.Offset + slot.Length > Page.Size)
         {
-            throw Corruption($"slot {index} addresses bytes {slot.Offset}..{slot.Offset + slot.Length}, outside the page body");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageReadSlotFailure, index, slot.Offset, slot.Offset + slot.Length));
         }
 
         record = new ReadOnlySpan<byte>(_pointer + slot.Offset, slot.Length).ToArray();
@@ -248,7 +248,7 @@ public readonly unsafe struct SlottedPage
         // The record and its new slot entry both come out of the free space.
         if (data.Length + sizeof(PageSlot) > SlotDirectoryStart(slotIndex) - recordOffset)
         {
-            throw new SlottedPageException("Insufficient free space in page for the record.");
+            throw new SlottedPageException(ErrorMessages.SlottedPageInsertSlotSlottedPage);
         }
 
         // Write record data at FreeDataEnd
@@ -311,7 +311,7 @@ public readonly unsafe struct SlottedPage
 
         if (!current.IsDeleted && (current.Offset < BodyOffset || current.Offset + current.Length > freeDataEnd))
         {
-            throw Corruption($"slot {index} addresses bytes {current.Offset}..{current.Offset + current.Length}, outside the record area that ends at {freeDataEnd}");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageUpdateSlotFailure, index, current.Offset, current.Offset + current.Length, freeDataEnd));
         }
 
         // If the new data fits in the existing space, write in place
@@ -328,7 +328,7 @@ public readonly unsafe struct SlottedPage
         // past the end of the page into the buffer pool's own objects.
         if (data.Length > SlotDirectoryStart(slotCount) - freeDataEnd)
         {
-            throw new SlottedPageException("Insufficient free space to update the record.");
+            throw new SlottedPageException(ErrorMessages.SlottedPageUpdateSlotSlottedPage);
         }
 
         // Append at the free-data end, then move the entry there in one write. The old bytes stay
@@ -404,7 +404,7 @@ public readonly unsafe struct SlottedPage
 
             if (slot.Offset < BodyOffset || slot.Offset + slot.Length > freeDataEnd)
             {
-                throw Corruption($"slot {i} addresses bytes {slot.Offset}..{slot.Offset + slot.Length}, outside the record area that ends at {freeDataEnd}");
+                throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageUpdateSlotFailure, i, slot.Offset, slot.Offset + slot.Length, freeDataEnd));
             }
 
             order[liveCount++] = (slot.Offset << 16) | i;
@@ -421,7 +421,7 @@ public readonly unsafe struct SlottedPage
 
             if (slot->Offset < previousEnd)
             {
-                throw Corruption($"slot {key & 0xFFFF} overlaps the record that ends at {previousEnd}");
+                throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageTryCompactFailure, key & 0xFFFF, previousEnd));
             }
 
             previousEnd = slot->Offset + slot->Length;
@@ -496,7 +496,7 @@ public readonly unsafe struct SlottedPage
 
         if (slotCount > maxSlotCount)
         {
-            throw Corruption($"the header records {slotCount} slots; a page holds at most {maxSlotCount}");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageTryReadSlotFailure, slotCount, maxSlotCount));
         }
 
         return SlotAt(index);
@@ -553,18 +553,18 @@ public readonly unsafe struct SlottedPage
     {
         if (slotCount > maxSlotCount)
         {
-            throw Corruption($"the header records {slotCount} slots; a page holds at most {maxSlotCount}");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageTryReadSlotFailure, slotCount, maxSlotCount));
         }
 
         if (freeDataEnd < BodyOffset || freeDataEnd > SlotDirectoryStart(slotCount))
         {
-            throw Corruption($"the free-data end {freeDataEnd} lies outside the record area {BodyOffset}..{SlotDirectoryStart(slotCount)}");
+            throw Corruption(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageEnsureWritableLayoutFailure, freeDataEnd, BodyOffset, SlotDirectoryStart(slotCount)));
         }
     }
 
     private StorageCorruptionException Corruption(string detail)
     {
         long pageId = ((Page.Header*)_pointer)->PageId;
-        return new StorageCorruptionException((PageId)pageId, $"Slotted page {pageId} is malformed: {detail}.");
+        return new StorageCorruptionException((PageId)pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SlottedPageCorruptionFailure, pageId, detail));
     }
 }

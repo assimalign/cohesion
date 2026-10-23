@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class StorageCorruptionTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Conformance: a corrupt page fails the operation with database, page and COHDBS003")]
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Conformance: a corrupt page fails the operation with database, page and CK06003")]
     [InlineData(false, 0)]
     [InlineData(true, 0)]
     [InlineData(false, 1)]
@@ -71,7 +71,7 @@ public sealed class StorageCorruptionTests
             });
 
             // Assert
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Database.ShouldBe((DatabaseName)"corrupt");
             failure.PageId.ShouldBe(pageId);
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
@@ -102,10 +102,10 @@ public sealed class StorageCorruptionTests
         var failure = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("corrupt", CancellationToken.None).AsTask());
 
         // Assert: a failed open publishes nothing, and the files remain usable after the fault clears.
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.PageId.ShouldBe((PageId)9L);
         failure.InnerException.ShouldBeSameAs(cause);
-        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBD003"]);
+        failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "COHDBD003"]);
         strategy.OpenFailure = null;
         (await engine.OpenDatabaseAsync("corrupt", CancellationToken.None)).Name.ShouldBe((DatabaseName)"corrupt");
     }

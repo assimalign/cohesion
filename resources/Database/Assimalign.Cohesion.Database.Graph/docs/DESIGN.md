@@ -77,8 +77,8 @@ session ready.
 
 Runtime storage failures, including wrapped I/O, use structured `COHDBG006` Diagnostics and
 plain embedded messages, matching open. Only the wire writer adds the prefix. Begin and
-operations share the translator. Attached-index damage leads with `COHDBS003`, retaining the
-index cause and `COHDBI002` plus `COHDBG006`; other index failures use `COHDBG006`.
+operations share the translator. Attached-index damage leads with `CK06003`, retaining the
+index cause and `CK06102` plus `COHDBG006`; other index failures use `COHDBG006`.
 
 
 ## Storage corruption (#1160)
@@ -88,7 +88,7 @@ DatabaseException with structured COHDBG006 diagnostics (#1364). Open releases a
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -101,7 +101,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
 (`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
@@ -1065,7 +1065,7 @@ string, Boolean, number, NULL. Lists are lexicographic; maps compare count, sort
 then values; nested NULL sorts last. Strings compare ordinally and entities by identity.
 Neo4j behavior references and full language rules are recorded in
 [Graph.Language ordering design](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#ordering-and-paging-1142).
-Standalone ORDER BY/page statements remain COHDBL001 (owner default, T2). WITH ordering executes in its projection stage; aggregate ordering follows that stage's grouping. No public interface, catalog or wire format changes.
+Standalone ORDER BY/page statements remain CK00001 (owner default, T2). WITH ordering executes in its projection stage; aggregate ordering follows that stage's grouping. No public interface, catalog or wire format changes.
 
 ### Conformance corpus timing (#1140 fix pass)
 
@@ -1290,7 +1290,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Unsupported language capability, reported on the parsed statement |
+| `CK00001` | Unsupported language capability, reported on the parsed statement |
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design. `GQL0005` is the sum-of-repetition-bounds limit of 64 relationships |
 | `GQL0007` | Attempt to mutate catalog introspection results |
 | `GQL0008` | A Cypher arrow (`-->`, `--`) directly after a pattern element, which GQL reads as a comment |
@@ -1307,19 +1307,19 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `COHDBG009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `COHDBG010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
 | `COHDBG011` | **Warning**, not a failure: the same for a relationship type the database does not have; no relationship has it. Neo4j's `UnknownRelationshipTypeWarning`, GQLSTATUS 01N51. Not sent over protocol 2.0 |
-| `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`COHDBS002`) is the inner exception ("Storage operations") |
+| `COHDBG012` | The database is offline (#1243): a durable flush of its journal or data file failed. Every operation is refused with `DatabaseOfflineException` until `OpenDatabaseAsync` reopens it; `Unavailable` on the wire. The storage's `StorageOfflineException` (`CK06002`) is the inner exception ("Storage operations") |
 | `COHDBG013` | Value error (#1140): non-Boolean conditions, invalid arithmetic, concatenation, container, index or field types, invalid paging counts, function/CAST kind or value failures, unsupported computed property values, zero divisor, overflow or non-finite result. Reused by #1142, #1146, #1147 and #1148; structured Diagnostic, code-free Message, composed as CODE: message on protocol 2.0 |
 | `COHDBG014` | Multiple map keys normalize to the same bare parameter name |
 | `COHDBG015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `COHDBG016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
-| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / COHDBS003. No upgrade path exists |
+| `COHDBG017` | Unsupported graph record or tree-registration format, including formats 1–3: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside COHDBG018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `COHDBG018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `COHDBG019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `COHDBG020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
 | `COHDBG021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
-| `COHDBI001` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. COHDBI001: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
-| `COHDBS001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. COHDBS001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
-| `COHDBS003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
+| `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
+| `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
+| `CK06003` | Storage corruption; `DatabaseCorruptionException` names the database and page, retains the storage cause, and advises restoration from a verified backup. Operations fail as `ExecutionFailure` on the wire. |
 
 Planner rejections carry stable codes in `DatabaseException.Diagnostics`, with Error severity
 and source offsets wherever the AST has a location. Their Message has no code prefix; the
@@ -1336,7 +1336,7 @@ Ownership uses the shared dedicated exception rather than an invented graph owne
 ### Statement boundaries and programmatic arguments (#1199)
 
 Catalog decode failures become `COHDBG006`, as do ordinary index and storage failures;
-index/page corruption retains the common `COHDBS003` corruption signal. Catalog mutation
+index/page corruption retains the common `CK06003` corruption signal. Catalog mutation
 conflicts carry an internal classification and become `DatabaseTransactionAbortedException`
 (`COHDBG007`), retaining the catalog cause. Only a snapshot-changed definition is retryable;
 identity reuse/rename, different identities for one name, retargeted index properties and missing
@@ -2183,7 +2183,7 @@ Statement failures leave the server session ready. Model clients validate diagno
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 Diagnostic overflow is preflighted before output and retains a source-order prefix plus
-COHDBP001 with exact retained/omitted counts; the original Error category/message or
+CK07001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
@@ -2451,7 +2451,7 @@ records whose nonzero identities the caller reserves from the backing storage's 
 duplicate identities are refused. Reserving identities before insertion lets the engine stage all
 changes before first publication. Formats 1, 2 and 3 are refused before logical recovery scrub with COHDBG017
 and the remedy to recreate the database; no legacy reader or upgrade path exists. The existing
-StorageCorruptionException retains the code in its internal format-refusal cause's Diagnostics; the engine retains it in DatabaseCorruptionException.Diagnostics beside COHDBS003 and COHDBG018.
+StorageCorruptionException retains the code in its internal format-refusal cause's Diagnostics; the engine retains it in DatabaseCorruptionException.Diagnostics beside CK06003 and COHDBG018.
 The graph record and tree-registration version is 4; catalog and B-tree page formats are unchanged.
 GraphRecordCodec.FormatVersion is the single fence used by pre-recovery validation and open.
 Format 3 shipped with #1532's typed adjacency and entity revisions. Format 4 (#1534) adds a
@@ -2476,7 +2476,7 @@ page when the store attaches it. The store opens after the coordinator's recover
 `GraphStore.EnsureIndexFormat(storage)` makes the same check first from the registration records
 (zero-stamped, so the scrub never changes them) and the root pages, writing nothing. The Graph
 engine calls it before recovery and refuses a database whose indexes an engine before #1194 wrote
-with "Database 'x' cannot be opened. COHDBI001: …" (the `IndexFormatException` as its inner
+with "Database 'x' cannot be opened. CK06101: …" (the `IndexFormatException` as its inner
 exception). A cleanly closed database is left byte-identical; a crashed one has had only the
 storage layer's format-agnostic journal redo and undo, and keeps its journal for the engine that
 wrote it. There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way
@@ -2492,7 +2492,7 @@ shared reclamation check (#1342), which the store made inline before.
 
 Cached-reference validation first checks that a present record has one of the three graph
 kinds and a nonzero identity (defect found during #1372). Unknown kinds and identity zero are
-corruption, reported with page and slot through `StorageCorruptionException` (`COHDBS003`);
+corruption, reported with page and slot through `StorageCorruptionException` (`CK06003`);
 they cannot silently remove the cached reference as though the slot held a valid replacement.
 A well-formed different identity still invalidates the old reference. The two damaged-header
 tests returned absence before the fix and now report damage; repairing the bytes restores the
@@ -2715,7 +2715,7 @@ one committed registration, require its exact location, repair it, and successfu
 The unsupported-record-format refusal retains COHDBG017 in the existing Diagnostics carrier
 under the located StorageCorruptionException. The engine reads this structured identity instead
 of parsing a message prefix. The message is unprefixed, with page/slot context, and the unchanged
-engine diagnostic sequence remains COHDBS003, COHDBG018, COHDBG017. Earlier formats still fail
+engine diagnostic sequence remains CK06003, COHDBG018, COHDBG017. Earlier formats still fail
 before scrub writes any file. The original prefix-dependent implementation lost COHDBG017 after
 location was added (four full-suite failures); the revised format regression requires the same
 complete codes plus structured physical context and byte-identical files.
@@ -2754,14 +2754,14 @@ integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays r
 Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
 
 Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
-loopback, wildcard -> Any; DNS names are refused synchronously with COHDBTCP001. Endpoint URIs
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
 must be absolute, have a host and explicit positive port, and have no user information, query or
 fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
 remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
 was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
 
 Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
-option as ParamName, with kernel resx codes COHDBO001, COHDBO002 and COHDBO003. Existing timer
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
 policies are retained: Documents permits zero authentication/idle values; Blob requires positive
 values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
 idle policy. All models require positive finite shutdown/linger values no greater than
@@ -2771,3 +2771,11 @@ protocol, storage format, event or counter changes.
 The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
 (AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
 literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.

@@ -40,7 +40,7 @@ interface since phase 2 of the concrete-types program
   `TransactionContext` (the most-consumed kernel contract, so every call on it is direct) and
   `LockManager` ("The lock manager implementation", below). Each has one implementation and
   is created here: by `TransactionManager.Create`, `TransactionManager.BeginAsync` and
-  `LockManager.Create`.
+  `new LockManager()`.
 - **`TransactionContext.PinStatementSnapshot()`** returns a statement view: it shares the
   transaction's id, sequence, isolation level and state, and fixes the snapshot at the call.
   Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and
@@ -83,7 +83,7 @@ scrubbing instead of treating the remaining abandoned stamps as committed.
 
 `VersionStore.GetVisibleVersionAsync` returns absence only for a reclaimed location or an
 invisible version. A checksum failure propagates `StorageCorruptionException` with
-`COHDBS003` and the page id; the record-space test corrupts media after eviction and proves
+`CK06003` and the page id; the record-space test corrupts media after eviction and proves
 both failure and a successful lookup after repair. Engines translate the storage failure
 at their own boundary. The short-record rule is tracked separately by #1372.
 
@@ -158,7 +158,7 @@ record inside a critical section, so any failure there is `PANIC` too,
 `src/backend/access/transam/xact.c:1470-1583`), because a retried fsync can report success for
 bytes the operating system already dropped. The storage does the equivalent without stopping
 the process: the failing flush latches the journal and the storage offline
-(`StorageOfflineException`, `COHDBS002`; `Database.Storage` DESIGN.md, "A failed durable flush
+(`StorageOfflineException`, `CK06002`; `Database.Storage` DESIGN.md, "A failed durable flush
 takes the storage offline"), and the unconfirmed commit carries that exception as its inner
 exception (`StorageOfflineException.Find` locates it). From then on nothing is written to the
 database's files — no append, no checkpoint, no undo, no write-back, not even at close — and
@@ -803,7 +803,7 @@ It alternates sizes in one non-parallel process, compares the minima of five rou
 an eightfold ratio; a whole-table scan grows with the hundredfold increase in foreign entries.
 
 **One sealed type, with an engine mode (#1258).** `LockManager` is a sealed class with an
-internal constructor and `LockManager.Create()`; the `ILockManager` interface and the internal
+internal constructor and `new LockManager()`; the `ILockManager` interface and the internal
 `DefaultLockManager` it fronted are gone, so every manager has `AbandonPending` (before, a
 lock manager of another type passed to `TransactionManager.Create` left a deferred writer's
 queued requests queued). The coordinator used to hand engine code a private decorator over the
@@ -1320,7 +1320,7 @@ every Database source shares (failure payloads, `Start`/`Stop` endings) are in t
 so the coordinator hands `Storage.Name` to the two it builds, through internal members only: the
 `TransactionManager` constructor's `database` parameter and `LockManager.EnterEngineMode`. The
 events the coordinator writes itself read the name from its storage inside the enabled check. A
-standalone `TransactionManager.Create` or `LockManager.Create` reports an empty `database`.
+standalone `TransactionManager.Create` or `new LockManager()` reports an empty `database`.
 
 **Payloads carry identifiers only** (event-source.md rule 11; plan D8): a sequence, a lock mode,
 a lock resource's kind and object id, a storage-offline cause, counts, and, for the kernel's own
@@ -1442,7 +1442,7 @@ rollback still counts. The canonical recorder is wrapped by a test-side rate his
 uncontended `LockManager.AcquireAsync` reaches no instrumentation before its grant. Two
 `TransactionEventSourceTests` delta tests pin it. The engine-mode path every engine uses never
 enters `AcquireCoreAsync`: a re-grant allocates 0 bytes, and a new resource allocates exactly what
-the `TryAcquire` it runs does. The standalone path (`LockManager.Create`) runs `AcquireCoreAsync`,
+the `TryAcquire` it runs does. The standalone path (`new LockManager()`) runs `AcquireCoreAsync`,
 the method the lock-wait and deadlock events are written from, on every request, and in an
 optimized build allocates nothing for it. Until #1390 it allocated the 56-byte closure of its
 cancellation registration per request, which the compiler created at the method's entry because
@@ -1507,7 +1507,7 @@ are unchanged, as approved in #1393.
 The record-space version store rejects a present record shorter than
 RecordVersionStamp.HeaderSize in visibility, undo/pruning stamp reads and recovery scrub.
 Reclaimed locations remain absent; short present records cannot silently settle ledger work.
-The shared StorageCorruptionException carries the physical page, slot and existing COHDBS003.
+The shared StorageCorruptionException carries the physical page, slot and existing CK06003.
 
 Reference consulted, without copying code: Neo4j
 community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
@@ -1557,3 +1557,11 @@ wave11-1420-delete-before-v2/after.csv, wave11-1420-delete-final-hashes.json and
 Wave11CascadeProbe/Wave11DeleteProbe. The initial delete baseline without the final payload
 verification is retained separately; the figures above use the final matching harness on both
 versions. The local Windows results do not replace official quiet-host profiling.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`LockManager()` is public; the parameterless `Create()` factory is removed. FIFO grant order, statement marks and deadlock handling are unchanged.

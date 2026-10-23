@@ -78,10 +78,10 @@ public sealed class SqlT1FunctionGrammarTests
 
         // Assert
         var diagnostic = parsed.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("precision argument", Case.Sensitive);
         var declaration = new SqlQueryParser().Parse($"CREATE TABLE t (ts TIMESTAMP DEFAULT {expression});");
-        declaration.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        declaration.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - T1 functions: every EXTRACT field retains grammar and identifiers retain their roles")]

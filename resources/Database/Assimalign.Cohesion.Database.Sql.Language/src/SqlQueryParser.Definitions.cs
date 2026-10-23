@@ -65,7 +65,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 Expect(ref lexer, TokenType.RightBracket, "']' after the array type");
             }
-            AddTypeModifierDiagnostic(subject, "Array types are not supported; use a scalar type.", arrayStart, _lastTokenEnd, "COHDBL001");
+            AddTypeModifierDiagnostic(subject, "Array types are not supported; use a scalar type.", arrayStart, _lastTokenEnd, "CK00001");
             resolvedType = null;
         }
         return type;

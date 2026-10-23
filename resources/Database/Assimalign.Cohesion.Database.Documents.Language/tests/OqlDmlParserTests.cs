@@ -51,16 +51,16 @@ public sealed class OqlDmlParserTests
     [InlineData("UPDATE items SET = 1", "OQL0002", "=", "identifier")]
     [InlineData("UPDATE items SET a 1", "OQL0002", "1", "=")]
     [InlineData("UPDATE items SET a = 1 garbage", "OQL0002", "garbage", "Unexpected")]
-    [InlineData("UPDATE items SET a = 1 RETURNING a", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("UPDATE items SET a = 1 FOR t IN tags END", "COHDBL001", "FOR", "FOR")]
-    [InlineData("UPDATE items USE KEYS 'a' SET a = 1", "COHDBL001", "USE", "USE")]
-    [InlineData("UPDATE items SET a = 1 LIMIT 1", "COHDBL001", "LIMIT", "LIMIT")]
-    [InlineData("UPDATE items UNSET a LIMIT 1", "COHDBL001", "LIMIT", "LIMIT")]
-    [InlineData("SELECT SET(1) FROM items", "COHDBL001", "SET", "SET")]
-    [InlineData("UPDATE items SET a = SET(1)", "COHDBL001", "SET(1)", "SET")]
-    [InlineData("UPDATE items SET a = (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
-    [InlineData("UPDATE items SET a = 1 WHERE (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
-    [InlineData("EXPLAIN UPDATE items SET a = (SELECT x FROM c)", "COHDBL001", "SELECT", "SUBQUERY")]
+    [InlineData("UPDATE items SET a = 1 RETURNING a", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("UPDATE items SET a = 1 FOR t IN tags END", "CK00001", "FOR", "FOR")]
+    [InlineData("UPDATE items USE KEYS 'a' SET a = 1", "CK00001", "USE", "USE")]
+    [InlineData("UPDATE items SET a = 1 LIMIT 1", "CK00001", "LIMIT", "LIMIT")]
+    [InlineData("UPDATE items UNSET a LIMIT 1", "CK00001", "LIMIT", "LIMIT")]
+    [InlineData("SELECT SET(1) FROM items", "CK00001", "SET", "SET")]
+    [InlineData("UPDATE items SET a = SET(1)", "CK00001", "SET(1)", "SET")]
+    [InlineData("UPDATE items SET a = (SELECT x FROM c)", "CK00001", "SELECT", "SUBQUERY")]
+    [InlineData("UPDATE items SET a = 1 WHERE (SELECT x FROM c)", "CK00001", "SELECT", "SUBQUERY")]
+    [InlineData("EXPLAIN UPDATE items SET a = (SELECT x FROM c)", "CK00001", "SELECT", "SUBQUERY")]
     public void Parse_InvalidUpdate_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act
@@ -106,14 +106,14 @@ public sealed class OqlDmlParserTests
     [InlineData("DELETE FROM items d garbage", "OQL0002", "garbage")]
     [InlineData("DELETE FROM items WHERE amount > 3 garbage", "OQL0002", "garbage")]
     [InlineData("DELETE FROM items; garbage", "OQL0002", "garbage")]
-    [InlineData("DELETE FROM items WHERE amount > 3 RETURNING amount", "COHDBL001", "RETURNING")]
-    [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
-    [InlineData("DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
-    [InlineData("DELETE FROM items WHERE amount > 3 OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
-    [InlineData("DELETE FROM items OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
-    [InlineData("EXPLAIN DELETE FROM items LIMIT 1", "COHDBL001", "LIMIT", "DELETE LIMIT")]
-    [InlineData("EXPLAIN DELETE FROM items OFFSET 1", "COHDBL001", "OFFSET", "DELETE OFFSET")]
-    [InlineData("DELETE FROM items USE KEYS 'a'", "COHDBL001", "USE")]
+    [InlineData("DELETE FROM items WHERE amount > 3 RETURNING amount", "CK00001", "RETURNING")]
+    [InlineData("DELETE FROM items WHERE amount > 3 LIMIT 1", "CK00001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("DELETE FROM items LIMIT 1", "CK00001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("DELETE FROM items WHERE amount > 3 OFFSET 1", "CK00001", "OFFSET", "DELETE OFFSET")]
+    [InlineData("DELETE FROM items OFFSET 1", "CK00001", "OFFSET", "DELETE OFFSET")]
+    [InlineData("EXPLAIN DELETE FROM items LIMIT 1", "CK00001", "LIMIT", "DELETE LIMIT")]
+    [InlineData("EXPLAIN DELETE FROM items OFFSET 1", "CK00001", "OFFSET", "DELETE OFFSET")]
+    [InlineData("DELETE FROM items USE KEYS 'a'", "CK00001", "USE")]
     public void Parse_InvalidDelete_ShouldLocateFailure(string query, string code, string token, string? construct = null)
     {
         // Arrange / Act
@@ -121,7 +121,7 @@ public sealed class OqlDmlParserTests
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(code);
-        if (code == "COHDBL001")
+        if (code == "CK00001")
         {
             diagnostic.Message.ShouldBe($"The {construct ?? token} clause is not supported by the OQL surface of this database model.");
         }
@@ -146,7 +146,7 @@ public sealed class OqlDmlParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("SUBQUERY", Case.Sensitive);
         diagnostic.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + "SELECT".Length);
@@ -193,13 +193,13 @@ public sealed class OqlDmlParserTests
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e')", "OQL0002", ")", "VALUE")]
     [InlineData("INSERT INTO other.items (KEY, VALUE) VALUES ('e', $doc)", "OQL0002", ".", "KEY")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) garbage", "OQL0002", "garbage", "Unexpected")]
-    [InlineData("INSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("INSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("INSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("INSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("INSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("INSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     public void Parse_InvalidInsert_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act
@@ -254,13 +254,13 @@ public sealed class OqlDmlParserTests
     [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e')", "OQL0002", ")", "VALUE")]
     [InlineData("UPSERT INTO other.items (KEY, VALUE) VALUES ('e', $doc)", "OQL0002", ".", "KEY")]
     [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) garbage", "OQL0002", "garbage", "Unexpected")]
-    [InlineData("UPSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "COHDBL001", "RETURNING", "RETURNING")]
-    [InlineData("UPSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("UPSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
-    [InlineData("UPSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "COHDBL001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO items (KEY, VALUE, OPTIONS) VALUES ('e', $doc, $o)", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('e', $doc) RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.category = 'a' RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k) SELECT META(d).id AS k FROM items d WHERE d.details = {'score':1} RETURNING k", "CK00001", "RETURNING", "RETURNING")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS o) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, OPTIONS {'expiration': 10}) SELECT META(d).id AS k FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
+    [InlineData("UPSERT INTO archive (KEY k, VALUE v, OPTIONS o) SELECT META(d).id AS k, d AS v FROM items d", "CK00001", "OPTIONS", "OPTIONS")]
     public void Parse_InvalidUpsert_ShouldLocateFailure(string query, string code, string token, string message)
     {
         // Arrange / Act
@@ -326,7 +326,7 @@ public sealed class OqlDmlParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(query.LastIndexOf("RETURNING", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + "RETURNING".Length);
         diagnostic.Message.ShouldNotBeNull().ShouldContain("RETURNING", Case.Sensitive);

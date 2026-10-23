@@ -173,7 +173,7 @@ public sealed class StoragePageManager
 
         if (!_freeSpaceMap.IsAllocated(pageId))
         {
-            throw new StorageIOException($"Page {(long)pageId} is not allocated.");
+            throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageNotAllocated, (long)pageId));
         }
 
         var handle = _bufferPool.PinForOverwrite(pageId, _stream);
@@ -204,7 +204,7 @@ public sealed class StoragePageManager
 
         if (!_freeSpaceMap.IsAllocated(pageId))
         {
-            throw new StorageIOException($"Page {(long)pageId} is not allocated.");
+            throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageNotAllocated, (long)pageId));
         }
 
         return _bufferPool.Pin(pageId, _stream);
@@ -266,7 +266,7 @@ public sealed class StoragePageManager
         if ((long)pageId == 0L)
         {
             throw new StorageIOException(
-                "Page 0 is the file header and is not accessible as a data page: the storage writes its header slots outside the buffer pool.");
+                ErrorMessages.PageManagerThrowIfHeaderPageStorageIO);
         }
     }
 

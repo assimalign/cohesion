@@ -207,12 +207,12 @@ internal static class StorageHeaderPage
     {
         if (inlineAnchor.Length != state.AnchorInlineCount || inlineAnchor.Length > InlineAnchorCapacity)
         {
-            throw new ArgumentException("The inline anchor does not match the slot state.", nameof(inlineAnchor));
+            throw new ArgumentException(ErrorMessages.StorageHeaderPageWriteSlotArgument, nameof(inlineAnchor));
         }
 
         if (identity.Length != StorageFileHeader.ByteSize)
         {
-            throw new ArgumentException("The identity block has the wrong size.", nameof(identity));
+            throw new ArgumentException(ErrorMessages.StorageHeaderPageWriteSlotArgument2, nameof(identity));
         }
 
         slot = slot[..SlotSize];
@@ -318,7 +318,7 @@ internal static class StorageHeaderPage
     {
         if (entries.Length is 0 or > AnchorPageCapacity)
         {
-            throw new ArgumentOutOfRangeException(nameof(entries), entries.Length, "An anchor page holds between 1 and its capacity of entries.");
+            throw new ArgumentOutOfRangeException(nameof(entries), entries.Length, ErrorMessages.HeaderPageWriteAnchorPageFailure);
         }
 
         page = page[..Page.Size];

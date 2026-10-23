@@ -457,7 +457,7 @@ public sealed class SqlExpressionDepthTests
 
         // Assert
         statement.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBL001", "SQL0006"]);
+            .Select(diagnostic => diagnostic.Code).ShouldBe(["CK00001", "SQL0006"]);
         statement.SqlExpression.ShouldNotBeOfType<SqlSelectExpression>();
     }
 

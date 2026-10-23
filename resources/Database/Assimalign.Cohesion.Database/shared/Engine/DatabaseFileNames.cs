@@ -158,7 +158,7 @@ internal static class DatabaseFileNames
         ArgumentException.ThrowIfNullOrWhiteSpace(name, paramName);
         if (GetRefusal(name) is { } reason)
         {
-            throw new ArgumentException($"{Rule} {reason}", paramName);
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.FileNamesThrowIfInvalidArgument, Rule, reason), paramName);
         }
     }
 

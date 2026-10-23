@@ -50,7 +50,7 @@ public sealed partial class GraphStoreTests
 
             // Assert: only a valid replacement record can invalidate a cached reference.
             failure.PageId.ShouldBe(unit.PageId);
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Message.ShouldContain($"slot {unit.SlotIndex}", Case.Sensitive);
         }
         finally

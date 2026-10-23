@@ -122,7 +122,7 @@ public class GqlQueryParserTests
     [InlineData("BEGIN TRANSACTION")]
     public void OutsideProfileCorpus_ReportsUnsupportedClause(string source)
     {
-        Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        Parse(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Fact]
@@ -219,7 +219,7 @@ public class GqlQueryParserTests
     {
         const string source = "MATCH (a)\nRETURN a CALL p";
         var diagnostic = Parse(source).Diagnostics.Single();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(source.IndexOf("CALL", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + 4);
         diagnostic.Line.ShouldBe(2);

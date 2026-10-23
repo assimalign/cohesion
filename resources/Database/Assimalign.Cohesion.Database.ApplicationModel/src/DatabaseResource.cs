@@ -46,7 +46,7 @@ public sealed class DatabaseResource : PlannedResource
         if (!Manifest.Name.Equals(context.Manifest.Name))
         {
             throw new InvalidOperationException(
-                $"Planning context resource '{context.Manifest.Name}' does not match '{Manifest.Name}'.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseResourceCreatePlanFailure, context.Manifest.Name, Manifest.Name));
         }
 
         return DatabasePlanner.CreatePlan(context);

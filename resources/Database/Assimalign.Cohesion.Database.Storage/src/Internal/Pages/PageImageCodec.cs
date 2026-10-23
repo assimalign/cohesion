@@ -126,12 +126,12 @@ internal static class PageImageCodec
     {
         if (reference.Length != Page.Size || current.Length != Page.Size)
         {
-            throw new ArgumentException($"A page is {Page.Size} bytes.");
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageImageCodecEncodeRunsArgument, Page.Size));
         }
 
         if (destination.Length < MaximumRunsLength)
         {
-            throw new ArgumentException($"The destination must hold {MaximumRunsLength} bytes.", nameof(destination));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PageImageCodecEncodeRunsArgument2, MaximumRunsLength), nameof(destination));
         }
 
         int written = EncodeSegment(reference, current, 0, MaskedStart, destination, 0);

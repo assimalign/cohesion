@@ -377,7 +377,7 @@ public sealed partial class SqlQueryParser
     {
         _parseDiagnostics.Add(new Diagnostic
         {
-            Code = "COHDBL001",
+            Code = "CK00001",
             Message = message,
             Start = start,
             End = end,

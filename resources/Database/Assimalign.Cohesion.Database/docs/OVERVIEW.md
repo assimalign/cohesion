@@ -90,7 +90,7 @@ the source boundary while the existing public construction and execution APIs re
   database whose journal or data fsync (#1243), journal drain (#1252) or header slot write
   (#1268) failed, or whose engine gave up on it (owner decision 25), until it is reopened, and
   `DatabaseTransactionCommitUnconfirmedException` for work that may have committed when it did.
-  `DatabaseCorruptionException` (`COHDBS003`) reports storage damage with the database,
+  `DatabaseCorruptionException` (`CK06003`) reports storage damage with the database,
   affected page and original storage cause; corruption never reads as absence.
   `DatabaseEngine.OfflineDatabases` lists the offline databases for health, and
   `DatabaseEngine.GetOfflineError` says what took one offline. Child roots own independent
@@ -140,3 +140,11 @@ the shared Indexing and Transactions packages own bounded pruning and its safe h
 All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
 Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
 The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.

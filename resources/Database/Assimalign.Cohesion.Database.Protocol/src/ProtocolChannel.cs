@@ -101,7 +101,7 @@ public sealed class ProtocolChannel : IAsyncDisposable
     {
         if (!Family.Supports(type))
         {
-            throw new ProtocolException($"Message identifier {(byte)type} is not defined by endpoint family '{Family.Name}'.");
+            throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolChannelValidateProtocol, (byte)type, Family.Name));
         }
     }
 

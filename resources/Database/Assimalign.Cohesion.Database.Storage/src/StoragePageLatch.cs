@@ -34,7 +34,8 @@ public sealed class StoragePageLatch
 
     private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
 
-    private StoragePageLatch()
+    /// <summary>Initializes a page latch with a unique rollback acquisition order.</summary>
+    public StoragePageLatch()
     {
         Order = Interlocked.Increment(ref s_created);
     }
@@ -58,13 +59,7 @@ public sealed class StoragePageLatch
     /// <summary>Gets the current shared-acquisition waiters (diagnostics and tests).</summary>
     internal int WaitingReaders => _latch.WaitingReadCount;
 
-    /// <summary>
-    /// Creates a latch for one structure's pages.
-    /// </summary>
-    /// <returns>The latch.</returns>
-    public static StoragePageLatch Create() => new();
-
-    /// <summary>
+/// <summary>
     /// Holds the latch shared, waiting while a writer or a rollback holds it.
     /// </summary>
     public void EnterRead() => _latch.EnterReadLock();

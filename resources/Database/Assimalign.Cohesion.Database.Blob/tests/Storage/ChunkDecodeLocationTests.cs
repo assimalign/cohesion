@@ -45,7 +45,7 @@ public sealed class ChunkDecodeLocationTests
             });
             failure.PageId.ShouldBe(location.PageId);
             failure.SlotIndex.ShouldBe(location.SlotIndex);
-            failure.Code.ShouldBe("COHDBS003");
+            failure.Code.ShouldBe("CK06003");
             failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
         }
         finally

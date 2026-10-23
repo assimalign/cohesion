@@ -124,7 +124,7 @@ public class SqlLanguageProfileTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Message.ShouldNotBeNull();
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Message.ShouldContain("SQL");
@@ -137,7 +137,7 @@ public class SqlLanguageProfileTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(
             "CREATE UNIQUE /* retained trivia */ INDEX ix_t_email ON t (email);");
 
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CK00001");
         statement.SqlExpression.ShouldBeOfType<SqlCreateIndexExpression>().IsUnique.ShouldBeTrue();
     }
 
@@ -162,7 +162,7 @@ public class SqlLanguageProfileTests
             CancellationToken cancellationToken = default)
         {
             SawUnsupportedClause = context.Statement.Diagnostics
-                .Any(item => item.Code == "COHDBL001");
+                .Any(item => item.Code == "CK00001");
             return Task.CompletedTask;
         }
     }

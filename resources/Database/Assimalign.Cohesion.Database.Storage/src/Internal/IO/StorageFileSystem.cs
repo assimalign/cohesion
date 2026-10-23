@@ -14,7 +14,7 @@ internal static class StorageFileSystem
         ArgumentException.ThrowIfNullOrEmpty(path);
         if (mode is not (FileMode.Open or FileMode.OpenOrCreate or FileMode.Create or FileMode.CreateNew))
         {
-            throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported storage file mode.");
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, ErrorMessages.StorageFileSystemOpenHandleFailure);
         }
         if (fileSystem is null)
         {
@@ -24,7 +24,7 @@ internal static class StorageFileSystem
             // otherwise creates its parent chain as part of CreateFile.
             if (!Directory.Exists(directory))
             {
-                throw new DirectoryNotFoundException($"Could not find a part of the path '{fullPath}'.");
+                throw new DirectoryNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFileSystemOpenHandleFailure2, fullPath));
             }
             // Resolve host paths before handing a provider-relative name to the physical file system.
             using var physical = new PhysicalFileSystem(directory);
@@ -36,7 +36,7 @@ internal static class StorageFileSystem
         {
             if (mode == FileMode.CreateNew)
             {
-                throw new IOException($"The storage file '{path}' already exists.");
+                throw new IOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFileSystemOpenHandleIO, path));
             }
             file = fileSystem.GetFile(path);
         }
@@ -44,7 +44,7 @@ internal static class StorageFileSystem
         {
             if (mode == FileMode.Open)
             {
-                throw new FileNotFoundException($"The storage file '{path}' does not exist.", path);
+                throw new FileNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FileSystemOpenHandleFileNotFound, path), path);
             }
             try
             {

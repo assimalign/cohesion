@@ -230,7 +230,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Act / Assert
         await using var engine = CreateEngine();
         var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(async () => await engine.OpenDatabaseAsync(TestDatabase));
-        refusal.Code.ShouldBe("COHDBS003");
+        refusal.Code.ShouldBe("CK06003");
         refusal.PageId.ShouldNotBeNull();
         var corruption = StorageCorruptionException.Find(refusal).ShouldNotBeNull();
         corruption.PageId.ShouldBe(refusal.PageId);
@@ -253,7 +253,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
         // Assert: catalog corruption is not reported as another engine's format.
         refusal.Message.ShouldContain("Unsupported catalog counter format");
-        refusal.Code.ShouldBe("COHDBS003");
+        refusal.Code.ShouldBe("CK06003");
         refusal.PageId.ShouldNotBeNull();
         var corruption = StorageCorruptionException.Find(refusal).ShouldNotBeNull();
         corruption.PageId.ShouldBe(refusal.PageId);
@@ -386,7 +386,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         AssertUnchanged(before);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: index pages in another B-tree page format are refused at open with COHDBI001 (#1194)")]
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Data-storage format: index pages in another B-tree page format are refused at open with CK06101 (#1194)")]
     public async Task Open_IndexPagesInFormatOne_ShouldBeRefusedByTheIndexManager()
     {
         // Arrange: the current format-8 marker over index trees in B-tree page format 1 — a
@@ -418,12 +418,12 @@ public sealed class SqlDataStorageFormatTests : IDisposable
 
     /// <summary>
     /// Below the data-storage format sits the storage format of each file set (#1251): the
-    /// storage refuses a file set in another storage format with <c>COHDBS001</c> before
+    /// storage refuses a file set in another storage format with <c>CK06001</c> before
     /// anything is read through it. A database has two file sets, so the engine names the
     /// database and the one that was refused, and forwards the refusal like its own format
     /// errors.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Storage format: a file set in storage format 2 (the format before #1253) is refused with COHDBS001 naming the database and the file set, its files untouched (#1251, #1253)")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Storage format: a file set in storage format 2 (the format before #1253) is refused with CK06001 naming the database and the file set, its files untouched (#1251, #1253)")]
     [InlineData("catalog")]
     [InlineData("data")]
     public async Task Open_FileSetInStorageFormatTwo_ShouldBeRefusedNamingTheDatabaseAndTheFileSet(string role)

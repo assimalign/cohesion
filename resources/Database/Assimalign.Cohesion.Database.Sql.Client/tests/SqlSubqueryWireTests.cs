@@ -281,7 +281,7 @@ public sealed class SqlSubqueryWireTests
 
     /// <summary>Excluded forms have the capability diagnostic through the server rather than a late executor rejection.</summary>
     /// <param name="statement">The unsupported form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report COHDBL001 over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Subquery: excluded forms report CK00001 over the wire")]
     [InlineData("SELECT id FROM users WHERE id = ANY (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = ALL (SELECT id FROM users)")]
     [InlineData("SELECT id FROM users WHERE id = SOME (SELECT id FROM users)")]
@@ -299,7 +299,7 @@ public sealed class SqlSubqueryWireTests
         // Act / Assert
         var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, statement));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 

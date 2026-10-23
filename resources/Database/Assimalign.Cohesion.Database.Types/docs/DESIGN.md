@@ -158,3 +158,10 @@ canonical text and UTF-8 payload.
 - No per-language, user-defined, or full linguistic index-backed collations; those
   require a persisted versioning design (#1026).
 - No compression or tagless schema-directed encoding (see decision above).
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

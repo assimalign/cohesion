@@ -502,3 +502,10 @@ or failed transactions on pool return, and only reuses an Idle session. Cleanup 
 pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
 are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
 public interface, protocol version or persistent format is introduced.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

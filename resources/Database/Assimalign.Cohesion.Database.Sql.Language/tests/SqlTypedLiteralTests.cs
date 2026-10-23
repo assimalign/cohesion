@@ -166,7 +166,7 @@ public sealed class SqlTypedLiteralTests
         diagnostic.End.ShouldBe(7 + text.Length);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Typed literals: recognized exclusions report COHDBL001")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Typed literals: recognized exclusions report CK00001")]
     [InlineData("TIME WITH TIME ZONE '10:00:00+01:00'")]
     [InlineData("TIME(3) WITH TIME ZONE '10:00:00+01:00'")]
     [InlineData("INTERVAL(3) '1 day'")]
@@ -208,7 +208,7 @@ public sealed class SqlTypedLiteralTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("literal", Case.Insensitive);
     }
 

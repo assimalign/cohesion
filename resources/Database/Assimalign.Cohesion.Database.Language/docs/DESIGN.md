@@ -95,7 +95,7 @@ therefore cannot silently inherit a flat, database-wide grammar.
   read-only view. Registration code can safely reuse its source arrays without mutating a running
   parser's grammar surface.
 - **One unsupported-clause diagnostic.** `QueryDiagnostics.UnsupportedClause` emits stable code
-  `COHDBL001` and a shared message naming the rejected clause and model language. Conformance
+  `CK00001` and a shared message naming the rejected clause and model language. Conformance
   corpora can distinguish an intentionally unsupported capability from malformed syntax.
 - **Parser-level gating.** Model parsers call `RequireClause` at the recognized clause boundary.
   The helper records the shared diagnostic and returns whether parsing may continue; the shared
@@ -104,7 +104,7 @@ therefore cannot silently inherit a flat, database-wide grammar.
 ## Keyword disposition and stray characters (#1101)
 
 Every word a language recognizes has one of two dispositions: it parses inside a supported
-clause, or it is rejected with exactly one `COHDBL001` at its own span whose message names the
+clause, or it is rejected with exactly one `CK00001` at its own span whose message names the
 construct. It is never bound as a name. A character no language uses is rejected with that
 language's syntax code. The rules, shared by SQL, OQL and GQL:
 
@@ -120,7 +120,7 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   identifier, so a field or variable of that name still parses. The table's position rule decides
   where the word starts a construct instead. Examples: the start of the statement, the token
   after an operand, or the token before a path pattern.
-- **`COHDBL001` is for recognized constructs.** That covers a clause, a statement, a multi-word
+- **`CK00001` is for recognized constructs.** That covers a clause, a statement, a multi-word
   prefix such as GQL `ALL SHORTEST`, a quantified predicate, a label-expression operator, or an
   operator such as SQL `~`. A statement whose first word is unsupported is one construct; the
   scan reports that word and nothing after it. A construct owns its modifiers and its operand:
@@ -130,17 +130,17 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **Each table has a corpus.** `SqlKeywordDispositionTests`, `OqlKeywordDispositionTests` and
   `GqlKeywordDispositionTests` enumerate the profile's keywords plus the table. They fail unless
   every word has a positive case inside a supported clause, or a case with exactly one
-  `COHDBL001` naming its construct. For a table entry, that diagnostic must also name the
+  `CK00001` naming its construct. For a table entry, that diagnostic must also name the
   construct the table records, so the table's construct cannot drift from the parser's message.
   A self-test proves that a word added without a case fails. So an item that adds a keyword or a
   table entry adds its corpus case in the same change.
-- **Pins, and who flips them.** These stay `COHDBL001`, with no T1 item lifting them: GQL path
+- **Pins, and who flips them.** These stay `CK00001`, with no T1 item lifting them: GQL path
   modes, GQL shortest-path prefixes, GQL `MERGE`, GQL `NODETACH DELETE`, and OQL `MERGE`. #1101
   owns the OQL `MERGE` pin, so oql-upsert does not re-pin it. Each of these items depends on #1101
   and flips its own pins, corpus cases included, in its own change: oql-limit-offset (OQL `LIMIT`
   and `OFFSET`), oql-upsert (`UPSERT`), oql-arrays (`UNNEST` and quantified predicates, flipped by #1136), and
   gql-label-direction (label-expression operators and `IS`). gql-label-direction (#1139) has
-  flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `COHDBL001` until
+  flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `CK00001` until
   the graph engine stores undirected relationships.
 - **A stray character is `TokenType.Unrecognized`.** The lexer reports a character outside every
   language as `Unrecognized`, never as `Identifier`. Examples are `?`, `#`, `^`, `§`, a
@@ -239,7 +239,7 @@ the in-process message. SQL and Graph compose `CODE: message` for ExecutionFailu
 [negotiated diagnostics](../../Assimalign.Cohesion.Database.Protocol/docs/DESIGN.md#negotiated-statement-diagnostics-1105) add structured delivery.
 
 `QueryLanguageProfile.Functions` is the executable built-in set. Recognized non-executing
-functions live in each language's unsupported vocabulary and report COHDBL001 at parse time.
+functions live in each language's unsupported vocabulary and report CK00001 at parse time.
 The single function guard in each engine's execution-conformance suite requires live evidence
 for every declared name and rejects evidence for undeclared names. OQL's
 [temporary exemptions were removed by #1126](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md#function-declaration-and-diagnostic-delivery-1103).
@@ -251,3 +251,10 @@ diagnostic creation require no reflection, dynamic code generation, or dependenc
 The recognized-unsupported tables are static arrays scanned by ordinary loops. The line-terminator
 set is one static `SearchValues<char>` built from a literal, which needs no reflection or runtime
 code generation.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

@@ -540,22 +540,22 @@ PostgreSQL's metapage test (`btm_magic` and `btm_version`, `nbtpage.c:155-168`;
 never moves and from which one engine wrote the whole tree. `BTreeIndexManager.Create`
 reads every registered root before it attaches any tree, and a root in any other
 format refuses the attach with `IndexFormatException`, whose message starts with
-`COHDBI001` and names the index, the format found and the one supported ("uses
+`CK06101` and names the index, the format found and the one supported ("uses
 B-tree page format 1, but this engine supports only format 2", with the export,
 drop and recreate remedy and #1152), or says the root is no B-tree page at all.
 `BTreeIndexManager.EnsureFormat(storage, registrations)` makes the same check alone,
 writing nothing, for a model whose open recovers its record space before it attaches
 its trees. Every node read after attach also checks the magic and version, like
 PostgreSQL's `_bt_checkpage` (`nbtpage.c:782-811`); a page that fails is damage, and
-the operation fails with `IndexCorruptionException` (`COHDBI002`, PostgreSQL's
+the operation fails with `IndexCorruptionException` (`CK06102`, PostgreSQL's
 `ERRCODE_INDEX_CORRUPTED`). There is no upgrade path (owner decision of 2026-10-02;
 upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 25, #1111), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 25"; a marker that does not describe its trees, the attach check's `COHDBI001` |
-| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. COHDBI001: …" |
-| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. COHDBI001: …" |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 25, #1111), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 25"; a marker that does not describe its trees, the attach check's `CK06101` |
+| Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
+| Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |
 
 Every refusal comes before the model's own recovery — its scrub, index purge and
@@ -639,13 +639,13 @@ torn read:
   storage now closes it (below, and `Database.Storage` DESIGN, "No reader sees a
   rollback's restore half done");
 - the root, or any node, read while its header was cleared failed the node check as
-  `IndexCorruptionException` (`COHDBI002`) on an undamaged tree. The message's "found
+  `IndexCorruptionException` (`CK06102`) on an undamaged tree. The message's "found
   format 2" is a second read of the header, made after the restore had written it back.
 
 `SqlUniqueViolationRollbackRaceTests`' workload (two sessions inserting 40 fresh keys
 and then a committed one under a unique index, four sessions seeking committed keys)
 failed every one-second run against `f17d8bc0`: 40 of 40 in Release, 27 as
-`COHDBI002` on the root, 9 as an empty seek and 4 as page 0, within 0.2–1 s of the
+`CK06102` on the root, 9 as an empty seek and 4 as page 0, within 0.2–1 s of the
 start. With the fix, 0 of 40 one-second runs and one 40-second run failed (5.0 million
 seeks against 177,000 rolled-back statements).
 
@@ -665,7 +665,7 @@ while this one holds their page write locks. `BTreeRollbackLatchTests` pins both
 against the tree: a rollback waits while a reader holds the latch (the root still the
 grown tree's under the hold, the committed one after), and cursors racing rolled-back
 splits read exactly the committed entries (both fail against a rollback that takes no
-latch: a cursor read 62 or 304 of 400 entries, or met `COHDBI002`).
+latch: a cursor read 62 or 304 of 400 entries, or met `CK06102`).
 
 - **No new wait cycle.** A rollback waits only for the latch's readers (a cursor holds
   one latch, briefly, and waits for nothing else while it holds it) and its writers
@@ -879,9 +879,9 @@ directly, not the area's `DatabaseException` — this package is a child root th
 area root rolls up (2026-07-13 inversion), so it must stay independently
 consumable. `IndexUniqueViolationException : IndexException` is the typed
 unique-violation surface. `IndexFormatException : IndexException` is the typed
-page-format refusal at attach (`COHDBI001`, with the index, its object, its root
+page-format refusal at attach (`CK06101`, with the index, its object, its root
 page and the format found). `IndexCorruptionException : IndexException` is the
-typed damage surface (`COHDBI002`, with the index, the page and the format the page
+typed damage surface (`CK06102`, with the index, the page and the format the page
 claims): a page reached inside an attached tree that is not a node of the current
 format, PostgreSQL's `ERRCODE_INDEX_CORRUPTED` from `_bt_checkpage`, and the
 counterpart of the storage child root's `StorageCorruptionException`. Each code
@@ -918,8 +918,8 @@ Keyword: `Splits = 0x1`; the other events check `EventKeywords.None`.
 | --- | --- | --- | --- | --- | --- |
 | 1 | `IndexCreated` | Verbose | — | `database`, `objectId`, `index`, `kind` | `BTreeIndexManager.CreateIndexAsync`, once the tree's root is allocated and registered |
 | 2 | `IndexDropped` | Verbose | — | `database`, `objectId`, `index` | `BTreeIndexManager.DropIndexAsync` |
-| 3 | `IndexFormatRefused` | Error | — | `database`, `objectId`, `index`, `rootPageId`, `foundFormat` | the attach-time format check (`BTreeIndexManager.Create`/`EnsureFormat`), before `IndexFormatException` (`COHDBI001`) |
-| 4 | `IndexCorruptionDetected` | Error | — | `database`, `index`, `pageId`, `formatVersion` (what the page claims) | any operation that reaches a page of an attached tree that is not a current-format node, before `IndexCorruptionException` (`COHDBI002`); once per failing operation |
+| 3 | `IndexFormatRefused` | Error | — | `database`, `objectId`, `index`, `rootPageId`, `foundFormat` | the attach-time format check (`BTreeIndexManager.Create`/`EnsureFormat`), before `IndexFormatException` (`CK06101`) |
+| 4 | `IndexCorruptionDetected` | Error | — | `database`, `index`, `pageId`, `formatVersion` (what the page claims) | any operation that reaches a page of an attached tree that is not a current-format node, before `IndexCorruptionException` (`CK06102`); once per failing operation |
 | 5 | `IndexInvariantViolated` | Error | — | `database`, `index`, `pageId`, `detail` (the `IndexException` message, which names pages and positions, never keys) | the five split checks: a leaf or internal node too small to split, a leaf out of order, a separator position out of range, a separator that would misorder its parent |
 | 6 | `PageSplit` | Verbose | Splits | `database`, `index`, `pageId`, `leaf`, `entries` (before the split) | `SplitLeaf` and `SplitInternal`, once the page's halves are written and before the parent takes the separator |
 | 7 | `RootGrown` | Verbose | Splits | `database`, `index`, `rootPageId` | `GrowRoot`: the root split in place and the tree grew a level |
@@ -1040,3 +1040,10 @@ Both limits must be positive. Cancellation preserves its token and releases all 
 An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
 It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
 D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

@@ -59,7 +59,7 @@ public sealed class OqlDiagnosticTests
         diagnostic.End.ShouldBe(location.End);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         failure.Message.ShouldNotContain("COHDOC", Case.Sensitive);
-        failure.Message.ShouldNotContain("COHDBL001:", Case.Sensitive);
+        failure.Message.ShouldNotContain("CK00001:", Case.Sensitive);
     }
 
     private static object Value(Diagnostic diagnostic) =>

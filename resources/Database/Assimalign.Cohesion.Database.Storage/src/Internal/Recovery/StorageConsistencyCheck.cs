@@ -206,8 +206,7 @@ internal sealed class StorageConsistencyCheck
 
         throw Inconsistent(
             pageId,
-            $"it is written back with LSN {pageLsn}, at or below the redo point {redoLsn}, so it was changed outside a storage " +
-            "transaction since the last checkpoint, and no journal record holds the change");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConsistencyCheckCheckWriteBackFailure, pageLsn, redoLsn));
     }
 
     /// <summary>
@@ -241,7 +240,7 @@ internal sealed class StorageConsistencyCheck
         long shadowLsn = BinaryPrimitives.ReadInt64LittleEndian(shadow.AsSpan(Page.LsnFieldOffset));
         if (baseLsn != shadowLsn)
         {
-            throw Inconsistent(pageId, $"its {type} at LSN {lsn} follows LSN {baseLsn}, but recovery would rebuild the page at LSN {shadowLsn}");
+            throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckCommitRecordJournaledFailure, type, lsn, baseLsn, shadowLsn));
         }
 
         Apply(pageId, lsn, type, payload[PageImageCodec.BaseLsnSize..], shadow);
@@ -400,14 +399,14 @@ internal sealed class StorageConsistencyCheck
             {
                 if (shadow is null)
                 {
-                    throw Inconsistent(pageId, $"its committed {record.Type} at LSN {record.Lsn} has no full page image before it in the journal");
+                    throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckRebuildFailure, record.Type, record.Lsn));
                 }
 
                 long baseLsn = BinaryPrimitives.ReadInt64LittleEndian(record.Payload.Span);
                 long shadowLsn = BinaryPrimitives.ReadInt64LittleEndian(shadow.AsSpan(Page.LsnFieldOffset));
                 if (baseLsn != shadowLsn)
                 {
-                    throw Inconsistent(pageId, $"its committed {record.Type} at LSN {record.Lsn} follows LSN {baseLsn}, but the journal rebuilds the page at LSN {shadowLsn}");
+                    throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckRebuildFailure2, record.Type, record.Lsn, baseLsn, shadowLsn));
                 }
 
                 Apply(pageId, record.Lsn, record.Type, record.Payload.Span[PageImageCodec.BaseLsnSize..], shadow);
@@ -416,7 +415,7 @@ internal sealed class StorageConsistencyCheck
 
         return shadow ?? throw Inconsistent(
             pageId,
-            $"it carries LSN {pageLsn}, above the redo point, but the journal holds no full page image of it (invariant P)");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckRebuildFailure3, pageLsn));
     }
 
     private static void Apply(long pageId, long lsn, JournalRecordType type, ReadOnlySpan<byte> runs, Span<byte> shadow)
@@ -426,7 +425,7 @@ internal sealed class StorageConsistencyCheck
             : PageImageCodec.TryApplyImage(runs, shadow);
         if (problem is not null)
         {
-            throw Inconsistent(pageId, $"its {type} at LSN {lsn} does not decode: {problem}");
+            throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckApplyFailure, type, lsn, problem));
         }
 
         BinaryPrimitives.WriteInt64LittleEndian(shadow[Page.LsnFieldOffset..], lsn);
@@ -448,17 +447,17 @@ internal sealed class StorageConsistencyCheck
         int difference = PageImageCodec.FirstDifference(expected, page);
         if (difference >= 0)
         {
-            throw Inconsistent(pageId, $"it {what}: the first differing byte is at offset {difference} (0x{page[difference]:X2}, {reference} 0x{expected[difference]:X2})");
+            throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckCompareFailure, what, difference, page[difference], reference, expected[difference]));
         }
 
         long expectedLsn = BinaryPrimitives.ReadInt64LittleEndian(expected[Page.LsnFieldOffset..]);
         long pageLsn = BinaryPrimitives.ReadInt64LittleEndian(page[Page.LsnFieldOffset..]);
         if (compareLsn && expectedLsn != pageLsn)
         {
-            throw Inconsistent(pageId, $"it {what}: it carries LSN {pageLsn}, but {reference} LSN {expectedLsn}, which its next record must follow");
+            throw Inconsistent(pageId, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageConsistencyCheckCompareFailure2, what, pageLsn, reference, expectedLsn));
         }
     }
 
     private static InvalidOperationException Inconsistent(long pageId, string detail)
-        => new($"Storage consistency check failed for page {pageId}: {detail}.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConsistencyCheckInconsistentFailure, pageId, detail));
 }

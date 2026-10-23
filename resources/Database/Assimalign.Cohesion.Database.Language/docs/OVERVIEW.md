@@ -16,3 +16,10 @@ context. Analyzer failures propagate to the caller. Statements reject null diagn
 expose diagnostics ordered by severity and then source end position.
 
 See [DESIGN.md](DESIGN.md) for language boundaries, lexical rules and diagnostic conventions.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.

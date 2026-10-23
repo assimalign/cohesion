@@ -116,7 +116,7 @@ public sealed class SqlOrderByParserTests
         var statement = new SqlQueryParser().Parse($"SELECT a FROM t ORDER BY a {suffix};");
         // Assert
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - ORDER BY: canonical text preserves written placement and identifier quoting")]
@@ -154,7 +154,7 @@ public sealed class SqlOrderByParserTests
     {
         var statement = new SqlQueryParser().Parse($"SELECT age, COUNT(*) FROM t GROUP BY {key};");
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain("select-list ordinals in GROUP BY are not supported");
     }

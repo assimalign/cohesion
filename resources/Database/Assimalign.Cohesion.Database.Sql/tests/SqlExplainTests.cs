@@ -214,7 +214,7 @@ public sealed class SqlExplainTests
         var rows = new List<DatabaseRow>();
         await foreach (var row in description.GetRowsAsync(CancellationToken.None)) { rows.Add(row); }
         rows[0].GetString(2).ShouldBe(expected);
-        new SqlQueryParser().Parse("EXPLAIN " + statement).Diagnostics.ShouldContain(d => d.Code == "COHDBL001");
+        new SqlQueryParser().Parse("EXPLAIN " + statement).Diagnostics.ShouldContain(d => d.Code == "CK00001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - EXPLAIN: binary seek bounds preserve the bytes as hexadecimal")]

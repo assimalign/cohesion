@@ -4,7 +4,7 @@ The multi-model OLTP database engine family for Cohesion: five independent datab
 
 ## Storage corruption diagnostics (#1160)
 
-`DatabaseCorruptionException` with `COHDBS003` is the area-wide signal for damaged storage,
+`DatabaseCorruptionException` with `CK06003` is the area-wide signal for damaged storage,
 including corruption wrapped in coded engine exceptions or an `AggregateException`. It names
 the database and affected page and retains the storage cause. When open is refused, an engine
 also includes its previous model diagnostic as an additional entry: Graph `COHDBG018`,

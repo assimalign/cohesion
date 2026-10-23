@@ -712,7 +712,7 @@ public sealed class TransactionEventSourceTests
         // Arrange: a manager over a log that refuses commit records, named as a coordinator names it.
         string name = UniqueName();
         await using var manager = new TransactionManager(
-            new FailingCommitLog(), LockManager.Create(), VersionStore.CreateInMemory(), database: name);
+            new FailingCommitLog(), new LockManager(), VersionStore.CreateInMemory(), database: name);
         var context = await manager.BeginAsync(IsolationLevel.Snapshot);
         using var recorder = new TransactionEventRecorder(EventLevel.Warning);
 
@@ -1035,7 +1035,7 @@ public sealed class TransactionEventSourceTests
     }
 
     /// <summary>
-    /// The standalone lock path (<see cref="LockManager.Create"/>): an uncontended request runs
+    /// The standalone lock path (<see cref="LockManager"/>): an uncontended request runs
     /// <c>AcquireCoreAsync</c>, the method the lock-wait and deadlock events are written from, and is
     /// granted before it reaches any of them. With no listener it allocates nothing in an optimized
     /// build. Until #1390 it allocated the 56-byte closure of its cancellation registration, which
@@ -1048,7 +1048,7 @@ public sealed class TransactionEventSourceTests
     public void AcquireAsync_UncontendedStandaloneWithNoListener_ShouldAllocateNothing()
     {
         // Arrange
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         var owner = new TransactionSequence(1_000_000_011);
         var other = new TransactionSequence(1_000_000_013);
         var held = LockResource.Entry(9, 1);

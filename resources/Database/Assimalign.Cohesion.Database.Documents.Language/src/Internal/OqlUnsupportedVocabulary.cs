@@ -2,7 +2,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Internal;
 
 /// <summary>
 /// The OQL recognized-unsupported table (#1101): every word the capability scan recognizes
-/// but the Documents engine does not run, with the construct its <c>COHDBL001</c> names.
+/// but the Documents engine does not run, with the construct its <c>CK00001</c> names.
 /// </summary>
 /// <remarks>
 /// Words outside <see cref="OqlLanguageProfile"/>'s keyword list stay identifiers to the

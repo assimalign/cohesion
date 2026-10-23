@@ -25,3 +25,10 @@ var database = await engine.OpenDatabaseAsync("settings");
 ## Consumers
 
 Any Cohesion resource that needs a durable data layer without running a separate database service. The hosted counterpart is `Database.Hosting` (engines + wire-protocol server in a standalone process).
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
