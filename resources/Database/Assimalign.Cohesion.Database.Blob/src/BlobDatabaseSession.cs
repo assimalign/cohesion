@@ -65,6 +65,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession.DebugView))]
 public sealed class BlobDatabaseSession : DatabaseSession
 {
     private static readonly string _errorSessionDisposeAsyncCoreDatabase = ErrorMessages.SessionDisposeAsyncCoreDatabase;
@@ -363,5 +365,17 @@ public sealed class BlobDatabaseSession : DatabaseSession
         {
             await operation.AbortAsync(new DatabaseException(_errorSessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabase Database => _target.Database;
     }
 }

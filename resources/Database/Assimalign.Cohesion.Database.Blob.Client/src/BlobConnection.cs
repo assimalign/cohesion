@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 /// and enumerators before starting another operation. Disposing this connection cancels and waits
 /// for its active exchange before returning the pool lease. Failed exchanges close the connection.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.DebugView))]
 public sealed class BlobConnection : IAsyncDisposable
 {
     // The operation names the event source writes: the public members that run a transfer.
@@ -403,6 +405,8 @@ public sealed class BlobConnection : IAsyncDisposable
 
     // Never certifies a failed response complete: a transfer can leave unread frames even when its
     // error code is ExecutionFailure, so every Blob failure discards the connection.
+    [global::System.Diagnostics.DebuggerDisplay("BlobExchange")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobExchange<>.DebugView))]
     private sealed class BlobExchange<TResult> : DatabaseProtocolExchange<TResult>
     {
         private readonly Func<ProtocolFrameReader, ProtocolFrameWriter, CancellationToken, ValueTask<TResult>> _action;
@@ -421,8 +425,18 @@ public sealed class BlobConnection : IAsyncDisposable
         protected override ValueTask<TResult> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
             CancellationToken cancellationToken)
             => _action(new BlobErrorReader(reader), new BlobFrameWriter(writer), cancellationToken);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobExchange<TResult> value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("BlobErrorReader")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobErrorReader.DebugView))]
     private sealed class BlobErrorReader : ProtocolFrameReader
     {
         private readonly ProtocolFrameReader _reader;
@@ -461,8 +475,18 @@ public sealed class BlobConnection : IAsyncDisposable
         }
 
         // The pooled connection owns the shared reader, so the base's no-op DisposeAsyncCore stays.
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobErrorReader value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("BlobFrameWriter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobFrameWriter.DebugView))]
     private sealed class BlobFrameWriter : ProtocolFrameWriter
     {
         private readonly ProtocolFrameWriter _writer;
@@ -503,8 +527,18 @@ public sealed class BlobConnection : IAsyncDisposable
         }
 
         // The pooled connection owns the shared writer, so the base's no-op DisposeAsyncCore stays.
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobFrameWriter value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("BlobDownloadExchange")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobDownloadExchange.DebugView))]
     private sealed class BlobDownloadExchange : DatabaseStreamingExchange
     {
         private readonly BlobConnection _owner;
@@ -584,5 +618,25 @@ public sealed class BlobConnection : IAsyncDisposable
             ProtocolException => ProtocolErrorCode.ProtocolViolation,
             _ => ProtocolErrorCode.Internal,
         };
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection.BlobDownloadExchange value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.BlobConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

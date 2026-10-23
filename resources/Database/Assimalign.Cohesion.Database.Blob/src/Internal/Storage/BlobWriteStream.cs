@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Blob.Storage;
 
 namespace Assimalign.Cohesion.Database.Blob.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BlobWriteStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteStream.DebugView))]
 internal sealed class BlobWriteStream : Stream
 {
     private readonly BlobStorage _storage;
@@ -243,4 +245,20 @@ internal sealed class BlobWriteStream : Stream
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobWriteStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+    }
 }

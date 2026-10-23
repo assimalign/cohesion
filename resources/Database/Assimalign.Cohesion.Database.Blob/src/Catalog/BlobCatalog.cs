@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Database.Blob.Catalog;
 /// triplet of <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.DebugView))]
 public sealed partial class BlobCatalog
 {
     private readonly BlobStorage _storage;
@@ -549,4 +551,12 @@ public sealed partial class BlobCatalog
     }
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog value)
+        {
+            _ = value;
+        }
+    }
 }

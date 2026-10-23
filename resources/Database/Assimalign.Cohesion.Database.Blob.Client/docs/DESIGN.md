@@ -315,3 +315,9 @@ the existing Error frame. The host transaction retains the original unprefixed, 
 `CK04004` abort cause; its later commit reports `CB04001`, preserves that cause instance and
 commits nothing. Repeated commit after terminal session cleanup retains the same cause.
 `BlobClientException.Diagnostics` remains empty under the existing Blob wire contract.
+
+## Debugger inspection (#1470)
+
+Client debugger views expose the captured database name and constant download-stream capabilities. They omit live connection state, transport settings, delegated stream getters and download content; transport helpers have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

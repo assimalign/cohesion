@@ -1829,3 +1829,9 @@ remain terminal. The existing `CB06003` worker refusal text is resource-backed a
 retaining its current prefix and offline precedence.
 Handshake refusal descriptions resolve through resources with their existing text and numeric
 protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Blob debugger views expose stored catalog identities, session references and reviewed stream flags/lengths without reading blob content. Delegated stream operations, current-transaction synchronization and engine/session snapshots are omitted. Internal helpers with no safe public or protected data have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

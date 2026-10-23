@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Blob.Storage;
 
 /// <summary>Stores blob chunks and catalog records on the shared page, journal, and recovery kernel.</summary>
+[global::System.Diagnostics.DebuggerDisplay("BlobStorage {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Storage.BlobStorage.DebugView))]
 public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private BlobStorage(StorageStream data, StorageStream journal, StorageStream backup)
@@ -204,4 +206,19 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
 
     internal (PageId PageId, int SlotIndex) InsertChunk(StorageTransaction transaction, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, ContentOwner, entry);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Storage.BlobStorage _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Storage.BlobStorage value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionRecordSpace Records => _target.Records;
+        public global::Assimalign.Cohesion.Database.Storage.StorageId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Storage.Name Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Storage.StorageModel Model => _target.Model;
+    }
 }

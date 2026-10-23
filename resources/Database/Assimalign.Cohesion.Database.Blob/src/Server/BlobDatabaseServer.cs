@@ -51,6 +51,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// confirmation, decision 31 of the plan).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer.DebugView))]
 public sealed class BlobDatabaseServer : DatabaseServer
 {
     private readonly BlobDatabaseEngine _engine;
@@ -371,5 +373,17 @@ public sealed class BlobDatabaseServer : DatabaseServer
         {
             BlobDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine Engine => _target.Engine;
     }
 }

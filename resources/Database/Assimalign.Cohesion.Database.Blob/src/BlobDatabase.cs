@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// the disposed flag.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabase {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabase.DebugView))]
 public sealed class BlobDatabase : DatabaseInstance
 {
     private static readonly string _workerFailureRefusalFormat = ErrorMessages.WorkerFailureRefusal;
@@ -511,5 +513,18 @@ public sealed class BlobDatabase : DatabaseInstance
         {
             await DataStorage.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabaseEngine Engine => _target.Engine;
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
     }
 }

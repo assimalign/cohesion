@@ -38,6 +38,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// a cast to the implementation, is a member of the type.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobContainer {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobContainer.DebugView))]
 public sealed class BlobContainer
 {
     private readonly BlobDatabase _database;
@@ -320,5 +322,17 @@ public sealed class BlobContainer
         {
             DatabaseTransactionAbortedException.ThrowBlobConflict();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobContainer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobContainer value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Internal;
 
 // The shared stream owns buffering, cancellation and the exchange lifetime. This
 // facade preserves the Blob API's exception type after shared health processing.
+[global::System.Diagnostics.DebuggerDisplay("BlobDownloadStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Client.Internal.BlobDownloadStream.DebugView))]
 internal sealed class BlobDownloadStream : Stream
 {
     private readonly Stream _stream;
@@ -72,5 +74,18 @@ internal sealed class BlobDownloadStream : Stream
     {
         await _stream.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Client.Internal.BlobDownloadStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Client.Internal.BlobDownloadStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
     }
 }

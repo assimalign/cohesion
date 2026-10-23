@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// override. Option B (concrete-types plan, section 6.6): the exchanges run the container
 /// operations of the bound session itself, so they join a transaction the session holds.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobDatabaseServerSession.DebugView))]
 internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 {
     private static readonly string _errorBlobDatabaseServerSessionAbortFailure = ErrorMessages.BlobDatabaseServerSessionAbortFailure;
@@ -830,5 +832,18 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

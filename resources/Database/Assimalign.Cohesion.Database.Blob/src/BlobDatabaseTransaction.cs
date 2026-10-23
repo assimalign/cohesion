@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction.DebugView))]
 public sealed class BlobDatabaseTransaction : DatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
@@ -161,5 +163,18 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
             : ErrorMessages.TransactionOperationsAborted + reason;
         return new DatabaseException(message, [new Types.Diagnostic
         { Code = "CB04001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }
