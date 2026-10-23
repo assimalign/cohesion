@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -188,7 +189,7 @@ public sealed class DocumentCollection
         ArgumentNullException.ThrowIfNull(session);
         if (!ReferenceEquals(session.Database, _database) || !ReferenceEquals(_boundSession, session))
         {
-            throw new DatabaseException(ErrorMessages.CollectionValidateSessionDatabase);
+            throw DatabaseException.CreateDocumentsFailure("CD07001", ErrorMessages.CollectionValidateSessionDatabase);
         }
         session.ThrowIfNotOpen();
         return session;
@@ -201,14 +202,14 @@ public sealed class DocumentCollection
         if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DatabaseTransactionAbortedException.ThrowDocumentConflict(); }
         if (expectedVersion is not null && previous?.Version != expectedVersion.Value.Value)
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCurrentDatabase, id, expectedVersion));
+            throw DatabaseException.CreateDocumentsFailure("CD04103", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCurrentDatabase, id, expectedVersion));
         }
     }
 
     private void EnsureCollection(TransactionContext context, bool writing = false)
     {
         var current = _database.Catalog.FindCollection(Name, context.Snapshot);
-        if (current?.Id != _collection.Id) { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCollectionDatabase, Name)); }
+        if (current?.Id != _collection.Id) { throw DatabaseException.CreateDocumentsFailure("CD09001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionEnsureCollectionDatabase, Name)); }
         if (writing && (current != _database.Catalog.FindCollection(Name, _database.LatestSnapshot(context)) ||
             !_database.Catalog.GetIndexes(_collection.Id, context.Snapshot).SequenceEqual(_database.Catalog.GetIndexes(_collection.Id, _database.LatestSnapshot(context)))))
         {

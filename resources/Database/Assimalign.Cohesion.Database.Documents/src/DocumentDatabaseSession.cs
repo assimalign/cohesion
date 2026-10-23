@@ -264,7 +264,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         if (!TryEnterOperation())
         {
-            throw new DatabaseException(ErrorMessages.DatabaseSessionEnterOperationDatabase);
+            throw DatabaseException.CreateDocumentsFailure("CK07003", ErrorMessages.DatabaseSessionEnterOperationDatabase);
         }
 
         var transaction = CurrentTransaction;
@@ -366,7 +366,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted))
         {
-            throw new DatabaseException(ErrorMessages.BeginTransactionCoreAsyncDatabase);
+            throw DatabaseException.CreateDocumentsFailure("CK04001", ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         _database.EnsureNotDisposed();

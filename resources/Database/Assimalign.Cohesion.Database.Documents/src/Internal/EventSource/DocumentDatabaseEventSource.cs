@@ -41,8 +41,8 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     // carries. Each can quote what a peer sent, before authentication too,
     // and a frame may hold 16 MB, so a longer value is cut and marked (event-source.md rule 11:
     // bounded payloads).
-    private const int MaxNameLength = 256;
-    private const int MaxTextLength = 1024;
+    private const int maxNameLength = 256;
+    private const int maxTextLength = 1024;
 
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
@@ -209,7 +209,7 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None) && ShouldReport(5, out int suppressedCount))
         {
-            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength), suppressedCount);
+            HandshakeRefused(session.Id, Bound(database, maxNameLength), Bound(principal, maxNameLength), code.ToString(), Bound(detail, maxTextLength), suppressedCount);
         }
     }
 
@@ -255,7 +255,7 @@ internal sealed class DocumentDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None) && ShouldReport(8, out int suppressedCount))
         {
-            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength), suppressedCount);
+            SessionProtocolViolation(session.Id, Bound(message, maxTextLength), suppressedCount);
         }
     }
 

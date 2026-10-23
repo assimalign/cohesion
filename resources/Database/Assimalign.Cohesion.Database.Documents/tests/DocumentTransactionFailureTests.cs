@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// </summary>
 public sealed class DocumentTransactionFailureTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Transaction: A chunk failure aborts through the engine end path (#1244)")]
     [InlineData(2, false)]
@@ -581,7 +581,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Act
         await session.DisposeAsync();
-        var statement = await Should.ThrowAsync<Exception>(async () => await pending.WaitAsync(Timeout));
+        var statement = await Should.ThrowAsync<Exception>(async () => await pending.WaitAsync(_timeout));
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
         await blocking.CommitAsync();
 
@@ -620,7 +620,7 @@ public sealed class DocumentTransactionFailureTests
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
         var stateAfterRefusal = transaction.State;
         await blocking.CommitAsync();
-        (await pending.WaitAsync(Timeout)).Id.Value.ShouldBe("waiting");
+        (await pending.WaitAsync(_timeout)).Id.Value.ShouldBe("waiting");
         await transaction.CommitAsync();
 
         // Assert
@@ -807,7 +807,7 @@ public sealed class DocumentTransactionFailureTests
         var begin = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync());
         bool stillWaiting = !pending.IsCompleted;
         await blocking.CommitAsync();
-        var completed = await pending.WaitAsync(Timeout);
+        var completed = await pending.WaitAsync(_timeout);
 
         // Assert
         new[] { statement, request, collectionOperation, documentOperation }.ShouldAllBe(refusal =>
@@ -1148,7 +1148,7 @@ public sealed class DocumentTransactionFailureTests
         bool otherProceededBeforeTheUndo = waiting.IsCompleted;
         database.Coordinator.Checkpoint();
         database.Coordinator.RunVersionPurgePass(CancellationToken.None);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
 
         // Assert
         locked.ShouldBeGreaterThan(0);
@@ -1311,7 +1311,7 @@ public sealed class DocumentTransactionFailureTests
             await release.Task.ConfigureAwait(false);
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
 
         // Act: the rollback waits for the apply, then its undo cannot touch the pages another
         // storage bracket holds.
@@ -1323,8 +1323,8 @@ public sealed class DocumentTransactionFailureTests
             await Task.Delay(TimeSpan.FromMilliseconds(100));
             bool rollbackWaitedForTheApply = !rollback.IsCompleted;
             release.SetResult();
-            (await applying.WaitAsync(Timeout)).ShouldBeTrue();
-            await rollback.WaitAsync(Timeout);
+            (await applying.WaitAsync(_timeout)).ShouldBeTrue();
+            await rollback.WaitAsync(_timeout);
             locked = holder.Pages;
             rollbackWaitedForTheApply.ShouldBeTrue();
         }
@@ -1339,7 +1339,7 @@ public sealed class DocumentTransactionFailureTests
         transaction.State.ShouldBe(TransactionState.RolledBack);
         refused.Message.ShouldContain("the statement was not applied", Case.Sensitive);
         database.Coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(_timeout);
         (await IdsAsync(other)).ShouldBe(["other"]);
     }
 

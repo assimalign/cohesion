@@ -85,12 +85,12 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
                 null => ReadOnlyMemory<byte>.Empty,
                 JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
                 string text => Encoding.UTF8.GetBytes(text),
-                _ => throw new DatabaseException(string.Format(CultureInfo.InvariantCulture, ErrorMessages.RowBytesInvalid, ordinal)),
+                _ => throw DatabaseException.CreateDocumentsFailure("CK02001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.RowBytesInvalid, ordinal)),
             };
         public override int GetInt32(int ordinal) => Convert.ToInt32(Required(ordinal), CultureInfo.InvariantCulture);
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => GetValue(ordinal) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentQueryRowRequiredDatabase, ordinal));
+        private object Required(int ordinal) => GetValue(ordinal) ?? throw DatabaseException.CreateDocumentsFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentQueryRowRequiredDatabase, ordinal));
     }
 }

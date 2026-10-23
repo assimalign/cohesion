@@ -287,7 +287,7 @@ public sealed class DocumentDatabase : DatabaseInstance
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, operation => new ValueTask<DocumentCollection>(new DocumentCollection(this,
-            Catalog.FindCollection(name, operation.Context.Snapshot) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name)), session)), token);
+            Catalog.FindCollection(name, operation.Context.Snapshot) ?? throw DatabaseException.CreateDocumentsFailure("CD01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name)), session)), token);
     }
 
     internal async ValueTask DropCollectionAsync(string name, DocumentDatabaseSession session, CancellationToken token)
@@ -481,7 +481,7 @@ public sealed class DocumentDatabase : DatabaseInstance
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException(ErrorMessages.DatabaseLockWriterAsyncDatabase);
+                throw DatabaseException.CreateDocumentsFailure("CK04002", ErrorMessages.DatabaseLockWriterAsyncDatabase);
             }
         }
         catch

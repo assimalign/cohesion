@@ -101,7 +101,7 @@ public sealed partial class DocumentCatalog
         foreach (string path in paths) { DocumentIndexKeys.ValidatePath(path); }
         if (!GetCollections(context.Snapshot).Any(collection => collection.Id == collectionId))
         {
-            throw new DocumentCatalogException(ErrorMessages.CreateIndexAsyncDocumentCatalog);
+            throw new DocumentCatalogException("CD01002", ErrorMessages.CreateIndexAsyncDocumentCatalog);
         }
         lock (_sync)
         {
@@ -235,7 +235,7 @@ public sealed partial class DocumentCatalog
         lock (_sync)
         {
             definition = FindIndex(collectionId, indexName, snapshot)?.Record.Index
-                ?? throw new DocumentCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SearchIndexAsyncDocumentCatalog, indexName));
+                ?? throw new DocumentCatalogException("CD01025", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SearchIndexAsyncDocumentCatalog, indexName));
         }
         var index = ResolveIndex(definition);
         var range = SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper);
@@ -396,7 +396,7 @@ public sealed partial class DocumentCatalog
 
     private BTreeIndex ResolveIndex(DocumentIndexMetadata metadata)
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
-            ? index : throw new DocumentCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
+            ? index : throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
@@ -451,23 +451,23 @@ public sealed partial class DocumentCatalog
                 using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
                 if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5)
                 {
-                    throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationHeaderInvalid);
+                    throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationHeaderInvalid);
                 }
                 DocumentCatalogCodec.EnsureVersion(5, reader.ReadByte());
                 ulong objectId = reader.ReadUInt64();
                 long root = reader.ReadInt64();
-                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationNameMissing);
+                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationNameMissing);
                 byte flags = reader.ReadByte();
                 if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
                 {
-                    throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationInvalid);
+                    throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid);
                 }
                 registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
             }
             catch (Exception error) when (error is DocumentCatalogException or IOException or ArgumentException or OverflowException)
             {
                 var malformed = error as DocumentCatalogException
-                    ?? new DocumentCatalogException(ErrorMessages.PhysicalRegistrationMalformed, error);
+                    ?? new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationMalformed, error);
                 throw DocumentCatalogCodec.At(unit.PageId, unit.SlotIndex, malformed);
             }
         }

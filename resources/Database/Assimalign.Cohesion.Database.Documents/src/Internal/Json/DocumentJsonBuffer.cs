@@ -21,7 +21,7 @@ internal sealed class DocumentJsonBuffer : IBufferWriter<byte>
     public void Advance(int count)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (count > maximumLength - _written) { throw new DatabaseException(ErrorMessages.ResultTooLarge); }
+        if (count > maximumLength - _written) { throw DatabaseException.CreateDocumentsFailure("CD05016", ErrorMessages.ResultTooLarge); }
         _written += count;
     }
 
@@ -41,7 +41,7 @@ internal sealed class DocumentJsonBuffer : IBufferWriter<byte>
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sizeHint);
         sizeHint = Math.Max(sizeHint, 1);
-        if (sizeHint > maximumCapacity - _written) { throw new DatabaseException(ErrorMessages.ResultTooLarge); }
+        if (sizeHint > maximumCapacity - _written) { throw DatabaseException.CreateDocumentsFailure("CD05016", ErrorMessages.ResultTooLarge); }
         int required = _written + sizeHint;
         if (required > _buffer.Length)
         {

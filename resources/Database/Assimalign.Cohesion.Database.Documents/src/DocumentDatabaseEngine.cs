@@ -9,6 +9,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
@@ -431,7 +432,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
-                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             // The engine lets the database go before it closes it, and the close waits for one a
@@ -575,7 +576,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             {
                 if (create)
                 {
-                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
+                    throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
                 }
 
                 if (existing.IsClosed || !existing.IsOffline)
@@ -621,12 +622,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
+                throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
             }
 
             if (!create && !HasDatabase(name, directory))
             {
-                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             if (directory is not null && create)
@@ -733,8 +734,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 if (!found)
                 {
                     throw create
-                        ? new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name))
-                        : new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
+                        ? DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name))
+                        : DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
                 }
             }
             else

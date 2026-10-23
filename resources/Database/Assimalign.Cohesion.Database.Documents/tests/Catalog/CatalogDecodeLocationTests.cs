@@ -13,6 +13,20 @@ namespace Assimalign.Cohesion.Database.Documents.Catalog.Tests;
 
 public sealed class CatalogDecodeLocationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents.Catalog] - Exceptions: legacy constructors retain caller messages and causes (#1470)")]
+    public void Exception_LegacyConstructors_ShouldRetainCallerContract()
+    {
+        var cause = new InvalidOperationException("caller cause");
+        var plain = new DocumentCatalogException("caller message");
+        var wrapped = new DocumentCatalogException("caller message", cause);
+        plain.Message.ShouldBe("caller message");
+        plain.InnerException.ShouldBeNull();
+        plain.Diagnostics.ShouldBeEmpty();
+        wrapped.Message.ShouldBe("caller message");
+        wrapped.InnerException.ShouldBeSameAs(cause);
+        wrapped.Diagnostics.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Catalog] - Registration decoding: malformed index metadata reports page and slot (#1372)")]
     [InlineData("truncated", false)]
     [InlineData("header", false)]
@@ -55,6 +69,13 @@ public sealed class CatalogDecodeLocationTests
                 if (fence) { DocumentCatalog.EnsureIndexFormat(database.DataStorage); }
                 else { DocumentCatalog.Open(database.DataStorage, database.Coordinator); }
             });
+            failure.Diagnostics.Count.ShouldBe(1);
+            var diagnostic = failure.Diagnostics[0];
+            diagnostic.Code.ShouldBe("CD06105");
+            diagnostic.Message.ShouldBe(failure.Message);
+            diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+            diagnostic.Start.ShouldBeNull();
+            diagnostic.End.ShouldBeNull();
             failure.Message.ShouldContain($"page {(long)unit.PageId}", Case.Sensitive);
             failure.Message.ShouldContain($"slot {unit.SlotIndex}", Case.Sensitive);
             failure.PageId.ShouldBe(unit.PageId);

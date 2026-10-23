@@ -66,6 +66,21 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         await engine.DisposeAsync();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Open: logical absence retains its precise exception and shared diagnostic")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenDatabaseAsync_AbsentName_ShouldCarryLogicalAbsenceDiagnostic(bool onDisk)
+    {
+        // Arrange
+        await using var engine = CreateEngine(onDisk);
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("absent", Token()));
+        // Assert
+        failure.GetType().ShouldBe(typeof(DatabaseNotFoundException));
+        failure.InnerException.ShouldBeNull();
+        CheckDiagnostic(failure, "CK03002");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Names: a create of 'SALES' after 'sales' is refused as existing, open or not (#1392)")]
     [InlineData(true)]
     [InlineData(false)]
@@ -84,6 +99,8 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         // Assert: the refusals left the database as it was.
         whileOpen.ShouldNotBeOfType<DatabaseNotFoundException>();
         whileClosed.ShouldNotBeOfType<DatabaseNotFoundException>();
+        CheckDiagnostic(whileOpen, "CK03001");
+        CheckDiagnostic(whileClosed, "CK03001");
         AssertDirectories(onDisk, "sales");
         (await ReadAsync(await engine.OpenDatabaseAsync("sales", Token()), document)).ShouldBe("sales-document");
         await engine.DisposeAsync();
@@ -582,4 +599,14 @@ public sealed class DocumentDatabaseNameTests : IDisposable
 
     // A bounded token, so a hung call fails the test instead of the run.
     private static CancellationToken Token() => new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token;
+    private static void CheckDiagnostic(DatabaseException failure, string code)
+    {
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+        failure.Message.StartsWith(code + ": ", StringComparison.Ordinal).ShouldBeFalse();
+    }
 }

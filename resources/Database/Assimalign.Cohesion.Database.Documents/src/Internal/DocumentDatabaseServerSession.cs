@@ -407,7 +407,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 {
                     if (!parameters.TryAdd(property.Name, property.Value.Clone()))
                     {
-                        throw new DatabaseException(ErrorMessages.ParameterNameDuplicate);
+                        throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
                     }
                 }
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
@@ -611,7 +611,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         if ((uint)payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {
-            throw new DatabaseException(ErrorMessages.ResultTooLarge);
+            throw DatabaseException.CreateDocumentsFailure("CD05016", ErrorMessages.ResultTooLarge);
         }
         return new ProtocolFrame((ProtocolMessageType)type, payload);
     }

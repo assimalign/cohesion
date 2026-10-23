@@ -380,7 +380,7 @@ transaction; after rollback the in-process session remains usable. The Documents
 
 Planner failures are `DatabaseException` instances with structured `Diagnostics`, an Error
 severity and the offending expression's Start/End/Line when its AST has a location. Their
-Message contains no code prefix. The Documents family is `COHDOCnnn`; paging deliberately uses
+Message contains no code prefix. The Documents family is `CD#####`; paging deliberately uses
 CD00007 for the same count rule at parse and plan time:
 
 | Code | Meaning |
@@ -2581,3 +2581,52 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Catalog conflict extension members and assembly-local Engine resource bindings live under `src/Internal/`. The bindings retain the shared module's marked namespace exception; public Catalog and Storage namespaces remain the component contracts. Test tuple extensions use the language's `extension(...)` syntax. Private identifiers follow the field and constant conventions without changing their values or validation order.
+
+## Direct catalog diagnostic carriers
+
+`DocumentCatalogException` keeps its existing base class and public constructors and adds
+`public IReadOnlyList<Diagnostic> Diagnostics { get; }`. The collection is never null; existing
+public constructors leave it empty. Internal catalog producers attach `CD06105` for malformed or unsupported catalog data, `CD01002` for an absent collection, and `CD01025` for an absent index.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CD01002` | Absent collection, including direct GetCollectionAsync |
+| `CD01009` | Duplicate wire parameter names; the existing normalized-key collision identity |
+| `CD04102` | Catalog changed since the transaction snapshot; DatabaseTransactionAbortedException |
+| `CD04103` | Expected document version does not match |
+| `CD05016` | Document result exceeds the committed frame or bounded JSON scratch limit |
+| `CD07001` | Collection and session are not bound to the same database and session |
+| `CD09001` | Collection handle no longer identifies the snapshot-visible collection |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04002` | Statement/operation transaction is no longer active |
+| `CK07003` | Another statement/operation already holds the session |
+| `CK02001` | Result field does not support the requested byte accessor |
+| `CK02002` | Required result field is NULL |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+The structured Failure frame carries the new producer diagnostics, and its message formats
+the first Error code once. Duplicate wire parameter keys reuse `CD01009` before parsing.
