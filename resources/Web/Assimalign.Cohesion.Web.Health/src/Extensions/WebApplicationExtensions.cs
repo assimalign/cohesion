@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web.Health.Internal;
 /// middleware never performs request-time service location. Application and resource authors can
 /// compose checks and map the aggregate, readiness, and liveness endpoints directly:
 /// <code>
-/// IHealthCheckService health = HealthChecks.CreateBuilder()
+/// IHealthCheckService health = new HealthChecksBuilder()
 ///     .AddCheck("self", () =&gt; HealthCheckResult.Healthy(),
 ///         tags: new[] { HealthTags.Ready, HealthTags.Live })
 ///     .Build();

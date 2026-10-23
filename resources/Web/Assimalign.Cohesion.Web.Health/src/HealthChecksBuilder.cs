@@ -2,20 +2,27 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace Assimalign.Cohesion.Web.Health.Internal;
+using Assimalign.Cohesion.Web.Health.Internal;
+
+namespace Assimalign.Cohesion.Web.Health;
 
 /// <summary>
-/// The default <see cref="IHealthChecksBuilder"/>. Accumulates registrations, rejecting
-/// duplicate names, and snapshots them into an immutable <see cref="HealthCheckService"/> when
+/// The health-check registry. Accumulates registrations, rejecting
+/// duplicate names, and snapshots them into an immutable <see cref="IHealthCheckService"/> when
 /// built.
 /// </summary>
-internal sealed class HealthChecksBuilder : IHealthChecksBuilder
+public sealed class HealthChecksBuilder : IHealthChecksBuilder
 {
     private readonly List<HealthCheckRegistration> _registrations = new();
     private readonly HashSet<string> _names = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Initializes an empty health-check registry.</summary>
+    public HealthChecksBuilder() { }
+
+    /// <inheritdoc />
     public IReadOnlyCollection<HealthCheckRegistration> Registrations => _registrations;
 
+    /// <inheritdoc />
     public IHealthChecksBuilder Add(HealthCheckRegistration registration)
     {
         ArgumentNullException.ThrowIfNull(registration);
@@ -31,5 +38,6 @@ internal sealed class HealthChecksBuilder : IHealthChecksBuilder
         return this;
     }
 
+    /// <inheritdoc />
     public IHealthCheckService Build() => new HealthCheckService(_registrations.ToArray());
 }

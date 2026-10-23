@@ -186,7 +186,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         DatabaseApplicationContext applicationContext,
         IReadOnlyList<IHealthContributor> contributors)
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        IHealthChecksBuilder builder = new HealthChecksBuilder();
         foreach (IHealthContributor contributor in contributors)
         {
             builder.AddContributor(contributor);

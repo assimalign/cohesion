@@ -65,3 +65,12 @@ Exception messages and format templates are generated from `src/Properties/Error
 format arguments use the current culture. Cancellation and abort templates used during normal
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+
+## Health-check builder construction (#1470)
+
+Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
+with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
+is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
+snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
+interface, protocol, format, diagnostic code, event or counter is added or changed.

@@ -11,7 +11,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Health] - Builder: rejects duplicate check names")]
     public void Add_WhenNameAlreadyRegistered_ShouldThrow()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        HealthChecksBuilder builder = new HealthChecksBuilder();
         builder.AddCheck("db", () => HealthCheckResult.Healthy());
 
         Should.Throw<InvalidOperationException>(() => builder.AddCheck("db", () => HealthCheckResult.Healthy()));
@@ -20,7 +20,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Health] - Builder: duplicate name check is case-insensitive")]
     public void Add_WhenNameDiffersOnlyByCase_ShouldThrow()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        IHealthChecksBuilder builder = new HealthChecksBuilder();
         builder.AddCheck("DB", () => HealthCheckResult.Healthy());
 
         Should.Throw<InvalidOperationException>(() => builder.AddCheck("db", () => HealthCheckResult.Healthy()));
@@ -29,7 +29,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Health] - Builder: Build snapshots the current registrations")]
     public async Task Build_WhenCalled_ShouldSnapshotRegistrationsAtThatMoment()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        IHealthChecksBuilder builder = new HealthChecksBuilder();
         builder.AddCheck("first", () => HealthCheckResult.Healthy());
 
         IHealthCheckService service = builder.Build();
@@ -45,7 +45,7 @@ public class HealthChecksBuilderTests
     [Fact(DisplayName = "Cohesion Test [Health] - Builder: Registrations exposes what was added")]
     public void Registrations_WhenChecksAdded_ShouldExposeThem()
     {
-        IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
+        IHealthChecksBuilder builder = new HealthChecksBuilder();
         builder.AddCheck("a", () => HealthCheckResult.Healthy(), tags: new[] { HealthTags.Ready });
 
         builder.Registrations.Count.ShouldBe(1);

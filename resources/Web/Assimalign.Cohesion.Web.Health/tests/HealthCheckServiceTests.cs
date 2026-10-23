@@ -12,7 +12,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: runs all checks and aggregates the worst status")]
     public async Task CheckHealthAsync_WhenChecksRegistered_ShouldRunAllAndAggregate()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("ok", () => HealthCheckResult.Healthy())
             .AddCheck("slow", () => HealthCheckResult.Degraded())
             .Build();
@@ -29,7 +29,7 @@ public class HealthCheckServiceTests
     public async Task CheckHealthAsync_WhenCheckThrows_ShouldReportFailureStatus()
     {
         var exception = new InvalidOperationException("db unreachable");
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(exception), failureStatus: HealthStatus.Unhealthy)
             .Build();
 
@@ -45,7 +45,7 @@ public class HealthCheckServiceTests
     {
         // Arrange
         var exception = new InvalidOperationException("Failed to connect to db-primary.corp.internal:5432 as svc_orders.");
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", StubCheck.Throwing(exception))
             .Build();
 
@@ -62,7 +62,7 @@ public class HealthCheckServiceTests
     public async Task CheckHealthAsync_WhenCheckTimesOut_ShouldDescribeWithoutExceptionMessageAndKeepException()
     {
         // Arrange
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck(
                 "db",
                 StubCheck.BlockingThenCancelledWith("Connect to db-primary.corp.internal:5432 timed out."),
@@ -82,7 +82,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: a thrown check honors a custom failure status")]
     public async Task CheckHealthAsync_WhenCheckThrowsWithDegradedPolicy_ShouldReportDegraded()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("cache", StubCheck.Throwing(new Exception("miss")), failureStatus: HealthStatus.Degraded)
             .Build();
 
@@ -95,7 +95,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: a check exceeding its timeout is folded into a failure entry")]
     public async Task CheckHealthAsync_WhenCheckExceedsTimeout_ShouldReportFailureWithoutThrowing()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("hang", StubCheck.Blocking(), failureStatus: HealthStatus.Unhealthy, timeout: TimeSpan.FromMilliseconds(50))
             .Build();
 
@@ -109,7 +109,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: caller cancellation propagates out")]
     public async Task CheckHealthAsync_WhenCallerCancels_ShouldThrowOperationCanceled()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("hang", StubCheck.Blocking())
             .Build();
 
@@ -122,7 +122,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: predicate selects the readiness slice only")]
     public async Task CheckHealthAsync_WhenPredicateGiven_ShouldRunOnlyMatchingChecks()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("ready-db", () => HealthCheckResult.Healthy(), tags: new[] { HealthTags.Ready })
             .AddCheck("live-self", () => HealthCheckResult.Unhealthy(), tags: new[] { HealthTags.Live })
             .Build();
@@ -136,7 +136,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: a predicate matching nothing yields a healthy empty report")]
     public async Task CheckHealthAsync_WhenPredicateMatchesNothing_ShouldBeHealthyAndEmpty()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("live-self", () => HealthCheckResult.Unhealthy(), tags: new[] { HealthTags.Live })
             .Build();
 
@@ -149,7 +149,7 @@ public class HealthCheckServiceTests
     [Fact(DisplayName = "Cohesion Test [Health] - Service: the report entry carries the registration tags")]
     public async Task CheckHealthAsync_WhenCheckTagged_ShouldSurfaceTagsOnEntry()
     {
-        IHealthCheckService service = HealthChecks.CreateBuilder()
+        IHealthCheckService service = new HealthChecksBuilder()
             .AddCheck("db", () => HealthCheckResult.Healthy(), tags: new[] { HealthTags.Ready, "sql" })
             .Build();
 
