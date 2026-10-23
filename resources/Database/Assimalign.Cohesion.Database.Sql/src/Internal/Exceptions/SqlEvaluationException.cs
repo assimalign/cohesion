@@ -242,7 +242,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure (<c>CS02011</c>).</returns>
     internal static SqlEvaluationException CannotCast(string source, SqlType target)
         => new(CannotCastCode,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionCannotCastSqlEvaluation, source, target.Name, source, target.Name, (target.IsDomain ? $" or to its base type {target.BaseType!.Name}" : string.Empty)),
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionCannotCastSqlEvaluation, source, target.Name, source, target.Name, (target.IsDomain ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DomainCastAlternative, target.BaseType!.Name) : string.Empty)),
             null);
 
     /// <summary>Creates the failure for a call whose argument types no overload of its function accepts.</summary>
@@ -252,7 +252,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure (<c>CS01006</c>, PostgreSQL's 42883).</returns>
     internal static SqlEvaluationException FunctionArgumentTypeMismatch(string functionName, string given, string usage)
         => new(FunctionSignatureMismatchCode,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentTypeMismatchSqlEvaluation, $"Function '{functionName}' has no overload that accepts argument types ({given}). Accepted: {usage}." +
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentTypeMismatchSqlEvaluation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionSignatureMismatch, functionName, given, usage) +
             (functionName.Equals("STRING_AGG", StringComparison.OrdinalIgnoreCase) || functionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase)
                 ? ErrorMessages.StringAggregateTypeHint : string.Empty)),
             null);
@@ -341,7 +341,7 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException ColumnReferenceNotAllowed(string column, string clause, string? alternative = null)
         => new(ColumnReferenceNotAllowedCode,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ReferenceNotAllowedSqlEvaluation, column, clause, (alternative is null ? string.Empty : $", or {alternative}")),
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ReferenceNotAllowedSqlEvaluation, column, clause, (alternative is null ? string.Empty : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ReferenceAlternativeSuffix, alternative))),
             null);
 
     /// <summary>Creates the failure for a function call whose arguments no signature of its function accepts.</summary>

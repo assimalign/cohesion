@@ -247,7 +247,7 @@ public partial class CompileDatabaseSchemaTaskTests
             error.Code == "COHDBSDK108" &&
             error.Message != null &&
             error.Message.StartsWith($"SqlSchemaBuilder.{method} declares what no SQL engine can provision yet", StringComparison.Ordinal) &&
-            error.Message.Contains("COHSQLP001", StringComparison.Ordinal));
+            error.Message.Contains("CS03101", StringComparison.Ordinal));
         Directory.Exists(task.OutputDirectory).ShouldBeFalse();
     }
 

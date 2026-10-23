@@ -10,7 +10,7 @@ bare varying names are unbounded. This follows PostgreSQL src/backend/parser/gra
 The shared SqlTypeModifiers source admits ISO multi-word names and SQL Server lexical aliases
 in extracted typed column declarations. VARCHAR(MAX), NVARCHAR(MAX) and VARBINARY(MAX) are
 unbounded; NCHAR, NATIONAL CHAR and NATIONAL CHARACTER normalize to padded Character like CHAR. Temporal
-precision, 7 included, stays COHDBSDK106 with COHDBL001 detail. The canonical format advanced
+precision, 7 included, stays COHDBSDK106 with CK00001 detail. The canonical format advanced
 v6 -> v7 in runtime and SDK together because NCHAR CustomType now normalizes to Character
 rather than remaining an unresolved domain name. Earlier artifacts and migration baselines
 are refused without an upgrade path. Migration SQL retains the validated CustomType spelling.
@@ -124,7 +124,7 @@ method that receives the `SqlDatabaseBuilder` works at run time but fails here; 
 schema as a `SqlSchema.Create(name, ...)` value instead). Artifacts are keyed by database name
 alone, so a database name is unique across every engine of the project, although two engines may
 each own a database of one name at run time. A schema principal fails the build
-(`COHDBSDK108`): every SQL engine build refuses it before touching a file (`COHSQLP001`, owner
+(`COHDBSDK108`): every SQL engine build refuses it before touching a file (`CS03101`, owner
 decision 58), so an artifact for it would only move the failure to the first start. Every
 declaration is compiled before any artifact is written, so a failure replaces none.
 
@@ -142,7 +142,7 @@ writes, so the artifact's document and hash equal the runtime's (`CompileDatabas
 The schema extraction task does not parse CHECK SQL, and
 **native functions are invisible to it**. A CHECK that calls a function the application registers
 on its engine builder compiles into the artifact like any other; the engine's build binds it to its
-function catalog before it touches a file (`COHSQLP001` when it does not bind). A CHECK's name
+function catalog before it touches a file (`CS03101` when it does not bind). A CHECK's name
 shares the table's constraint, primary-key and index name space (`COHDBSDK105`, as the runtime
 compiler's `DuplicateDeclaration`).
 
@@ -195,7 +195,7 @@ The diagnostics:
 | `COHDBSDK104` | An operation the DSL does not support, or a CHECK's SQL text, column's SQL type, or DefaultSql literal that is not a non-empty constant. |
 | `COHDBSDK105` | A duplicate table, type, principal, column, index or primary key, a conflicting column type or DEFAULT literal, or a CHECK named as another of its table's constraints, its primary key or one of its indexes. |
 | `COHDBSDK106` | Invalid type modifiers naming the table/column or domain; or a semantic error: a dangling or mistyped reference, a column whose CLR type is not a SQL column type (the message lists the supported types), the KeyValuePair model, or a compiled-schema validation error (prefixed with the database name). |
-| `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`COHSQLP001`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
+| `COHDBSDK108` | `SqlSchemaBuilder.Principal`: a declaration every SQL engine build refuses (`CS03101`) until principal and grant DDL exists. (`SqlSchemaBuilder.Type<T>` was refused here too until E3 made it a domain.) |
 | `COHDBSDK109` | A typed Default value is not a C# compile-time constant; use DefaultSql with a constant SQL literal. |
 
 The outputs are:
@@ -319,11 +319,28 @@ runtime declarations and raw compiled metadata cannot disagree about that defaul
 
 The same SQL text rule admits FLOAT(p) for 1..53 bits (1..24 selects Float32, 25..53 Float64 at
 engine resolution). Temporal precision is recognized but unsupported and reports COHDBSDK106
-with COHDBL001 in its detail, naming the column and modifier; malformed or invalid modifiers
-retain SQL0005 in that detail. No artifact is written on either refusal. The existing diagnostic
+with CK00001 in its detail, naming the column and modifier; malformed or invalid modifiers
+retain CS00005 in that detail. No artifact is written on either refusal. The existing diagnostic
 ids and runtime/SDK canonical-document parity remain unchanged.
 
 INTERVAL field qualifiers and ranges, with optional precision on SECOND, are recognized by the
-same linked grammar. Extraction reports COHDBSDK106 with COHDBL001, naming the column and full
+same linked grammar. Extraction reports COHDBSDK106 with CK00001, naming the column and full
 qualifier, even without precision; no artifact is written. DIALECT.md lists all accepted spellings
 and the unimplemented field restriction/rounding semantics.
+
+
+## Shared defaults and diagnostic resources (#1470)
+
+The Defaults shared module resolves incompatible-value text through a consuming-assembly-local
+`SqlDefaultLiteralErrorMessages` binding to the generated internal resource accessor. SQL schema
+and SDK extraction therefore retain identical ArgumentException text and the `value` parameter,
+without a resource lookup on successful rendering. SQL explanatory message fragments also use
+resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
+for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
+`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.

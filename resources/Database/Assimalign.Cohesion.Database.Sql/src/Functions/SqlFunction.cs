@@ -285,7 +285,7 @@ public abstract class SqlFunction
         if (!AcceptsCount(count))
         {
             throw new ArgumentException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfArgumentCountInvalidArgument, Name, (VariadicParameter is null ? "exactly" : "at least"), _parameters.Length, count),
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ThrowIfArgumentCountInvalidArgument, Name, (VariadicParameter is null ? ErrorMessages.ArgumentCountExact : ErrorMessages.ArgumentCountMinimum), _parameters.Length, count),
                 "arguments");
         }
     }

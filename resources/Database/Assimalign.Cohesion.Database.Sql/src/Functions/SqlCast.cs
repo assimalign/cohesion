@@ -146,7 +146,7 @@ public sealed class SqlCast
             !(mapped.Storage.Type == DatabaseType.String && type.Storage.Type == DatabaseType.Character))
         {
             throw new ArgumentException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastRequireStorageArgument, parameter, mapped.Name, type.Name, (type.IsDomain ? $" (a domain over {type.BaseType!.Name})" : string.Empty), SqlType.NameOf(type.Storage.Type)), argument);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastRequireStorageArgument, parameter, mapped.Name, type.Name, (type.IsDomain ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DomainStorageSuffix, type.BaseType!.Name) : string.Empty), SqlType.NameOf(type.Storage.Type)), argument);
         }
     }
 }

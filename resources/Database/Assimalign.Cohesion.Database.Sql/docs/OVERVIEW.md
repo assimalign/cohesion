@@ -394,3 +394,20 @@ establishing the pause; thirty-second cancellation/join limits are hang guards. 
 extra retry decides an assertion, and no parallelism cap is added. This corrects a fixture race:
 the engine pump could add a pass to an exact-count manually driven refusal episode. Product
 worker scheduling, fault semantics, public APIs, diagnostics and storage/wire formats are unchanged.
+
+
+## Shared defaults and diagnostic resources (#1470)
+
+The Defaults shared module resolves incompatible-value text through a consuming-assembly-local
+`SqlDefaultLiteralErrorMessages` binding to the generated internal resource accessor. SQL schema
+and SDK extraction therefore retain identical ArgumentException text and the `value` parameter,
+without a resource lookup on successful rendering. SQL explanatory message fragments also use
+resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
+for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
+`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.

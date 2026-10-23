@@ -83,7 +83,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         if (Find(type.Name) is { } registered)
         {
             throw new InvalidOperationException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddFailure, type.Name, (ReferenceEquals(registered, type) ? "it is" : $"domain '{registered.Name}' is")));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddFailure, type.Name, (ReferenceEquals(registered, type) ? ErrorMessages.SameDomainSubject : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OtherDomainSubject, registered.Name))));
         }
 
         _types.Add(type);
@@ -120,7 +120,7 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
             bool builtIn = _casts.Exists(registered => SqlStandardCasts.Contains(registered)
                 && SqlTypeCatalog.CastKey(registered.Source, registered.Target).Equals(SqlTypeCatalog.CastKey(cast.Source, cast.Target)));
             throw new InvalidOperationException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddCastFailure2, cast.Source.Name, cast.Target.Name, (builtIn ? " by the standard library" : string.Empty)));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlTypeCollectionAddCastFailure2, cast.Source.Name, cast.Target.Name, (builtIn ? ErrorMessages.StandardLibrarySuffix : string.Empty)));
         }
 
         _casts.Add(cast);

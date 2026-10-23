@@ -134,7 +134,7 @@ internal sealed partial class SqlPlanner
             var found = ordinals.Where(i => string.Equals(allColumns[i].Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (found.Length != 1)
             {
-                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning4, name, (found.Length == 0 ? "missing" : "ambiguous"), side), select.Location);
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerBindJoinSqlPlanning4, name, (found.Length == 0 ? ErrorMessages.UsingColumnMissing : ErrorMessages.UsingColumnAmbiguous), side), select.Location);
             }
             return found[0];
         }

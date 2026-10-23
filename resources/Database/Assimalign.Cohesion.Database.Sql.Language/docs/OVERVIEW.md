@@ -79,3 +79,9 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.

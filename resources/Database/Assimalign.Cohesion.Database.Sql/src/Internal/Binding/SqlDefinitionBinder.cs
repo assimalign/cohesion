@@ -65,7 +65,7 @@ internal static class SqlDefinitionBinder
 
     internal static SqlType ResolveType(string name, SqlFunctionEnvironment environment, Location? location = null)
         => environment.Types.Resolve(name, out string? error) is { } type && error is null
-            ? type : throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderResolveTypeSqlPlanning, name, error ?? "unknown type"), location ?? FragmentLocation(name));
+            ? type : throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderResolveTypeSqlPlanning, name, error ?? ErrorMessages.UnknownTypeDetail), location ?? FragmentLocation(name));
 
     internal static SqlCatalogFunction Declare(SqlCreateFunctionExpression create, SqlFunctionEnvironment environment, Collation collation, string? schema)
     {

@@ -82,7 +82,7 @@ internal sealed partial class SqlDeclaredDatabase
 
         if (SqlSchemaProvisioner.DescribeUnsupported(compiled) is { } unsupported)
         {
-            throw Refuse(engineName, declaration.Name, $"its schema declares {unsupported}.", inner: null);
+            throw Refuse(engineName, declaration.Name, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredSchemaUnsupported, unsupported), inner: null);
         }
 
         foreach (CompiledSchemaType declared in compiled.Types)

@@ -85,7 +85,7 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
             if (HasSameSignature(registered, function))
             {
                 throw new InvalidOperationException(
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionCollectionAddFailure2, function, (SqlStandardLibrary.Contains(registered) ? " by the standard library" : string.Empty)));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionCollectionAddFailure2, function, (SqlStandardLibrary.Contains(registered) ? ErrorMessages.StandardLibrarySuffix : string.Empty)));
             }
         }
 
