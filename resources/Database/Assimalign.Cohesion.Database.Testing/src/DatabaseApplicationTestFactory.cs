@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Testing;
 /// only composition path; the factory does not require a test-only bootstrap or interface.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationTestFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory.DebugView))]
 public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFactory
 {
     private const string adminEndpointName = "admin";
@@ -572,5 +574,17 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         {
             // A failed assertion should not be hidden by best-effort fixture cleanup.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Hosting.Resources.ResourceContext ResourceContext => _target.ResourceContext;
     }
 }

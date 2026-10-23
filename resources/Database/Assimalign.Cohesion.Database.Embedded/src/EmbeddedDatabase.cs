@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Embedded;
 /// whether embedded or hosted — so the facade only composes and disposes them.
 /// Disposal stops engines in reverse registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EmbeddedDatabase")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase.DebugView))]
 public sealed class EmbeddedDatabase : IAsyncDisposable
 {
     private readonly IReadOnlyList<DatabaseEngine> _engines;
@@ -132,5 +134,17 @@ public sealed class EmbeddedDatabase : IAsyncDisposable
         {
             throw new AggregateException(ErrorMessages.EmbeddedDatabaseDisposeAsyncAggregate, failures);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Embedded.EmbeddedDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.DatabaseEngine> Engines => _target.Engines;
     }
 }

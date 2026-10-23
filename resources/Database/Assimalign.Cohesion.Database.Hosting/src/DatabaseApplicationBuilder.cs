@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// registered, before any factory runs; there is one registration path per kind of thing.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder.DebugView))]
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
@@ -702,5 +704,21 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
 
 
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationOptions Options => _target.Options;
+        public global::Assimalign.Cohesion.Hosting.HostEnvironment Environment => _target.Environment;
+        public global::Assimalign.Cohesion.Configuration.ConfigurationManager Configuration => _target.Configuration;
+        public global::Assimalign.Cohesion.Logging.LoggerFactoryBuilder Logging => _target.Logging;
+        public global::Assimalign.Cohesion.DependencyInjection.ServiceProviderBuilder Services => _target.Services;
     }
 }

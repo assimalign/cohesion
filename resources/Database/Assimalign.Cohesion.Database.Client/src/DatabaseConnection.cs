@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.Database.Client;
 /// that cannot certify a clean state is closed instead of reused (#1540).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseConnection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.DatabaseConnection.DebugView))]
 public sealed class DatabaseConnection : IAsyncDisposable
 {
     private readonly DatabaseClient _owner;
@@ -293,6 +295,14 @@ public sealed class DatabaseConnection : IAsyncDisposable
         else
         {
             returned.TrySetException(failure);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.DatabaseConnection value)
+        {
+            _ = value;
         }
     }
 }

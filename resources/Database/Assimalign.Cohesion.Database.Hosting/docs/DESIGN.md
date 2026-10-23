@@ -303,3 +303,12 @@ snapshots are preserved; Database's admin endpoint uses the same public construc
 interface, protocol, format, diagnostic code, event or counter is added or changed.
 
 The rules audit aligns private test identifiers while preserving health checks, reopen behavior and hosted-service ownership. No runtime composition or public contract changes follow from those test naming edits.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views return stored composition references and identity only; synchronized host state, callbacks, lifecycle operations and service resolution are omitted.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

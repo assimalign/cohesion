@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Client;
 /// network I/O. The caller disposes the client. Redirect following and cookies are disabled on the transport
 /// the client creates.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseCommandClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.DatabaseCommandClient.DebugView))]
 public sealed class DatabaseCommandClient : IDisposable
 {
     private readonly Uri _address;
@@ -138,5 +140,13 @@ public sealed class DatabaseCommandClient : IDisposable
             }
         }
         return new ResourceCommandObservation(response.IsSuccessStatusCode ? status : "Rejected", detail);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.DatabaseCommandClient value)
+        {
+            _ = value;
+        }
     }
 }

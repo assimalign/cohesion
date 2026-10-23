@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
 // An authenticated transport. Only the pool owns connectors; callers receive a new lease per rent.
+[global::System.Diagnostics.DebuggerDisplay("DatabaseConnector {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.DebugView))]
 internal sealed class DatabaseConnector
 {
     private static readonly string _errorDatabaseConnectorDialAsyncFailure = ErrorMessages.DatabaseConnectorDialAsyncFailure;
@@ -361,6 +363,8 @@ internal sealed class DatabaseConnector
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("TransactionRollbackExchange")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange.DebugView))]
     private sealed class TransactionRollbackExchange : DatabaseProtocolExchange<bool>
     {
         internal TransactionRollbackExchange(ProtocolMessageFamily family)
@@ -385,6 +389,18 @@ internal sealed class DatabaseConnector
             if (ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0)
             { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
             return true;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector.TransactionRollbackExchange value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
         }
     }
 
@@ -555,5 +571,21 @@ internal sealed class DatabaseConnector
         }
 
         return MarkBroken(new DatabaseClientException(error.Code, error.Message));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.DatabaseConnector value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
+        public string Principal => _target.Principal;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolVersion ServerVersion => _target.ServerVersion;
+        public global::Assimalign.Cohesion.Database.Protocol.ProtocolMessageFamily Family => _target.Family;
+        public global::System.Collections.Generic.IReadOnlyList<string> Capabilities => _target.Capabilities;
     }
 }

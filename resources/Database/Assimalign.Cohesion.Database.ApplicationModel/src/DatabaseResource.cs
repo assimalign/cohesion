@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// produced by an enabled database executable, and its realization plan contains no
 /// platform-specific objects or runtime database dependencies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseResource {Name}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.ApplicationModel.DatabaseResource.DebugView))]
 public sealed class DatabaseResource : PlannedResource
 {
     private const string databasePlannerName = "Database planner";
@@ -50,5 +52,21 @@ public sealed class DatabaseResource : PlannedResource
         }
 
         return DatabasePlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.ApplicationModel.DatabaseResource _target;
+
+        public DebugView(global::Assimalign.Cohesion.ApplicationModel.DatabaseResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

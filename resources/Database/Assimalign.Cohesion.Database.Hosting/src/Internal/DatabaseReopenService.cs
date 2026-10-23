@@ -77,6 +77,8 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 /// through <c>Assimalign.Cohesion.Logging.EventSource</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseReopenService")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseReopenService.DebugView))]
 internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
 {
     // How often the engines are polled at most: an offline database is found within a second.
@@ -848,4 +850,16 @@ internal sealed class DatabaseReopenService : IHostService, IAsyncDisposable
     /// instance, gone offline again, keeps its backoff.
     /// </summary>
     private sealed record ReopenedDatabase(DatabaseEngine Engine, string Name, DatabaseInstance Instance, int Level, long At, TimeSpan Window);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseReopenService _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseReopenService value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Hosting.ServiceId Id => _target.Id;
+    }
 }

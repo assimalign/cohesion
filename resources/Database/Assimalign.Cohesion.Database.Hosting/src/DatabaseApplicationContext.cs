@@ -27,6 +27,8 @@ using Assimalign.Cohesion.Hosting.Health;
 /// engine/server registries are frozen before service factories run; retained options cannot
 /// change the running context.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationContext.DebugView))]
 public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
 {
     private DatabaseHealthTrace? _healthTrace;
@@ -407,5 +409,25 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     {
         _engines = Array.AsReadOnly([.. engines]);
         _servers = Array.AsReadOnly([.. servers]);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationContext _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Hosting.IHostEnvironment Environment => _target.Environment;
+        public global::System.Collections.Generic.IEnumerable<global::Assimalign.Cohesion.Hosting.IHostService> HostedServices => _target.HostedServices;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.DatabaseEngine> Engines => _target.Engines;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.DatabaseServer> Servers => _target.Servers;
+        public global::Assimalign.Cohesion.Configuration.IConfiguration Configuration => _target.Configuration;
+        public global::System.IServiceProvider Services => _target.Services;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Hosting.HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

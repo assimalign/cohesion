@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ClientFrameWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.ClientFrameWriter.DebugView))]
 internal sealed class ClientFrameWriter : ProtocolFrameWriter
 {
     private readonly ProtocolFrameWriter _writer;
@@ -45,4 +47,12 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
     }
 
     protected override ValueTask DisposeAsyncCore() => _writer.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.ClientFrameWriter value)
+        {
+            _ = value;
+        }
+    }
 }

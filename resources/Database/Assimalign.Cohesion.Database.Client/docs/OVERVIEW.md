@@ -110,3 +110,12 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 ## Explicit pool-reset construction
 
 The internal pool-reset exchange uses an explicit constructor while retaining the same negotiated status and connection-reuse behavior; see [DESIGN.md](DESIGN.md).
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Database.Client;
 /// they are returned.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.DatabaseClient.DebugView))]
 public sealed class DatabaseClient : IAsyncDisposable
 {
     private readonly IDuplexConnectionFactory _connectionFactory;
@@ -306,5 +308,17 @@ public sealed class DatabaseClient : IAsyncDisposable
             }
             await idle.CloseAsync().ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Client.DatabaseClient _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Client.DatabaseClient value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Client.DatabaseConnectionSettings Settings => _target.Settings;
     }
 }

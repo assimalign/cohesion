@@ -63,3 +63,12 @@ Database storage format, diagnostic identity, event or counter changes. All bina
 must be rebuilt together, including installed SDK/framework E2E payloads.
 
 Private identifiers and extension-container syntax follow the shared conventions. Resource kind strings, manifest fields, descriptor ownership and public composition signatures are unchanged.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Views use materialized resource identity and endpoint/mount references; descriptor delegation, environment secrets and serializer option initialization are omitted.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

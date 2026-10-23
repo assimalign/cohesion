@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabaseResourceCommandHandler {Kind,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler.DebugView))]
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
@@ -171,5 +173,17 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             throw new JsonException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResourceCommandHandlerRequiredJson, property));
         }
         return value.GetString()!;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

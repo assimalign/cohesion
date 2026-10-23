@@ -23,6 +23,8 @@ using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabaseAdminEndpointService")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseAdminEndpointService.DebugView))]
 internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -234,5 +236,13 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             ? address
             : throw new InvalidOperationException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServiceResolveBindAddressFailure, host));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseAdminEndpointService value)
+        {
+            _ = value;
+        }
     }
 }
