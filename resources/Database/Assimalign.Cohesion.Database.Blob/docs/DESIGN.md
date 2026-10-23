@@ -1767,3 +1767,15 @@ Catalog conflict callers use the internal static extension member
 exception; Blob retains its existing resource and failure translation. This placement preserves
 exception identity and text, with no public API, diagnostic code, wire, storage-format, event or
 counter change. Existing snapshot-conflict and transaction-failure tests cover the behavior.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.

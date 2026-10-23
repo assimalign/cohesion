@@ -363,8 +363,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             or > SqlQueryParserOptions.MaximumExpressionNestingLimit)
         {
             throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.ExpressionNestingLimit), options.ExpressionNestingLimit,
-                $"must be between {SqlQueryParserOptions.MinimumExpressionNestingLimit} and " +
-                $"{SqlQueryParserOptions.MaximumExpressionNestingLimit} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionNestingRequirement, SqlQueryParserOptions.MinimumExpressionNestingLimit, SqlQueryParserOptions.MaximumExpressionNestingLimit));
         }
 
         DatabaseEngineOptionChecks.GetBufferPoolPageCount(options.BufferPoolCapacity, engine, nameof(options.BufferPoolCapacity));

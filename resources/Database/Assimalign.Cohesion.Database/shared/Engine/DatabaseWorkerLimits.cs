@@ -68,7 +68,7 @@ internal static class DatabaseWorkerLimits
         if (workerFailureWindow > DatabaseEngine.MaximumWorkerFailureWindow)
         {
             throw DatabaseEngineOptionChecks.Refuse(engine, workerFailureWindowName, workerFailureWindow,
-                $"must be at most {DatabaseEngine.MaximumWorkerFailureWindow}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.OptionMaximumRequirement, DatabaseEngine.MaximumWorkerFailureWindow));
         }
 
         DatabaseEngineOptionChecks.ThrowIfNotPositive(workerFailureMinimumPasses, engine, workerFailureMinimumPassesName);
@@ -76,8 +76,7 @@ internal static class DatabaseWorkerLimits
         if (journalSizeLimit > 0 && journalSizeLimit < checkpointJournalSize)
         {
             throw DatabaseEngineOptionChecks.Refuse(engine, journalSizeLimitName, journalSizeLimit,
-                $"must be zero (the default) or at least the checkpoint journal size ({checkpointJournalSize} bytes): " +
-                "a journal would otherwise pass it before it is due for a checkpoint.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.JournalCheckpointMinimum, checkpointJournalSize));
         }
     }
 

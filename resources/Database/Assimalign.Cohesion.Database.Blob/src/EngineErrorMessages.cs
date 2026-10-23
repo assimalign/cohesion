@@ -20,4 +20,18 @@ internal static class EngineErrorMessages
     internal static string EngineOptionChecksRefuseFailure => ModelErrorMessages.EngineOptionChecksRefuseFailure;
     internal static string FileNamesThrowIfInvalidArgument => ModelErrorMessages.FileNamesThrowIfInvalidArgument;
     internal static string StateThrowIfPendingUnattachedFailure => ModelErrorMessages.StateThrowIfPendingUnattachedFailure;
+    internal static string EngineDescription => ModelErrorMessages.EngineDescription;
+    internal static string OptionPositiveRequirement => ModelErrorMessages.OptionPositiveRequirement;
+    internal static string OptionNonnegativeRequirement => ModelErrorMessages.OptionNonnegativeRequirement;
+    internal static string OptionMaximumRequirement => ModelErrorMessages.OptionMaximumRequirement;
+    internal static string BufferPoolCapacityRequirement => ModelErrorMessages.BufferPoolCapacityRequirement;
+    internal static string JournalCheckpointMinimum => ModelErrorMessages.JournalCheckpointMinimum;
+    internal static string DatabaseNameRule => ModelErrorMessages.DatabaseNameRule;
+    internal static string DatabaseNameEmpty => ModelErrorMessages.DatabaseNameEmpty;
+    internal static string DatabaseNameTooLong => ModelErrorMessages.DatabaseNameTooLong;
+    internal static string DatabaseNameCharacterInvalid => ModelErrorMessages.DatabaseNameCharacterInvalid;
+    internal static string DatabaseNameLeadingDot => ModelErrorMessages.DatabaseNameLeadingDot;
+    internal static string DatabaseNameTrailingDot => ModelErrorMessages.DatabaseNameTrailingDot;
+    internal static string DatabaseNameConsecutiveDots => ModelErrorMessages.DatabaseNameConsecutiveDots;
+    internal static string DatabaseNameDeviceReserved => ModelErrorMessages.DatabaseNameDeviceReserved;
 }

@@ -7638,3 +7638,15 @@ The shared Types module also binds modifier-refusal templates to each consumer's
 resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
 codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
 format with the current culture. Successful type validation adds no resource lookup.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.

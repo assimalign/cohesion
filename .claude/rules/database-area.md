@@ -67,7 +67,8 @@ contracts in this sense and stay.
    transactions, servers, builders, catalogs, clients and connections. When an internal
    implementation becomes the public type, it keeps an `internal` constructor. When
    construction must cross an assembly boundary, the type gets a public static factory on
-   itself (`SqlClient.Create(...)`, `LockManager.Create()`). The
+   itself (`SqlClient.Create(...)`). Parameterless construction uses public constructors
+   (`new LockManager()`, `new StoragePageLatch()`, owner decision 61). The
    `public static class X` + `public interface IX` + `internal DefaultX` triplet collapses into
    one `public sealed class X`. A factory may also sit on an abstract base and return its
    internal default leaf, the `Aes.Create()` shape (`ProtocolFrameReader.Create(...)`).

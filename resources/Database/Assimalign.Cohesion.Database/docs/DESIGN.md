@@ -1397,3 +1397,20 @@ structured diagnostic carrier exists. Standard .NET guards retain their argument
 The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.
 
 The convention review also inspected Neo4j `community/common/src/main/java/org/neo4j/kernel/api/exceptions/Status.java:877-886` (portable classification/category/title identities) and RavenDB `src/Raven.Client/Exceptions/RavenException.cs:26-29` (exception-owned construction). Cohesion keeps the approved short numeric identities and generated resources; neither engine's code or naming scheme is copied.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+The existing portable-name policy was rechecked against RavenDB src/Raven.Client/Util/ResourceNameValidator.cs:55-71 (length and reserved-name refusals) and Neo4j community/common/src/main/java/org/neo4j/kernel/database/NormalizedDatabaseName.java:27-30 (root-locale normalization). This change preserves Cohesion's existing ASCII policy and only moves its messages; no reference code is copied.
+
+The [convention audit](CONVENTIONS.md) records the reusable-throw migration, retained local
+guards and shared-source resource ownership.

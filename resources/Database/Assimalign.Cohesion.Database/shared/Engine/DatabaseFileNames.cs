@@ -82,10 +82,7 @@ internal static class DatabaseFileNames
     /// <summary>
     /// The rule, as every refusal of a name starts, the same on every model and operating system.
     /// </summary>
-    internal const string Rule =
-        "A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots, must not start " +
-        "or end with a dot or hold two dots in a row, and must not be a Windows device name (CON, PRN, AUX, NUL, " +
-        "COM0 to COM9, LPT0 to LPT9) on its own or before a dot.";
+    internal static string Rule => EngineErrorMessages.DatabaseNameRule;
 
     /// <summary>
     /// The file set that holds a SQL or key-value database's catalog, in the database's directory.
@@ -101,12 +98,12 @@ internal static class DatabaseFileNames
     {
         if (string.IsNullOrEmpty(name))
         {
-            return "The name is empty.";
+            return EngineErrorMessages.DatabaseNameEmpty;
         }
 
         if (name.Length > MaximumLength)
         {
-            return $"The name is {name.Length} characters long.";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseNameTooLong, name.Length);
         }
 
         for (int index = 0; index < name.Length; index++)
@@ -114,30 +111,30 @@ internal static class DatabaseFileNames
             char character = name[index];
             if (!char.IsAsciiLetterOrDigit(character) && character is not ('_' or '-' or '.'))
             {
-                return $"The name holds {Describe(character)} at position {index}.";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseNameCharacterInvalid, Describe(character), index);
             }
         }
 
         if (name[0] == '.')
         {
-            return "The name starts with a dot.";
+            return EngineErrorMessages.DatabaseNameLeadingDot;
         }
 
         if (name[^1] == '.')
         {
-            return "The name ends with a dot.";
+            return EngineErrorMessages.DatabaseNameTrailingDot;
         }
 
         if (name.Contains("..", StringComparison.Ordinal))
         {
-            return "The name holds two dots in a row.";
+            return EngineErrorMessages.DatabaseNameConsecutiveDots;
         }
 
         int dot = name.IndexOf('.');
         var stem = dot < 0 ? name.AsSpan() : name.AsSpan(0, dot);
         if (IsDeviceName(stem))
         {
-            return $"'{stem}' is a Windows device name.";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseNameDeviceReserved, stem.ToString());
         }
 
         return null;

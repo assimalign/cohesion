@@ -2569,3 +2569,15 @@ resource and the failure condition; a separate public exception/helper is unnece
 translation. Database/collection/executor callers share this member. There is no public API,
 SQLSTATE, wire, storage-format, event or counter change. Local validation predicates remain
 with the objects whose validity they check.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
