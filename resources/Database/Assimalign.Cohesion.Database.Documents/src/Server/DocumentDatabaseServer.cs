@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <remarks>The composition root owns the engine. The server owns its listener, binds on StartAsync,
 /// drains on StopAsync, and cannot restart. Every operation uses an automatic transaction;
 /// transactions over the wire are unsupported. Options are copied at creation.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer.DebugView))]
 public sealed class DocumentDatabaseServer : DatabaseServer
 {
     private readonly DocumentDatabaseEngine _engine;
@@ -292,5 +294,17 @@ public sealed class DocumentDatabaseServer : DatabaseServer
         {
             DocumentDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine Engine => _target.Engine;
     }
 }

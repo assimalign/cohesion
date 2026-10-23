@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 // Utf8JsonWriter can request six bytes per UTF-16 character before it knows the
 // actual escape count. Allow that bounded scratch space, but never retain more
 // than one frame of committed JSON, even when a projection repeats large values.
+[global::System.Diagnostics.DebuggerDisplay("DocumentJsonBuffer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonBuffer.DebugView))]
 internal sealed class DocumentJsonBuffer : IBufferWriter<byte>
 {
     private const int maximumLength = (int)ProtocolFrameHeader.MaxPayloadLength;
@@ -46,6 +48,14 @@ internal sealed class DocumentJsonBuffer : IBufferWriter<byte>
         if (required > _buffer.Length)
         {
             Array.Resize(ref _buffer, Math.Min(maximumCapacity, Math.Max(required, Math.Max(256, _buffer.Length * 2))));
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonBuffer value)
+        {
+            _ = value;
         }
     }
 }

@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentQueryResult")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DebugView))]
 internal sealed class DocumentQueryResult : DatabaseResultSet
 {
     private readonly IReadOnlyList<DatabaseColumn> _columns;
@@ -49,6 +51,8 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    [global::System.Diagnostics.DebuggerDisplay("DocumentQueryRow FieldCount={FieldCount}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DocumentQueryRow.DebugView))]
     internal sealed class DocumentQueryRow : DatabaseRow
     {
         private readonly object?[] _values;
@@ -92,5 +96,32 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
         private object Required(int ordinal) => GetValue(ordinal) ?? throw DatabaseException.CreateDocumentsFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentQueryRowRequiredDatabase, ordinal));
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DocumentQueryRow _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult.DocumentQueryRow value)
+            {
+                _target = value;
+            }
+
+            public int FieldCount => _target.FieldCount;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentQueryResult value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Execution.DatabaseResultStatus Status => _target.Status;
+        public long AffectedCount => _target.AffectedCount;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.Diagnostic> Diagnostics => _target.Diagnostics;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Execution.DatabaseColumn> Columns => _target.Columns;
     }
 }

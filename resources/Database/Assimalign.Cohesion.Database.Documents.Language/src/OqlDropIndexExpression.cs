@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>
 /// A <c>DROP INDEX</c> statement that removes an index from a collection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlDropIndexExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlDropIndexExpression.DebugView))]
 public sealed class OqlDropIndexExpression : OqlExpression
 {
     /// <summary>Initializes a document index removal statement.</summary>
@@ -34,4 +36,20 @@ public sealed class OqlDropIndexExpression : OqlExpression
 
     /// <summary>Gets whether an absent index is a no-op.</summary>
     public bool IfExists { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlDropIndexExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlDropIndexExpression value)
+        {
+            _target = value;
+        }
+
+        public string IndexName => _target.IndexName;
+        public string Collection => _target.Collection;
+        public bool IfExists => _target.IfExists;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

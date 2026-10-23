@@ -74,10 +74,20 @@ internal sealed partial class DocumentPlanner
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("UpdatePathNode")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.UpdatePathNode.DebugView))]
     private sealed class UpdatePathNode
     {
         internal Dictionary<OqlPathSegment, UpdatePathNode> Children { get; } = new();
         internal bool IsTarget { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.UpdatePathNode value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)

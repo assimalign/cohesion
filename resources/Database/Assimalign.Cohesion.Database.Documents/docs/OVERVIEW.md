@@ -282,3 +282,9 @@ Session-state, result-row and model-specific refusals expose structured codes wh
 their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
 lists each condition. Successful execution, transaction ownership, storage formats and wire
 layouts are unchanged; the existing wire formatter includes an error code once.
+
+## Debugger inspection (#1470)
+
+Documents debugger views show stored metadata without evaluating queries, reading content or taking session snapshots.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

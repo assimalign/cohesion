@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Parses the executable OQL profile into an expression tree with diagnostics.</summary>
 /// <remarks>Instances serialize concurrent calls. Offsets are zero-based UTF-16 positions with exclusive ends.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("OqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
 public sealed partial class OqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
@@ -714,4 +716,12 @@ public sealed partial class OqlQueryParser : QueryParser
     }
 
     private readonly record struct Lexeme(TokenType Type, string Text, int Start, int End, int Line);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser value)
+        {
+            _ = value;
+        }
+    }
 }

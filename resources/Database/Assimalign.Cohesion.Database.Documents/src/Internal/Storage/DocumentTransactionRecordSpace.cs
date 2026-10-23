@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentTransactionRecordSpace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentTransactionRecordSpace.DebugView))]
 internal sealed class DocumentTransactionRecordSpace : TransactionRecordSpace
 {
     private readonly DocumentStorage _storage;
@@ -30,4 +32,12 @@ internal sealed class DocumentTransactionRecordSpace : TransactionRecordSpace
     protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
     protected override ulong PackLocationCore(PageId pageId, int slotIndex) => DocumentStorage.PackLocation(pageId, slotIndex);
     protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location) => DocumentStorage.UnpackLocation(location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentTransactionRecordSpace value)
+        {
+            _ = value;
+        }
+    }
 }

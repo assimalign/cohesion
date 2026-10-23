@@ -23,3 +23,9 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+DocumentId debugger inspection exposes its existing public Value getter, which reads the stored identifier or the existing empty default. Static codecs remain unchanged; inspection does not parse JSON, encode payloads or walk document values.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// which the handshake records once each; the engine session is re-exposed typed by a covariant
 /// override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession.DebugView))]
 internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 {
     private static readonly string _shutdownMessage = ErrorMessages.ServerShuttingDown;
@@ -803,5 +805,18 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

@@ -65,6 +65,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the transaction are re-exposed typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession.DebugView))]
 public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQueryRequest>
 {
     private readonly DocumentDatabase _database;
@@ -454,5 +456,17 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         {
             await operation.AbortAsync(new DatabaseException(ErrorMessages.SessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabase Database => _target.Database;
     }
 }

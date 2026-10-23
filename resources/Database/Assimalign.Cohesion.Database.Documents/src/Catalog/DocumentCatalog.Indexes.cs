@@ -514,6 +514,8 @@ public sealed partial class DocumentCatalog
         => _coordinator.TryGetStorageTransaction(context, out var bracket)
             ? bracket : throw new InvalidOperationException(ErrorMessages.CatalogResolveStatementBracketFailure);
 
+    [global::System.Diagnostics.DebuggerDisplay("IndexUndo")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.IndexUndo.DebugView))]
     private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DocumentCatalog _catalog;
@@ -537,5 +539,13 @@ public sealed partial class DocumentCatalog
         protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.IndexUndo value)
+            {
+                _ = value;
+            }
+        }
     }
 }

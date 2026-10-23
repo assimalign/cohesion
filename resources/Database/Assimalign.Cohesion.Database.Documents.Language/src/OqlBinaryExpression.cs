@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A binary arithmetic, comparison, or logical operation.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlBinaryExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlBinaryExpression.DebugView))]
 public sealed class OqlBinaryExpression : OqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="OqlBinaryExpression"/> class.</summary>
@@ -24,4 +26,20 @@ public sealed class OqlBinaryExpression : OqlExpression
     public string Operator { get; }
     /// <summary>Gets the right operand.</summary>
     public OqlExpression Right { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlBinaryExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlBinaryExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Left => _target.Left;
+        public string Operator => _target.Operator;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Right => _target.Right;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

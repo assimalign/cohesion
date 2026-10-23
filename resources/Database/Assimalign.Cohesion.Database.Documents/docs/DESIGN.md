@@ -2630,3 +2630,9 @@ The normal successful paths add no diagnostic allocation, counter or process-wid
 There is no storage-format or protocol-version change and no new SQLSTATE mapping.
 The structured Failure frame carries the new producer diagnostics, and its message formats
 the first Error code once. Duplicate wire parameter keys reuse `CD01009` before parsing.
+
+## Debugger inspection (#1470)
+
+Documents debugger views expose stored collection identities, request/result metadata and reviewed owned-stream flags/lengths. They omit query parameters, content, synchronized current-transaction getters and engine/session snapshots. Internal helpers with no safe public or protected data have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

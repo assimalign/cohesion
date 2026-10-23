@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>An inclusive range predicate.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlBetweenExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlBetweenExpression.DebugView))]
 public sealed class OqlBetweenExpression : OqlExpression
 {
     /// <summary>Initializes a BETWEEN predicate.</summary>
@@ -27,4 +29,21 @@ public sealed class OqlBetweenExpression : OqlExpression
     public OqlExpression Upper { get; }
     /// <summary>Gets whether the result is negated.</summary>
     public bool Negated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlBetweenExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlBetweenExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Operand => _target.Operand;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Lower => _target.Lower;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Upper => _target.Upper;
+        public bool Negated => _target.Negated;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

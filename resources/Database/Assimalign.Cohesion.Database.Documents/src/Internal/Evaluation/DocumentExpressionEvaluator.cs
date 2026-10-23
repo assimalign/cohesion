@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentExpressionEvaluator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentExpressionEvaluator.DebugView))]
 internal sealed partial class DocumentExpressionEvaluator
 {
     private readonly string? _alias;
@@ -465,5 +467,13 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         internal static ValueComparer Instance { get; } = new();
         public int Compare(object? left, object? right) => DocumentExpressionEvaluator.Compare(left, right);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentExpressionEvaluator value)
+        {
+            _ = value;
+        }
     }
 }

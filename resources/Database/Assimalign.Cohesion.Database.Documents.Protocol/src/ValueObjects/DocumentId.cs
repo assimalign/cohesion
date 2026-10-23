@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Protocol;
 /// Identities are ordinal, case-sensitive strings (for example <c>orders/2026/1042</c>),
 /// so range scans over identity prefixes are meaningful.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentId {Value,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Protocol.DocumentId.DebugView))]
 public readonly struct DocumentId : IEquatable<DocumentId>
 {
     private readonly string? _value;
@@ -54,4 +56,16 @@ public readonly struct DocumentId : IEquatable<DocumentId>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(DocumentId left, DocumentId right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Protocol.DocumentId _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Protocol.DocumentId value)
+        {
+            _target = value;
+        }
+
+        public string Value => _target.Value;
+    }
 }

@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction.DebugView))]
 public sealed class DocumentDatabaseTransaction : DatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
@@ -171,5 +173,18 @@ public sealed class DocumentDatabaseTransaction : DatabaseTransaction
     {
         var offline = _database.TranslateOffline(error);
         return ReferenceEquals(offline, error) ? _database.TranslateKernelFailure(error) : offline;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }

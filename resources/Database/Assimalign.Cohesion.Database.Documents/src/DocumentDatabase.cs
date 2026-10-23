@@ -47,6 +47,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the disposed flag.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabase {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabase.DebugView))]
 public sealed class DocumentDatabase : DatabaseInstance
 {
     // The callback runs only after database composition has attached its current index manager.
@@ -540,5 +542,18 @@ public sealed class DocumentDatabase : DatabaseInstance
         {
             await DataStorage.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine Engine => _target.Engine;
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
     }
 }

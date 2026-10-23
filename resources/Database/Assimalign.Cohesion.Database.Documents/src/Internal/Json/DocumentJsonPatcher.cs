@@ -206,6 +206,8 @@ internal static class DocumentJsonPatcher
             ErrorMessages.UpdatePathShapeInvalid, path), node.Target.Path.Location);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PatchNode")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonPatcher.PatchNode.DebugView))]
     private sealed class PatchNode
     {
         internal PatchNode(OqlPathSegment segment, DocumentUpdateTarget target)
@@ -220,5 +222,13 @@ internal static class DocumentJsonPatcher
         internal List<PatchNode> Ordered { get; } = new();
         internal int? Leaf { get; set; }
         internal bool HasWrites { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentJsonPatcher.PatchNode value)
+            {
+                _ = value;
+            }
+        }
     }
 }

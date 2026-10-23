@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// implementation; its operations take the typed <see cref="DocumentDatabaseSession"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentCollection {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentCollection.DebugView))]
 public sealed class DocumentCollection
 {
     private readonly DocumentDatabase _database;
@@ -215,5 +217,17 @@ public sealed class DocumentCollection
         {
             DatabaseTransactionAbortedException.ThrowDocumentConflict();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentCollection value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

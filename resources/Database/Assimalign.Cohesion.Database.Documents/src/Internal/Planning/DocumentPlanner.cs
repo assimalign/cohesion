@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentPlanner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.DebugView))]
 internal sealed partial class DocumentPlanner
 {
     private readonly DocumentCatalog _catalog;
@@ -602,5 +604,13 @@ internal sealed partial class DocumentPlanner
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
         return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner value)
+        {
+            _ = value;
+        }
     }
 }

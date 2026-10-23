@@ -363,9 +363,26 @@ internal static partial class DocumentPlanExecutor
         _ => DatabaseType.Null,
     };
 
+    [global::System.Diagnostics.DebuggerDisplay("EvaluatedRow")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow.DebugView))]
     private sealed record EvaluatedRow(object?[] Values, DocumentEvaluationContext Document, IReadOnlyList<DocumentEvaluationContext>? Group, int Ordinal)
     {
         internal object?[] OrderKeys { get; set; } = [];
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanExecutor.EvaluatedRow value)
+            {
+                _target = value;
+            }
+
+            public object?[] Values => _target.Values;
+            public global::Assimalign.Cohesion.Database.Documents.Internal.DocumentEvaluationContext Document => _target.Document;
+            public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Internal.DocumentEvaluationContext>? Group => _target.Group;
+            public int Ordinal => _target.Ordinal;
+        }
     }
 
     private sealed class TupleComparer : IComparer<object?[]>
