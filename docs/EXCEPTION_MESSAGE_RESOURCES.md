@@ -66,7 +66,7 @@ types the assembly does not own.
 
 ## Mechanism proof and CI coverage
 
-[ResourceGenerationCheck](../build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj)
+[ResourceGenerationCheck](../fixtures/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj)
 is an executable probe of the shared mechanism. It sets both current cultures to `fr-FR`,
 retrieves the neutral resource through the generated accessor, and constructs an exception with
 the resource format and `12.5`. It requires the exact message

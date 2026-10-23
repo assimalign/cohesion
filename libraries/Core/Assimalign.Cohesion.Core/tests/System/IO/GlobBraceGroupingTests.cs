@@ -9,7 +9,7 @@ using Assimalign.Cohesion;
 namespace System.IO.Tests;
 
 /// <summary>
-/// Pins the brace-group matching that <c>docs/Assembly/System.IO/Glob/OVERVIEW.md</c> documents,
+/// Pins brace-group matching with non-empty alternatives,
 /// and the end-of-input handling that brace groups exposed.
 /// </summary>
 public class GlobBraceGroupingTests

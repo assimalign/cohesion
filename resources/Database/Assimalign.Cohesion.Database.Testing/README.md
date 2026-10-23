@@ -70,7 +70,7 @@ its SDK and framework packages from `_out/packages`. Without them the fixture ca
 tests fail on missing generated output rather than on anything they are actually asserting:
 
 ```bash
-pwsh installer/scripts/Install-Local.ps1
+pwsh scripts/Install-Local.ps1
 ```
 
 This is the same command the `database-testing-pack` job runs in

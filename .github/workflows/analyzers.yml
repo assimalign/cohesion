@@ -4,6 +4,10 @@ on:
     paths:
       - "analyzers/**"
       - "build/**"
+      - "fixtures/IntegrationCheck/**"
+      - "fixtures/ResourceGenerationCheck/**"
+      - "fixtures/Directory.Build.props"
+      - "scripts/build/Test-CohesionSharedSource.ps1"
       - "libraries/Core/**"
       - "libraries/ObjectMapping/**"
       - "libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/**"
@@ -95,7 +99,10 @@ jobs:
 
       - name: Verify shared-source module selection
         shell: pwsh
-        run: ./build/tests/Test-CohesionSharedSource.ps1
+        run: ./scripts/build/Test-CohesionSharedSource.ps1
 
       - name: "Build: IntegrationCheck"
-        run: dotnet build "./build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj" --configuration Release
+        run: dotnet build "./fixtures/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj" --configuration Release
+
+      - name: Verify generated error resources
+        run: dotnet run --project "./fixtures/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj" --configuration Release

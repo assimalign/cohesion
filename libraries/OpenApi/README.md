@@ -85,7 +85,7 @@ ApiManager, or any service runtime.
 
 Every package in the table is implemented. The eight libraries are built and tested on Linux, Windows,
 and macOS by `.github/workflows/library-openapi.yml` and are listed in the release inventory
-(`installer/scripts/modules/CohesionPackaging.psm1`), so a release publishes each as its own package.
+(`scripts/modules/CohesionPackaging.psm1`), so a release publishes each as its own package.
 The generator is built and tested by `.github/workflows/analyzers.yml` and reaches consumers only inside
 the Attributes package. No OpenApi package is a member of a shared framework, so an application, an
 `Sdk.Web` one included, references the packages it uses.

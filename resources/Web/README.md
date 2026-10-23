@@ -145,7 +145,7 @@ The working checklist also lives in `.claude/rules/web-area.md`:
 
 1. **csproj** — references per the dependency rule; builder verbs ship in the package itself:
    a `builder.Services.Add<Feature>` registration verb as a component integration (see *Feature
-   registration*, plus a call in `build/IntegrationCheck` and a path in `analyzers.yml`), and
+   registration*, plus a call in `fixtures/IntegrationCheck` and a path in `analyzers.yml`), and
    `Use<Feature>` pipeline verbs on `IWebApplicationPipelineBuilder`. Registration stays
    dependency-free (typed features and values — no DI reference, no configuration binding).
 2. **Framework membership** — a framework-delivered feature gets a `CohesionFrameworkAssembly` line in
@@ -160,9 +160,9 @@ The working checklist also lives in `.claude/rules/web-area.md`:
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root
    `Assimalign.Cohesion.slnx`.
 4. **CI and inventory** — the matrix in `.github/workflows/resource-web.yml` and
-   `installer/scripts/modules/CohesionPackaging.psm1`; both lists include each packable project.
-5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
-   stabilizes), and a row in the project map below.
+   `scripts/modules/CohesionPackaging.psm1`; both lists include each packable project.
+5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` and a row in the project map below.
+   Public API reference belongs in [cohesion-docs](https://github.com/assimalign/cohesion-docs).
 
 The runtime consumes the root and three feature packages: `Web.Routing`, `Web.Server`, and
 `Web.Health`; feature libraries remain rooted in Web. Health and resource integrations live

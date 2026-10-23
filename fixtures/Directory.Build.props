@@ -1,0 +1,9 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+
+	<!-- Repository-wide build and generator checks. Project-owned fixtures stay with their tests. -->
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+</Project>

@@ -145,15 +145,17 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     internal static Dictionary<string, string> CreateMatchingSdkPins()
     {
-        using JsonDocument repositorySettings = ReadRepositoryGlobalJson();
-        return repositorySettings.RootElement
-            .GetProperty("msbuild-sdks")
-            .EnumerateObject()
-            .Where(property =>
-                string.Equals(property.Name, BaseSdkPackageId, StringComparison.OrdinalIgnoreCase) ||
-                property.Name.StartsWith($"{BaseSdkPackageId}.", StringComparison.OrdinalIgnoreCase))
+        // Root global.json selects the .NET SDK; isolated consumers own their Cohesion pins.
+        // ApplicationModel is imported by its owning SDK at that SDK's version, without a pin.
+        return Directory.EnumerateDirectories(
+                Path.Combine(_repositoryRoot, "sdks"),
+                $"{BaseSdkPackageId}*",
+                SearchOption.TopDirectoryOnly)
+            .Select(directory => Path.GetFileName(directory))
+            .Where(packageId => !string.Equals(
+                packageId, "Assimalign.Cohesion.Sdk.ApplicationModel", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(
-                property => property.Name,
+                packageId => packageId,
                 _ => _packageVersion,
                 StringComparer.OrdinalIgnoreCase);
     }

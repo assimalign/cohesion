@@ -51,7 +51,7 @@ The implementing PR will:
 4. Add the assembly to the CI matrix in
    `.github/workflows/library-dns.yml`.
 5. Add the project to `$script:CohesionReleaseLibrary` in
-   `installer/scripts/modules/CohesionPackaging.psm1`; it ships as an
+   `scripts/modules/CohesionPackaging.psm1`; it ships as an
    ordinary NuGet package (no shared framework lists the Dns family).
 6. Replace this OVERVIEW with the post-implementation version
    (status, public surface, etc.) and either freeze

@@ -21,7 +21,4 @@
 	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/">
 		<Project Path="Assimalign.Cohesion.OpenTelemetry/tests/Assimalign.Cohesion.OpenTelemetry.Tests.csproj" />
 	</Folder>
-	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/">
-		<File Path="Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/OVERVIEW.md" />
-	</Folder>
 </Solution>

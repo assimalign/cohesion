@@ -10,7 +10,7 @@
 # a pull request's versions when it closes and keeps the newest 20 main builds.
 #
 # The version comes from Get-CohesionCiPackageVersion in
-# installer/scripts/modules/CohesionPackaging.psm1. It extends the PREDECESSOR of the canonical
+# scripts/modules/CohesionPackaging.psm1. It extends the PREDECESSOR of the canonical
 # version, so every CI build sorts below the release it builds toward:
 #
 #     canonical 10.0.0-preview.1   ->  main: 10.0.0-preview.0.ci.<run>
@@ -77,7 +77,7 @@ jobs:
         with:
           persist-credentials: false
           path: _ci/tooling
-          sparse-checkout: installer/scripts/modules
+          sparse-checkout: scripts/modules
 
       - name: Resolve CI package version
         id: version
@@ -87,9 +87,9 @@ jobs:
           COHESION_BUILD_NUMBER: ${{ github.run_number }}
           COHESION_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          Import-Module ./_ci/tooling/installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./_ci/tooling/scripts/modules/CohesionPackaging.psm1 -Force
 
-          $canonicalVersion = (& ./installer/scripts/Get-CohesionVersion.ps1)
+          $canonicalVersion = (& ./scripts/Get-CohesionVersion.ps1)
           if (-not $canonicalVersion) {
             throw 'Get-CohesionVersion.ps1 produced no output.'
           }
@@ -152,7 +152,7 @@ jobs:
           COHESION_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
           COHESION_BUILD_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: >-
-          ./installer/scripts/Pack-Release.ps1
+          ./scripts/Pack-Release.ps1
           -Version $env:COHESION_PACKAGE_VERSION
           -RepositoryCommit $env:COHESION_BUILD_COMMIT
 
@@ -228,7 +228,7 @@ jobs:
             throw "Could not resolve the host RID from 'dotnet --info'."
           }
 
-          ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 `
+          ./scripts/sdks/Invoke-SdkConsumerSmoke.ps1 `
               -PackageDirectory ./_ci/packages `
               -Version $env:COHESION_VERSION `
               -RuntimeIdentifier $rid

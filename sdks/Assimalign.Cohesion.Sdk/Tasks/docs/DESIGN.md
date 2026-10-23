@@ -120,6 +120,10 @@ and compile consumer fixtures. Visual Studio compatibility tests load shipped
 props and targets with .NET Framework MSBuild to reject APIs unavailable in that
 host.
 
+The shared consumer workspace derives Cohesion SDK pins from the repository's SDK families
+at the package version under test. Root `global.json` supplies only the .NET SDK settings.
+The ApplicationModel SDK remains an implicit, version-matched import and receives no consumer pin.
+
 ## Non-goals
 
 The base SDK does not create resource manifests, generated resource or control-

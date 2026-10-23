@@ -21,9 +21,9 @@ the RID reported by `dotnet --info`):
 ```powershell
 dotnet build build/Tasks -c Debug
 $rid = 'win-arm64'
-./installer/scripts/Install-Local.ps1 -Configuration Release -Rids $rid -SkipLibraries -UseCanonicalVersion
+./scripts/Install-Local.ps1 -Configuration Release -Rids $rid -SkipLibraries -UseCanonicalVersion
 $env:COHESION_TEMPLATES_TEST_FEED = '_out/packages'
-$env:COHESION_TEMPLATES_TEST_PACKAGE_VERSION = ./installer/scripts/Get-CohesionVersion.ps1
+$env:COHESION_TEMPLATES_TEST_PACKAGE_VERSION = ./scripts/Get-CohesionVersion.ps1
 dotnet test tooling/templates/Assimalign.Cohesion.Templates/tests/Assimalign.Cohesion.Templates.Tests.csproj -c Release --filter FullyQualifiedName~Build_Spa
 ```
 

@@ -14,12 +14,6 @@
 		<File Path="Assimalign.Cohesion.NotificationHub/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.NotificationHub/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub/docs/Assembly/Assimalign.Cohesion.NotificationHub/INotificationHubApplication/">
-		<File Path="Assimalign.Cohesion.NotificationHub/docs/Assembly/Assimalign.Cohesion.NotificationHub/INotificationHubApplication/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub/docs/Assembly/Assimalign.Cohesion.NotificationHub/INotificationHubApplicationBuilder/">
-		<File Path="Assimalign.Cohesion.NotificationHub/docs/Assembly/Assimalign.Cohesion.NotificationHub/INotificationHubApplicationBuilder/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub/src/">
 		<Project Path="Assimalign.Cohesion.NotificationHub/src/Assimalign.Cohesion.NotificationHub.csproj" />
 	</Folder>
@@ -38,9 +32,6 @@
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.NotificationHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.NotificationHub.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/docs/Assembly/Assimalign.Cohesion.NotificationHub.Hosting/NotificationHubApplication/">
-		<File Path="Assimalign.Cohesion.NotificationHub.Hosting/docs/Assembly/Assimalign.Cohesion.NotificationHub.Hosting/NotificationHubApplication/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.NotificationHub.Hosting/src/Assimalign.Cohesion.NotificationHub.Hosting.csproj" />
@@ -64,9 +55,6 @@
 	</Folder>
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.NotificationHub.ApplicationModel/tests/Assimalign.Cohesion.NotificationHub.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Refs/">
 		<File Path="Assimalign.Cohesion.NotificationHub.Refs/Directory.Build.props" />

@@ -77,11 +77,15 @@ Cohesion is a mono repository that contains all the source code, extensions, and
 | `./build`       | Custom MSBuild infrastructure: centralized targets, package versions, and build tasks shared by every project. |
 | `./docs`        | Repository-level documentation (delivery roadmap, service design, build system, versioning).               |
 | `./extensions`  | IDE and platform integrations (Visual Studio extension); `dotnet new` templates moved to `./tooling/templates`. |
-| `./installer`   | WiX MSI source and delivery scripts (`Install-Local.ps1`, domain scaffolding).                              |
+| `./fixtures`    | Repository-wide integration, resource-generation, and isolated SDK consumer checks.                       |
 | `./libraries`   | Foundation libraries (L1) — every Cohesion building block. `libraries/App` produces the `App` hosting-kernel framework and holds the pack logic every framework shares. |
 | `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family. Each area produces its own framework; its members are listed in the area's `.Runtime/Directory.Build.props`. |
 | `./sdks`        | MSBuild SDK projects (`Assimalign.Cohesion.Sdk[.Domain]`).                                                  |
-| `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts, `dotnet new` templates in `templates/`).                    |
+| [`./scripts`](scripts/README.md) | All repository PowerShell entry points, shared modules, and script tests.                    |
+| `./tooling`     | Developer tooling (`cohesion` CLI and `dotnet new` templates in `Templates/`).                              |
+
+Public API reference is maintained in [cohesion-docs](https://github.com/assimalign/cohesion-docs).
+Project overview and design documents stay beside the implementation in this repository.
 
 The delivery waves below reflect the dependency order of the foundation libraries (see [docs/programs/DELIVERY_ROADMAP.md](docs/programs/DELIVERY_ROADMAP.md) for the full plan):
 

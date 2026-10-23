@@ -239,7 +239,7 @@ happen to compose.
   already supply the TFM.
 - **A relative path inside a fixture changes depth when it moves.** The Database fixture's
   `NuGet.Config` points at `_out/packages` relatively and
-  `installer/scripts/modules/tests/CohesionReleasePolicy.Tests.ps1` reads that file by path; check
+  `scripts/tests/CohesionReleasePolicy.Tests.ps1` reads that file by path; check
   both when relocating one.
 - **The owning area's CI workflow carries the fixture path** in its `paths:` trigger filter, so a
   change to the fixture still builds the area that depends on it.

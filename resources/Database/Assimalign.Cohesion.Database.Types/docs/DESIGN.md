@@ -56,7 +56,7 @@ references makes cross-model ordering a compile-time fact rather than a conventi
 - **Unicode 17.0 data is pinned in source.** Neither the three byte transforms nor
   their comparisons and hashes use runtime normalization, casing, or `CompareInfo`.
   They work identically under invariant globalization and across ICU upgrades.
-  [The generator](../tools/Generate-CollationUnicodeData.ps1) verifies SHA-256 hashes
+  [The generator](../../../../scripts/resources/Database/Generate-CollationUnicodeData.ps1) verifies SHA-256 hashes
   of the official [CaseFolding.txt](https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt)
   and [UnicodeData.txt](https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt) inputs;
   [Unicode License v3](UNICODE_LICENSE.txt) covers the generated tables. Updating

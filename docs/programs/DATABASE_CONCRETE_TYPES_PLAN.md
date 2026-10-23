@@ -2129,7 +2129,7 @@ The order is linear apart from one outside prerequisite: phase 2 waits for #1236
 - `dotnet build` and `dotnet test` for every `resources/Database` project, passing the `.csproj`
   path, with no new warnings;
 - COHRES001, COHRES002 and COHRES004 green;
-- `pwsh build/scripts/Update-CohesionDependencyGraph.ps1 -Check`;
+- `pwsh scripts/Update-CohesionDependencyGraph.ps1 -Check`;
 - the deviation line from `database-area.md` in the PR summary;
 - each touched project's `docs/DESIGN.md` updated in the same commit;
 - NativeAOT and trimming safety unchanged.
@@ -3357,7 +3357,7 @@ readings their entries record:
   `DefaultBlobClient`).
 - *Markers* (§8): the four P5 bases.
 - *Docs.* Each client's `DESIGN.md` gains a "Concrete types" section and loses the interface
-  names, as do the `OVERVIEW.md` files and Blob.Client's `docs/Assembly` page (a P8 item, done
+  names, as do the `OVERVIEW.md` files and Blob.Client's API reference page (now owned by `cohesion-docs`) (a P8 item, done
   with its owner); the Blob and Graph model `DESIGN.md` files name the exchange bases.
 - *Outside the clients:* call-site retypes in Graph.Tests (`GraphCatalogClientTests`,
   `GraphCatalogTestExchange`), Hosting.Tests (`ResourceCommandHostingTests`,
@@ -4267,9 +4267,9 @@ occurrence counter. Existing Graph event 12 and root event 28 need separate thro
   `DatabaseResult` (§6.8, including non-null diagnostics), plus `QueryParser` and
   `QueryAnalyzer`. #1576–#1579 delivered diagnostic ownership, the memberless request root,
   session capabilities and all five result-family renames; P8 must build on those names.
-- **Docs.** The `docs/Assembly` pages that name interfaces (Blob.Client, Graph, Graph.Catalog and
+- **Docs.** The API reference pages in `cohesion-docs` that name interfaces (Blob.Client, Graph, Graph.Catalog and
   Graph.Storage), per-project OVERVIEW and DESIGN leftovers, the area README project map,
-  `docs/DEPENDENCIES.md` (regenerated), and the cohesion-docs mirror. The program documents P6
+  `docs/DEPENDENCIES.md` (regenerated), and the documentation in cohesion-docs. The program documents P6
   left naming the deleted interfaces in the present tense (§7, "P6, as landed", *Docs*).
 - **Decisions.** Re-raise the analyzer decision (§11).
 - **Cleanup.** Fold this plan's durable parts into the DESIGN files and delete it.

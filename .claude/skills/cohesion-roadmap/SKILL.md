@@ -11,7 +11,7 @@ carried files in `data/` hold only what the board cannot: the plan, program and 
 naming, and the approved realignment record.
 
 ```pwsh
-.claude/skills/cohesion-roadmap/scripts/Get-CohesionRoadmapData.ps1 -OutDir <dir> -Html
+scripts/resources/Database/Get-CohesionRoadmapData.ps1 -OutDir <dir> -Html
 ```
 
 Sanity check: run with `-Previous <the last roadmap-data.json>` and read `changes`. Every moved, added or removed
@@ -89,10 +89,10 @@ Full model with field-level sources: `reference/data-model.md`.
 ## Regenerating
 
 ```pwsh
-scripts/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Html                       # collect + build + page
-scripts/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Stage build -Html          # rebuild from the snapshot, no GitHub traffic
-scripts/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -MaxAgeHours 2 -Html         # reuse issue pages up to 2 h old (local rebuilds only)
-scripts/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Html -Previous C:\temp\roadmap-last\roadmap-data.json   # explain what moved
+scripts/resources/Database/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Html                       # collect + build + page
+scripts/resources/Database/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Stage build -Html          # rebuild from the snapshot, no GitHub traffic
+scripts/resources/Database/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -MaxAgeHours 2 -Html         # reuse issue pages up to 2 h old (local rebuilds only)
+scripts/resources/Database/Get-CohesionRoadmapData.ps1 -OutDir C:\temp\roadmap -Html -Previous C:\temp\roadmap-last\roadmap-data.json   # explain what moved
 ```
 
 `-RealignStateDir <dir>` (default `%LOCALAPPDATA%\cohesion-board-realign` when it exists) adds the realign

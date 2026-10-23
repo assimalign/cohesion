@@ -9,7 +9,7 @@
 #   * every main build (<base>.ci.<build>) outside the newest 20 of its base.
 #
 # Selection is Select-CohesionCiPackageVersionToPrune in
-# installer/scripts/modules/CohesionPackaging.psm1, which only ever returns those exact CI shapes,
+# scripts/modules/CohesionPackaging.psm1, which only ever returns those exact CI shapes,
 # so a release version (10.0.0-preview.1), stable or local version is never selected. The packages
 # examined are the ones the release inventory publishes (Get-CohesionReleasePackageId), because
 # GITHUB_TOKEN cannot list an organization's packages; cohesion-platforms' packages of the same
@@ -94,7 +94,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: installer/scripts/modules
+          sparse-checkout: scripts/modules
 
       - name: Prune CI package versions
         shell: pwsh
@@ -104,8 +104,8 @@ jobs:
           COHESION_REPOSITORY: ${{ github.repository }}
           COHESION_PRUNE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
-          Import-Module ./installer/scripts/modules/CohesionPackageFeed.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackageFeed.psm1 -Force
 
           $arguments = @{
             Organization   = $env:COHESION_PACKAGE_OWNER

@@ -79,9 +79,10 @@ configuration binding are `*.Hosting` concerns one layer up.
 
 ## Project documentation
 
-Per-project `docs/OVERVIEW.md`, `docs/DESIGN.md`, and `docs/Assembly/` live beside each project's
+Per-project `docs/OVERVIEW.md` and `docs/DESIGN.md` live beside each project's
 `src/`. Start at [Assimalign.Cohesion.Http/docs/DESIGN.md](Assimalign.Cohesion.Http/docs/DESIGN.md)
 for the root abstractions and the feature-collection model. The server transport is introduced in
 [Http.Connections overview](Assimalign.Cohesion.Http.Connections/docs/OVERVIEW.md).
 Decisions that span more than one package
 (server WebSockets, trailers) are in [docs/libraries/Http/DECISIONS.md](../../docs/libraries/Http/DECISIONS.md).
+Public API reference belongs in [cohesion-docs](https://github.com/assimalign/cohesion-docs).

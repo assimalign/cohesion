@@ -14,12 +14,6 @@
 		<File Path="Assimalign.Cohesion.IoTHub/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IoTHub/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/">
-		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/">
-		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub/src/Assimalign.Cohesion.IoTHub.csproj" />
 	</Folder>
@@ -29,9 +23,6 @@
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/">
-		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
@@ -56,9 +47,6 @@
 	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.IoTHub.ApplicationModel/tests/Assimalign.Cohesion.IoTHub.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Refs/">
 		<File Path="Assimalign.Cohesion.IoTHub.Refs/Directory.Build.props" />

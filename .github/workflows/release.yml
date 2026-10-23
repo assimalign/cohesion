@@ -16,7 +16,7 @@
 #     exchange in publish-nuget succeeds.
 #
 # Everything the release ships and everything it validates comes from one place:
-# installer/scripts/modules/CohesionPackaging.psm1. The prepare job turns that inventory into the
+# scripts/modules/CohesionPackaging.psm1. The prepare job turns that inventory into the
 # validation matrix and Pack-Release.ps1 packs from it, so the set CI proves and the set that
 # reaches nuget.org cannot drift apart. A three-OS consumer gate then builds, publishes, and runs
 # against the exact packed artifact before either package feed can receive it.
@@ -146,7 +146,7 @@ jobs:
         run: |
           # This is the canonical source shared with Install-Local.ps1. Release packaging uses it
           # exactly; local packaging deliberately derives the same prerelease plus `.local`.
-          $canonicalVersion = (& ./installer/scripts/Get-CohesionVersion.ps1)
+          $canonicalVersion = (& ./scripts/Get-CohesionVersion.ps1)
           if (-not $canonicalVersion) {
             throw 'Get-CohesionVersion.ps1 produced no output.'
           }
@@ -180,7 +180,7 @@ jobs:
           # Get-ReleaseMatrix.ps1 runs the inventory drift guard before emitting anything, so a
           # release that would ship something CI never validated - or silently omit something CI
           # does validate - fails here, before a single project is built.
-          $matrix = (& ./installer/scripts/Get-ReleaseMatrix.ps1)
+          $matrix = (& ./scripts/Get-ReleaseMatrix.ps1)
           if (-not $matrix) {
             throw 'Get-ReleaseMatrix.ps1 produced no matrix.'
           }
@@ -259,7 +259,7 @@ jobs:
           COHESION_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
           COHESION_RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: >-
-          ./installer/scripts/Pack-Release.ps1
+          ./scripts/Pack-Release.ps1
           -Version $env:COHESION_PACKAGE_VERSION
           -RepositoryCommit $env:COHESION_RELEASE_COMMIT
 
@@ -362,7 +362,7 @@ jobs:
             throw "Could not resolve the host RID from 'dotnet --info'."
           }
 
-          ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 `
+          ./scripts/sdks/Invoke-SdkConsumerSmoke.ps1 `
               -PackageDirectory ./_release/packages `
               -Version $env:COHESION_VERSION `
               -RuntimeIdentifier $rid

@@ -244,7 +244,7 @@ with non-format requirements marked inapplicable only for an explicit reason.
 1. **Build and release coverage.** The package builds in the Content CI matrix, its tests run
    there, and it is in the release inventory. Check `.github/workflows/library-content.yml`, run
    the package build/test commands and `Assert-CohesionReleaseInventory` from
-   `installer/scripts/modules/CohesionPackaging.psm1`. An inventory exclusion is not a pass.
+   `scripts/modules/CohesionPackaging.psm1`. An inventory exclusion is not a pass.
 2. **Implemented, controlled failure paths.** No public member throws `NotImplementedException`,
    and no reader leaks a raw BCL exception for malformed input. Search source with `rg`, review
    reachable parsing paths and run malformed-input tests. An empty implementation or an empty
@@ -337,7 +337,7 @@ dotnet build libraries/Content/<P>/src/<P>.csproj
 dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj
 dotnet msbuild libraries/Content/<P>/src/<P>.csproj -getProperty:IsAotCompatible,EnableAotAnalyzer,EnableTrimAnalyzer,GenerateDocumentationFile,NoWarn,RunAnalyzersDuringBuild
 dotnet build libraries/Content/<P>/src/<P>.csproj -p:GenerateDocumentationFile=true -p:EmitCompilerGeneratedFiles=true "-p:CompilerGeneratedFilesOutputPath=$taskScratch/generated/<Package>"
-pwsh -NoProfile -Command "Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
+pwsh -NoProfile -Command "Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
 rg -n 'NotImplementedException' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
 rg -n 'throw new (IndexOutOfRangeException|ArgumentOutOfRangeException|OverflowException|EndOfStreamException|InvalidCastException|ArgumentException|InvalidOperationException|FormatException|DecoderFallbackException)|(?:ArgumentNullException|ArgumentOutOfRangeException)\.ThrowIf' libraries/Content -g '**/src/**/*.cs' -g '!**/obj/**' -g '!**/bin/**'
 rg -n 'ReadExactly|checked\(|catch .*Exception' libraries/Content -g '**/src/**/*.cs' -g '!**/obj/**' -g '!**/bin/**'
@@ -706,7 +706,7 @@ skips. Builds used the default Debug configuration.
 dotnet build libraries/Content/<P>/src/<P>.csproj
 dotnet test libraries/Content/<P>/tests/<P>.Tests.csproj
 dotnet msbuild libraries/Content/<P>/src/<P>.csproj -getProperty:IsAotCompatible,EnableAotAnalyzer,EnableTrimAnalyzer
-pwsh -NoProfile -Command "Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
+pwsh -NoProfile -Command "Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force; Assert-CohesionReleaseInventory"
 rg -n 'NotImplementedException' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
 rg -n 'ContentFormatErrorCode|MaxDepth|DepthLimit|LimitExceeded' libraries/Content -g '*.cs' -g '!**/obj/**' -g '!**/bin/**'
 ```
