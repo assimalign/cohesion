@@ -99,12 +99,12 @@ No reflection, no dynamic code, no serialization — plain delegates and BCL typ
 
 This library still has no dependency on, or directly authored surface for, Cohesion dependency
 injection. Its assembly-level `ComponentIntegrationAttribute` names the
-`IServiceProviderBuilder` seam as a string and names the already-public
+`IServiceProviderBuilder` seam through the shared catalog and names the already-public
 `HttpClientFactoryBuilder.Build()` instance method. No public components class exists solely for
 integration, so the declaration contributes the verb with zero added public surface while the
 source assembly continues to reference only its own HTTP family.
 
-When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
+The project opts into Core's internal `ComponentIntegration` shared-source module and explicitly declares both the `Builder` and `BuilderWithServiceProvider` templates. When a consuming compilation references both libraries, `ComponentIntegrationGenerator` from
 `Assimalign.Cohesion.SourceGeneration` recognizes the instance method as a builder
 template and projects `AddHttpClientFactory(Action<HttpClientFactoryBuilder>? configure = null)` into
 that consumer. The callback is optional for every builder template (owner decision 39, #1395), but a
@@ -115,6 +115,15 @@ The generated adapter eagerly constructs the builder, invokes the configuration 
 lambda so the container captures it for disposal. Without the dependency-injection assembly the
 generator emits no verb, preserving the library boundary while still providing an ergonomic
 composition path where both sides are intentionally present.
+
+The generator also projects
+`AddHttpClientFactory(Action<IServiceProvider, HttpClientFactoryBuilder> configure)`. This overload
+registers a producer that constructs the builder, invokes the callback with the resolving provider,
+and calls `Build()` on first factory resolution. The callback can resolve services registered later
+in composition. Because this integration targets `AddSingleton`, repeated resolutions reuse the same
+factory and the provider disposes it. Validation failures, including missing named clients, occur on
+resolution for this overload. A typed null callback throws `ArgumentNullException` during registration;
+an untyped `null` continues to select the original eager overload.
 
 ## Exception message resources (#1467)
 

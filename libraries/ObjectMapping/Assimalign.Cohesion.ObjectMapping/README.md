@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.ObjectMapping
 
 A lightweight, profile-based object-to-object mapper. Mapping rules are declared
-explicitly in profiles, built into an immutable mapper, and replayed at run time.
+explicitly in profiles, collected in a reusable mapper, and replayed at run time.
 The scalar mapping path uses compiled getters and setters (no per-call reflection).
 
 See [docs/OVERVIEW.md](docs/OVERVIEW.md) and [docs/DESIGN.md](docs/DESIGN.md) for

@@ -23,6 +23,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Health" />
 	</ItemGroup>

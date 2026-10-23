@@ -15,6 +15,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 ## Build configuration
 
 - [ ] No duplicated `<PropertyGroup>` or `<ItemGroup>` blocks across sibling csprojs that should live in shared `.props`/`.targets`
+- [ ] Each `<ItemGroup>` contains only one item element type; like items are grouped together while preserving conditions and evaluation order (`build-system.md`)
 - [ ] Internal dependencies use `CohesionProjectReference`, not `ProjectReference` with relative paths
 - [ ] Package dependencies use `CohesionPackageReference`, not raw `PackageReference`
 - [ ] Any new package version is added to `build/Targets/Build.References.Packages.targets` first

@@ -3,8 +3,10 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Sql.Language</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>

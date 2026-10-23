@@ -12,10 +12,14 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Certificate" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
 	</ItemGroup>
 </Project>

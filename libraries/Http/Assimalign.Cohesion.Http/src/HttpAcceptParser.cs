@@ -66,6 +66,27 @@ public static class HttpAcceptParser
             }
         }
 
+        if (results.Count <= 8)
+        {
+            HttpMediaTypeQuality[] ordered = results.ToArray();
+            // Stable insertion sort avoids sorting machinery for the usual short header.
+            // Keep the bounded fast path separate so large client lists remain O(n log n).
+            for (int i = 1; i < ordered.Length; i++)
+            {
+                HttpMediaTypeQuality entry = ordered[i];
+                int j = i - 1;
+                while (j >= 0 && (ordered[j].Quality.PerMille < entry.Quality.PerMille
+                    || (ordered[j].Quality == entry.Quality
+                        && ordered[j].MediaType.Specificity < entry.MediaType.Specificity)))
+                {
+                    ordered[j + 1] = ordered[j];
+                    j--;
+                }
+                ordered[j + 1] = entry;
+            }
+            return ordered;
+        }
+
         return results
             .OrderByDescending(entry => entry.Quality.PerMille)
             .ThenByDescending(entry => entry.MediaType.Specificity)
@@ -140,6 +161,25 @@ public static class HttpAcceptParser
             }
 
             results.Add(new HttpQualityValue(tokenSpan.ToString(), quality));
+        }
+
+        if (results.Count <= 16)
+        {
+            HttpQualityValue[] ordered = results.ToArray();
+            for (int i = 1; i < ordered.Length; i++)
+            {
+                HttpQualityValue entry = ordered[i];
+                int j = i - 1;
+                while (j >= 0 && (ordered[j].Quality.PerMille < entry.Quality.PerMille
+                    || (ordered[j].Quality == entry.Quality
+                        && ordered[j].IsWildcard && !entry.IsWildcard)))
+                {
+                    ordered[j + 1] = ordered[j];
+                    j--;
+                }
+                ordered[j + 1] = entry;
+            }
+            return ordered;
         }
 
         return results

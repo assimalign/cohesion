@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <Compile Remove="TestHost/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

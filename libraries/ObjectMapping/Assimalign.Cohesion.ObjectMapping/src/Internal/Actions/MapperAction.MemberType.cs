@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * go through delegates that are either supplied directly (the AOT-safe path emitted by the source
  * generator) or compiled from expression trees (the run-time fallback).
  */
-internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
+internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
     where TTargetMember : class, new()
     where TSourceMember : class, new()
 {
@@ -43,7 +43,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
     {
         if (target.Body is not MemberExpression memberExpression)
         {
-            throw new ArgumentException($"The target expression body: '{target}' must be a MemberExpression.");
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetExpressionMemberRequired, target));
         }
         // Ensure that the member is of type TTarget (Target Members cannot be nested.)
         if (memberExpression.Member.DeclaringType != typeof(TTarget))
@@ -56,7 +56,7 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         _setter = MapperUtility.CompileSetter<TTarget, TTargetMember?>(memberExpression.Member);
     }
 
-    public void Invoke(IMapperContext context)
+    public override void Invoke(IMapperContext context)
     {
         if (context.Source is not TSource source || context.Target is not TTarget target)
         {
@@ -97,6 +97,35 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
                 {
                     action.Invoke(nestedContext);
                 }
+            }
+        }
+
+        _setter.Invoke(target, targetValue);
+    }
+
+    public override void Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        var sourceValue = GetSourceValue(source);
+        if (sourceValue is null)
+        {
+            if (execution.IgnoreHandling == MapperIgnoreHandling.Never)
+            {
+                _setter.Invoke(target, null);
+            }
+
+            return;
+        }
+
+        var targetValue = GetTargetValue(target);
+        var nested = new MapperExecution(targetValue, sourceValue, execution.Profiles,
+            execution.IgnoreHandling, execution.CollectionHandling);
+        List<IMapperProfile> profiles = execution.Profiles;
+        for (int i = 0; i < profiles.Count; i++)
+        {
+            IMapperProfile profile = profiles[i];
+            if (profile.IsMatch(typeof(TTargetMember), typeof(TSourceMember)))
+            {
+                nested.Invoke(profile);
             }
         }
 

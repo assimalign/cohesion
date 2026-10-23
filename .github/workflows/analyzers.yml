@@ -93,5 +93,9 @@ jobs:
       - name: Build build tasks
         run: dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release
 
+      - name: Verify shared-source module selection
+        shell: pwsh
+        run: ./build/tests/Test-CohesionSharedSource.ps1
+
       - name: "Build: IntegrationCheck"
         run: dotnet build "./build/IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj" --configuration Release

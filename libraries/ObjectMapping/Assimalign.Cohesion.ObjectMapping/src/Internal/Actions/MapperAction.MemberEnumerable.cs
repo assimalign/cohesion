@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * AOT-safe path emitted by the source generator, where the conversion is baked into the setter) or
  * compiled from expression trees with reflection-based conversion (the run-time fallback).
  */
-internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> : IMapperAction
+internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
     where TSourceMember : class, new()
     where TTargetMember : class, new()
 {
@@ -47,7 +47,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
     {
         if (target.Body is not MemberExpression member)
         {
-            throw new ArgumentException($"The target expression body: '{target}' must be a MemberExpression.");
+            throw new ArgumentException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TargetExpressionMemberRequired, target));
         }
         if (member.Member.DeclaringType != typeof(TTarget))
         {
@@ -62,7 +62,7 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         _setter = (instance, items) => SetValue(memberInfo, instance!, convert(items));
     }
 
-    public void Invoke(IMapperContext context)
+    public override void Invoke(IMapperContext context)
     {
         if (context.Source is not TSource source || context.Target is not TTarget target)
         {
@@ -116,6 +116,74 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         }
 
         _setter.Invoke(target, items);
+    }
+
+    public override void Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        var sourceValues = GetSourceValue(source);
+        if (sourceValues is null)
+        {
+            return;
+        }
+
+        // Resolve once before enumeration, as on the public-context path. Callbacks may change profiles.
+        var matchingProfiles = new List<IMapperProfile>();
+        foreach (IMapperProfile profile in execution.Profiles)
+        {
+            if (profile.TargetType == typeof(TTargetMember) && profile.SourceType == typeof(TSourceMember))
+            {
+                matchingProfiles.Add(profile);
+            }
+        }
+        var items = sourceValues is ICollection<TSourceMember> counted
+            ? new List<TTargetMember>(counted.Count)
+            : new List<TTargetMember>();
+        if (execution.CollectionHandling == MapperCollectionHandling.Merge)
+        {
+            var existing = GetTargetValue(target);
+            if (existing is not null)
+            {
+                items.AddRange(existing);
+            }
+        }
+
+        if (sourceValues.GetType() == typeof(List<TSourceMember>))
+        {
+            var list = (List<TSourceMember>)sourceValues;
+            foreach (var sourceValue in list)
+            {
+                items.Add(MapElement(sourceValue, matchingProfiles, ref execution));
+            }
+        }
+        else if (sourceValues is TSourceMember[] array)
+        {
+            foreach (var sourceValue in array)
+            {
+                items.Add(MapElement(sourceValue, matchingProfiles, ref execution));
+            }
+        }
+        else
+        {
+            foreach (var sourceValue in sourceValues)
+            {
+                items.Add(MapElement(sourceValue, matchingProfiles, ref execution));
+            }
+        }
+
+        _setter.Invoke(target, items);
+    }
+
+    private static TTargetMember MapElement(TSourceMember sourceValue, List<IMapperProfile> profiles, ref MapperExecution execution)
+    {
+        var targetValue = new TTargetMember();
+        var element = new MapperExecution(targetValue, sourceValue, execution.Profiles,
+            execution.IgnoreHandling, execution.CollectionHandling);
+        foreach (var profile in profiles)
+        {
+            element.Invoke(profile);
+        }
+
+        return targetValue;
     }
 
     private IEnumerable<TTargetMember>? GetTargetValue(TTarget target)

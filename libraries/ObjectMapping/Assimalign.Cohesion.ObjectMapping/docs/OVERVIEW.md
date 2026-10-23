@@ -3,7 +3,7 @@
 ## Summary
 
 A small, profile-based object-to-object mapper. Mapping is configured explicitly
-through profiles (no convention magic by default), built into an immutable mapper,
+through profiles (no convention magic by default), collected in a reusable mapper,
 and replayed at run time. The scalar mapping path is reflection-free (compiled
 getters and setters) for performance.
 

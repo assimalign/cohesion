@@ -30,6 +30,8 @@
     </PropertyGroup>
     <ItemGroup>
       <_TemplateSource Include="content/**/*" Exclude="content/**/bin/**;content/**/obj/**" />
+    </ItemGroup>
+    <ItemGroup>
       <_TemplateGlobal Include="content/**/global.json" />
     </ItemGroup>
     <Copy SourceFiles="@(_TemplateSource)"

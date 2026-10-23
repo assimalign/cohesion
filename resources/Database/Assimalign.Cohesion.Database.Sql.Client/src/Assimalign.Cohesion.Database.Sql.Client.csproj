@@ -10,10 +10,12 @@
 	-->
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+	<ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" Module="Diagnostics" />
 	</ItemGroup>
 </Project>

@@ -9,9 +9,19 @@ using Assimalign.Cohesion.Web.OpenApi;
 // so this project takes no reference to DI. Decision 35: every IHttpFeature registration is a singleton,
 // which Web.Hosting enforces at Build.
 [assembly: ComponentIntegration(
-    targetTypeName:    "Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder",
-    targetMethodName:  "AddSingleton",
+    target:           ComponentIntegrationTarget.ServiceProviderBuilder,
+    targetMethod:     ComponentIntegrationMethod.AddSingleton,
     factoryType:       typeof(OpenApiBuilder),
     factoryMethodName: nameof(OpenApiBuilder.Build),
+    template:         ComponentIntegrationTemplate.Builder,
+    Verb = "AddOpenApi",
+    Contract = typeof(IHttpFeature))]
+
+[assembly: ComponentIntegration(
+    target:           ComponentIntegrationTarget.ServiceProviderBuilder,
+    targetMethod:     ComponentIntegrationMethod.AddSingleton,
+    factoryType:       typeof(OpenApiBuilder),
+    factoryMethodName: nameof(OpenApiBuilder.Build),
+    template:         ComponentIntegrationTemplate.BuilderWithServiceProvider,
     Verb = "AddOpenApi",
     Contract = typeof(IHttpFeature))]

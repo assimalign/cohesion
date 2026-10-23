@@ -9,6 +9,8 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
@@ -16,7 +18,7 @@
 		<!-- DuplexPipePairTests covers the Connections shared\ source, which the library itself
 		     does not compile in (no type in Connections produces or consumes one). The suite
 		     therefore links the same files the drivers do. -->
-		<CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Connections" Module="Pipes" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />

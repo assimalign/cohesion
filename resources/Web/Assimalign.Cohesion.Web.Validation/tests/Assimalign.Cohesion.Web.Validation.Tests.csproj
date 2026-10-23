@@ -19,10 +19,14 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectValidation" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- Activate the endpoint-binding generator on this project's typed Map* call sites. -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />
 		<!-- The builder.Services.Add<Feature> verbs are component integrations this generator projects (#1380). -->
 		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />

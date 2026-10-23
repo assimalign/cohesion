@@ -318,7 +318,7 @@ public sealed class Route : IRouterRoute
             {
                 string remainder = requestIndex >= requestSegments.Length
                     ? string.Empty
-                    : string.Join("/", requestSegments[requestIndex..]);
+                    : string.Join("/", requestSegments.AsSpan(requestIndex));
 
                 if (!TryAssignParameter(catchAll, remainder, values))
                 {

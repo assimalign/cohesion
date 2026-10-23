@@ -16,6 +16,6 @@
              also carries PipeOptionsContext) compiles in from the Connections shared\ folder.
              All of it is stateless or driver-owned, so a private copy per driver is correct;
              none of it is part of the Connections public surface. -->
-        <CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Connections" Module="Pipes" />
     </ItemGroup>
 </Project>

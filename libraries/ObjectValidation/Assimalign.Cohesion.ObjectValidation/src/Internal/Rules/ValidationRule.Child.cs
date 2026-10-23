@@ -95,16 +95,17 @@ internal sealed class ChildValidationRule<TValue> : ValidationRuleBase<TValue>
     // here: the object overload above skips it explicitly.
     public override bool TryValidate(TValue value, out IValidationContext context)
     {
-        context = new ValidationContext<TValue>(value)
+        var nestedContext = new ValidationContext<TValue>(value)
         {
             ValidationMode = ParentContext.ValidationMode,
             ContinueThroughValidationChain = ParentContext.ContinueThroughValidationChain,
             ThrowExceptionOnFailure = ParentContext.ThrowExceptionOnFailure
         };
+        context = nestedContext;
 
         foreach (var item in Profile.ValidationItems)
         {
-            if (ParentContext.ValidationMode == ValidationMode.Stop && context.Errors.Any())
+            if (ParentContext.ValidationMode == ValidationMode.Stop && nestedContext.GetErrors().Any())
             {
                 break;
             }
@@ -118,7 +119,7 @@ internal sealed class ChildValidationRule<TValue> : ValidationRuleBase<TValue>
 
             item.Evaluate(childContext);
 
-            foreach (var error in childContext.Errors)
+            foreach (var error in childContext.GetErrors())
             {
                 context.AddFailure(new ValidationError()
                 {

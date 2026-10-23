@@ -5,11 +5,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="xunit" />
     <CohesionPackageReference Include="xunit.runner.visualstudio" />
     <CohesionPackageReference Include="Shouldly" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
   </ItemGroup>
 </Project>

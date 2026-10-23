@@ -24,6 +24,11 @@ Plan descriptions share the eight-column Database.Execution result contract acro
 Documents and Graph. SQL's SELECT-only EXPLAIN ANALYZE can populate actual candidate counts;
 plain EXPLAIN stays nonexecuting, and the other models retain their documented syntax (#1522).
 
+Model packages compile the root's internal `Engine` shared-source module. Other Database-owned
+modules are `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults`; each consumer declares
+both its owning project and `Module` in `CohesionSharedSource` (#1705). The project file identifies
+the source boundary while the existing public construction and execution APIs remain intact.
+
 - **Root bases (concrete-types plan, phases 3 and 6, #1259 and #1262)** — `DatabaseEngine`,
   `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`,
   `DatabaseServerSession` and `DatabaseEngineWorker` are the abstract bases of the area's

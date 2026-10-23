@@ -11,12 +11,18 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+	</ItemGroup>
+	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FaultingMemoryStream.cs" Link="TestObjects\FaultingMemoryStream.cs" />

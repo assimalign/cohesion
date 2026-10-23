@@ -8,6 +8,6 @@
   </ItemGroup>
   <ItemGroup>
     <!-- ModelSnapshot (descriptor materialization), compiled in as a stateless static. -->
-    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" Module="Materialization" />
   </ItemGroup>
 </Project>

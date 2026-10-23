@@ -25,9 +25,9 @@ operations so reads stay lock-free.
    `Size >= 0`).
 4. If `SizeLimit` is set, require `Size` on the entry and verify it is not larger than the
    limit on its own. An over-sized entry triggers `CapacityExceeded`.
-5. Subscribe to each `IChangeToken` in `ExpirationTokens`. The subscription callback
-   resolves the entry from the storage dictionary at notification time so it tolerates
-   replacement.
+5. Subscribe to each `IChangeToken` in `ExpirationTokens`. The subscriptions share a binding
+   that is attached to this commit's exact `StoredEntry` before publication. A retired callback
+   cannot remove a replacement with the same key (#1680).
 6. Build a `StoredEntry` and call `_entries.AddOrUpdate` to install it; any previous entry
    for the same key is recorded for `Replaced` callback dispatch.
 7. Decrement the size of the previous entry, add the new entry's size to the running total,
@@ -87,6 +87,10 @@ accessor over `src/Properties/ErrorMessages.resx`.
 ## Token Subscription Notes
 
 - Each entry holds an `IDisposable[]` of subscriptions, one per token.
+- The mutable entry allocates its token and callback lists only when a caller requests them.
+  Commit reads empty collections without creating lists. Stored callbacks are copied into an
+  array, with an empty array shared when there are no callbacks; later changes to the entry's
+  configuration list do not affect that snapshot.
 - When the cache evicts the entry, it disposes the subscriptions before firing callbacks.
 - A token that fires synchronously during `OnChange` runs before the entry has been added to
   the storage dictionary. In that case the lookup is a miss and the entry is committed

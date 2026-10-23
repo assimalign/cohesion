@@ -302,7 +302,7 @@ body, applied through a receipt-aware runner rather than plain SQL files) is
 
 ## Type modifier parity (#1438)
 
-The extractor links the stateless internal Sql.Language/shared/SqlTypeModifiers through
+The extractor links the stateless internal Sql.Language/shared/Types/SqlTypeModifiers through
 CohesionSharedSource, alongside the schema package and engine. Column SQL text and Decimal(p,s)
 use one mapping and rule (named Decimal arguments bind by parameter name in either order):
 p 1..28, s 0..p, string/binary length 1..10485760, and FLOAT binary precision 1..53.

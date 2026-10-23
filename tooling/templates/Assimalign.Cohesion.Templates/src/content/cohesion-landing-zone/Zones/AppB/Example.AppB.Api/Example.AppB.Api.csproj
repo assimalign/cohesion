@@ -11,8 +11,12 @@
   <ItemGroup>
     <!-- Sdk.Web defaults: endpoint `http` (8080), readiness=http:/readyz and liveness=http:/livez on `http`; the Web default control plane rides `http` under /cohesion/v1/*. Override with Update, never Include. -->
     <CohesionEndpoint Update="http" Public="true" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Gateway-visible defaults (delivered as COHESION_CONFIG__*); the Platform ConfigurationStore can promote a different value at run time. -->
     <CohesionSetting Include="Billing:PageSize" Type="int" Default="50" />
+  </ItemGroup>
+  <ItemGroup>
 
     <!-- Same application (appb): realized by the appb gateway; typed accessor Resource.References.AppBDatabase.Db. -->
     <CohesionResourceReference Include="..\Example.AppB.Database\Example.AppB.Database.csproj" />

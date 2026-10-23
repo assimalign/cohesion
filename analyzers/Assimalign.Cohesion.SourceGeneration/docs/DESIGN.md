@@ -1,181 +1,168 @@
 # Assimalign.Cohesion.SourceGeneration Design
 
-## Design intent
+## Contract and delivery
 
-This project supplies reference-free integration light-up between Cohesion libraries. A contributing
-assembly describes either a public static factory or a public instance factory method on a builder
-through an ordinary assembly-level `ComponentIntegrationAttribute`; a consuming compilation receives
-an extension member only when it also references the named composition seam. The contributor therefore
-does not reference the seam owner, and the generator contains no knowledge of particular libraries,
-containers, or lifetimes.
+Component integrations are internal Cohesion build declarations. The shared module
+`libraries/Core/Assimalign.Cohesion.Core/shared/ComponentIntegration/` owns the attribute, enums,
+and metadata catalog. A contributing project opts in explicitly:
 
-The root generator project serves declarations owned by `libraries/Core` (owner decision 59,
-2026-10-13). `ComponentIntegrationAttribute` lives in Core, so its generator lives here. Generators
-for declarations owned by other areas live in their own `Assimalign.Cohesion.SourceGeneration.<Area>`
-projects; ObjectMapping owns its separate generator project.
-
-Like every project under `analyzers/`, it targets `netstandard2.0`, is loaded by Roslyn, and is not a
-standalone package. Cohesion delivers it through the Core package for PackageReference consumers and
-through the App targeting pack for SDK consumers.
-
-Core's analyzer reference and App's framework analyzer both select this project:
-
-```mermaid
-flowchart LR
-    Core["Assimalign.Cohesion.Core"] --> Generator["Assimalign.Cohesion.SourceGeneration"]
-    App["App targeting pack"] --> Generator
+```xml
+<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
 ```
 
-The 2026-10-13 tooling move changes the public Roslyn entry-point type to
-`Assimalign.Cohesion.SourceGeneration.ComponentIntegrationGenerator` in the root analyzer assembly.
-Diagnostic ids, generated sources (including the historical generator attribution comment), and
-generated integration APIs remain unchanged. `AnalyzerReleases.Shipped.md` and
-`AnalyzerReleases.Unshipped.md` travel with the generator and retain its diagnostic history.
+Each opted-in assembly compiles its own internal copy. Core's shipped runtime assembly does not
+contain the attribute or catalog, and applications cannot use a public Core attribute to declare
+integrations. This is a source-sharing convention within the repository, not a runtime service.
+The generator also compiles the module; this creates no runtime assembly dependency on Core or DI.
 
-## Mechanism
+`ComponentIntegrationGenerator` scans assembly attributes in the current and referenced assemblies.
+It recognizes assembly-local copies by metadata name and validates constructor and named-property
+shapes. It does not require the contributing assembly to reference Core, or require a globally
+visible attribute symbol in the consuming compilation. An absent target suppresses the verb and
+reports COHCMP0005. The incremental output model contains values only, never cached Roslyn symbols.
 
-`ComponentIntegrationGenerator` is an `IIncrementalGenerator` that runs in the consuming compilation.
-It uses `CompilationProvider` because assembly attributes on referenced binaries are metadata, not
-syntax nodes, and cannot be discovered with `ForAttributeWithMetadataName`.
+The root generator belongs here because the contract is owned by Core. Core's NuGet package still
+ships the analyzer; the App targeting pack supplies it to SDK consumers. In-repository consumers
+reference `CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration"` when they call
+projected verbs. The analyzer targets netstandard2.0; consuming projects use C# 14 and .NET 10.
 
-Collection proceeds in a fixed order:
+## Closed target catalog
 
-1. Look up all types with metadata name
-   `Assimalign.Cohesion.ComponentIntegrationAttribute`; no match means no work and no diagnostics.
-2. Scan the current assembly and referenced assembly symbols. Referenced binaries are first filtered by
-   whether they reference `Assimalign.Cohesion.Core`.
-3. Decode matching assembly attributes defensively. Malformed declarations are diagnosed and skipped
-   without stopping other contributors.
-4. Resolve the target seam with `GetTypesByMetadataName`. An absent seam suppresses emission and reports
-   one discoverability diagnostic for the contributing assembly.
-5. Resolve the named public ordinary method group and dispatch by member kind:
-   - all static members take the existing static-factory path, with every supported overload projected;
-   - all instance members take the builder-template path; and
-   - a mixed or empty group reports COHCMP0003 and emits nothing for that declaration.
-6. Validate the selected path and convert it to a value-only projection model. Static methods retain
-   their existing signature validation. A builder type must be externally visible, non-static,
-   non-abstract, closed, and have a public parameterless instance constructor. Its selected factory
-   method must be public, non-generic, zero-parameter, non-void, and return an externally visible type.
-   Parameterized instance members are ignored when selecting the zero-parameter member; if none remains,
-   the declaration reports COHCMP0003. Visibility violations report COHCMP0002 and shape violations
-   report COHCMP0003.
-7. Sort projections deterministically and remove duplicate seam/verb/parameter signatures.
-
-The incremental model contains strings, booleans, integers, equatable arrays, and captured diagnostic
-values only. Roslyn symbols and locations never cross from collection into the cached output model.
-
-## Attribute contract
-
-The public attribute lives in `Assimalign.Cohesion.Core`. Its required constructor values are:
-
-- `TargetTypeName`: the seam's fully qualified metadata name, deliberately represented as a string.
-- `TargetMethodName`: the instance or extension sink invoked on the seam.
-- `FactoryType`: either the public static type holding static factories or an externally visible,
-  non-static, non-abstract, closed builder with a public parameterless constructor.
-- `FactoryMethodName`: either a public static method group, for which every supported overload is
-  projected, or a public instance method group with a zero-parameter build method. Mixed static and
-  instance groups are ambiguous and rejected.
-
-`Verb` optionally renames the projected method and defaults to the factory method name. `Contract`
-optionally supplies the sink's explicit generic type argument. Adding another factory overload needs no
-attribute change.
-
-On the static path, supported parameters are ordinary by-value parameters. The generator preserves
-`params`, nullable type annotations, and explicit defaults, and forwards every argument without adding
-behavior. Generic factory methods, by-reference parameters, void returns, and non-public signature types
-are intentionally rejected. On the builder path, parameterized instance members are ignored and the
-single zero-parameter method supplies the product type for the fixed template, whose only parameter is
-the optional configure callback.
-
-## Emission
-
-Output is one `CohesionComponents.<DeclaringAssembly>.g.cs` file per contributing assembly. Multiple
-factory namespaces are grouped as separate block namespaces in that file. Block namespaces are the
-sanctioned generated-code exception to the repository's file-scoped namespace rule.
-
-The seam namespace is imported at file scope because the named sink may itself be an extension member and
-extension lookup is namespace-scoped. All emitted type references are `global::`-qualified. The generated
-container is internal, while its extension member is public within that container:
+The schema is version 2. Constructor arguments are:
 
 ```csharp
-extension(global::Target.ISeam builder)
-{
-    public global::Target.ISeam AddThing(global::System.String @name = "default")
+ComponentIntegration(
+    ComponentIntegrationTarget target,
+    ComponentIntegrationMethod targetMethod,
+    Type factoryType,
+    string factoryMethodName,
+    ComponentIntegrationTemplate template)
+```
+
+| Enum | Allowed values |
+| --- | --- |
+| `ComponentIntegrationTarget` | `ServiceProviderBuilder` |
+| `ComponentIntegrationMethod` | `AddSingleton`, `AddScoped`, `AddTransient` |
+| `ComponentIntegrationTemplate` | `Factory`, `Builder`, `BuilderWithServiceProvider`, `Custom` |
+
+`ComponentIntegrationCatalog` is the single mapping from these enum values to metadata/member
+names. Unknown numeric values are diagnosed. The target resolves to
+`Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder`, without a contributor referencing
+its assembly. Adding a seam is an explicit catalog change with generator and integration coverage.
+`Verb` optionally supplies the generated feature name; `Contract` supplies an explicit generic
+argument to the selected registration method. Neither is a lifetime selector.
+
+A declaration chooses one template. In particular, the generator does not automatically add a
+provider overload when a declaration selects `Builder`. Declare both overloads explicitly:
+
+```csharp
+[assembly: ComponentIntegration(
+    ComponentIntegrationTarget.ServiceProviderBuilder, ComponentIntegrationMethod.AddSingleton,
+    typeof(HttpClientFactoryBuilder), nameof(HttpClientFactoryBuilder.Build),
+    ComponentIntegrationTemplate.Builder,
+    Verb = "AddHttpClientFactory", Contract = typeof(IHttpClientFactory))]
+
+[assembly: ComponentIntegration(
+    ComponentIntegrationTarget.ServiceProviderBuilder, ComponentIntegrationMethod.AddSingleton,
+    typeof(HttpClientFactoryBuilder), nameof(HttpClientFactoryBuilder.Build),
+    ComponentIntegrationTemplate.BuilderWithServiceProvider,
+    Verb = "AddHttpClientFactory", Contract = typeof(IHttpClientFactory))]
+```
+
+This is an intentional authoring break from the former public string-based attribute. All repository
+contributors use version 2. Mixed old/new contract versions are not a supported package configuration.
+
+## Templates and lifetime
+
+`Builder` emits `Verb(Action<TBuilder>? configure = null)`. It constructs the builder, optionally
+configures it, calls its build method eagerly, then registers `_ => component`. Bare and untyped-null
+calls build the defaults. Validation therefore runs at registration. Because the same component is
+returned on every producer invocation, use this template for singleton registrations.
+
+`BuilderWithServiceProvider` emits `Verb(Action<IServiceProvider, TBuilder> configure)`. The callback
+is required; typed null is rejected during registration. Construction, configuration, validation,
+and the build method run inside the selected registration method's producer. Each invocation gets a
+fresh builder. Singleton/scoped/transient lifetime and disposal belong to that registration method.
+Singleton configuration runs on first resolve and can resolve services registered later in composition.
+The BCL `OverloadResolutionPriority(-1)` attribute on this overload preserves existing untyped-null
+calls as calls to the ordinary builder overload. Method groups and typed delegates also bind normally.
+
+Both builder templates require an externally visible, closed, concrete builder with a public
+parameterless constructor, and a public, non-generic, zero-parameter instance build method returning
+an externally visible type. A method group mixing static and instance members is rejected.
+
+`Factory` forwards each supported public static overload of the explicitly named factory method.
+It preserves parameter types, names, defaults, nullable annotations, and `params`. Generic methods,
+by-reference parameters, void returns, and inaccessible signature types are rejected. Static factory
+behavior is unchanged. Disposable static products should be returned through `Func<IServiceProvider,
+T>` so the container captures them; COHCMP0007 warns about directly returned disposable instances.
+
+Existing Web feature declarations select `AddSingleton`, as required by Web.Hosting. The catalog
+also supports scoped and transient registrations for integrations whose component contract allows them.
+There are no implicit additional lifetime variants sharing the same generated name and signature.
+
+## Custom signatures and complete bodies
+
+`Custom` replaces the generated parameter list and entire method body. Supply `Signature` without
+parentheses and `Body` as a complete C# block, including the return statement. The factory type
+anchors the generated namespace and supplies placeholders; the custom block owns construction,
+registration, validation, and disposal behavior. The generator does not append a return or wrap it
+in a registration template.
+
+```csharp
+[assembly: ComponentIntegration(
+    ComponentIntegrationTarget.ServiceProviderBuilder, ComponentIntegrationMethod.AddSingleton,
+    typeof(HttpClientFactoryBuilder), nameof(HttpClientFactoryBuilder.Build),
+    ComponentIntegrationTemplate.Custom,
+    Verb = "AddHttpClientFactory", Contract = typeof(IHttpClientFactory),
+    Signature = "global::System.Action<global::Assimalign.Cohesion.Http.HttpClientFactoryBuilder>? configure = null",
+    Body = """
     {
-        builder.Add(global::Contributor.Components.Create(@name));
-        return builder;
+        var clients = new $factoryType$();
+        ($arguments$)?.Invoke(clients);
+        var component = clients.$factoryMethod$();
+        $receiver$.$targetMethod$<$contract$>(_ => component);
+        return $receiver$;
     }
-}
+    """)]
 ```
 
-The generated adapter is deliberately semantics-free: the factory owns construction and validation, the
-target method owns registration behavior, and the adapter only composes the two calls. C# 14 is required to
-declare the extension block; a down-level consuming compilation receives a diagnostic and no source.
+| Placeholder | Expansion |
+| --- | --- |
+| `$receiver$` | Collision-free extension receiver identifier |
+| `$arguments$` | Comma-separated parameter identifiers with required ref/out/in modifiers |
+| `$targetMethod$` | Selected catalog method name, without generic arguments |
+| `$seamType$` | Fully qualified receiver type |
+| `$factoryType$` | Fully qualified factory/builder type |
+| `$factoryMethod$` | Escaped factory member name |
+| `$contract$` | Fully qualified Contract type, or empty if omitted |
 
-An instance factory method emits the fixed builder template instead of copying a method signature:
+Placeholder syntax is reserved throughout the body, including string literals. Unknown placeholders,
+malformed signatures, missing custom fields, and malformed blocks report COHCMP0003 and emit no
+method. Syntax is checked before emission; names and types bind in the consuming compilation and
+normal compiler diagnostics report inaccessible or missing APIs. Qualify body and signature types:
+only the seam's namespace is imported automatically. This supports code referencing a seam library
+without adding that library to the contributing project's references.
 
-```csharp
-public global::Target.ISeam AddThing(
-    global::System.Action<global::Contributor.ThingBuilder>? @configure = null)
-{
-    var cohesionComponentFactory = new global::Contributor.ThingBuilder();
-    @configure?.Invoke(cohesionComponentFactory);
-    var cohesionComponent = cohesionComponentFactory.Build();
+Raw body text and relative indentation are preserved, including raw string literals. Shared output
+containers remain internal, grouped in one generated file per contributor, under the factory's
+namespace. Generated block namespaces are the existing exception to the file-scoped namespace rule.
 
-    builder.AddThing<global::Contributor.IThing>(_ => cohesionComponent);
-    return builder;
-}
-```
-
-Composition is eager so the builder's own `Build()` validation runs during registration. Registration
-still uses a producer lambda, allowing the container to capture the product for disposal. The lambda is
-deliberately uncast: a lambda converts to the `Func<IServiceProvider, T>` sink overload but cannot convert
-to the `T` instance overload.
-
-The configure callback is optional (owner decision 39 of 2026-10-10, #1395). A bare call, or an explicit
-`null`, builds the builder's defaults: `builder.Services.AddAuthorization()` and
-`builder.Services.AddAuthorization(authorization => ...)` are the same verb. Until then the callback was required and
-a `null` threw `ArgumentNullException`, so a verb that callers invoke bare had to be a static factory
-behind a hidden public type. The change is template-wide, not per integration, so the generator still
-holds no seam names, verb names, or lifetimes; it is recorded as the one owner-approved change to the
-template in `.claude/rules/component-integration.md`. A builder whose `Build()` cannot produce a product
-from its defaults rejects the bare call there, at registration.
-
-## Disposal guard
-
-For a factory returning `System.Func<...>`, the final type argument is the produced component. Otherwise
-the return type itself is the product. A directly returned product implementing `IDisposable` or
-`IAsyncDisposable` produces COHCMP0007 but is still emitted, because instance registration commonly
-bypasses container disposal capture while a producer registration can be captured.
-
-COHCMP0007 applies only to the static-factory path. The builder template always wraps its product in a
-producer registration, so a disposable builder product cannot take the uncaptured instance path and
-never reports COHCMP0007.
-
-## Diagnostics
+## Diagnostics and verification
 
 | ID | Severity | Meaning |
 | --- | --- | --- |
-| `COHCMP0001` | Warning | Declaration is malformed or contains unresolvable metadata. |
-| `COHCMP0002` | Warning | Factory, builder, return type, or copied signature is not externally visible. |
-| `COHCMP0003` | Warning | Factory method group or builder uses an unsupported or ambiguous shape. |
-| `COHCMP0004` | Warning | Projection duplicates an earlier seam/verb/parameter signature. |
-| `COHCMP0005` | Info | Contributor is referenced while its named seam is absent. |
-| `COHCMP0006` | Warning | Consumer language version is older than C# 14. |
-| `COHCMP0007` | Warning | Disposable product is returned directly instead of through `Func<...>`. |
+| COHCMP0001 | Warning | Malformed declaration, schema, or unknown catalog value |
+| COHCMP0002 | Warning | Inaccessible factory, builder, or signature type |
+| COHCMP0003 | Warning | Unsupported factory/template shape or invalid custom implementation |
+| COHCMP0004 | Warning | Duplicate generated signature |
+| COHCMP0005 | Info | Target seam is absent |
+| COHCMP0006 | Warning | Consumer language version is older than C# 14 |
+| COHCMP0007 | Warning | Static factory returns a disposable instance directly |
 
-All locations are `Location.None` because declarations are normally read from assembly metadata.
-
-## Limitations
-
-- The target metadata name is an unchecked string. Renaming a seam disables its integrations until the
-  declaration is updated; the repository integration-check project is the drift canary.
-- Sink existence and overload compatibility are left to normal C# binding. A generated compile error is
-  more accurate than attempting incomplete extension-member lookup inside the generator.
-- A factory cannot name a type from an assembly it intentionally does not reference. Such integrations
-  belong with the seam owner or in a dedicated adapter assembly.
-- Generated containers are internal and cannot re-export verbs through another library.
-- The adapter always returns the seam and has no ordering or middleware semantics; pipeline-shaped
-  integrations and sub-builder returns are outside this mechanism.
-- Analyzer delivery is transitive for packaged consumers, so mixed Cohesion package versions can select
-  one of multiple analyzer copies. Coherent package versions are the supported configuration.
+Two-stage Roslyn tests compile contributors with their own internal contract, then compile and execute
+consumers. They cover ordinary/provider callbacks, lifetime-owned construction, disposal, custom block
+execution, placeholders, schema errors, and independent overload declarations. IntegrationCheck calls
+every declared feature overload against the real DI seam. The shared-source regression script checks
+module isolation, recursive files, multiple modules per owner, duplicate imports, missing metadata,
+unknown owners/modules, traversal, and wildcards under Core and Visual Studio MSBuild.

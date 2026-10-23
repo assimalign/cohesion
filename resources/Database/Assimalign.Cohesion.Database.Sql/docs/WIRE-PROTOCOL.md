@@ -204,6 +204,7 @@ executes its data statement. Both return the existing eight-column plan result, 
 Int64 estimated_rows/actual_rows values in the already nullable count columns. Detail identifies
 exact probes, incomplete lower bounds and heuristic join estimates; actual counts describe
 candidate work before residuals. No new message type, frame shape or startup version is added.
-Data-changing analysis fails COHSQLE057 (0A000). Hash-build grant exhaustion fails COHSQLE067
+Data-changing analysis normally fails COHSQLE057 (0A000); the earlier read-only catalog check
+retains COHSQLE021 for system-relation mutations. Hash-build grant exhaustion fails COHSQLE067
 (53200) through the ordinary diagnostic carrier; the resx message contains no repeated code prefix.
 No standalone ANALYZE maintenance, persisted statistic or hash spill is introduced.

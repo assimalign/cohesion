@@ -16,24 +16,23 @@ public sealed class JsonWebTokenParts
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
 
-        var segments = token.Split('.');
-        if (segments.Length != 3)
+        if (!TryGetSeparators(token, out int first, out int second))
         {
             throw new ArgumentException(
-                "A JSON Web Token must contain three dot-delimited segments.",
+                ErrorMessages.CompactSegmentCount,
                 nameof(token));
         }
 
-        if (segments[0].Length == 0 || segments[1].Length == 0)
+        if (first == 0 || second == first + 1)
         {
             throw new ArgumentException(
-                "A JSON Web Token header and payload segments must not be empty.",
+                ErrorMessages.CompactSegmentEmpty,
                 nameof(token));
         }
 
-        Header = segments[0];
-        Payload = segments[1];
-        Signature = segments[2];
+        Header = token[..first];
+        Payload = token[(first + 1)..second];
+        Signature = token[(second + 1)..];
     }
 
     /// <summary>
@@ -89,16 +88,25 @@ public sealed class JsonWebTokenParts
             return false;
         }
 
-        var segments = token.Split('.');
-        if (segments.Length != 3 || segments[0].Length == 0 || segments[1].Length == 0)
+        if (!TryGetSeparators(token, out int first, out int second)
+            || first == 0 || second == first + 1
+            || token.AsSpan(0, first).IsWhiteSpace()
+            || token.AsSpan(first + 1, second - first - 1).IsWhiteSpace())
         {
             return false;
         }
 
-        parts = new JsonWebTokenParts(segments[0], segments[1], segments[2]);
+        parts = new JsonWebTokenParts(token[..first], token[(first + 1)..second], token[(second + 1)..]);
         return true;
     }
 
     /// <inheritdoc />
     public override string ToString() => string.Concat(Header, ".", Payload, ".", Signature);
+
+    private static bool TryGetSeparators(string token, out int first, out int second)
+    {
+        first = token.IndexOf('.');
+        second = first < 0 ? -1 : token.IndexOf('.', first + 1);
+        return second >= 0 && token.IndexOf('.', second + 1) < 0;
+    }
 }

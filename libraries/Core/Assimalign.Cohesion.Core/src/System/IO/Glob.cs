@@ -18,17 +18,18 @@ namespace System.IO;
 [DebuggerDisplay("{ToString()}")]
 public sealed partial class Glob
 {
-    private readonly TokenBase[] _tokens;
+    private readonly GlobPattern _pattern;
 
-    internal Glob(TokenBase[] tokens)
+    internal Glob(GlobPattern pattern)
     {
-        _tokens = ArgumentNullException.ThrowIfNullOrNone(tokens);
+        ArgumentNullException.ThrowIfNull(pattern);
+        _pattern = pattern;
     }
 
     /// <summary>
     /// Gets the number of tokens in the glob.
     /// </summary>
-    public int Count => _tokens.Length;
+    public int Count => _pattern.Tokens.Length;
 
     /// <summary>
     /// Gets the parsed tokens, in pattern order.
@@ -38,7 +39,7 @@ public sealed partial class Glob
     /// returned <see cref="ImmutableArray{T}"/> wraps that array without copying it and exposes no
     /// way to change it, so reading the tokens allocates nothing and cannot alter another glob.
     /// </remarks>
-    public ImmutableArray<Token> Tokens => ImmutableArray<Token>.CastUp(ImmutableCollectionsMarshal.AsImmutableArray(_tokens));
+    public ImmutableArray<Token> Tokens => ImmutableArray<Token>.CastUp(ImmutableCollectionsMarshal.AsImmutableArray(_pattern.Tokens));
 
     #region Methods
 
@@ -127,40 +128,25 @@ public sealed partial class Glob
     /// </remarks>
     public bool IsMatch(ReadOnlySpan<char> value, CultureInfo cultureInfo, bool caseInSensitive)
     {
-        bool consumesVariableLength = _tokens.Length == 0;
-        int consumesMinLength = 0;
         int position = 0;
-
-        for (int i = 0; i < _tokens.Length; i++)
+        if (!_pattern.ConsumesVariableLength)
         {
-            consumesMinLength = consumesMinLength + _tokens[i].ConsumesMinLength;
-
-            if (!consumesVariableLength)
-            {
-                if (_tokens[i].ConsumesVariableLength)
-                {
-                    consumesVariableLength = true;
-                }
-            }
-        }
-
-        if (!consumesVariableLength)
-        {
-            if ((value.Length - position) != consumesMinLength)
+            if (value.Length != _pattern.MinimumLength)
             {
                 // can't possibly match as tokens require a fixed length and the string length is different.
                 return false;
             }
         }
-        else if ((value.Length - position) < consumesMinLength)
+        else if (value.Length < _pattern.MinimumLength)
         {
             // can't possibly match as tokens require a minimum length and the string is too short.
             return false;
         }
 
-        for (int i = 0; i < _tokens.Length; i++)
+        TokenBase[] tokens = _pattern.Tokens;
+        for (int i = 0; i < tokens.Length; i++)
         {
-            if (!_tokens[i].Test(value, cultureInfo, caseInSensitive, position, out position))
+            if (!tokens[i].Test(value, cultureInfo, caseInSensitive, position, out position))
             {
                 return false;
             }
@@ -194,7 +180,7 @@ public sealed partial class Glob
     {
         ArgumentNullException.ThrowIfNullOrEmpty(pattern);
 
-        TokenBase[] tokens = Parser.Tokenize(pattern);
+        GlobPattern tokens = Parser.Tokenize(pattern);
 
         return new Glob(tokens);
     }
@@ -209,9 +195,10 @@ public sealed partial class Glob
     {
         var builder = new StringBuilder();
 
-        for(int i = 0; i < _tokens.Length; i++)
+        TokenBase[] tokens = _pattern.Tokens;
+        for(int i = 0; i < tokens.Length; i++)
         {
-            Format(builder, _tokens[i]);
+            Format(builder, tokens[i]);
         }
 
         return builder.ToString();

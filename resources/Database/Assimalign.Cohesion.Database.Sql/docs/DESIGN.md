@@ -7471,8 +7471,9 @@ Plain EXPLAIN never executes the SELECT/DML. Probes can read indexes; actual_row
 Owner clarification on 2026-10-22 adds EXPLAIN ANALYZE over SELECT query bodies only, including
 read-only WITH/set operations. It executes and drains the query under normal snapshot,
 cancellation, timeout and hash-memory rules, then returns the description. INSERT/UPDATE/DELETE,
-including WITH data changes, fail COHSQLE057 / SQLSTATE 0A000 before execution. Standalone
-ANALYZE remains unsupported. SELECT expressions and application functions run as for an ordinary SELECT.
+including WITH data changes, normally fail COHSQLE057 / SQLSTATE 0A000 before execution.
+The existing earlier read-only catalog check retains COHSQLE021 for mutations of system relations.
+Standalone ANALYZE remains unsupported. SELECT expressions and application functions run as for an ordinary SELECT.
 The existing eight columns and ordinary result frames remain unchanged. estimated_rows on an
 access node contains the probe count; detail says exact_probe or lower_bound and records physical
 entry/page work. JoinStep estimates are explicitly heuristic (minimum probed inputs for hash,

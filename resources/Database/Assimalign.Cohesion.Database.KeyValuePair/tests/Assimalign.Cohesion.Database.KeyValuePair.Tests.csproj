@@ -19,6 +19,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- Rewrites index pages into the layouts the old-format refusal tests need (#1194). -->
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Indexing\tests\TestObjects\LegacyBTreePages.cs" Link="TestObjects\LegacyBTreePages.cs" />
 		<!-- Rewrites a data file's storage format version for the storage-format refusal tests (#1251). -->

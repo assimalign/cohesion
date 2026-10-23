@@ -63,7 +63,7 @@ internal sealed class LengthBetweenValidationRule<TValue> : ValidationRuleBase<T
         return member switch
         {
             null => true,
-            string stringValue      when stringValue is not null && stringValue.Length >= this._lowerBound && stringValue.Length <= this._upperBound => true,
+            string stringValue      => stringValue.Length >= this._lowerBound && stringValue.Length <= this._upperBound,
             ICollection collection  when collection.Count >= this._lowerBound && collection.Count <= this._upperBound => true,
             Array array             when array.Length >= this._lowerBound && array.Length <= this._upperBound => true,
             IEnumerable enumerable  when enumerable.Cast<object>().Count() >= this._lowerBound  && enumerable.Cast<object>().Count() <= this._upperBound => true,

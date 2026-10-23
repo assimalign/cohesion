@@ -59,7 +59,8 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
 
                         if (rule.TryValidate(enumValue, out var ruleContext))
                         {
-                            foreach (var error in ruleContext.Errors)
+                            var errors = ruleContext is ValidationContext<TValue> builtIn ? builtIn.GetErrors() : ruleContext.Errors;
+                            foreach (var error in errors)
                             {
                                 // The rule and its error template are shared by every validation. Add the
                                 // index to a copy of the reported error, never to that shared state.

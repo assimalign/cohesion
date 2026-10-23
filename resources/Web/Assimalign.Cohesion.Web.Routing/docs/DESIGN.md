@@ -61,6 +61,11 @@ raw template ──RoutePatternParser──▶ RoutePattern ──┐
 
 ### Two-phase matching (path, then method)
 
+A catch-all joins the remaining range of the split array without allocating a second array.
+Capture values, empty-segment behavior and candidate ordering remain the same. Path splitting
+retains the trimmed-string implementation: the span-based candidates measured in iteration 1
+reduced some allocations but regressed matching time on the tested paths.
+
 `IRouterRoute` exposes matching as two operations rather than one:
 
 - `TryMatchPath(context, out values)` — matches the request **path** and validates parameter

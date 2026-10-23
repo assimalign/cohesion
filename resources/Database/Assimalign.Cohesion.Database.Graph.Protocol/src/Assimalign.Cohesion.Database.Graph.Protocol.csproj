@@ -5,6 +5,8 @@
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" />
+    </ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" Module="Encoding" />
     </ItemGroup>
 </Project>

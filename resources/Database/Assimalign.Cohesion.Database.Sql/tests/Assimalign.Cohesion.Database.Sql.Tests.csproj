@@ -20,6 +20,8 @@
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Sql.Language\tests\TestObjects\SqlTypeModifierCases.cs" Link="TestObjects\SqlTypeModifierCases.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
@@ -28,6 +30,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
 		<!-- Q8 uses the same 50-table fixture as the NativeAOT benchmark. -->
 		<Compile Include="..\samples\Assimalign.Cohesion.Database.Sql.Benchmarks\Q8Schema.cs" Link="TestObjects\Q8Schema.cs" />
 		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />

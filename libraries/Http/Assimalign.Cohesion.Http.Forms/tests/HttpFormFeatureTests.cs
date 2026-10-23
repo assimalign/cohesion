@@ -15,6 +15,42 @@ namespace Assimalign.Cohesion.Http.Forms.Tests;
 
 public class HttpFormFeatureTests
 {
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - Parameters: Should preserve charset casing, quotes and first occurrence")]
+    [InlineData("application/x-www-form-urlencoded;; charset=\"ISO-8859-1\" ; ignored=x", "é")]
+    [InlineData("application/x-www-form-urlencoded; CHARSET=latin1; charset=utf-8", "é")]
+    [InlineData("application/x-www-form-urlencoded; charset =latin1", "�")]
+    public async Task ReadFormAsync_CharsetParameters_ShouldPreserveDecoding(string contentType, string expected)
+    {
+        // Arrange
+        using MemoryStream body = new(Encoding.Latin1.GetBytes("name=é"));
+        IHttpRequest request = new BareHttpRequest { Body = body, ContentType = contentType };
+
+        // Act
+        IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync(CancellationToken.None);
+
+        // Assert
+        form["name"][0].ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Forms] - Parameters: Should preserve disposition whitespace and duplicate precedence")]
+    [InlineData("form-data; name=\"field\"")]
+    [InlineData("form-data;; NAME=\"field\" ; ignored=x")]
+    [InlineData("form-data; name=\"before\"; name=\"field\"")]
+    public async Task ReadFormAsync_DispositionParameters_ShouldPreserveField(string disposition)
+    {
+        // Arrange
+        string text = "--boundary\r\nContent-Disposition: " + disposition + "\r\n\r\nv\r\n--boundary--\r\n";
+        using MemoryStream body = new(Encoding.UTF8.GetBytes(text));
+        IHttpRequest request = new BareHttpRequest { Body = body, ContentType = "multipart/form-data; boundary=\"boundary\"; ignored=x" };
+
+        // Act
+        IHttpFormCollection form = await new HttpFormFeature(request).ReadFormAsync(CancellationToken.None);
+
+        // Assert
+        form.Count.ShouldBe(1);
+        form["field"][0].ShouldBe("v");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Http.Forms] - ReadFormAsync: both encodings preserve repeated fields and read first")]
     [InlineData("first", "second")]
     [InlineData("first", "", "last")]

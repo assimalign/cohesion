@@ -8,6 +8,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Forms" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

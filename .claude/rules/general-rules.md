@@ -459,20 +459,23 @@ Every assembly that wants those files names the **owning project** in its own cs
 
 ```xml
 <ItemGroup>
-  <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+  <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" Module="Materialization" />
 </ItemGroup>
 ```
 
 - It resolves **by project name**, exactly like `CohesionProjectReference`, off the same
   `libraries/` + `resources/` index (`build/Targets/Build.SharedFiles.targets`). No relative paths.
-- It compiles every `*.cs` under that project's `shared/` tree into the consumer, linked under a
-  `shared\` node. **The folder is the unit**, not the file.
+- `Module` is required and names one subfolder of `shared/`. Only `shared/<Module>/**/*.cs` is
+  compiled, linked under `shared/<Module>/`; sibling modules and root files are excluded. Declare
+  multiple items to select multiple modules from one project. Paths and wildcards are rejected.
 - The item lives in the **consuming csproj**, never in a `Directory.Build.targets`. Someone
   reading the csproj has to be able to see what the assembly is built from; an allowlist one
   directory up is exactly the thing that makes linked source hard to find. This applies to the
   owning project too: `shared/` is outside the csproj's `src/` directory, so a project that wants
   its own shared folder compiled in names **itself**.
-- Naming a project with no `shared/` folder, or a name that is not a project, fails the build.
+- An unknown project, missing module, invalid module name, or nonexistent module fails the build
+  with `COHSHR001` through `COHSHR004`. Core's `ComponentIntegration` module is an explicitly
+  opted-in internal build contract; it is not part of Core's public assembly API.
 
 **The safety test.** A file in `shared/` holds only stateless static types, or types whose
 instances never cross an assembly boundary. No static mutable fields, no singletons, no

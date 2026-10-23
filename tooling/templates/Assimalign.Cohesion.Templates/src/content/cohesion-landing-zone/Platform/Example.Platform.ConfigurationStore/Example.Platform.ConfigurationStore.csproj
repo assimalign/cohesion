@@ -16,8 +16,14 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="api" Public="true" Certificate="tls" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionMount Update="tls" Source="platform-secretstore:certs/platform-configurationstore" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="Configuration\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -128,6 +128,7 @@ foreach ($relative in $orderedPaths) {
         Project      = @()
         Private      = @()
         Shared       = @()
+        SharedModules = @()
         Analyzer     = @()
         Package      = @()
     }
@@ -180,6 +181,11 @@ foreach ($project in $projects.Values) {
     $project.Project  = @($projectRefs  | Sort-Object -Unique)
     $project.Private  = @($privateRefs  | Sort-Object -Unique)
     $project.Shared   = @($sharedRefs   | Sort-Object -Unique)
+    $project.SharedModules = @($xml.SelectNodes('//CohesionSharedSource[@Include]') | ForEach-Object {
+        $owner = $_.GetAttribute('Include')
+        $module = $_.GetAttribute('Module')
+        if ([string]::IsNullOrWhiteSpace($module)) { $owner } else { $owner + '/' + $module }
+    } | Sort-Object -Unique)
     $project.Analyzer = @($analyzerRefs | Sort-Object -Unique)
     $project.Package  = @($packageRefs  | Sort-Object -Unique)
 }
@@ -282,11 +288,11 @@ Add-Line 'An arrow always means "references" / "depends on", the same direction 
 Add-Line 'written in: `Web.Hosting --> Web` reads "`Web.Hosting` references `Assimalign.Cohesion.Web`".'
 Add-Line 'The `Assimalign.Cohesion.` prefix is stripped from node labels; tables carry the exact names.'
 Add-Line ''
-Add-Line 'A `CohesionSharedSource` link — compiling another project''s `shared/` folder into this'
+Add-Line 'A `CohesionSharedSource` link — compiling a selected `shared/<Module>/` folder into this'
 Add-Line 'assembly — counts as an edge here, because it couples the two exactly as a reference does. It'
 Add-Line 'also has its own column in the per-area tables. No edge is counted twice when a project both'
 Add-Line 'references a project and links its shared source, and a project naming itself (how it compiles'
-Add-Line 'its own `shared/` folder, which sits outside its `src/` directory) is shown in the table but is'
+Add-Line 'its own shared module, which sits outside its `src/` directory) is shown in the table but is'
 Add-Line 'not an edge.'
 Add-Line ''
 Add-Line '| | Count |'
@@ -436,7 +442,7 @@ foreach ($area in $areaNames) {
     foreach ($m in $members) {
         $refs = if (@($m.Project).Count) { (@($m.Project) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
         $priv = if (@($m.Private).Count) { (@($m.Private) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
-        $shrd = if (@($m.Shared).Count)  { (@($m.Shared)  | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
+        $shrd = if (@($m.SharedModules).Count)  { (@($m.SharedModules) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
         $pkgs = if (@($m.Package).Count) { (@($m.Package) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
         Add-Line "| ``$($m.Name)`` | $refs | $priv | $shrd | $pkgs |"
     }

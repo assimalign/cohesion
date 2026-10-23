@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+
+using Assimalign.Cohesion.ObjectMapping.Internal;
 
 namespace Assimalign.Cohesion.ObjectMapping;
 
@@ -13,7 +16,7 @@ namespace Assimalign.Cohesion.ObjectMapping;
 /// <typeparam name="TSource">The source type the profile maps from.</typeparam>
 public abstract class MapperProfile<
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TTarget,
-    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSource> : IMapperProfile
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSource> : IMapperProfile, IMapperProfileExecutor, IMapperProfileExecutor<TTarget, TSource>
 {
     private readonly List<IMapperAction> _mapActions = new List<IMapperAction>();
 
@@ -53,6 +56,55 @@ public abstract class MapperProfile<
 
     /// <inheritdoc />
     public IReadOnlyList<IMapperAction> MapActions => _mapActions;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    void IMapperProfileExecutor.Invoke(ref MapperExecution execution)
+    {
+        if (execution.Target is TTarget target && execution.Source is TSource source)
+        {
+            Invoke(target, source, ref execution);
+        }
+        else
+        {
+            foreach (IMapperAction action in ((IMapperProfile)this).MapActions)
+            {
+                action.Invoke(execution.GetContext());
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    void IMapperProfileExecutor<TTarget, TSource>.Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        Invoke(target, source, ref execution);
+    }
+
+    private void Invoke(TTarget target, TSource source, ref MapperExecution execution)
+    {
+        IReadOnlyList<IMapperAction> actions = ((IMapperProfile)this).MapActions;
+        if (typeof(TTarget).IsValueType || typeof(TSource).IsValueType || !ReferenceEquals(actions, _mapActions))
+        {
+            // Preserve boxed value identity and derived profiles that reimplement the public action list.
+            foreach (IMapperAction action in actions)
+            {
+                action.Invoke(execution.GetContext());
+            }
+            return;
+        }
+
+        // Keep List's version check: a callback that changes this profile's actions must still fail.
+        foreach (IMapperAction action in _mapActions)
+        {
+            if (action is TypedMapperAction<TTarget, TSource> typed)
+            {
+                typed.Invoke(target, source, ref execution);
+            }
+            else
+            {
+                action.Invoke(execution.GetContext());
+            }
+        }
+    }
 
     /// <summary>
     /// Declares the mapping actions for this profile using the supplied descriptor.

@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+    <ItemGroup>
+        <EmbeddedResource Include="$(CohesionRepositoryDirectory)libraries\Core\Assimalign.Cohesion.Core\shared\ComponentIntegration\*.cs"
+                          LogicalName="ComponentIntegration.%(Filename)%(Extension)" />
+    </ItemGroup>
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.SourceGeneration.Tests</RootNamespace>
 	</PropertyGroup>

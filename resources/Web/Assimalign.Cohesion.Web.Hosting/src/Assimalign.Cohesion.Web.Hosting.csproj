@@ -41,7 +41,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="CommandDiagnostics" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" Module="Validation" />
 	</ItemGroup>
 </Project>

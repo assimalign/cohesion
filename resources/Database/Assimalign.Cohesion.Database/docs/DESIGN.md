@@ -9,6 +9,15 @@ it executes before returning measured counts through the existing nullable Int64
 Documents and Graph continue to reject their ANALYZE prefixes. Cross-model contract tests verify
 column names, types, order, nullability and SQL's measured SELECT/TableScan counts.
 
+## Shared-source authoring modules (#1705)
+
+Each `CohesionSharedSource` declaration names its owner and required `Module`. Database's engine
+helpers live in `shared/Engine/`, with the model projects selecting `Module="Engine"`. Other
+Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults` modules.
+The move preserves helper contents and their internal, assembly-local type identities. Test-only
+linked support remains ordinary Compile items. Every project ItemGroup contains one item type,
+preserving declaration metadata and evaluation order when groups split during integration.
+
 ## Engine failure diagnostics (#1247, #1364)
 
 An engine error code always appears in `Diagnostics`. Only wire writers add a code prefix
@@ -88,7 +97,7 @@ surface. Child roots never reference the root.
 
 The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(DatabaseEngine)`, owned and named `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, and one-shot `Build()`. The owned overload names the engine as its first argument, so the hosting layer reserves the name, and refuses a duplicate, when a model verb registers the engine, before any factory runs (owner decision 52 of 2026-10-09): a model's factory can open and provision databases, which a duplicate engine must never reach. The nameless factory overload is deleted. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine (`IReadOnlyList<DatabaseEngine> Engines`), nested servers (`IReadOnlyList<DatabaseServer> Servers`), and ordinal `GetEngine(name)` lookup, which returns the root base; the static extension `GetEngine<TEngine>(name) where TEngine : DatabaseEngine` (`Extensions/DatabaseApplicationContextExtensions.cs`) returns a model's engine typed, refusing an engine of another type with `InvalidOperationException`. These three are three of the area's five kept interfaces (`database-area.md`); since phase 6 of the concrete-types plan (#1262) they name the root bases, and every other root interface is deleted. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
 
-Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. Since B3 of the engine extensibility design the state also holds the databases a non-SQL builder declares (`AddDatabase(name)`), hands them to the built engine and opens or creates each before the build returns, disposing the engine on a failure; `shared/DatabaseDeclarations.cs` words the duplicate-declaration and drop refusals for all five models (the SQL builder keeps its richer declarations), `shared/DatabaseEngineOptionChecks.cs` makes each model's option checks name the engine (`{Model} engine '{name}': {Option} …`), and `shared/DatabaseFileNames.cs` is the one name rule every model applies to a database it stores and the one mapping from a name to its directory and file sets (the rule is checked in each engine's create, open and drop cores and by each builder's `AddDatabase`; see "A database's name maps to its files", below). No model options type carries an engine name: the name is the builder's, or `Create(name, options)`'s. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
+Each model ships a sealed engine builder (`SqlDatabaseEngineBuilder` and its siblings) with typed `AddWorker(Func<TEngine, DatabaseEngineWorker>)` and `AddServer(Func<TEngine, DatabaseServer>)`; the former root `IDatabaseEngineBuilder` they implemented is deleted (row 6 of the plan). Shared construction/rollback source is owned in this project's `shared/Engine/` (`DatabaseEngineBuilderState<TEngine>`) and compiled by each model through `CohesionSharedSource`. Since B3 of the engine extensibility design the state also holds the databases a non-SQL builder declares (`AddDatabase(name)`), hands them to the built engine and opens or creates each before the build returns, disposing the engine on a failure; `shared/Engine/DatabaseDeclarations.cs` words the duplicate-declaration and drop refusals for all five models (the SQL builder keeps its richer declarations), `shared/Engine/DatabaseEngineOptionChecks.cs` makes each model's option checks name the engine (`{Model} engine '{name}': {Option} …`), and `shared/Engine/DatabaseFileNames.cs` is the one name rule every model applies to a database it stores and the one mapping from a name to its directory and file sets (the rule is checked in each engine's create, open and drop cores and by each builder's `AddDatabase`; see "A database's name maps to its files", below). No model options type carries an engine name: the name is the builder's, or `Create(name, options)`'s. No separate generic application composition algorithm consumes arbitrary model options. The 2026-10-02 ruling that omitted typed worker/server factory overloads is superseded (D5): since step P4.0 the shared build state is typed over each model's engine, and since phase 4 each model's sealed builder offers typed `AddWorker` and `AddServer` ("Root bases", below).
 
 Workers remain scheduled and quiesced by their engine. Every worker derives from `DatabaseEngineWorker`, whose non-virtual `Run(CancellationToken)` is the pump the engine runs on the thread it owns. `DatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
 
@@ -173,7 +182,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   `COHESION_DATABASE_ENGINE_PUMP_IN_BASE` constant the adopted models defined to compile it to
   nothing.
 - **The shared build state composes through the leaf** (plan step P4.0, §6.5). Every model's
-  builder compiles `shared/DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`
+  builder compiles `shared/Engine/DatabaseEngineBuilderState<TEngine> where TEngine : DatabaseEngine`
   (phase 6 collapsed its former `<TEngine, TWorker, TServer>` and fixed the products to the
   bases), which runs typed factories (`Func<TEngine, DatabaseEngineWorker>`,
   `Func<TEngine, DatabaseServer>`) and hands their products to the
@@ -254,7 +263,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   stayed registered until it was dropped, and every later open handed back the disposed instance
   or refused it. Now `DatabaseInstance` disposal completes a close task once its core ends and
   then tells its engine, which calls the leaf's `protected abstract ForgetClosedDatabaseCore`;
-  the five leaves implement it through the shared `shared/DatabaseRegistry.Forget`, so the next
+  the five leaves implement it through the shared `shared/Engine/DatabaseRegistry.Forget`, so the next
   `OpenDatabaseAsync` opens the database again from its files. The rules that make it race-free:
   - **The leaf keeps tracking the database until its close ends**, so every worker's closed-database
     skip (the `IsClosed` guards) still covers the window between the close and the forget.
@@ -289,7 +298,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   - **Engine-initiated closes are unchanged**: a drop, an offline reopen and the engine's disposal
     remove the database first, so its forget finds nothing to do.
 
-  In-memory databases reopen with their data too (#1272): `shared/DatabaseMemoryFiles` keeps each
+  In-memory databases reopen with their data too (#1272): `shared/Engine/DatabaseMemoryFiles` keeps each
   in-memory file set's streams until it is dropped or the engine is disposed (the disposal
   releases every file set, so a disposed engine still referenced holds none of its databases), and
   an open copies the closed streams' bytes into new streams outside its lock, each allocated once
@@ -299,7 +308,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.
 - **A database's name maps to its files through one shared function** (#1392):
-  `shared/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
+  `shared/Engine/DatabaseFileNames`, compiled into each model assembly beside `DatabaseMemoryFiles`.
   `DatabaseName` compares ordinally ignoring case, so the mapping has to give every spelling the
   same files on a case-sensitive file system too. Each model used to build the directory from the
   caller's spelling, and on Linux an open or declaration of `SALES` after a create of `sales` made
@@ -509,8 +518,8 @@ ordinary storage transaction contention is retried as busy.
   device that took seconds to answer an fsync, or to fail a write, stopped every other
   database's journal truncation for as long (a hung data-file fsync in one database left
   the other with no checkpoint at all in five seconds of writes). The engines' checkpointer
-  is now one shared copy, `shared/DatabaseCheckpointWorker.cs`, that runs each database's
-  checkpoint on a lane (`shared/DatabaseWorkerLanes.cs`): a dedicated lane thread,
+  is now one shared copy, `shared/Engine/DatabaseCheckpointWorker.cs`, that runs each database's
+  checkpoint on a lane (`shared/Engine/DatabaseWorkerLanes.cs`): a dedicated lane thread,
   at most one checkpoint per database at a time. The pass waits for the lane while no
   other database needs the worker, so a checkpoint that ends is settled by the pass that
   started it, as before. Once another database's journal reaches its size (the engine's
@@ -680,7 +689,7 @@ ordinary storage transaction contention is retried as busy.
     of the database's journals holds the engine's `JournalSizeLimit` (an engine option; zero,
     the default, resolves to four times `CheckpointJournalSize`, 1 GiB at its default and
     PostgreSQL's `max_wal_size` default, or to 1 GiB with the size trigger off;
-    `shared/DatabaseWorkerLimits.cs`) takes the database offline with
+    `shared/Engine/DatabaseWorkerLimits.cs`) takes the database offline with
     `StorageOfflineCause.JournalSizeLimit`, through the worker base's
     `protected TakeDatabaseOffline`: under load the journal would fill the device long before
     the failure window passes. One failure is not enough (owner decision 41), because a journal

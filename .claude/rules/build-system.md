@@ -35,6 +35,29 @@ When in doubt: search for the property name in `build/Targets/` first. If it's a
 
 When editing project files, prefer Cohesion-specific MSBuild items over stock items wherever one exists — not just the ones enumerated here.
 
+### One item type per ItemGroup
+
+Each `<ItemGroup>` contains only one item element type. Group like XML elements together:
+`CohesionProjectReference`, `CohesionPackageReference`, `CohesionSharedSource`, `Compile`, `None`,
+and every other item type each get their own `<ItemGroup>` block. Do not mix different item types
+under the same parent, even when they serve the same feature or share a condition.
+
+Multiple items of the same type belong together when their conditions and evaluation order allow it:
+
+```xml
+<ItemGroup>
+  <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+  <CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+</ItemGroup>
+<ItemGroup>
+  <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+</ItemGroup>
+```
+
+This applies to `.csproj`, `.props`, and `.targets` files, including item groups inside targets.
+Preserve conditions and evaluation order when splitting or consolidating groups; separate groups
+of the same item type are appropriate when those semantics require them.
+
 ### Shipped props and targets must evaluate under Visual Studio's MSBuild
 
 Visual Studio evaluates projects with the **.NET Framework** MSBuild inside `devenv`, while every

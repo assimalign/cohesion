@@ -17,4 +17,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
 	</ItemGroup>
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 </Project>

@@ -3,10 +3,12 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Graph</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Graph.Protocol" Module="Encoding" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
+	</ItemGroup>
+	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Language" />

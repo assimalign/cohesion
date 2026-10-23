@@ -37,8 +37,10 @@ internal sealed class ContentSerializationFeature : IContentSerializationFeature
 
         foreach (IContentReader reader in _readers)
         {
-            foreach (HttpMediaType range in reader.MediaTypes)
+            IReadOnlyList<HttpMediaType> mediaTypes = reader.MediaTypes;
+            for (int i = 0; i < mediaTypes.Count; i++)
             {
+                HttpMediaType range = mediaTypes[i];
                 // Strictly-greater keeps the earliest registration on specificity ties.
                 if (range.Includes(mediaType) && range.Specificity > matchSpecificity)
                 {
@@ -59,8 +61,10 @@ internal sealed class ContentSerializationFeature : IContentSerializationFeature
 
         foreach (IContentWriter writer in _writers)
         {
-            foreach (HttpMediaType range in writer.MediaTypes)
+            IReadOnlyList<HttpMediaType> mediaTypes = writer.MediaTypes;
+            for (int i = 0; i < mediaTypes.Count; i++)
             {
+                HttpMediaType range = mediaTypes[i];
                 if (range.Includes(mediaType) && range.Specificity > matchSpecificity)
                 {
                     match = writer;

@@ -6,10 +6,12 @@
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />

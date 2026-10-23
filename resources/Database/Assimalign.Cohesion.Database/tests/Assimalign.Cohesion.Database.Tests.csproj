@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="xunit" />
@@ -12,6 +14,8 @@
 		<CohesionPackageReference Include="Shouldly" />
 		<!-- Compiler-backed consumer tests keep Roslyn test-only. -->
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<!--
 			The root event source's tests drive real in-memory engines (the event-sources plan, §7):
@@ -27,6 +31,8 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
 		<Compile Remove="TestObjects\CheckpointPace.cs" />
 	</ItemGroup>
 </Project>

@@ -11,7 +11,11 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="http" Public="true" />
+  </ItemGroup>
+  <ItemGroup>
     <CohesionResourceReference Include="..\Example.AppC.Api\Example.AppC.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

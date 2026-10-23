@@ -23,10 +23,11 @@ public class GlobTokensTests
         // Arrange: two globs over one array, as the parse cache hands out for one pattern.
         string directory = $"/d{Guid.NewGuid():N}";
         string pattern = $"{directory}/file[0-9].txt";
-        TokenBase[] shared = Parser.Tokenize(pattern);
+        var parsed = Parser.Tokenize(pattern);
+        TokenBase[] shared = parsed.Tokens;
         var original = (TokenBase[])shared.Clone();
-        var written = new Glob(shared);
-        var other = new Glob(shared);
+        var written = new Glob(parsed);
+        var other = new Glob(parsed);
         IList<Token> genericList = written.Tokens;
         IList list = written.Tokens;
 

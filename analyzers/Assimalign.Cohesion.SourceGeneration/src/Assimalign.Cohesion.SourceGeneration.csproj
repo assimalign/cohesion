@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+    <ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+    </ItemGroup>
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.SourceGeneration</RootNamespace>
 	</PropertyGroup>

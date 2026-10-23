@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text;
 
 namespace Assimalign.Cohesion.Dns.Internal;
@@ -39,6 +40,7 @@ internal static class DnsNameEncoder
     private static void WriteCore(ref DnsWireWriter writer, DnsName name, bool compress)
     {
         string[] labels = name.GetLabels();
+        Span<byte> labelBytes = stackalloc byte[63];
 
         // Root name is just the zero terminator.
         if (labels.Length == 0)
@@ -53,11 +55,11 @@ internal static class DnsNameEncoder
         for (int i = 0; i < labels.Length; i++)
         {
             string label = labels[i];
-            byte[] labelBytes = Encoding.ASCII.GetBytes(label);
-            if (labelBytes.Length > 63)
+            int byteCount = Encoding.ASCII.GetByteCount(label);
+            if (byteCount > labelBytes.Length)
             {
                 DnsException.ThrowMalformed(
-                    $"label '{label}' exceeds the RFC 1035 limit of 63 octets in wire form");
+                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.WireLabelTooLong, label));
             }
 
             string suffixKey = BuildSuffixKey(labels, i);
@@ -79,8 +81,9 @@ internal static class DnsNameEncoder
                 writer.LabelOffsets[suffixKey] = writer.Position;
             }
 
-            writer.WriteUInt8((byte)labelBytes.Length);
-            writer.WriteBytes(labelBytes);
+            writer.WriteUInt8((byte)byteCount);
+            int written = Encoding.ASCII.GetBytes(label.AsSpan(), labelBytes);
+            writer.WriteBytes(labelBytes[..written]);
         }
 
         // Root terminator.
@@ -98,15 +101,6 @@ internal static class DnsNameEncoder
             return labels[startIndex].ToLowerInvariant();
         }
 
-        StringBuilder builder = new();
-        for (int i = startIndex; i < labels.Length; i++)
-        {
-            if (i > startIndex)
-            {
-                builder.Append('.');
-            }
-            builder.Append(labels[i].ToLowerInvariant());
-        }
-        return builder.ToString();
+        return string.Join(".", labels.AsSpan(startIndex)).ToLowerInvariant();
     }
 }

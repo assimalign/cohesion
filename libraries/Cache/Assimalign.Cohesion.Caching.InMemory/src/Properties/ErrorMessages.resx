@@ -13,4 +13,22 @@
   <data name="CompactionPercentageInvalid" xml:space="preserve">
     <value>CompactionPercentage must be in the (0, 1] range.</value>
   </data>
+  <data name="EntrySizeRequired" xml:space="preserve">
+    <value>When MemoryCacheOptions.SizeLimit is set every committed entry must declare a Size.</value>
+  </data>
+  <data name="EntrySizeLimitExceeded" xml:space="preserve">
+    <value>The entry's Size exceeds the cache's SizeLimit.</value>
+  </data>
+  <data name="CacheDisposed" xml:space="preserve">
+    <value>The MemoryCache has been disposed.</value>
+  </data>
+  <data name="RelativeExpirationInvalid" xml:space="preserve">
+    <value>AbsoluteExpirationRelativeToNow must be greater than zero.</value>
+  </data>
+  <data name="SlidingExpirationInvalid" xml:space="preserve">
+    <value>SlidingExpiration must be greater than zero.</value>
+  </data>
+  <data name="EntrySizeInvalid" xml:space="preserve">
+    <value>Size must be greater than or equal to zero.</value>
+  </data>
 </root>
