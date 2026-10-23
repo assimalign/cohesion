@@ -103,12 +103,12 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 
         manifest.Probes.Readiness.ShouldNotBeNull();
         manifest.Probes.Readiness!.Endpoint.ShouldBe("admin");
-        manifest.Probes.Readiness.Http.ShouldBe("/readyz");
+        manifest.Probes.Readiness.Http!.Value.Value.ShouldBe("/readyz");
         manifest.Probes.Liveness.ShouldNotBeNull();
         manifest.Probes.Liveness!.Endpoint.ShouldBe("admin");
-        manifest.Probes.Liveness.Http.ShouldBe("/livez");
+        manifest.Probes.Liveness.Http!.Value.Value.ShouldBe("/livez");
         manifest.ControlPlane.Endpoint.ShouldBe("admin");
-        manifest.ControlPlane.Path.ShouldBe("/cohesion/v1");
+        manifest.ControlPlane.Path.Value.ShouldBe("/cohesion/v1");
 
         ResourceManifestMount data = manifest.Mounts.ShouldHaveSingleItem();
         data.Name.ShouldBe("data");

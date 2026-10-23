@@ -85,9 +85,11 @@ types retain their existing roles and accessibility.
 
 `ResourceHttpPath` owns the resource probe and control-plane path grammar: a nonblank
 absolute path beginning with `/`, without a query or fragment. Paths compare ordinally,
-as RFC 3986 section 6.2.2.1 does not make path components case-insensitive. Manifest validation
-checks probe `Http` and control-plane `Path` strings through `ResourceHttpPath.IsValid` and
-throws `InvalidDataException` for invalid paths. Plan validation uses the same rule through
+as RFC 3986 section 6.2.2.1 does not make path components case-insensitive. Manifest probe
+`Http` and control-plane `Path` carry checked values. Construction rejects malformed strings
+with `ArgumentException`; JSON import rejects them with `JsonException`. Manifest validation
+still checks present default values through `ResourceHttpPath.IsValid` and refuses them with
+`InvalidDataException`. Plan validation uses the same rule through
 `TryCreate` for manifest and planned HTTP probe values and control-plane paths before a gateway
 can reconcile. `ProbeMapping.Value` remains a string because it also carries gRPC service names.
 `ControlPlaneSpec.Path` remains a string because the empty string represents an omitted
@@ -96,8 +98,8 @@ control-plane fact in legacy v1 plans; nonempty paths still pass the canonical g
 `ResourceMountSource` owns the case-sensitive source expression grammar used by manifests,
 provider validation, and gateway resolution. `literal:` accepts an empty payload and embedded
 colons; `parameter:` requires a nonblank name; other expressions contain exactly one colon
-between nonblank source and key. Whitespace and case are preserved. Manifest validation uses
-`ResourceMountSource.TryCreate` and throws `InvalidDataException` for invalid source strings.
+between nonblank source and key. Whitespace and case are preserved. Typed construction and JSON import reject malformed source text. Manifest validation uses
+`ResourceMountSource.TryCreate` and throws `InvalidDataException` for a present default source.
 `GenericPlanner` uses `TryCreate` before constructing mount bindings and reports invalid direct
 planner input with `InvalidOperationException`.
 `MountBinding.Source` retains the generated nullable value type; plan validation refuses a
@@ -105,13 +107,13 @@ present default. Both manifest and plan sources retain null for omission. Mount 
 remain separate: Volume mounts cannot declare sources, and literal sources require
 Configuration mounts.
 
-**Owner's Database freeze (#1168).** `ResourceManifestProbe.Http` and
-`ResourceManifestMount.Source` remain `string?`; `ResourceManifestControlPlane.Path` remains
-`string`. These serialized DTO members deliberately keep their existing public types so frozen
-Database consumers can keep string initializers and string assertions unchanged. Their grammar
-still lives only in the value types, and invalid DTO text fails at manifest validation before
-reconcile. Each property carries the scoped deviation marker; adoption of typed DTO properties
-waits for #1470. The freeze does not change typed plan mount sources or credential APIs.
+**Typed manifest DTOs (#1470).** The freeze deviation is retired. Public properties are
+`ResourceHttpPath? ResourceManifestProbe.Http`, `ResourceHttpPath ResourceManifestControlPlane.Path`
+and `ResourceMountSource? ResourceManifestMount.Source`, each with init access. Valid string
+initializers still use the existing implicit conversions. Optional values preserve null; a
+required/default path or a present default source is refused before reconcile. Consumers read
+`.Value` for raw text (or `?.Value` for optional members). The source-generated manifest JSON
+context retains plain strings and nulls, with schema `cohesion/resource/v1` unchanged.
 
 `ApplicationName.IsValid` owns the existing application identity grammar: 1-63 lowercase
 ASCII letters, digits, or hyphens, beginning and ending with a letter or digit. Conversion,
@@ -128,17 +130,17 @@ The credential record carries both types and checks default values through its i
 so construction and `with` expressions cannot bypass validation. Dynamic issuer output is
 checked when issued, before it can enter the gateway's credential cache.
 
-**Compatibility with 10.0.0-preview.1.** The manifest DTO property types above stay unchanged.
-The remaining source and binary API breaks are `MountBinding`'s source constructor parameter,
+**Compatibility with 10.0.0-preview.1.** The three manifest DTO property types above change
+from strings to their checked value types. Consumers must recompile. Other existing API changes are `MountBinding`'s source constructor parameter,
 property, and deconstruction output, and `ApplicationCredential`'s scheme/value constructor
 parameters, properties, and deconstruction outputs: these now use generated value types.
 Consumers must recompile; code using string members reads the underlying `Value`. Valid string
 assignments continue through implicit conversions.
 
-Validation also changes behavior: invalid manifest HTTP/control-plane paths and source expressions
-fail manifest validation with `InvalidDataException`; invalid strings converted to value types
-and invalid `ApplicationName.Parse` calls throw `ArgumentException`. The value objects' own JSON
-converters reject invalid strings with `JsonException`. `ApplicationModelDocument.Parse` and
+Validation rejects malformed manifest HTTP/control-plane paths and source expressions during
+value construction with `ArgumentException`, or JSON import with `JsonException`. Present default
+values remain refused by manifest validation with `InvalidDataException` and direct plan validation
+with `InvalidOperationException`. Invalid `ApplicationName.Parse` calls throw `ArgumentException`. `ApplicationModelDocument.Parse` and
 both `Load` overloads instead propagate `ArgumentException` when an application name fails
 validation through `ToModel` and `ApplicationName.Parse`; `ToModel` and both `Save` overloads
 share that behavior. Relative paths and paths containing query/fragment delimiters,

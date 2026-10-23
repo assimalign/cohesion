@@ -82,7 +82,7 @@ public static class GenericPlanner
             ResourceMountSource? source = null;
             if (mount.Source is not null)
             {
-                if (!ResourceMountSource.TryCreate(mount.Source, out ResourceMountSource expression))
+                if (!ResourceMountSource.TryCreate(mount.Source.Value.Value, out ResourceMountSource expression))
                 {
                     throw new InvalidOperationException(ErrorMessages.ResourceMountSourceInvalid);
                 }
