@@ -25,6 +25,7 @@ from CI or an agent skill.
 | `resources/Database/Prepare-Q8PhaseInstrumentation.ps1` | Prepare SQL phase instrumentation in an extracted archive beneath `_out/`. |
 | `resources/Web/Measure-OutputCacheCounters.ps1` | Run the output-cache counter experiment; temporarily edits source and restores it in `finally`. |
 | `sdks/Invoke-SdkConsumerSmoke.ps1` | Build, publish, and run isolated package-only SDK consumers. |
+| `sdks/New-SdkConsumerGlobalJson.ps1` | Generate isolated consumer SDK pins from a prepared package feed. |
 
 ```powershell
 pwsh scripts/Install-Local.ps1

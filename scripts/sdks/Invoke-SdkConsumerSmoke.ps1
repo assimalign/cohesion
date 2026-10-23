@@ -120,20 +120,15 @@ if ($null -eq $localSource) {
 $localSource.value = $packageDirectory
 $nuget.Save($nugetPath)
 
-$repositoryGlobalJson = Get-Content -LiteralPath (Join-Path $repositoryDirectory 'global.json') -Raw |
-    ConvertFrom-Json
-$sdkVersions = [ordered]@{
-    'Assimalign.Cohesion.Sdk' = $Version
-    'Assimalign.Cohesion.Sdk.Web' = $Version
-    'Assimalign.Cohesion.Sdk.Database' = $Version
-}
-$consumerGlobalJson = [ordered]@{
-    sdk = $repositoryGlobalJson.sdk
-    'msbuild-sdks' = $sdkVersions
-}
-$consumerGlobalJson |
-    ConvertTo-Json -Depth 10 |
-    Set-Content -LiteralPath (Join-Path $workspace 'global.json') -Encoding utf8
+& (Join-Path $PSScriptRoot 'New-SdkConsumerGlobalJson.ps1') `
+    -PackageDirectory $packageDirectory `
+    -Version $Version `
+    -OutputDirectory $workspace `
+    -SdkPackageId @(
+        'Assimalign.Cohesion.Sdk'
+        'Assimalign.Cohesion.Sdk.Web'
+        'Assimalign.Cohesion.Sdk.Database'
+    )
 
 $profiles = @(
     [pscustomobject]@{

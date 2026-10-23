@@ -555,9 +555,20 @@ jobs:
           $env:DOTNET_CLI_HOME = Join-Path $workspace ".dotnet"
           New-Item -ItemType Directory -Path $workspace -Force | Out-Null
           Copy-Item -Path "$source/*" -Destination $workspace -Recurse -Force
-          Copy-Item -LiteralPath global.json -Destination (Join-Path $workspace "global.json") -Force
 
           $packageFeed = (Resolve-Path -LiteralPath "_out/packages").Path
+          $version = (& ./scripts/Get-CohesionVersion.ps1).Trim()
+          ./scripts/sdks/New-SdkConsumerGlobalJson.ps1 `
+              -PackageDirectory $packageFeed `
+              -Version $version `
+              -OutputDirectory $workspace `
+              -SdkPackageId @(
+                  'Assimalign.Cohesion.Sdk'
+                  'Assimalign.Cohesion.Sdk.Gateway'
+                  'Assimalign.Cohesion.Sdk.Web'
+                  'Assimalign.Cohesion.Sdk.Database'
+              )
+
           $nugetPath = Join-Path $workspace "NuGet.Config"
           [xml] $nuget = Get-Content -LiteralPath $nugetPath -Raw
           $localSource = @($nuget.configuration.packageSources.add) |
