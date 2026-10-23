@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// <summary>
 /// Options controlling in-process resource invocation, health probing, restart, and state.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InProcessGatewayOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
 {
     private int _livenessFailureThreshold = 3;
@@ -99,5 +101,36 @@ public sealed class InProcessGatewayOptions : ApplicationGatewayOptions
                 nameof(MaximumRestartBackoff),
                 ErrorMessages.MaximumRestartBackoffInvalid);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InProcessGatewayOptions _target;
+
+        public DebugView(InProcessGatewayOptions value)
+        {
+            _target = value;
+        }
+
+        public string? StateDirectory => _target.StateDirectory;
+        public TimeSpan ProbeInterval => _target.ProbeInterval;
+        public TimeSpan ProbeTimeout => _target.ProbeTimeout;
+        public int LivenessFailureThreshold => _target.LivenessFailureThreshold;
+        public TimeSpan InitialRestartBackoff => _target.InitialRestartBackoff;
+        public TimeSpan MaximumRestartBackoff => _target.MaximumRestartBackoff;
+        public int MaximumRestartAttempts => _target.MaximumRestartAttempts;
+        public string? ExportDirectory => _target.ExportDirectory;
+        public string ApplicationVersion => _target.ApplicationVersion;
+        public string? ParameterFile => _target.ParameterFile;
+        public global::System.Collections.Generic.IList<global::Assimalign.Cohesion.ApplicationModel.Gateway.IGatewayResourceCommandClient> CommandClients => _target.CommandClients;
+        public global::System.TimeProvider TimeProvider => _target.TimeProvider;
+        public global::System.TimeSpan BootstrapCredentialLifetime => _target.BootstrapCredentialLifetime;
+        public global::System.TimeSpan DeveloperTokenLifetime => _target.DeveloperTokenLifetime;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.IGatewayTrustKeyRepository? TrustKeyRepository => _target.TrustKeyRepository;
+        public global::Assimalign.Cohesion.ApplicationModel.IControlPlaneClient? ControlPlaneClient => _target.ControlPlaneClient;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.IApplicationGatewayControlPlaneFactory? ControlPlane => _target.ControlPlane;
+        public global::System.Collections.Generic.IList<global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceController> Controllers => _target.Controllers;
+        public global::System.Collections.Generic.IDictionary<string, string> Parameters => _target.Parameters;
+        public global::System.TimeSpan ReadinessBudget => _target.ReadinessBudget;
     }
 }

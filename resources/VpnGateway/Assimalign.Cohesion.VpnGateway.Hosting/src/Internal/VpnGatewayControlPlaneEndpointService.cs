@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("VpnGatewayControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class VpnGatewayControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class VpnGatewayControlPlaneEndpointService : IHostService, IDis
                 ? address
                 : throw new InvalidOperationException($"The VpnGateway endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly VpnGatewayControlPlaneEndpointService _target;
+
+        public DebugView(VpnGatewayControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

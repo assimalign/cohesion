@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IoTHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IoTHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class IoTHubControlPlaneEndpointService : IHostService, IDisposa
                 ? address
                 : throw new InvalidOperationException($"The IoTHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly IoTHubControlPlaneEndpointService _target;
+
+        public DebugView(IoTHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

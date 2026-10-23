@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// A fluent builder for an <see cref="OpenApiCallback"/> — a map of out-of-band callback requests keyed
 /// by a runtime expression that resolves to the callback URL.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiCallbackBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiCallbackBuilder
 {
     private readonly OpenApiCallback _callback = new();
@@ -34,5 +36,12 @@ public sealed class OpenApiCallbackBuilder
         configure(builder);
         _callback.PathItems[expression] = builder.Build();
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiCallbackBuilder value)
+        {
+        }
     }
 }

@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// <summary>
 /// Adapts the reusable IdentityModel RSA verifier to Bearer's existing public seam.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RsaJwtSignatureVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RsaJwtSignatureVerifier : IJwtSignatureVerifier
 {
     private readonly IJsonWebTokenSignatureVerifier _verifier;
@@ -35,4 +37,11 @@ public sealed class RsaJwtSignatureVerifier : IJwtSignatureVerifier
     /// <inheritdoc />
     public bool Verify(string algorithm, ReadOnlySpan<byte> signingInput, ReadOnlySpan<byte> signature)
         => _verifier.Verify(algorithm, signingInput, signature);
+
+    private sealed class DebugView
+    {
+        public DebugView(RsaJwtSignatureVerifier value)
+        {
+        }
+    }
 }

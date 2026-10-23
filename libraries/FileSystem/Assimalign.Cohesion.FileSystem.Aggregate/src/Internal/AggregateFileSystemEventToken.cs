@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// write patterns against the aggregate's virtual layout (e.g. <c>/data/**/*.log</c>) without
 /// caring where each underlying provider is mounted.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AggregateFileSystemEventToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AggregateFileSystemEventToken : IFileSystemEventToken, IDisposable
 {
     private readonly Glob? _aggregateGlob;
@@ -208,6 +210,8 @@ internal sealed class AggregateFileSystemEventToken : IFileSystemEventToken, IDi
         public IFileSystemEventToken Token { get; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("CompositeRegistration")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class CompositeRegistration : IDisposable
     {
         private readonly List<IDisposable> _inner;
@@ -232,10 +236,24 @@ internal sealed class AggregateFileSystemEventToken : IFileSystemEventToken, IDi
             }
             _onDispose(this);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(CompositeRegistration value)
+            {
+            }
+        }
     }
 
     private sealed class NoopRegistration : IDisposable
     {
         public void Dispose() { }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AggregateFileSystemEventToken value)
+        {
+        }
     }
 }

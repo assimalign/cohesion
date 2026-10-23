@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Provides a concrete uploaded form file implementation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpFormFile {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpFormFile : IHttpFormFile
 {
     private readonly Func<Stream> _streamFactory;
@@ -48,5 +50,20 @@ public sealed class HttpFormFile : IHttpFormFile
     public Stream OpenReadStream()
     {
         return _streamFactory();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpFormFile _target;
+
+        public DebugView(HttpFormFile value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public string FileName => _target.FileName;
+        public string? ContentType => _target.ContentType;
+        public long Length => _target.Length;
     }
 }

@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Content.Pdf;
 
 /// <summary>A case-sensitive byte name with equality after #xx unescaping (§7.3.5).</summary>
 /// <remarks>Names are byte sequences. Empty names are valid; NUL is forbidden.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("PdfName")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfName : IPdfObject, IEquatable<PdfName>
 {
     private readonly byte[] _bytes;
@@ -84,4 +86,16 @@ public sealed class PdfName : IPdfObject, IEquatable<PdfName>
         >= '0' and <= '9' => value - '0', >= 'A' and <= 'F' => value - 'A' + 10,
         >= 'a' and <= 'f' => value - 'a' + 10, _ => -1
     };
+
+    private sealed class DebugView
+    {
+        private readonly PdfName _target;
+
+        public DebugView(PdfName value)
+        {
+            _target = value;
+        }
+
+        public ReadOnlyMemory<byte> Bytes => _target.Bytes;
+    }
 }

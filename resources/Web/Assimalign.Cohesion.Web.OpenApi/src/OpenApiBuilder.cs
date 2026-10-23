@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// <c>IWebApplicationBuilder.AddFeature</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiBuilder
 {
     private readonly OpenApiOptions _options = new();
@@ -53,5 +55,17 @@ public sealed class OpenApiBuilder
         _options.MakeReadOnly();
 
         return new OpenApiDocumentFeature(_options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiBuilder _target;
+
+        public DebugView(OpenApiBuilder value)
+        {
+            _target = value;
+        }
+
+        public OpenApiOptions Options => _target.Options;
     }
 }

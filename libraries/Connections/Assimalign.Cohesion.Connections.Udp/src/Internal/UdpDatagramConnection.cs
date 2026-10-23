@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Connections.Udp.Internal;
 /// Datagrams are sent and received directly on the socket, one message per call, preserving
 /// message boundaries. The connection owns the socket and disposes it when disposed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("UdpDatagramConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class UdpDatagramConnection : DatagramConnection
 {
     private readonly Socket _socket;
@@ -138,5 +140,22 @@ internal sealed class UdpDatagramConnection : DatagramConnection
         {
             // Observer failures cannot prevent transport teardown.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UdpDatagramConnection _target;
+
+        public DebugView(UdpDatagramConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

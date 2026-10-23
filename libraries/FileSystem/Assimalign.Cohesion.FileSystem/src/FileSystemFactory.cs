@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.FileSystem;
 /// thread-safe; <see cref="Create(string)"/> is safe to call concurrently and the underlying
 /// instance is materialized at most once per registration.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileSystemFactory : IFileSystemFactory
 {
     private readonly Dictionary<string, Func<IFileSystem>> _registrations;
@@ -154,5 +156,17 @@ public sealed class FileSystemFactory : IFileSystemFactory
         {
             throw new ObjectDisposedException(nameof(FileSystemFactory));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly FileSystemFactory _target;
+
+        public DebugView(FileSystemFactory value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyCollection<string> Names => _target.Names;
     }
 }

@@ -25,6 +25,8 @@ using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IdentityEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentityEndpointService : IHostService, IDisposable
 {
     private const string DevelopmentDeviceSubject = "development-user";
@@ -1178,5 +1180,17 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         Health,
         Readiness,
         Liveness,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityEndpointService _target;
+
+        public DebugView(IdentityEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

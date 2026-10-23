@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Bmff;
 
 
 /// <summary>Retains the group id to name box identity; typed payload reading and writing are unsupported.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class GroupIdToNameBox : BmffBox
 {
     /// <summary>Creates a GroupIdToNameBox at its original location.</summary>
@@ -45,4 +47,21 @@ public sealed class GroupIdToNameBox : BmffBox
     }
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly GroupIdToNameBox _target;
+
+        public DebugView(GroupIdToNameBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

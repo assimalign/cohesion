@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Http;
 /// or an <see cref="StructuredFieldInnerList"/> (RFC 9651 &#167; 3.1, &#167; 3.2). Inspect
 /// <see cref="IsInnerList"/> before reading <see cref="Item"/> or <see cref="InnerList"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString(),nq}")]
 public readonly struct StructuredFieldMember : IEquatable<StructuredFieldMember>
 {
@@ -114,4 +115,17 @@ public readonly struct StructuredFieldMember : IEquatable<StructuredFieldMember>
     /// <param name="right">The second member.</param>
     /// <returns><see langword="true"/> if the members are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(StructuredFieldMember left, StructuredFieldMember right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldMember _target;
+
+        public DebugView(StructuredFieldMember value)
+        {
+            _target = value;
+        }
+
+        public bool IsInnerList => _target.IsInnerList;
+        public StructuredFieldParameters Parameters => _target.Parameters;
+    }
 }

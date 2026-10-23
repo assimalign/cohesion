@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// its request-headers deadline.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1ReadTimeout")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1ReadTimeout : IDisposable
 {
     // The _phase values: waiting for the next request to begin, reading its head, or an idle wait a
@@ -186,5 +188,12 @@ internal sealed class Http1ReadTimeout : IDisposable
     public void Dispose()
     {
         _cts?.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(Http1ReadTimeout value)
+        {
+        }
     }
 }

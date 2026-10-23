@@ -12,6 +12,8 @@ using HostingResourceMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessContextFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessContextFactory
 {
     private const string ConfigurationSectionToken = "<Section>";
@@ -557,5 +559,12 @@ internal sealed class InProcessContextFactory
                 $"Resource environment pattern '{AppEnvironment.Variables.ConfigurationPattern}' has no "
                 + $"'{ConfigurationSectionToken}' token.")
             : AppEnvironment.Variables.ConfigurationPattern[..tokenIndex];
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessContextFactory value)
+        {
+        }
     }
 }

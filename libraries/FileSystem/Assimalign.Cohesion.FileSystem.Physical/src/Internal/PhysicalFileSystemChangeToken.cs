@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PhysicalFileSystemChangeToken")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposable
 {
     private readonly object _sync = new();
@@ -204,6 +206,13 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             var renameArgs = (RenamedEventArgs)args;
 
             Callback.Invoke(new FileSystemRenameEvent<T>(renameArgs.OldFullPath, renameArgs.FullPath, State, ChangeType));
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PhysicalFileSystemChangeToken value)
+        {
         }
     }
 }

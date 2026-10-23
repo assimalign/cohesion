@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content;
 /// In-memory content. Always reopenable; writable unless created read-only. Writes are committed when
 /// the write stream is disposed, atomically replacing the visible bytes.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MemoryContent {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MemoryContent : IWritableContent
 {
     /// <summary>
@@ -107,6 +109,8 @@ public sealed class MemoryContent : IWritableContent
     }
 
     /// <summary>A caller-owned read view over the current bytes; disposing it does not affect the content.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("ReadOnlyMemoryStream {Length,nq}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ReadOnlyMemoryStream : MemoryStream
     {
         /// <summary>Initializes a new instance of the <see cref="ReadOnlyMemoryStream"/> class.</summary>
@@ -115,9 +119,31 @@ public sealed class MemoryContent : IWritableContent
             : base(data.ToArray(), writable: false)
         {
         }
+
+        private sealed class DebugView
+        {
+            private readonly ReadOnlyMemoryStream _target;
+
+            public DebugView(ReadOnlyMemoryStream value)
+            {
+                _target = value;
+            }
+
+            public bool CanRead => _target.CanRead;
+            public bool CanSeek => _target.CanSeek;
+            public bool CanWrite => _target.CanWrite;
+            public int Capacity => _target.Capacity;
+            public long Length => _target.Length;
+            public long Position => _target.Position;
+            public bool CanTimeout => _target.CanTimeout;
+            public int ReadTimeout => _target.ReadTimeout;
+            public int WriteTimeout => _target.WriteTimeout;
+        }
     }
 
     /// <summary>Buffers writes and commits them to the owning content when disposed.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("CommitOnDisposeStream {Length,nq}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class CommitOnDisposeStream : MemoryStream
     {
         private readonly MemoryContent _owner;
@@ -138,5 +164,42 @@ public sealed class MemoryContent : IWritableContent
 
             base.Dispose(disposing);
         }
+
+        private sealed class DebugView
+        {
+            private readonly CommitOnDisposeStream _target;
+
+            public DebugView(CommitOnDisposeStream value)
+            {
+                _target = value;
+            }
+
+            public bool CanRead => _target.CanRead;
+            public bool CanSeek => _target.CanSeek;
+            public bool CanWrite => _target.CanWrite;
+            public int Capacity => _target.Capacity;
+            public long Length => _target.Length;
+            public long Position => _target.Position;
+            public bool CanTimeout => _target.CanTimeout;
+            public int ReadTimeout => _target.ReadTimeout;
+            public int WriteTimeout => _target.WriteTimeout;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MemoryContent _target;
+
+        public DebugView(MemoryContent value)
+        {
+            _target = value;
+        }
+
+        public string? Name => _target.Name;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

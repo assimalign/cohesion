@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Heif.Internal;
 
 // A seekable concatenation of borrowed segments. Used for idat appends and fragmented descriptors.
 // Only a current view is opened, never a payload array; disposal leaves backing sources open.
+[global::System.Diagnostics.DebuggerDisplay("HeifSegmentStream {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HeifSegmentStream : Stream
 {
     private readonly BinarySegment[] _segments;
@@ -79,4 +81,23 @@ internal sealed class HeifSegmentStream : Stream
     public override void SetLength(long value) => throw new NotSupportedException(ErrorMessages.InvalidEdit);
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException(ErrorMessages.InvalidEdit);
     protected override void Dispose(bool disposing) { _disposed = true; base.Dispose(disposing); }
+
+    private sealed class DebugView
+    {
+        private readonly HeifSegmentStream _target;
+
+        public DebugView(HeifSegmentStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

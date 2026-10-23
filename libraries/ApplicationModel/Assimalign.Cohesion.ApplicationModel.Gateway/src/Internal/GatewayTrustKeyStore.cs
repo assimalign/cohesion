@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <summary>
 /// Persists the gateway's ECDSA trust key beneath an application-scoped state directory.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("GatewayTrustKeyStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayTrustKeyStore : IGatewayTrustKeyRepository
 {
     private const string PrivateKeyFileName = "private-key.p8.protected";
@@ -383,4 +385,11 @@ internal sealed class GatewayTrustKeyStore : IGatewayTrustKeyRepository
     private readonly record struct StorePaths(
         string KeyRingDirectory,
         string PrivateKeyPath);
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayTrustKeyStore value)
+        {
+        }
+    }
 }

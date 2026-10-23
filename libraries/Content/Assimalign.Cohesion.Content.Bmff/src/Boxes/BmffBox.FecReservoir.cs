@@ -9,6 +9,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Retains the fec reservoir box identity; typed payload reading and writing are unsupported.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FecReservoirBox : BmffBox
 {
     /// <summary>Creates a FecReservoirBox at its original location.</summary>
@@ -43,4 +45,21 @@ public sealed class FecReservoirBox : BmffBox
     }
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly FecReservoirBox _target;
+
+        public DebugView(FecReservoirBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Content.Ebml;
 
 namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MkvBlockHeader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MkvBlockHeader
 {
     private MkvBlockHeader(ulong trackNumber, short timestamp, byte flags, bool simple, long[] sizes, long[] offsets)
@@ -102,5 +104,12 @@ internal sealed class MkvBlockHeader
         for (var i = 1; i < width; i++) { encoded = (encoded << 8) | ReadOctet(source, ref cursor, origin); }
         // Track and lace VINTs use every data value, including all-ones (not the size sentinel).
         return VInt.FromEncoded(encoded).Value;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MkvBlockHeader value)
+        {
+        }
     }
 }

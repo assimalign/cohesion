@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Dns.Internal;
 /// over slowly enough that a process-lifetime entry per upstream is fine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsCookieStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DnsCookieStore
 {
     private readonly byte[] _clientCookie;
@@ -114,5 +116,12 @@ internal sealed class DnsCookieStore
     {
         ArgumentNullException.ThrowIfNull(serverIp);
         _serverCookies.TryRemove(serverIp, out _);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(DnsCookieStore value)
+        {
+        }
     }
 }

@@ -2,6 +2,8 @@ using System;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HPackDynamicTable {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HPackDynamicTable
 {
     private HPackHeaderField[] _buffer;
@@ -95,5 +97,18 @@ internal sealed class HPackDynamicTable
             _count--;
             _removeIndex = (_removeIndex + 1) % _buffer.Length;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HPackDynamicTable _target;
+
+        public DebugView(HPackDynamicTable value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public int MaxSize => _target.MaxSize;
     }
 }

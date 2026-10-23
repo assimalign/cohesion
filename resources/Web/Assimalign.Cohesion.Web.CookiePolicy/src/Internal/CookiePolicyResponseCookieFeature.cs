@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// this feature.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookiePolicyResponseCookieFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CookiePolicyResponseCookieFeature : IHttpResponseCookieFeature
 {
     private readonly IHttpContext _context;
@@ -69,4 +71,11 @@ internal sealed class CookiePolicyResponseCookieFeature : IHttpResponseCookieFea
     /// once, after both policy features are installed on the exchange.
     /// </summary>
     public void AdoptQueuedCookies() => _cookies?.AdoptQueuedCookies();
+
+    private sealed class DebugView
+    {
+        public DebugView(CookiePolicyResponseCookieFeature value)
+        {
+        }
+    }
 }

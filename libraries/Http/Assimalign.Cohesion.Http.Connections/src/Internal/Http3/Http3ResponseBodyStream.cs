@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="OperationCanceledException"/> while the exchange's <c>RequestCancelled</c> fires.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http3ResponseBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
 {
     private readonly Http3Context _context;
@@ -117,5 +119,23 @@ internal sealed class Http3ResponseBodyStream : HttpResponseBodyStream
             // QuicException is an IOException: the stream/connection is already gone, so the missed
             // FIN rides on the connection close instead.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3ResponseBodyStream _target;
+
+        public DebugView(Http3ResponseBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool HasStarted => _target.HasStarted;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

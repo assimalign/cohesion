@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Validation;
 /// The mutable state passed to each <see cref="IOpenApiValidationRule"/> during a validation pass.
 /// Rules read <see cref="Document"/> and report findings through the <c>Report</c> helpers.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiValidationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiValidationContext
 {
     private readonly List<OpenApiDiagnostic> _diagnostics = new();
@@ -47,4 +49,17 @@ public sealed class OpenApiValidationContext
     /// <param name="location">The JSON Pointer to the offending location.</param>
     public void Warning(string code, string message, string location) =>
         Report(OpenApiDiagnosticSeverity.Warning, code, message, location);
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiValidationContext _target;
+
+        public DebugView(OpenApiValidationContext value)
+        {
+            _target = value;
+        }
+
+        public OpenApiDocument Document => _target.Document;
+        public IReadOnlyList<OpenApiDiagnostic> Diagnostics => _target.Diagnostics;
+    }
 }

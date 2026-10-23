@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="Unsupported"/> instance is the default for exchanges that do not
 /// carry trailers.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpTrailerCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpTrailerCollection : IHttpTrailerCollection
 {
     private readonly IHttpHeaderCollection _fields;
@@ -109,5 +111,19 @@ public sealed class HttpTrailerCollection : IHttpTrailerCollection
             throw new InvalidOperationException(
                 ErrorMessages.TrailersNotSupported);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpTrailerCollection _target;
+
+        public DebugView(HttpTrailerCollection value)
+        {
+            _target = value;
+        }
+
+        public bool IsSupported => _target.IsSupported;
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Bmff;
 
 
 /// <summary>Retains the file delivery session group box identity; typed payload reading and writing are unsupported.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileDeliverySessionGroupBox : BmffBox
 {
     /// <summary>Creates a FileDeliverySessionGroupBox at its original location.</summary>
@@ -44,4 +46,21 @@ public sealed class FileDeliverySessionGroupBox : BmffBox
     }
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly FileDeliverySessionGroupBox _target;
+
+        public DebugView(FileDeliverySessionGroupBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

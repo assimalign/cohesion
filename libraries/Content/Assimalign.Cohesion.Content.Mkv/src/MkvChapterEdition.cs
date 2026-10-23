@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// <summary>An editable EditionEntry backed by the document's native chapter tree.</summary>
 /// <remarks>Flags retain native metadata; ordered-chapter playback is not interpreted. Add at least
 /// one chapter before saving. Unknown native children and omitted defaults remain untouched.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MkvChapterEdition")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MkvChapterEdition
 {
     /// <summary>Creates an empty edition with the schema's default flags.</summary>
@@ -49,4 +51,16 @@ public sealed class MkvChapterEdition
     }
     /// <summary>Gets the editable ordered ChapterAtom children.</summary>
     public IList<MkvChapter> Chapters { get; }
+
+    private sealed class DebugView
+    {
+        private readonly MkvChapterEdition _target;
+
+        public DebugView(MkvChapterEdition value)
+        {
+            _target = value;
+        }
+
+        public IList<MkvChapter> Chapters => _target.Chapters;
+    }
 }

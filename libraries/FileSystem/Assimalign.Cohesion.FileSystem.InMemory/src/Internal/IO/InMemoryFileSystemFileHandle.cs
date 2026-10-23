@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileSystemFileHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InMemoryFileSystemFileHandle : IFileSystemFileHandle
 {
     private readonly Lock _operationLock = new();
@@ -184,5 +186,12 @@ internal sealed class InMemoryFileSystemFileHandle : IFileSystemFileHandle
         var time = DateTime.Now;
         _file.SetAccessedOn(time);
         _file.SetUpdatedOn(time);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryFileSystemFileHandle value)
+        {
+        }
     }
 }

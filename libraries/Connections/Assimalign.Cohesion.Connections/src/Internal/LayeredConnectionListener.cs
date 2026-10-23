@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Connections.Internal;
 /// <see cref="ObjectDisposedException"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LayeredConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LayeredConnectionListener : DuplexConnectionListener
 {
     /// <summary>The number of slots <c>listener.Use(layer)</c> gives the listener.</summary>
@@ -309,5 +311,19 @@ internal sealed class LayeredConnectionListener : DuplexConnectionListener
             // Releasing a connection must not fail the listener; whatever ended the connection has
             // already been reported.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LayeredConnectionListener _target;
+
+        public DebugView(LayeredConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IDuplexConnection> Connections => _target.Connections;
     }
 }

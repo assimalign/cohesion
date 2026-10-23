@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Content.Mpeg.Internal;
 
 // A shared MediaSample has one PTS. Repeated/dwell/non-unit edit programs cannot be
 // projected into that shape without duplicating samples or inventing timestamps.
+[global::System.Diagnostics.DebuggerDisplay("Mp4EditMap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Mp4EditMap
 {
     internal MediaTimestamp Shift { get; private set; }
@@ -58,4 +60,11 @@ internal sealed class Mp4EditMap
     }
 
     internal bool Presents(MediaTimestamp time) => !Empty && (!Start.HasValue || time >= Start.Value) && (!End.HasValue || time < End.Value);
+
+    private sealed class DebugView
+    {
+        public DebugView(Mp4EditMap value)
+        {
+        }
+    }
 }

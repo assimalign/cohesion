@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// <summary>
 /// Provides binding and pipe-tuning options for <see cref="NamedPipeConnectionListener"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("NamedPipeConnectionListenerOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NamedPipeConnectionListenerOptions
 {
     private int _maxServerInstances = NamedPipeServerStream.MaxAllowedServerInstances;
@@ -133,5 +135,23 @@ public sealed class NamedPipeConnectionListenerOptions
         configure(options);
 
         return options;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NamedPipeConnectionListenerOptions _target;
+
+        public DebugView(NamedPipeConnectionListenerOptions value)
+        {
+            _target = value;
+        }
+
+        public NamedPipeEndPoint? EndPoint => _target.EndPoint;
+        public int MaxServerInstances => _target.MaxServerInstances;
+        public bool WriteThrough => _target.WriteThrough;
+        public bool CurrentUserOnly => _target.CurrentUserOnly;
+        public PipeSecurity? PipeSecurity => _target.PipeSecurity;
+        public int InputBufferSize => _target.InputBufferSize;
+        public int OutputBufferSize => _target.OutputBufferSize;
     }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The CompactSampleSize box; ISO/IEC 14496-12 8.7.3.3.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CompactSampleSizeBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -130,5 +132,27 @@ public sealed class CompactSampleSizeBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" samples={Entries.Length} field-size={FieldSize}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CompactSampleSizeBox _target;
+
+        public DebugView(CompactSampleSizeBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public uint Reserved => _target.Reserved;
+        public byte FieldSize => _target.FieldSize;
+        public ushort[] Entries => _target.Entries;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

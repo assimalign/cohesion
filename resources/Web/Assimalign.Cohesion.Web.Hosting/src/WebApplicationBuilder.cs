@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// resolves HTTP exchange interceptors once when it is created. Nothing is resolved
 /// per request.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 {
     private readonly WebApplicationOptions _options;
@@ -696,5 +698,22 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Services.AddSingleton<IHttpFeature>(_ => configure.Invoke(_context)
             ?? throw new InvalidOperationException(ErrorMessages.ApplicationFeatureFactoryResultNull));
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebApplicationBuilder _target;
+
+        public DebugView(WebApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public HostEnvironment Environment => _target.Environment;
+        public WebApplicationServerBuilder Server => _target.Server;
+        public ServiceProviderBuilder Services => _target.Services;
+        public ConfigurationManager Configuration => _target.Configuration;
+        public LoggerFactoryBuilder Logging => _target.Logging;
+        public bool EnableEventSourceForwarding => _target.EnableEventSourceForwarding;
     }
 }

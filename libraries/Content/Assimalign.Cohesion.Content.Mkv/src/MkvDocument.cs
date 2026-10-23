@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// Save to separate storage, then load that storage for relocated sample coordinates. OpenRead always
 /// returns the original source snapshot; edits affect Save. Use EbmlReader and MkvSchema.Registry for
 /// non-seekable streaming with MkvBlockReader, and EbmlWriter with MkvSchema.Matroska for forward-only emission.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MkvDocument {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MkvDocument : IMediaFile
 {
     private readonly Stream _source;
@@ -399,5 +401,27 @@ public sealed class MkvDocument : IMediaFile
                 else { reader.Skip(); }
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MkvDocument _target;
+
+        public DebugView(MkvDocument value)
+        {
+            _target = value;
+        }
+
+        public EbmlDocument Ebml => _target.Ebml;
+        public EbmlElement Segment => _target.Segment;
+        public IList<MkvChapterEdition> Chapters => _target.Chapters;
+        public IReadOnlyList<IMediaTrack> Tracks => _target.Tracks;
+        public MediaTimestamp? Duration => _target.Duration;
+        public bool IsLive => _target.IsLive;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

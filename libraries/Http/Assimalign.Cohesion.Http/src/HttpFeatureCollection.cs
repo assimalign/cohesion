@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Http;
 /// consumers can cheaply detect any change in the effective feature set.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpFeatureCollection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class HttpFeatureCollection : IHttpFeatureCollection
 {
     private readonly IHttpFeatureCollection? _defaults;
@@ -221,4 +223,11 @@ public class HttpFeatureCollection : IHttpFeatureCollection
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpFeatureCollection value)
+        {
+        }
+    }
 }

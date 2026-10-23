@@ -16,6 +16,7 @@ using static Assimalign.Cohesion.Internal.PathHelper;
 /// <summary>
 /// A case insensitive file name.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{_value}")]
 public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
 #if NET7_0_OR_GREATER
@@ -219,4 +220,11 @@ public readonly struct FileName : IEquatable<FileName>, IComparable<FileName>
     }
 
     #endregion
+
+    private sealed class DebugView
+    {
+        public DebugView(FileName value)
+        {
+        }
+    }
 }

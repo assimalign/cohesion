@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Http.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HPackDecoder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HPackDecoder
 {
     public const int DefaultHeaderTableSize = 4096;
@@ -284,5 +286,12 @@ internal sealed class HPackDecoder
         // into '?', which in a :path split the path from a query that was never sent. A name stays
         // token-only: no octet above 0x7F is a tchar, so HttpReceivedFieldRules refuses it either way.
         return value.IsEmpty ? string.Empty : Encoding.Latin1.GetString(value);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HPackDecoder value)
+        {
+        }
     }
 }

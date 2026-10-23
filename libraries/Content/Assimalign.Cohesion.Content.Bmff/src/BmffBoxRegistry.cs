@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>An immutable registry of explicit BMFF box factories.</summary>
+[global::System.Diagnostics.DebuggerDisplay("BmffBoxRegistry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class BmffBoxRegistry
 {
     private readonly FrozenDictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> _factories;
@@ -152,5 +154,12 @@ public sealed class BmffBoxRegistry
         builder.Register(BmffBoxType.DataEntryUrn, header => new DataEntryUrnBox(header.Offset, header.TotalSize ?? 0));
         builder.Register(BmffBoxType.ItemInfoEntry, header => new ItemInfoEntryBox(header.Offset, header.TotalSize ?? 0));
         return builder.Build();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffBoxRegistry value)
+        {
+        }
     }
 }

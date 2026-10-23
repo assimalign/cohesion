@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// multiplexed connection pair and returns the client end; the matching server end is queued on the
 /// bound listener for its next accept.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryMultiplexedConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryMultiplexedConnectionFactory : MultiplexedConnectionFactory
 {
     private readonly InMemoryMultiplexedConnectionListener _listener;
@@ -43,5 +45,17 @@ public sealed class InMemoryMultiplexedConnectionFactory : MultiplexedConnection
         cancellationToken.ThrowIfCancellationRequested();
 
         return ValueTask.FromResult<IMultiplexedConnection>(_listener.Connect());
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryMultiplexedConnectionFactory _target;
+
+        public DebugView(InMemoryMultiplexedConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
     }
 }

@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("AmqpTransportConnectionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
 {
     private readonly IDuplexConnection _connection;
@@ -208,5 +210,22 @@ internal sealed class AmqpTransportConnectionContext : AmqpConnectionContext
                 throw new AmqpProtocolException("The carrier stream ended before the AMQP protocol header was fully received.");
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpTransportConnectionContext _target;
+
+        public DebugView(AmqpTransportConnectionContext value)
+        {
+            _target = value;
+        }
+
+        public AmqpProtocolHeader LocalProtocolHeader => _target.LocalProtocolHeader;
+        public AmqpProtocolHeader? RemoteProtocolHeader => _target.RemoteProtocolHeader;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
     }
 }

@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.EventHub.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EventHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EventHubApplicationBuilder : IEventHubApplicationBuilder
 {
     private readonly EventHubApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class EventHubApplicationBuilder : IEventHubApplicationBuilder
     }
 
     IEventHubApplication IEventHubApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly EventHubApplicationBuilder _target;
+
+        public DebugView(EventHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// to the peer; writes and the end of the server's side go through the owning
 /// <see cref="Http2ConnectionContext"/>, which owns the write gate and the send-window accounting.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http2ExtendedConnectStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2ExtendedConnectStream : HttpExtendedConnectStream
 {
     private readonly Http2ConnectionContext _connection;
@@ -46,4 +48,23 @@ internal sealed class Http2ExtendedConnectStream : HttpExtendedConnectStream
     /// <inheritdoc />
     protected override ValueTask CloseCoreAsync()
         => _connection.CompleteTunnelAsync(_context);
+
+    private sealed class DebugView
+    {
+        private readonly Http2ExtendedConnectStream _target;
+
+        public DebugView(Http2ExtendedConnectStream value)
+        {
+            _target = value;
+        }
+
+        public bool IsHeadCommitted => _target.IsHeadCommitted;
+        public bool IsClosed => _target.IsClosed;
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

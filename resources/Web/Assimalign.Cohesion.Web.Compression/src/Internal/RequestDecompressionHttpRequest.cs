@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// <see cref="IHttpRequest.Body"/> is get-only and cannot be swapped in place, so transparent
 /// decompression is delivered by decorating the request the pipeline sees.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RequestDecompressionHttpRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestDecompressionHttpRequest : IHttpRequest
 {
     private readonly IHttpRequest _inner;
@@ -40,4 +42,24 @@ internal sealed class RequestDecompressionHttpRequest : IHttpRequest
     public IHttpContext HttpContext => _context;
 
     public Stream Body => _body;
+
+    private sealed class DebugView
+    {
+        private readonly RequestDecompressionHttpRequest _target;
+
+        public DebugView(RequestDecompressionHttpRequest value)
+        {
+            _target = value;
+        }
+
+        public HttpHost Host => _target.Host;
+        public HttpPath Path => _target.Path;
+        public HttpMethod Method => _target.Method;
+        public HttpScheme Scheme => _target.Scheme;
+        public IHttpQueryCollection Query => _target.Query;
+        public IHttpHeaderCollection Headers => _target.Headers;
+        public IHttpTrailerCollection Trailers => _target.Trailers;
+        public IHttpContext HttpContext => _target.HttpContext;
+        public Stream Body => _target.Body;
+    }
 }

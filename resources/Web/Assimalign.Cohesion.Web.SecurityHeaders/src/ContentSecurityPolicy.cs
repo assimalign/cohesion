@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// </code>
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ContentSecurityPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ContentSecurityPolicy
 {
     private readonly ContentSecurityPolicyDirective[] _directives;
@@ -68,4 +70,16 @@ public sealed class ContentSecurityPolicy
     /// </summary>
     /// <returns>The policy in its header form, for display and diagnostics.</returns>
     public override string ToString() => _template.ToString();
+
+    private sealed class DebugView
+    {
+        private readonly ContentSecurityPolicy _target;
+
+        public DebugView(ContentSecurityPolicy value)
+        {
+            _target = value;
+        }
+
+        public bool UsesNonce => _target.UsesNonce;
+    }
 }

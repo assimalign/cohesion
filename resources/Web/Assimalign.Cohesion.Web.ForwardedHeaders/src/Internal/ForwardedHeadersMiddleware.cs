@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.ForwardedHeaders.Internal;
 /// on every exchange (with a zero trusted-hop count when nothing resolved), so
 /// downstream consumers get a uniform read.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ForwardedHeadersMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ForwardedHeadersMiddleware : IWebApplicationMiddleware
 {
     private readonly ForwardedHeadersResolver _resolver;
@@ -27,5 +29,12 @@ internal sealed class ForwardedHeadersMiddleware : IWebApplicationMiddleware
     {
         context.Features.Set(_resolver.Resolve(context));
         return next.Invoke(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ForwardedHeadersMiddleware value)
+        {
+        }
     }
 }

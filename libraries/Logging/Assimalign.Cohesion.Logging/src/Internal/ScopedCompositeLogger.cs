@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// the composite's behavior but stamps the scope's parent id onto every entry written through
 /// it.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ScopedCompositeLogger")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ScopedCompositeLogger : ScopedLogger
 {
     private readonly CompositeLogger _composite;
@@ -87,5 +89,18 @@ internal sealed class ScopedCompositeLogger : ScopedLogger
                 // Underlying scope disposal must not abort the rest of teardown.
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ScopedCompositeLogger _target;
+
+        public DebugView(ScopedCompositeLogger value)
+        {
+            _target = value;
+        }
+
+        public LogId ParentId => _target.ParentId;
+        public string Category => _target.Category;
     }
 }

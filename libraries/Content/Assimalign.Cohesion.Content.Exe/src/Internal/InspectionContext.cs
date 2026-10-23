@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Exe.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InspectionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InspectionContext : IDisposable
 {
     private readonly ContentSliceStream _source;
@@ -120,5 +122,12 @@ internal sealed class InspectionContext : IDisposable
     {
         ArrayPool<byte>.Shared.Return(_scratch);
         _source.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InspectionContext value)
+        {
+        }
     }
 }

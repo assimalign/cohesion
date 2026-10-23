@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// budget, at which point the caller terminates the connection with
 /// <c>GOAWAY(ENHANCE_YOUR_CALM)</c>. AOT-safe — no reflection, no runtime codegen.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2FloodGuard")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2FloodGuard
 {
     private readonly Http2SlidingWindowCounter _resetStreams;
@@ -52,4 +54,11 @@ internal sealed class Http2FloodGuard
     /// current window has been exceeded.
     /// </summary>
     public bool TrackPingFrame() => _pingFrames.RecordAndCheckExceeded(Environment.TickCount64);
+
+    private sealed class DebugView
+    {
+        public DebugView(Http2FloodGuard value)
+        {
+        }
+    }
 }

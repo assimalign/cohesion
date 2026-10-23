@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// ASP.NET Core <c>FormOptions</c> defaults.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpMultipartFormReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpMultipartFormReader
 {
     /// <summary>Default cap on the number of headers per multipart section.</summary>
@@ -236,5 +238,19 @@ internal sealed class HttpMultipartFormReader
                 headers[name] = value;
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpMultipartFormReader _target;
+
+        public DebugView(HttpMultipartFormReader value)
+        {
+            _target = value;
+        }
+
+        public int HeadersCountLimit => _target.HeadersCountLimit;
+        public int HeadersLengthLimit => _target.HeadersLengthLimit;
+        public long? BodyLengthLimit => _target.BodyLengthLimit;
     }
 }

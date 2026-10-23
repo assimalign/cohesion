@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// <summary>
 /// Establishes outbound QUIC connections and surfaces each as a <see cref="QuicMultiplexedConnection"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("QuicConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -111,5 +113,17 @@ public sealed class QuicConnectionFactory : MultiplexedConnectionFactory
         configure(options);
 
         return new QuicConnectionFactory(options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicConnectionFactory _target;
+
+        public DebugView(QuicConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
     }
 }

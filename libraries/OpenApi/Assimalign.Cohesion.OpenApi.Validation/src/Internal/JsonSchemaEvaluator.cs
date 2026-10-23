@@ -35,6 +35,8 @@ internal readonly struct JsonSchemaViolation
 /// OAS meta-schemas, whose dynamic scope starts at the root), applicators, and
 /// <c>unevaluatedProperties</c> with annotation tracking.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JsonSchemaEvaluator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class JsonSchemaEvaluator
 {
     private readonly JsonElement _root;
@@ -703,4 +705,11 @@ internal sealed class JsonSchemaEvaluator
 
     private static void Report(List<JsonSchemaViolation>? violations, string pointer, string message) =>
         violations?.Add(new JsonSchemaViolation(pointer, message));
+
+    private sealed class DebugView
+    {
+        public DebugView(JsonSchemaEvaluator value)
+        {
+        }
+    }
 }

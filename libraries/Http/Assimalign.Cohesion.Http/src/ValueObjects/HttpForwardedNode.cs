@@ -36,6 +36,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see langword="false"/> for anything that is not a well-formed node.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
 {
@@ -343,4 +344,21 @@ public readonly struct HttpForwardedNode : IEquatable<HttpForwardedNode>
 
     /// <summary>Determines whether two nodes are not equal.</summary>
     public static bool operator !=(HttpForwardedNode left, HttpForwardedNode right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpForwardedNode _target;
+
+        public DebugView(HttpForwardedNode value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public string? Port => _target.Port;
+        public IPAddress? Address => _target.Address;
+        public bool IsObfuscatedName => _target.IsObfuscatedName;
+        public bool HasObfuscatedPort => _target.HasObfuscatedPort;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

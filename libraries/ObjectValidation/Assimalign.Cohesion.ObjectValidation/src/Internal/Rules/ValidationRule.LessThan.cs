@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LessThanValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(LessThanValidationRule<>.DebugView))]
 internal sealed class LessThanValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : struct, IComparable, IComparable<TValue>
 {
@@ -64,5 +66,20 @@ internal sealed class LessThanValidationRule<TValue> : ValidationRuleBase<TValue
             context = null;
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LessThanValidationRule<TValue> _target;
+
+        public DebugView(LessThanValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }

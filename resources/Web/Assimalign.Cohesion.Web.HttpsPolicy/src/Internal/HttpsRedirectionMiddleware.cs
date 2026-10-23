@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 /// passed on, so a malformed host cannot reach the application over the insecure connection either.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpsRedirectionMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
 {
     private const int HttpsDefaultPort = 443;
@@ -157,5 +159,12 @@ internal sealed class HttpsRedirectionMiddleware : IWebApplicationMiddleware
         }
 
         return string.Concat(path, "?", HttpQuery.Create(query).Value);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpsRedirectionMiddleware value)
+        {
+        }
     }
 }

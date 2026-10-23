@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Web.WebSockets;
 /// there wins, and a <see langword="null"/> one takes the default configured here.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebSocketOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebSocketOptions
 {
     private TimeSpan _keepAliveInterval = WebSocket.DefaultKeepAliveInterval;
@@ -117,5 +119,21 @@ public sealed class WebSocketOptions
         }
 
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebSocketOptions _target;
+
+        public DebugView(WebSocketOptions value)
+        {
+            _target = value;
+        }
+
+        public ICollection<string> AllowedOrigins => _target.AllowedOrigins;
+        public bool AllowAnyOrigin => _target.AllowAnyOrigin;
+        public TimeSpan KeepAliveInterval => _target.KeepAliveInterval;
+        public TimeSpan KeepAliveTimeout => _target.KeepAliveTimeout;
+        public bool DangerousEnableCompression => _target.DangerousEnableCompression;
     }
 }

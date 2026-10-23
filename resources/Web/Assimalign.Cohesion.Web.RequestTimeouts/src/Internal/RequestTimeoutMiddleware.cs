@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// reserved for the response-already-started path, where a wire reset is the only clean answer.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestTimeoutMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
 {
     /// <summary>
@@ -174,5 +176,12 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
         }
 
         response.StatusCode = statusCode;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RequestTimeoutMiddleware value)
+        {
+        }
     }
 }

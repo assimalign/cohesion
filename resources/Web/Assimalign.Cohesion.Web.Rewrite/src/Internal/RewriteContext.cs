@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// actions; the middleware applies them once evaluation ends, so a rule that throws leaves the response
 /// untouched.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RewriteContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RewriteContext : IRewriteContext
 {
     private readonly IHttpContext _httpContext;
@@ -171,5 +173,23 @@ internal sealed class RewriteContext : IRewriteContext
         {
             throw new InvalidOperationException(ErrorMessages.RewriteExchangeAlreadyEnded);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RewriteContext _target;
+
+        public DebugView(RewriteContext value)
+        {
+            _target = value;
+        }
+
+        public IHttpContext HttpContext => _target.HttpContext;
+        public HttpPath PathBase => _target.PathBase;
+        public HttpPath Path => _target.Path;
+        public IHttpQueryCollection Query => _target.Query;
+        public RewriteOutcome Outcome => _target.Outcome;
+        public string? RedirectLocation => _target.RedirectLocation;
+        public HttpStatusCode RedirectStatusCode => _target.RedirectStatusCode;
     }
 }

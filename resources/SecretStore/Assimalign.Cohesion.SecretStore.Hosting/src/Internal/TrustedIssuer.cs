@@ -7,6 +7,8 @@ using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("TrustedIssuer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TrustedIssuer
 {
     internal TrustedIssuer(
@@ -58,5 +60,12 @@ internal sealed class TrustedIssuer
         return kinds.EnumerateArray().Select(static value =>
             value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
                 ? value.GetString()! : throw new ArgumentException("allowedCommandKinds entries must be nonblank strings.")).ToArray();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TrustedIssuer value)
+        {
+        }
     }
 }

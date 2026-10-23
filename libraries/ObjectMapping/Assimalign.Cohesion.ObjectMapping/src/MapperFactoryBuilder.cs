@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.ObjectMapping;
 /// <remarks>
 /// Use a factory to separate mappers that may have conflicting mapping profiles for the same source and target types.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MapperFactoryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
 {
     private readonly ConcurrentDictionary<string, IMapper> _mappers;
@@ -158,6 +160,8 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
         return this;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MapperFactory")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class MapperFactory : IMapperFactory
     {
         private readonly ConcurrentDictionary<string, IMapper> _mappers;
@@ -177,6 +181,20 @@ public sealed class MapperFactoryBuilder : IMapperFactoryBuilder
             }
 
             throw new MapperException($"No mapper has been registered with the name '{mapperName}'.");
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(MapperFactory value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperFactoryBuilder value)
+        {
         }
     }
 }

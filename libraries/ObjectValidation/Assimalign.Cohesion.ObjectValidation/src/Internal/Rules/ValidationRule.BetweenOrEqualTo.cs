@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BetweenOrEqualToValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(BetweenOrEqualToValidationRule<>.DebugView))]
 internal sealed class BetweenOrEqualToValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : struct, IComparable, IComparable<TValue>
 {
@@ -62,5 +64,20 @@ internal sealed class BetweenOrEqualToValidationRule<TValue> : ValidationRuleBas
             context = null;
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BetweenOrEqualToValidationRule<TValue> _target;
+
+        public DebugView(BetweenOrEqualToValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }

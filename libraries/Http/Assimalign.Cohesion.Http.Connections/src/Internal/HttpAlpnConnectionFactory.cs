@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// and keeps accepting.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpAlpnConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpAlpnConnectionFactory : HttpConnectionFactory
 {
     private readonly Http1ConnectionFactory _http1;
@@ -75,5 +77,18 @@ internal sealed class HttpAlpnConnectionFactory : HttpConnectionFactory
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpAlpnConnectionFactory _target;
+
+        public DebugView(HttpAlpnConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public string? AltSvcHeaderValue => _target.AltSvcHeaderValue;
+        public HttpResponseHeaderPolicy ResponseHeaderPolicy => _target.ResponseHeaderPolicy;
     }
 }

@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Content.Mkv;
 /// that reader. Disposing this reader closes its borrowed payload view; the EBML reader drains unread
 /// bytes when it advances. Track metadata, cluster timestamps and BlockGroup references remain the
 /// enclosing reader's responsibility.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("MkvBlockReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MkvBlockReader : IDisposable
 {
     private readonly ContentSliceStream _payload;
@@ -106,5 +108,24 @@ public sealed class MkvBlockReader : IDisposable
         _disposed = true;
         _frame?.Dispose();
         _payload.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MkvBlockReader _target;
+
+        public DebugView(MkvBlockReader value)
+        {
+            _target = value;
+        }
+
+        public ulong TrackNumber => _target.TrackNumber;
+        public short RelativeTimestamp => _target.RelativeTimestamp;
+        public bool IsKeyframe => _target.IsKeyframe;
+        public bool IsInvisible => _target.IsInvisible;
+        public bool IsDiscardable => _target.IsDiscardable;
+        public MkvLacing Lacing => _target.Lacing;
+        public int FrameCount => _target.FrameCount;
+        public IReadOnlyList<long> FrameOffsets => _target.FrameOffsets;
     }
 }

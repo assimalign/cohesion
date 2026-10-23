@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Http;
 /// data-protection protector for you.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpAntiforgeryOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpAntiforgeryOptions
 {
     private HttpFieldName _headerName = "X-CSRF-TOKEN";
@@ -152,4 +154,25 @@ public sealed class HttpAntiforgeryOptions
     /// reject every form post from a user who has not answered yet.
     /// </summary>
     public bool CookieIsEssential { get; set; } = true;
+
+    private sealed class DebugView
+    {
+        private readonly HttpAntiforgeryOptions _target;
+
+        public DebugView(HttpAntiforgeryOptions value)
+        {
+            _target = value;
+        }
+
+        public HttpCookieName CookieName => _target.CookieName;
+        public string FormFieldName => _target.FormFieldName;
+        public HttpFieldName HeaderName => _target.HeaderName;
+        public byte[] Key => _target.Key;
+        public IHttpAntiforgeryProtector? Protector => _target.Protector;
+        public bool CookieHttpOnly => _target.CookieHttpOnly;
+        public bool CookieSecure => _target.CookieSecure;
+        public HttpCookieSameSiteMode CookieSameSite => _target.CookieSameSite;
+        public HttpCookiePath CookiePath => _target.CookiePath;
+        public bool CookieIsEssential => _target.CookieIsEssential;
+    }
 }

@@ -39,6 +39,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// The provider holds no state; one instance may serve any number of concurrent requests.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreCertificateAuthority")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreCertificateAuthority : IResourceCertificateAuthority
 {
     private readonly Func<RemoteCertificateValidationCallback?, HttpMessageInvoker> _transportFactory;
@@ -123,5 +125,17 @@ public sealed class SecretStoreCertificateAuthority : IResourceCertificateAuthor
             .GetCertificateAsync(SecretStoreProtocol.RootCertificateName, cancellationToken)
             .ConfigureAwait(false);
         return new ResourceCertificate(certificate, anchors);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreCertificateAuthority _target;
+
+        public DebugView(SecretStoreCertificateAuthority value)
+        {
+            _target = value;
+        }
+
+        public string? ResourceKind => _target.ResourceKind;
     }
 }

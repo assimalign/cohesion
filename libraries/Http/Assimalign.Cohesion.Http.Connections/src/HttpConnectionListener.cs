@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// <see cref="IMultiplexedConnectionListener"/>. Accepted connections are buffered on a bounded
 /// channel drained by <see cref="AcceptAsync(CancellationToken)"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>, IHttpConnectionListener
 {
     private readonly List<(HttpConnectionFactory Factory, IDuplexConnectionListener Listener)> _streamListeners;
@@ -690,5 +692,19 @@ public sealed class HttpConnectionListener : ConnectionListener<IHttpConnection>
         }
 
         return filtered.Count == 0 ? Array.Empty<IHttpExchangeInterceptor>() : [.. filtered];
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpConnectionListener _target;
+
+        public DebugView(HttpConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public HttpProtocol Protocols => _target.Protocols;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Http.Connections.IHttpConnection> Connections => _target.Connections;
     }
 }

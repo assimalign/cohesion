@@ -19,6 +19,8 @@ using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+[global::System.Diagnostics.DebuggerDisplay("WebApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware;
@@ -231,5 +233,18 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         ArgumentNullException.ThrowIfNull(options);
 
         return new WebApplicationBuilder(options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebApplication _target;
+
+        public DebugView(WebApplication value)
+        {
+            _target = value;
+        }
+
+        public WebApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

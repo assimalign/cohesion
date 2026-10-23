@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <summary>
 /// Owns an application's gateway signing key and its public JWK representation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("GatewayTrustKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayTrustKey : IDisposable
 {
     private const string P256CurveOid = "1.2.840.10045.3.1.7";
@@ -95,5 +97,18 @@ internal sealed class GatewayTrustKey : IDisposable
 
         using JsonDocument document = JsonDocument.Parse(publicJwk.WrittenMemory);
         return document.RootElement.Clone();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly GatewayTrustKey _target;
+
+        public DebugView(GatewayTrustKey value)
+        {
+            _target = value;
+        }
+
+        public string KeyId => _target.KeyId;
+        public JsonElement PublicJwk => _target.PublicJwk;
     }
 }

@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Security.DataProtection;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("TrustedIssuerStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TrustedIssuerStore
 {
     private readonly string _path;
@@ -373,6 +375,13 @@ internal sealed class TrustedIssuerStore
         if (!_initialized)
         {
             throw new InvalidOperationException("The trusted issuer store has not been initialized.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TrustedIssuerStore value)
+        {
         }
     }
 }

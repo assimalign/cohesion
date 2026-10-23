@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Authorization.Internal;
 /// and its asynchronous overload. The delegate is captured at builder time and invoked directly, with
 /// no reflection or activation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AssertionRequirement")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AssertionRequirement : IAuthorizationRequirement
 {
     private readonly Func<AuthorizationContext, bool>? _assertion;
@@ -47,5 +49,12 @@ internal sealed class AssertionRequirement : IAuthorizationRequirement
         return _assertion is not null
             ? new ValueTask<bool>(_assertion.Invoke(context))
             : _asyncAssertion!.Invoke(context, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AssertionRequirement value)
+        {
+        }
     }
 }

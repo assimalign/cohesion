@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Content.Ebml.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EbmlValidation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EbmlValidation
 {
     private readonly bool _lenient;
@@ -139,6 +141,13 @@ internal sealed class EbmlValidation
                     Report(ErrorMessages.SchemaViolation, ContentFormatErrorCode.InvalidValue, child.Offset);
                 }
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EbmlValidation value)
+        {
         }
     }
 }

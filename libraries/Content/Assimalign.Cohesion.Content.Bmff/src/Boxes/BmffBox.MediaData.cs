@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Content.Binary;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The MediaData box with a borrowed, potentially lazy payload.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MediaDataBox : BmffBox
 {
     /// <summary>Creates a box with its original location.</summary>
@@ -28,4 +30,22 @@ public sealed class MediaDataBox : BmffBox
     public override T Accept<T>(IBmffBoxVisitor<T> visitor) => visitor.Visit(this);
     /// <inheritdoc/>
     public override void Accept(IBmffBoxVisitor visitor) => visitor.Visit(this);
+
+    private sealed class DebugView
+    {
+        private readonly MediaDataBox _target;
+
+        public DebugView(MediaDataBox value)
+        {
+            _target = value;
+        }
+
+        public BinarySegment Payload => _target.Payload;
+        public BmffBoxType BoxType => _target.BoxType;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

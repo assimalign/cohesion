@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.Compression;
 /// setting: the transport's byte cap protects only the compressed wire bytes, so without a
 /// decompressed cap a small coded body could inflate without bound (a zip bomb).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestDecompressionOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RequestDecompressionOptions
 {
     private long _maxDecompressedSizeBytes = 100L * 1024 * 1024;
@@ -38,5 +40,17 @@ public sealed class RequestDecompressionOptions
 
             _maxDecompressedSizeBytes = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RequestDecompressionOptions _target;
+
+        public DebugView(RequestDecompressionOptions value)
+        {
+            _target = value;
+        }
+
+        public long MaxDecompressedSizeBytes => _target.MaxDecompressedSizeBytes;
     }
 }

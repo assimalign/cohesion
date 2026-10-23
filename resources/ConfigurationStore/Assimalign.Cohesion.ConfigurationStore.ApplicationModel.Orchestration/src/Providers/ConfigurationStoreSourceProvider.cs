@@ -42,6 +42,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// stores and concurrent reads.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreSourceProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationStoreSourceProvider : IResourceSourceProvider
 {
     private const string configurationStoreKind = "ConfigurationStore";
@@ -146,5 +148,17 @@ public sealed class ConfigurationStoreSourceProvider : IResourceSourceProvider
     {
         Uri address = Uri.ThrowIfNotEndpoint(controlPlaneAddress);
         return Uri.CreateEndpoint(address.Scheme, address.Host, address.Port);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationStoreSourceProvider _target;
+
+        public DebugView(ConfigurationStoreSourceProvider value)
+        {
+            _target = value;
+        }
+
+        public string? ResourceKind => _target.ResourceKind;
     }
 }

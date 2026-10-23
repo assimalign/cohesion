@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Web.Authorization.Internal;
 /// endpoint never runs for the preflight, so it is neither authorized nor acknowledged.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
 {
     /// <summary>
@@ -210,6 +212,13 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
         for (int i = 0; i < schemes.Count; i++)
         {
             await context.ForbidAsync(schemes[i], properties: null, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AuthorizationMiddleware value)
+        {
         }
     }
 }

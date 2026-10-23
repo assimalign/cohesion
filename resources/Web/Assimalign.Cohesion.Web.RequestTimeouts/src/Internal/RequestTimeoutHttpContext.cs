@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// Every other member, <see cref="Features"/> included, forwards to the original context, so
 /// shared exchange state never forks.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestTimeoutHttpContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestTimeoutHttpContext : IHttpContext
 {
     private readonly IHttpContext _inner;
@@ -53,4 +55,22 @@ internal sealed class RequestTimeoutHttpContext : IHttpContext
     public Task CancelAsync() => _inner.CancelAsync();
 
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        private readonly RequestTimeoutHttpContext _target;
+
+        public DebugView(RequestTimeoutHttpContext value)
+        {
+            _target = value;
+        }
+
+        public HttpVersion Version => _target.Version;
+        public IHttpRequest Request => _target.Request;
+        public IHttpResponse Response => _target.Response;
+        public IHttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public IHttpFeatureCollection Features => _target.Features;
+        public IDictionary<string, object?> Items => _target.Items;
+        public CancellationToken RequestCancelled => _target.RequestCancelled;
+    }
 }

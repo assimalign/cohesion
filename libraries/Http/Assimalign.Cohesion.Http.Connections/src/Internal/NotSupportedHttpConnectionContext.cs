@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// or send fails with <see cref="NotSupportedException"/>. It carries no byte stream — the
 /// standalone <see cref="IHttpConnectionContext"/> contract no longer forces one.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("NotSupportedHttpConnectionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class NotSupportedHttpConnectionContext : IHttpConnectionContext
 {
     private readonly string _message;
@@ -50,5 +52,18 @@ internal sealed class NotSupportedHttpConnectionContext : IHttpConnectionContext
     public void BeginGracefulClose()
     {
         // Nothing to close gracefully: the receive sequence never yields an exchange.
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NotSupportedHttpConnectionContext _target;
+
+        public DebugView(NotSupportedHttpConnectionContext value)
+        {
+            _target = value;
+        }
+
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
     }
 }

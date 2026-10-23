@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// <summary>
 /// An ATX heading: a level from one through six and inline content.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownHeading")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownHeading : MarkdownBlock
 {
     private int _level = 1;
@@ -35,4 +37,17 @@ public sealed class MarkdownHeading : MarkdownBlock
 
     /// <summary>Gets the inline content of the heading, in order.</summary>
     public IList<MarkdownInline> Inlines { get; } = new List<MarkdownInline>();
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownHeading _target;
+
+        public DebugView(MarkdownHeading value)
+        {
+            _target = value;
+        }
+
+        public int Level => _target.Level;
+        public IList<MarkdownInline> Inlines => _target.Inlines;
+    }
 }

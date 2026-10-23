@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Web.Routing.Metadata;
 /// reach a host-constrained route by sending a host it accepts.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouteHostMetadata")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RouteHostMetadata
 {
     private readonly RouteHostConstraint[] _hosts;
@@ -94,4 +96,16 @@ public sealed class RouteHostMetadata
     /// </summary>
     /// <returns>The constraint list text, or <c>(any host)</c> when no constraint is declared.</returns>
     public override string ToString() => _hosts.Length == 0 ? "(any host)" : string.Join(", ", _hosts);
+
+    private sealed class DebugView
+    {
+        private readonly RouteHostMetadata _target;
+
+        public DebugView(RouteHostMetadata value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<RouteHostConstraint> Hosts => _target.Hosts;
+    }
 }

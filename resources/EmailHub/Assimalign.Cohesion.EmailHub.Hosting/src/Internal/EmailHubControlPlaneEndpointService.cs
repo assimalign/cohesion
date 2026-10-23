@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.EmailHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EmailHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EmailHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class EmailHubControlPlaneEndpointService : IHostService, IDispo
                 ? address
                 : throw new InvalidOperationException($"The EmailHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly EmailHubControlPlaneEndpointService _target;
+
+        public DebugView(EmailHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

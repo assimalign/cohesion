@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// HTTP/2 abuse limits, request/response interceptors, and per-exchange feature
 /// capacity the listener applies to every HTTP/2 connection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http2ConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2ConnectionFactory : HttpConnectionFactory
 {
     private readonly Http2ConnectionListenerOptions.Http2Limits _limits;
@@ -31,4 +33,17 @@ internal sealed class Http2ConnectionFactory : HttpConnectionFactory
 
     public override HttpConnection Create(IDuplexConnection connection, bool isSecure)
         => new Http2Connection(connection, isSecure, _limits, _requestInterceptors, _responseInterceptors, _featureCapacity, AltSvcHeaderValue, _allowAlternateSchemes, ResponseHeaderPolicy);
+
+    private sealed class DebugView
+    {
+        private readonly Http2ConnectionFactory _target;
+
+        public DebugView(Http2ConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Http.Connections.Internal.HttpResponseHeaderPolicy ResponseHeaderPolicy => _target.ResponseHeaderPolicy;
+        public string? AltSvcHeaderValue => _target.AltSvcHeaderValue;
+    }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Web.Health.Internal;
 /// Adapts an inline probe delegate to the <see cref="IHealthCheck"/> contract so callers can
 /// register a check with a lambda instead of a dedicated type.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DelegateHealthCheck")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DelegateHealthCheck : IHealthCheck
 {
     private readonly Func<HealthCheckContext, CancellationToken, ValueTask<HealthCheckResult>> _probe;
@@ -19,4 +21,11 @@ internal sealed class DelegateHealthCheck : IHealthCheck
 
     public ValueTask<HealthCheckResult> CheckAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
         => _probe(context, cancellationToken);
+
+    private sealed class DebugView
+    {
+        public DebugView(DelegateHealthCheck value)
+        {
+        }
+    }
 }

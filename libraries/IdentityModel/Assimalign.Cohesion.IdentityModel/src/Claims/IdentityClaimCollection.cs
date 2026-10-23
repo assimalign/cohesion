@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// <summary>
 /// Represents an immutable, insertion-ordered snapshot of normalized claims.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("IdentityClaimCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityClaimCollection : IIdentityClaimCollection
 {
     private readonly IIdentityClaim[] _claims;
@@ -138,4 +140,16 @@ public sealed class IdentityClaimCollection : IIdentityClaimCollection
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly IdentityClaimCollection _target;
+
+        public DebugView(IdentityClaimCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

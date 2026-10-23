@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Connections.Udp;
 /// <summary>
 /// Defines options for binding a server-side UDP datagram socket.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("UdpBindOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class UdpBindOptions
 {
     private int? _receiveBufferSize;
@@ -84,5 +86,21 @@ public sealed class UdpBindOptions
 
             _sendBufferSize = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly UdpBindOptions _target;
+
+        public DebugView(UdpBindOptions value)
+        {
+            _target = value;
+        }
+
+        public EndPoint EndPoint => _target.EndPoint;
+        public bool DualMode => _target.DualMode;
+        public bool ReuseAddress => _target.ReuseAddress;
+        public int? ReceiveBufferSize => _target.ReceiveBufferSize;
+        public int? SendBufferSize => _target.SendBufferSize;
     }
 }

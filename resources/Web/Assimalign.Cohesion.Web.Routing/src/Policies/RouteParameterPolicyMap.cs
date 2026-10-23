@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Web.Routing.Patterns;
 /// <summary>
 /// Resolves inline parameter policy names into executable route parameter policies.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RouteParameterPolicyMap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RouteParameterPolicyMap
 {
     private readonly Dictionary<string, Func<string?, RouteParameterPolicy>> _factories;
@@ -295,5 +297,12 @@ public sealed class RouteParameterPolicyMap
         argument = policyText[(openParenthesisIndex + 1)..^1];
 
         return !string.IsNullOrWhiteSpace(policyName);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RouteParameterPolicyMap value)
+        {
+        }
     }
 }

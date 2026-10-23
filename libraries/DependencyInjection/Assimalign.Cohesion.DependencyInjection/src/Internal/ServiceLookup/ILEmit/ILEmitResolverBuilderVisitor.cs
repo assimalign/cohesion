@@ -7,6 +7,8 @@ using System.Reflection.Emit;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ILEmitResolverBuilderVisitor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResolverBuilderContext, object>
 {
     private static readonly MethodInfo _scopeLockGetter = typeof(ServiceProviderEngineScope).GetProperty(
@@ -468,5 +470,12 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
     {
         // When calling CaptureDisposable we expect callee and arguments to be on the stackcontext.Generator.BeginExceptionBlock
         argument.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.CaptureDisposableMethodInfo);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ILEmitResolverBuilderVisitor value)
+        {
+        }
     }
 }

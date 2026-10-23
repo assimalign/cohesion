@@ -9,6 +9,8 @@ using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.Web.Testing.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("TestBootstrapIdentity")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TestBootstrapIdentity : IDisposable
 {
     private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -78,5 +80,12 @@ internal sealed class TestBootstrapIdentity : IDisposable
         }
 
         return jwk.WrittenSpan.ToArray();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TestBootstrapIdentity value)
+        {
+        }
     }
 }

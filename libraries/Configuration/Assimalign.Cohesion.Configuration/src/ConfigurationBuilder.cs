@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// Used to build key/value based configuration settings for use in an application.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class ConfigurationBuilder : IConfigurationBuilder
 {
     private readonly ConfigurationOptions _options;
@@ -239,6 +241,13 @@ public class ConfigurationBuilder : IConfigurationBuilder
             catch
             {
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationBuilder value)
+        {
         }
     }
 }

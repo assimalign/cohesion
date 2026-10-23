@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http3ConnectionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
@@ -3448,5 +3450,18 @@ internal sealed partial class Http3ConnectionContext : HttpConnectionContext
 
         await body.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
         return copy.ToArray();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3ConnectionContext _target;
+
+        public DebugView(Http3ConnectionContext value)
+        {
+            _target = value;
+        }
+
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
     }
 }

@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 
 namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("AmqpBufferReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal ref struct AmqpBufferReader
 {
     private ReadOnlySpan<byte> _buffer;
@@ -98,5 +100,20 @@ internal ref struct AmqpBufferReader
         {
             throw new AmqpProtocolException("The AMQP payload ended unexpectedly.");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly int _member0;
+        private readonly bool _member1;
+
+        public DebugView(AmqpBufferReader value)
+        {
+            _member0 = value.Remaining;
+            _member1 = value.End;
+        }
+
+        public int Remaining => _member0;
+        public bool End => _member1;
     }
 }

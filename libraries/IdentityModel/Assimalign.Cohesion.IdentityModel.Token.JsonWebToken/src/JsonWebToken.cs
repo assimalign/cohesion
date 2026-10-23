@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// to the OpenID Connect branch.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("JsonWebToken {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JsonWebToken : IdentityToken, IJsonWebToken
 {
     /// <summary>
@@ -328,5 +330,33 @@ public sealed class JsonWebToken : IdentityToken, IJsonWebToken
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         return descriptor;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly JsonWebToken _target;
+
+        public DebugView(JsonWebToken value)
+        {
+            _target = value;
+        }
+
+        public JoseHeader Header => _target.Header;
+        public string? Algorithm => _target.Algorithm;
+        public JsonWebTokenParts? Parts => _target.Parts;
+        public global::Assimalign.Cohesion.IdentityModel.Token.IdentityTokenKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.IdentityModel.AuthenticationProtocol Protocol => _target.Protocol;
+        public string? Id => _target.Id;
+        public global::Assimalign.Cohesion.IdentityModel.SubjectIdentifier? Subject => _target.Subject;
+        public string? Issuer => _target.Issuer;
+        public string? TokenType => _target.TokenType;
+        public global::System.Collections.Generic.IReadOnlyList<string> Audiences => _target.Audiences;
+        public global::System.DateTimeOffset? IssuedAt => _target.IssuedAt;
+        public global::System.DateTimeOffset? NotBefore => _target.NotBefore;
+        public global::System.DateTimeOffset? ExpiresAt => _target.ExpiresAt;
+        public global::Assimalign.Cohesion.IdentityModel.AuthenticationContext? AuthenticationContext => _target.AuthenticationContext;
+        public global::Assimalign.Cohesion.IdentityModel.IIdentityClaimCollection Claims => _target.Claims;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, global::Assimalign.Cohesion.IdentityModel.IdentityClaimValue> Properties => _target.Properties;
+        public string? RawData => _target.RawData;
     }
 }

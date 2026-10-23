@@ -5,6 +5,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 // A process-wide cache in production; provider-keyed caches keep deterministic clocks isolated.
+[global::System.Diagnostics.DebuggerDisplay("HttpResponseDateCache")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpResponseDateCache
 {
     private static readonly ConditionalWeakTable<TimeProvider, HttpResponseDateCache> _providers = new();
@@ -42,6 +44,13 @@ internal sealed class HttpResponseDateCache
                 Volatile.Write(ref _current, current);
             }
             return current;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpResponseDateCache value)
+        {
         }
     }
 }

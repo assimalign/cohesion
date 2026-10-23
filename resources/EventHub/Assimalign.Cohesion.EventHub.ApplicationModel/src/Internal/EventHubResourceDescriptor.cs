@@ -5,6 +5,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EventHubResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EventHubResourceDescriptor : IEventHubResourceDescriptor
 {
     private readonly IApplicationResourceDescriptor _inner;
@@ -36,5 +38,19 @@ internal sealed class EventHubResourceDescriptor : IEventHubResourceDescriptor
     {
         _inner.DependsOn(resources);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EventHubResourceDescriptor _target;
+
+        public DebugView(EventHubResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public EventHubResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

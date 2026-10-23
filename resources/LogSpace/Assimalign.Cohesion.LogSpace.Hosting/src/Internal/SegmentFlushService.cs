@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 // Dedicated OS thread per the execution menu: a synchronous blocking loop must own its
 // thread for its entire life instead of occupying the pool. See docs/DESIGN.md.
+[global::System.Diagnostics.DebuggerDisplay("SegmentFlushService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SegmentFlushService : DedicatedThreadService
 {
     private readonly LogSegmentStore _store;
@@ -26,5 +28,17 @@ internal sealed class SegmentFlushService : DedicatedThreadService
             _store.Flush();
         }
         _store.Flush(stopping: true);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SegmentFlushService _target;
+
+        public DebugView(SegmentFlushService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

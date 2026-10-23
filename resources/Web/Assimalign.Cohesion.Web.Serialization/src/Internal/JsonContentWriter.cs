@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// points only, so the path is reflection-free under NativeAOT. The body is streamed, so no
 /// <c>Content-Length</c> is set; transports frame the response per protocol.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JsonContentWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class JsonContentWriter : IContentWriter
 {
     private readonly JsonSerializerOptions _options;
@@ -63,5 +65,17 @@ internal sealed class JsonContentWriter : IContentWriter
             : contentType.ToString();
 
         await JsonSerializer.SerializeAsync(response.Body, value, typeInfo, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly JsonContentWriter _target;
+
+        public DebugView(JsonContentWriter value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<HttpMediaType> MediaTypes => _target.MediaTypes;
     }
 }

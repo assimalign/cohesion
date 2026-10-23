@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Web.Authorization.Internal;
 /// This is the requirement behind <see cref="AuthorizationPolicyBuilder.RequireRole(string[])"/> and
 /// <see cref="AuthorizationMetadata.Roles"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RolesRequirement")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RolesRequirement : IAuthorizationRequirement
 {
     private readonly string[] _roles;
@@ -57,5 +59,17 @@ internal sealed class RolesRequirement : IAuthorizationRequirement
         }
 
         return new ValueTask<bool>(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RolesRequirement _target;
+
+        public DebugView(RolesRequirement value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<string> Roles => _target.Roles;
     }
 }

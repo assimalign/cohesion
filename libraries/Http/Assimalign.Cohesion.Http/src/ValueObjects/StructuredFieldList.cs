@@ -14,6 +14,7 @@ namespace Assimalign.Cohesion.Http;
 /// (represented uniformly by <see cref="StructuredFieldMember"/>). This is one of the three
 /// top-level structured field types.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString(),nq}")]
 public readonly struct StructuredFieldList
     : IReadOnlyList<StructuredFieldMember>, IEquatable<StructuredFieldList>
@@ -206,4 +207,16 @@ public readonly struct StructuredFieldList
     /// <param name="right">The second list.</param>
     /// <returns><see langword="true"/> if the lists are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(StructuredFieldList left, StructuredFieldList right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldList _target;
+
+        public DebugView(StructuredFieldList value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

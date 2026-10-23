@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Content.Bmff;
 namespace Assimalign.Cohesion.Content.Heif.Internal;
 
 // iref's version supplies the ID width. Decode after the parent assigns that context.
+[global::System.Diagnostics.DebuggerDisplay("HeifReferenceFields")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HeifReferenceFields
 {
     private byte[]? _encoded;
@@ -86,5 +88,12 @@ internal sealed class HeifReferenceFields
         }
 
         return (LargeIds ? 6L : 4L) + ToItemIds.Length * (LargeIds ? 4L : 2L) + TrailingData.Length;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HeifReferenceFields value)
+        {
+        }
     }
 }

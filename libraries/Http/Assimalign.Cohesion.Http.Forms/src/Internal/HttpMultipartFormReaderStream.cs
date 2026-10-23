@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// the boundary's Boyer-Moore-Horspool skip table for fast boundary scans
 /// over arbitrary section bodies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpMultipartFormReaderStream {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpMultipartFormReaderStream : Stream
 {
     private readonly BufferedReadStream _inner;
@@ -235,5 +237,26 @@ internal sealed class HttpMultipartFormReaderStream : Stream
     {
         // The inner buffered stream is owned by the MultipartReader; do not
         // dispose it from a section stream.
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpMultipartFormReaderStream _target;
+
+        public DebugView(HttpMultipartFormReaderStream value)
+        {
+            _target = value;
+        }
+
+        public long? LengthLimit => _target.LengthLimit;
+        public bool FinishedSection => _target.FinishedSection;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HostToServiceWrapper {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HostToServiceWrapper : IHostService
 {
     private readonly IHost _host;
@@ -286,5 +288,17 @@ internal sealed class HostToServiceWrapper : IHostService
             // A later explicit StopAsync still observes the retained failure. This observer
             // only prevents an eventual background-cleanup fault from becoming unobserved.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HostToServiceWrapper _target;
+
+        public DebugView(HostToServiceWrapper value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

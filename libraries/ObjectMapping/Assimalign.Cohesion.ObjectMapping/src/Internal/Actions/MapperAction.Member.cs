@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * source generator) or derived from expression trees at run time (the fallback
  * path, which is not NativeAOT-safe and is annotated accordingly).
  */
+[global::System.Diagnostics.DebuggerDisplay("MapperActionMember")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MapperActionMember<,,,>.DebugView))]
 internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
 {
     private readonly Func<TSource, TSourceMember> _getter;
@@ -102,6 +104,13 @@ internal sealed class MapperActionMember<TTarget, TTargetMember, TSource, TSourc
         catch (NullReferenceException)
         {
             return default!;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperActionMember<TTarget, TTargetMember, TSource, TSourceMember> value)
+        {
         }
     }
 }

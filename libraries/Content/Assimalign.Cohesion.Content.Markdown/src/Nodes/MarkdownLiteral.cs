@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// A run of literal text. Backslash escapes and character references are resolved during parsing,
 /// so the text is the final, unencoded content.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownLiteral")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownLiteral : MarkdownInline
 {
     private string _text;
@@ -31,5 +33,17 @@ public sealed class MarkdownLiteral : MarkdownInline
             ArgumentNullException.ThrowIfNull(value);
             _text = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownLiteral _target;
+
+        public DebugView(MarkdownLiteral value)
+        {
+            _target = value;
+        }
+
+        public string Text => _target.Text;
     }
 }

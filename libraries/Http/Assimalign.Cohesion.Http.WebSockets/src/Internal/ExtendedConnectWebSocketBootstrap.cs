@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// both are connection-specific, which HTTP/2 and HTTP/3 prohibit (RFC 9113 §8.2.2, RFC 9114 §4.2).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ExtendedConnectWebSocketBootstrap")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExtendedConnectWebSocketBootstrap : HttpWebSocketBootstrap
 {
     private readonly IHttpRequest _request;
@@ -67,5 +69,12 @@ internal sealed class ExtendedConnectWebSocketBootstrap : HttpWebSocketBootstrap
     public override ValueTask<Stream> AcceptTransportAsync(CancellationToken cancellationToken)
     {
         return _extendedConnect.AcceptAsync(cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ExtendedConnectWebSocketBootstrap value)
+        {
+        }
     }
 }

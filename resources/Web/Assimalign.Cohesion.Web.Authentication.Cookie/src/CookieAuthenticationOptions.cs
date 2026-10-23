@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 /// by the composition root (a <c>*.Hosting</c> project) from the application's rotating key ring —
 /// the handler never derives keys itself.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookieAuthenticationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CookieAuthenticationOptions
 {
     private HttpFieldValue _loginPath = CookieAuthenticationDefaults.LoginPath;
@@ -144,5 +146,27 @@ public sealed class CookieAuthenticationOptions
         {
             throw new ArgumentException(ErrorMessages.RedirectPathInvalid, "value");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CookieAuthenticationOptions _target;
+
+        public DebugView(CookieAuthenticationOptions value)
+        {
+            _target = value;
+        }
+
+        public string? DisplayName => _target.DisplayName;
+        public HttpCookieName CookieName => _target.CookieName;
+        public HttpCookieOptions Cookie => _target.Cookie;
+        public HttpFieldValue LoginPath => _target.LoginPath;
+        public string LogoutPath => _target.LogoutPath;
+        public HttpFieldValue AccessDeniedPath => _target.AccessDeniedPath;
+        public string ReturnUrlParameter => _target.ReturnUrlParameter;
+        public TimeSpan ExpireTimeSpan => _target.ExpireTimeSpan;
+        public bool SlidingExpiration => _target.SlidingExpiration;
+        public IDataProtector? TicketProtector => _target.TicketProtector;
+        public TimeProvider TimeProvider => _target.TimeProvider;
     }
 }

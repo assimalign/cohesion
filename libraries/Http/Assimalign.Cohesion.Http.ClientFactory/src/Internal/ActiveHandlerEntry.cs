@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// handler, its expiration timestamp, and weak references to the per-client wrapping
 /// handlers so the cleanup pass can decide when the inner handler is safe to dispose.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ActiveHandlerEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ActiveHandlerEntry
 {
     private readonly object _wrapperLock = new();
@@ -37,5 +39,18 @@ internal sealed class ActiveHandlerEntry
         {
             return _wrappers.ToArray();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ActiveHandlerEntry _target;
+
+        public DebugView(ActiveHandlerEntry value)
+        {
+            _target = value;
+        }
+
+        public HttpMessageHandler Handler => _target.Handler;
+        public DateTimeOffset ExpiresAtUtc => _target.ExpiresAtUtc;
     }
 }

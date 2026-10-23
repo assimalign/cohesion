@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>An editable typed leaf or master with ordered children.</summary>
 /// <remarks>Leaf values use ulong, long, double, string, or BinarySegment. Dates use signed nanoseconds
 /// since 2001-01-01T00:00:00 UTC, preserving precision beyond DateTime ticks.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("EbmlElement")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EbmlElement
 {
     private object? _value;
@@ -94,4 +96,21 @@ public sealed class EbmlElement
     public long Offset { get; internal set; }
 
     internal BinarySegment? RawPayload { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly EbmlElement _target;
+
+        public DebugView(EbmlElement value)
+        {
+            _target = value;
+        }
+
+        public VInt Identifier => _target.Identifier;
+        public EbmlElementType Type => _target.Type;
+        public object? Value => _target.Value;
+        public bool IsUnknownSize => _target.IsUnknownSize;
+        public int SizeLength => _target.SizeLength;
+        public long Offset => _target.Offset;
+    }
 }

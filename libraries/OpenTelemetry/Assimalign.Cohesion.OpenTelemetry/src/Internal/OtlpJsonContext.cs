@@ -2,10 +2,26 @@ using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.OpenTelemetry.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("OtlpJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(ExportLogsServiceRequest))]
-internal sealed partial class OtlpJsonContext : JsonSerializerContext;
+internal sealed partial class OtlpJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly OtlpJsonContext _target;
+
+        public DebugView(OtlpJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}
 
 internal sealed record ExportLogsServiceRequest(ResourceLogs[] ResourceLogs);
 internal sealed record ResourceLogs(OtlpResource Resource, ScopeLogs[] ScopeLogs);

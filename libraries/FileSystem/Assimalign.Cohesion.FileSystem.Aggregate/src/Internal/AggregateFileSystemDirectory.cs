@@ -11,6 +11,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// in aggregate-space. Child enumerations are re-wrapped, and create/delete calls are forwarded
 /// through the aggregate so the routing layer can validate mounts.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[D] - {Path}")]
 internal sealed class AggregateFileSystemDirectory : IFileSystemDirectory
 {
@@ -155,4 +156,22 @@ internal sealed class AggregateFileSystemDirectory : IFileSystemDirectory
         => EnumerateFileSystem(new FileSystemEnumerationOptions { Recurse = true }).GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly AggregateFileSystemDirectory _target;
+
+        public DebugView(AggregateFileSystemDirectory value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath Path => _target.Path;
+        public DateTime CreatedOn => _target.CreatedOn;
+        public DateTime UpdatedOn => _target.UpdatedOn;
+        public DateTime AccessedOn => _target.AccessedOn;
+        public FileAttributes Attributes => _target.Attributes;
+        public IFileSystem FileSystem => _target.FileSystem;
+        public DirectoryName Name => _target.Name;
+    }
 }

@@ -38,6 +38,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// expired-handler cleanup pass uses a small lock around the expired list only.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpClientFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyncDisposable
 {
     private readonly HttpClientFactoryOptions _options;
@@ -250,6 +252,13 @@ internal sealed class HttpClientFactory : IHttpClientFactory, IDisposable, IAsyn
     {
         Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpClientFactory value)
+        {
+        }
     }
 }
 

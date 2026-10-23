@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for the <see cref="OpenApiComponents"/> container.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiComponentsBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiComponentsBuilder
 {
     private readonly OpenApiComponents _components;
@@ -135,5 +137,12 @@ public sealed class OpenApiComponentsBuilder
         configure(builder);
         _components.Callbacks[name] = builder.Build();
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiComponentsBuilder value)
+        {
+        }
     }
 }

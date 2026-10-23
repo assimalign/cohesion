@@ -4,6 +4,8 @@ using System.Reflection;
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("ConstructorCallSite")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConstructorCallSite : CallSiteService
 {
     internal ConstructorInfo ConstructorInfo { get; }
@@ -30,4 +32,19 @@ internal sealed class ConstructorCallSite : CallSiteService
     public override Type ServiceType { get; }
     public override Type ImplementationType => ConstructorInfo.DeclaringType ?? throw new NullReferenceException();
     public override CallSiteKind Kind { get; } = CallSiteKind.Constructor;
+
+    private sealed class DebugView
+    {
+        private readonly ConstructorCallSite _target;
+
+        public DebugView(ConstructorCallSite value)
+        {
+            _target = value;
+        }
+
+        public Type ServiceType => _target.ServiceType;
+        public CallSiteKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.DependencyInjection.Internal.CallSiteResultCache Cache => _target.Cache;
+        public object Value => _target.Value;
+    }
 }

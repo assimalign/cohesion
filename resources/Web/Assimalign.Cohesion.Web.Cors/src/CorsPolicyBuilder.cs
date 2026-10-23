@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Web.Cors;
 /// preflight.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CorsPolicyBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CorsPolicyBuilder
 {
     private readonly List<string> _origins = new();
@@ -364,5 +366,12 @@ public sealed class CorsPolicyBuilder
         }
 
         return distinct.ToArray();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CorsPolicyBuilder value)
+        {
+        }
     }
 }

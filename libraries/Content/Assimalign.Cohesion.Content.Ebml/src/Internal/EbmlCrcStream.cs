@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Content.Ebml.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EbmlCrcStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EbmlCrcStream : Stream
 {
     private uint _state = uint.MaxValue;
@@ -26,4 +28,21 @@ internal sealed class EbmlCrcStream : Stream
     public override void Flush() { }
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly EbmlCrcStream _target;
+
+        public DebugView(EbmlCrcStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

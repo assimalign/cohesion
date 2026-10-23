@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Content.Bmff;
 /// <summary>An editable ordered box tree with borrowed or explicitly owned lazy source bytes.</summary>
 /// <remarks>Keep the source open and unchanged until saving finishes. Access to one source is sequential.
 /// Save relocates supported in-file media references from the last loaded or planned layout.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("BmffDocument")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class BmffDocument : IDisposable
 {
     private BmffLayout? _layout;
@@ -207,5 +209,18 @@ public sealed class BmffDocument : IDisposable
                 Source?.Dispose();
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffDocument _target;
+
+        public DebugView(BmffDocument value)
+        {
+            _target = value;
+        }
+
+        public IList<BmffBox> Boxes => _target.Boxes;
+        public Stream? Source => _target.Source;
     }
 }

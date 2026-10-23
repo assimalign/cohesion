@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// is opened. The transport takes ownership of the listener and disposes it with the transport.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AmqpServerTransport")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpServerTransport : IAsyncDisposable
 {
     private readonly IDuplexConnectionListener? _listener;
@@ -130,6 +132,13 @@ public sealed class AmqpServerTransport : IAsyncDisposable
         if (_multiplexedListener is not null)
         {
             await _multiplexedListener.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AmqpServerTransport value)
+        {
         }
     }
 }

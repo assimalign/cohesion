@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// 
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyComparer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class KeyComparer :
     IComparer<Key>,
     IEqualityComparer<Key>,
@@ -125,4 +127,11 @@ public class KeyComparer :
     public static KeyComparer CurrentCultureIgnoreCase { get; } = new KeyComparer(KeyComparison.CurrentCultureIgnoreCase);
     public static KeyComparer InvariantCulture { get; } = new KeyComparer(KeyComparison.InvariantCulture);
     public static KeyComparer InvariantCultureIgnoreCase { get; } = new KeyComparer(KeyComparison.InvariantCultureIgnoreCase);
+
+    private sealed class DebugView
+    {
+        public DebugView(KeyComparer value)
+        {
+        }
+    }
 }

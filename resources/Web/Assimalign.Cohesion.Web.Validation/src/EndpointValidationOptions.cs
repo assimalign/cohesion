@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Web.Validation;
 /// <c>errors</c> map.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EndpointValidationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EndpointValidationOptions
 {
     private readonly Dictionary<Type, IValidator> _validators = new();
@@ -148,5 +150,17 @@ public sealed class EndpointValidationOptions
         {
             throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ValidatorAlreadyRegistered, type));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EndpointValidationOptions _target;
+
+        public DebugView(EndpointValidationOptions value)
+        {
+            _target = value;
+        }
+
+        public bool Enabled => _target.Enabled;
     }
 }

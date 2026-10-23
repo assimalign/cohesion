@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.Dns;
 ///   upstream exchanges per resolve, bounded NS-resolution recursion depth.</description></item>
 /// </list>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IterativeDnsResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IterativeDnsResolver : DnsResolver
 {
     private readonly TimeSpan _queryTimeout;
@@ -568,6 +570,8 @@ public sealed class IterativeDnsResolver : DnsResolver
     /// sub-resolves for out-of-bailiwick NS names reuse the same instance so the budget is
     /// charged across the whole resolve.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("ResolveContext")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ResolveContext
     {
         private readonly HashSet<DnsQuestion> _inFlight = new();
@@ -588,5 +592,33 @@ public sealed class IterativeDnsResolver : DnsResolver
 
         public void EnterNsResolution() => NsResolutionDepth++;
         public void LeaveNsResolution() => NsResolutionDepth--;
+
+        private sealed class DebugView
+        {
+            private readonly ResolveContext _target;
+
+            public DebugView(ResolveContext value)
+            {
+                _target = value;
+            }
+
+            public int MaxQueries => _target.MaxQueries;
+            public int QueryCount => _target.QueryCount;
+            public int NsResolutionDepth => _target.NsResolutionDepth;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IterativeDnsResolver _target;
+
+        public DebugView(IterativeDnsResolver value)
+        {
+            _target = value;
+        }
+
+        public int CacheCount => _target.CacheCount;
+        public int DelegationCacheCount => _target.DelegationCacheCount;
+        public bool IsDisposed => _target.IsDisposed;
     }
 }

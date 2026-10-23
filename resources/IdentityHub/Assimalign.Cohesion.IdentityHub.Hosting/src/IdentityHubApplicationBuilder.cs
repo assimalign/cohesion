@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 /// declared clients against the declared audiences, and resolves the lifecycle services once, in
 /// registration order; the identity endpoint is always the last of them.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
@@ -363,5 +365,17 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         }
 
         return endpoint;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityHubApplicationBuilder _target;
+
+        public DebugView(IdentityHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
     }
 }

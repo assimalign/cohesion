@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// state; one instance may serve any number of stores and concurrent reads.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreSourceProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreSourceProvider : IResourceSourceProvider
 {
     private readonly Func<RemoteCertificateValidationCallback?, HttpMessageInvoker> _transportFactory;
@@ -186,5 +188,17 @@ public sealed class SecretStoreSourceProvider : IResourceSourceProvider
             nameof(request));
         SecretStoreProtocol.EnsureSecretStore(store, nameof(request));
         return store;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreSourceProvider _target;
+
+        public DebugView(SecretStoreSourceProvider value)
+        {
+            _target = value;
+        }
+
+        public string? ResourceKind => _target.ResourceKind;
     }
 }

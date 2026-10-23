@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// A bullet or ordered list: an ordered collection of list items with a tightness that controls
 /// whether item paragraphs render wrapped (loose) or bare (tight).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownList")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownList : MarkdownBlock
 {
     private int _start = 1;
@@ -48,4 +50,19 @@ public sealed class MarkdownList : MarkdownBlock
     /// <summary>Adds an item to the end of the list.</summary>
     /// <param name="item">The item to add.</param>
     public void Add(MarkdownListItem item) => Items.Add(item);
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownList _target;
+
+        public DebugView(MarkdownList value)
+        {
+            _target = value;
+        }
+
+        public bool IsOrdered => _target.IsOrdered;
+        public int Start => _target.Start;
+        public bool IsTight => _target.IsTight;
+        public IList<MarkdownListItem> Items => _target.Items;
+    }
 }

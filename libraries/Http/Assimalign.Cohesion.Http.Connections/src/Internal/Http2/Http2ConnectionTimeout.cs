@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// under this object's own lock, which is always taken after the connection's.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2ConnectionTimeout")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2ConnectionTimeout : IDisposable
 {
     private readonly Lock _gate = new();
@@ -339,5 +341,18 @@ internal sealed class Http2ConnectionTimeout : IDisposable
         None,
         KeepAlive,
         RequestHeaders,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2ConnectionTimeout _target;
+
+        public DebugView(Http2ConnectionTimeout value)
+        {
+            _target = value;
+        }
+
+        public bool TimedOut => _target.TimedOut;
+        public bool RequestHeadersTimedOut => _target.RequestHeadersTimedOut;
     }
 }

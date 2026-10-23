@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Binary;
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
 // A bounded cursor independent of the shared source cursor. Nested resolutions can seek freely.
+[global::System.Diagnostics.DebuggerDisplay("PdfInput")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfInput : IDisposable
 {
     private readonly byte[] _buffer = ArrayPool<byte>.Shared.Rent(4096);
@@ -71,4 +73,11 @@ internal sealed class PdfInput : IDisposable
     internal static bool IsWhiteSpace(int value) => value is 0 or 9 or 10 or 12 or 13 or 32;
     internal static bool IsDelimiter(int value) => value is -1 or '(' or ')' or '<' or '>' or '[' or ']' or '/' or '%' || IsWhiteSpace(value);
     public void Dispose() => ArrayPool<byte>.Shared.Return(_buffer);
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfInput value)
+        {
+        }
+    }
 }

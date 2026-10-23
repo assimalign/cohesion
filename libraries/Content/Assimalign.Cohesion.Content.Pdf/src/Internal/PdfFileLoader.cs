@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfFileLoader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfFileLoader
 {
     private readonly Stream _source;
@@ -390,4 +392,11 @@ internal sealed class PdfFileLoader
         return integer.Value;
     }
     internal static bool IsName(IPdfObject? value, string name) => value is PdfName pdfName && Encoding.ASCII.GetString(pdfName.Bytes.Span) == name;
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfFileLoader value)
+        {
+        }
+    }
 }

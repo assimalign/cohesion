@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// <summary>
 /// Configures the servers that participate in a web application's host lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationServerBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplicationServerBuilder
 {
     private readonly WebApplicationBuilder _builder;
@@ -281,5 +283,12 @@ public sealed class WebApplicationServerBuilder
             OwnEndpointCertificate,
             ContentRootPath,
             UseConfiguredConnectionLimit));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebApplicationServerBuilder value)
+        {
+        }
     }
 }

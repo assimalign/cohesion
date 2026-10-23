@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Hosting.Telemetry.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("TelemetryHostService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TelemetryHostService : IHostService
 {
     private readonly OtlpLoggerProvider _provider;
@@ -57,5 +59,17 @@ internal sealed class TelemetryHostService : IHostService
     {
         await disposal.ConfigureAwait(false);
         await Task.Run(factory.Dispose, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TelemetryHostService _target;
+
+        public DebugView(TelemetryHostService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

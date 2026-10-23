@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.OpenApi.Integration.Internal;
 /// more <see cref="IOpenApiEndpointSource"/> instances and generates a version-targeted document through
 /// the generation pipeline. No reflection is used — the composition is plain data assembly.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiDescriptionProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OpenApiDescriptionProvider : IOpenApiDescriptionProvider
 {
     private readonly IReadOnlyList<IOpenApiEndpointSource> _sources;
@@ -51,5 +53,12 @@ internal sealed class OpenApiDescriptionProvider : IOpenApiDescriptionProvider
             ApiVersion = _info.ApiVersion,
             Description = _info.Description
         });
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiDescriptionProvider value)
+        {
+        }
     }
 }

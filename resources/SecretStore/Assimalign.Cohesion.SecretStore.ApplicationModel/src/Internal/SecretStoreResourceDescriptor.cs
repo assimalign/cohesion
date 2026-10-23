@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecretStoreResourceDescriptor : ISecretStoreResourceDescriptor
 {
     private readonly IResourceCommandDescriptor _inner;
@@ -43,4 +45,19 @@ internal sealed class SecretStoreResourceDescriptor : ISecretStoreResourceDescri
 
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(IApplicationResourceDescriptor resource) => DependsOn(resource);
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(params IApplicationResourceDescriptor[] resources) => DependsOn(resources);
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreResourceDescriptor _target;
+
+        public DebugView(SecretStoreResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public SecretStoreResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
+        public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
+    }
 }

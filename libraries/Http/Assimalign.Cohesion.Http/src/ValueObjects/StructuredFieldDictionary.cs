@@ -16,6 +16,7 @@ namespace Assimalign.Cohesion.Http;
 /// first-seen order is preserved; a repeated key keeps its position and takes the last value.
 /// This is one of the three top-level structured field types.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString(),nq}")]
 public readonly struct StructuredFieldDictionary
     : IReadOnlyList<KeyValuePair<string, StructuredFieldMember>>, IEquatable<StructuredFieldDictionary>
@@ -274,4 +275,16 @@ public readonly struct StructuredFieldDictionary
     /// <param name="right">The second dictionary.</param>
     /// <returns><see langword="true"/> if the dictionaries are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(StructuredFieldDictionary left, StructuredFieldDictionary right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldDictionary _target;
+
+        public DebugView(StructuredFieldDictionary value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

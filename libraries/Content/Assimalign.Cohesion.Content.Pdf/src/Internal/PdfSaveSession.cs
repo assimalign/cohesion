@@ -7,6 +7,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfSaveSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed partial class PdfSaveSession : IDisposable
 {
     private readonly PdfDocument _document;
@@ -170,4 +172,11 @@ internal sealed partial class PdfSaveSession : IDisposable
     }
     private void Finish(long start) => _output.Text(FormattableString.Invariant($"startxref\n{start}\n%%EOF\n"));
     public void Dispose() { _hash.Dispose(); _output.Dispose(); }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfSaveSession value)
+        {
+        }
+    }
 }

@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// telemetry, never the exchange: <see cref="Start"/> and <see cref="Stop"/> contain the failure.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebExchangeTelemetry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestActivityFeature
 {
     private const string httpRequestMethod = "http.request.method";
@@ -470,5 +472,12 @@ internal sealed class WebExchangeTelemetry : IWebRequestIdFeature, IWebRequestAc
 
         /// <summary>The pipeline threw, its response could not be replaced, and the exchange was reset.</summary>
         Faulted,
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebExchangeTelemetry value)
+        {
+        }
     }
 }

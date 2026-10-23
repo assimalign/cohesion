@@ -27,6 +27,7 @@ namespace Assimalign.Cohesion.Http;
 /// it models a token that is syntactically a valid key but absent from the registry.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Key,nq} (Supported={IsSupported})")]
 public readonly struct HttpDigestAlgorithm : IEquatable<HttpDigestAlgorithm>
 {
@@ -156,4 +157,19 @@ public readonly struct HttpDigestAlgorithm : IEquatable<HttpDigestAlgorithm>
     /// <param name="right">The second algorithm.</param>
     /// <returns><see langword="true"/> if the algorithms are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(HttpDigestAlgorithm left, HttpDigestAlgorithm right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpDigestAlgorithm _target;
+
+        public DebugView(HttpDigestAlgorithm value)
+        {
+            _target = value;
+        }
+
+        public string? Key => _target.Key;
+        public bool IsRegistered => _target.IsRegistered;
+        public bool IsSupported => _target.IsSupported;
+        public int HashLengthInBytes => _target.HashLengthInBytes;
+    }
 }

@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Content.Bmff;
 namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>A still-image or metadata item, with ordered properties, references and borrowed extents.</summary>
+[global::System.Diagnostics.DebuggerDisplay("HeifItem {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HeifItem
 {
     internal HeifItem(ItemInfoEntryBox info) { Info = info; }
@@ -65,5 +67,29 @@ public sealed class HeifItem
         public FourCC Type { get; }
         /// <summary>Gets destination IDs in wire order.</summary>
         public IReadOnlyList<uint> ToItemIds { get; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HeifItem _target;
+
+        public DebugView(HeifItem value)
+        {
+            _target = value;
+        }
+
+        public uint Id => _target.Id;
+        public FourCC Type => _target.Type;
+        public string Name => _target.Name;
+        public string ContentType => _target.ContentType;
+        public bool IsHidden => _target.IsHidden;
+        public ushort ProtectionIndex => _target.ProtectionIndex;
+        public bool IsSupported => _target.IsSupported;
+        public bool IsImage => _target.IsImage;
+        public IReadOnlyList<BinarySegment> Data => _target.Data;
+        public HeifGridImage? Grid => _target.Grid;
+        public HeifOverlayImage? Overlay => _target.Overlay;
+        public HeifItem? IdentitySource => _target.IdentitySource;
+        public IReadOnlyList<BinarySegment> ExifData => _target.ExifData;
     }
 }

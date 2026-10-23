@@ -11,6 +11,8 @@ using ResourceCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClient
 {
     public ValueTask<ResourceCommandResult> ApplyCommandAsync(
@@ -225,5 +227,12 @@ internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClie
         }
 
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayControlPlaneClient value)
+        {
+        }
     }
 }

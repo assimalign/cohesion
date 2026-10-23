@@ -28,6 +28,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <see cref="Parse"/> or <see cref="TryParse"/> to create constraints.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString(),nq}")]
 public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
 {
@@ -237,5 +238,19 @@ public readonly struct RouteHostConstraint : IEquatable<RouteHostConstraint>
         }
 
         return host.IndexOf('*') < 0;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RouteHostConstraint _target;
+
+        public DebugView(RouteHostConstraint value)
+        {
+            _target = value;
+        }
+
+        public string Host => _target.Host;
+        public int? Port => _target.Port;
+        public bool MatchesAnyHost => _target.MatchesAnyHost;
     }
 }

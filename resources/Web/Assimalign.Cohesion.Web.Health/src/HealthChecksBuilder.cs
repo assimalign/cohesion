@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Health;
 /// duplicate names, and snapshots them into an immutable <see cref="IHealthCheckService"/> when
 /// built.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HealthChecksBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HealthChecksBuilder : IHealthChecksBuilder
 {
     private readonly List<HealthCheckRegistration> _registrations = new();
@@ -40,4 +42,16 @@ public sealed class HealthChecksBuilder : IHealthChecksBuilder
 
     /// <inheritdoc />
     public IHealthCheckService Build() => new HealthCheckService(_registrations.ToArray());
+
+    private sealed class DebugView
+    {
+        private readonly HealthChecksBuilder _target;
+
+        public DebugView(HealthChecksBuilder value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyCollection<HealthCheckRegistration> Registrations => _target.Registrations;
+    }
 }

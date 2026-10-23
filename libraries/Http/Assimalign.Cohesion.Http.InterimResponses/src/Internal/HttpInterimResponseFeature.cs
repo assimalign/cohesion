@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// control owns the per-version wire emission and the status-code / ordering rules, while this
 /// feature owns the application-facing surface and its resolution from the feature collection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpInterimResponseFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpInterimResponseFeature : IHttpInterimResponseFeature
 {
     /// <summary>The name under which the interim-response feature is registered.</summary>
@@ -33,4 +35,17 @@ internal sealed class HttpInterimResponseFeature : IHttpInterimResponseFeature
         IHttpHeaderCollection? headers = null,
         CancellationToken cancellationToken = default)
         => _control.WriteInterimResponseAsync(statusCode, headers, cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly HttpInterimResponseFeature _target;
+
+        public DebugView(HttpInterimResponseFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public bool IsInterimResponseSupported => _target.IsInterimResponseSupported;
+    }
 }

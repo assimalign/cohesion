@@ -5,6 +5,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class InMemoryFileStream : Stream
 {
     private readonly InMemoryFileSystemFile _file;
@@ -199,5 +201,22 @@ internal class InMemoryFileStream : Stream
         {
             throw new ObjectDisposedException(nameof(InMemoryFileStream), "Cannot access a closed file.");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryFileStream _target;
+
+        public DebugView(InMemoryFileStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

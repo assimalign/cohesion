@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.VpnGateway.Hosting;
 /// <summary>
 /// Hosts a VpnGateway application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("VpnGatewayApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>, IVpnGatewayApplication
 {
     private readonly VpnGatewayApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>, 
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new VpnGatewayApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly VpnGatewayApplication _target;
+
+        public DebugView(VpnGatewayApplication value)
+        {
+            _target = value;
+        }
+
+        public VpnGatewayApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

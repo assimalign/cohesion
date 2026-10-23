@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ApplicationModel.Internal;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed EventHub workload in an application graph.</summary>
+[global::System.Diagnostics.DebuggerDisplay("EventHubResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EventHubResource : PlannedResource
 {
     private const string EventHubPlannerName = "EventHub planner";
@@ -35,5 +37,24 @@ public sealed class EventHubResource : PlannedResource
         }
 
         return EventHubPlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EventHubResource _target;
+
+        public DebugView(EventHubResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

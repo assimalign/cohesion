@@ -10,6 +10,8 @@ namespace System.Buffers;
 /// <remarks>
 /// This pool uses fixed-size pinned blocks and is intended for throughput-sensitive buffer pipelines that benefit from reuse.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AdaptiveMemoryPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AdaptiveMemoryPool : MemoryPool<byte>
 {
     private const int AnySize = -1;
@@ -245,6 +247,8 @@ public sealed class AdaptiveMemoryPool : MemoryPool<byte>
         ObjectDisposedException.ThrowIf(_isDisposed, this);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MemoryBlockOwner")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class MemoryBlockOwner : IMemoryOwner<byte>
     {
         private readonly AdaptiveMemoryPool _pool;
@@ -274,5 +278,30 @@ public sealed class AdaptiveMemoryPool : MemoryPool<byte>
         {
             Volatile.Write(ref _isDisposed, 0);
         }
+
+        private sealed class DebugView
+        {
+            private readonly MemoryBlockOwner _target;
+
+            public DebugView(MemoryBlockOwner value)
+            {
+                _target = value;
+            }
+
+            public Memory<byte> Memory => _target.Memory;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AdaptiveMemoryPool _target;
+
+        public DebugView(AdaptiveMemoryPool value)
+        {
+            _target = value;
+        }
+
+        public int BlockSize => _target.BlockSize;
+        public int MaxBufferSize => _target.MaxBufferSize;
     }
 }

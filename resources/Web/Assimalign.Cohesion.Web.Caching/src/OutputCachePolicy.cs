@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.Caching;
 /// caller owns that correctness.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OutputCachePolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OutputCachePolicy
 {
     private TimeSpan _duration = TimeSpan.FromSeconds(60);
@@ -199,5 +201,25 @@ public sealed class OutputCachePolicy
         }
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OutputCachePolicy _target;
+
+        public DebugView(OutputCachePolicy value)
+        {
+            _target = value;
+        }
+
+        public bool Enabled => _target.Enabled;
+        public TimeSpan Duration => _target.Duration;
+        public bool HonorResponseCacheControl => _target.HonorResponseCacheControl;
+        public bool CacheAuthenticated => _target.CacheAuthenticated;
+        public long? MaximumBodySize => _target.MaximumBodySize;
+        public IList<HttpFieldName> VaryByHeaders => _target.VaryByHeaders;
+        public IList<string> VaryByQueryKeys => _target.VaryByQueryKeys;
+        public IList<string> VaryByRouteValues => _target.VaryByRouteValues;
+        public IList<string> Tags => _target.Tags;
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.DependencyInjection;
 /// <summary>
 /// An <see cref="IServiceScope" /> implementation that implements <see cref="IAsyncDisposable" />.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AsyncServiceScope")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct AsyncServiceScope : IServiceScope, IAsyncDisposable
 {
     private readonly IServiceScope _serviceScope;
@@ -35,5 +37,17 @@ public readonly struct AsyncServiceScope : IServiceScope, IAsyncDisposable
 
         // ValueTask.CompletedTask is only available in net5.0 and later.
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AsyncServiceScope _target;
+
+        public DebugView(AsyncServiceScope value)
+        {
+            _target = value;
+        }
+
+        public IServiceProvider ServiceProvider => _target.ServiceProvider;
     }
 }

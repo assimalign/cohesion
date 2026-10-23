@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// constructed: its lists are read-only copies, and its requirements must be thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthorizationPolicy
 {
     private readonly IAuthorizationRequirement[] _requirements;
@@ -183,5 +185,18 @@ public sealed class AuthorizationPolicy
         }
 
         return schemes.Count == 0 ? ReadOnlyCollection<string>.Empty : schemes.AsReadOnly();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuthorizationPolicy _target;
+
+        public DebugView(AuthorizationPolicy value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<IAuthorizationRequirement> Requirements => _target.Requirements;
+        public IReadOnlyList<string> AuthenticationSchemes => _target.AuthenticationSchemes;
     }
 }

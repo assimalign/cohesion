@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 /// The default <see cref="IOpenApiValidator"/>. Runs an ordered set of <see cref="IOpenApiValidationRule"/>
 /// instances and collects their diagnostics into a single result.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiValidator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OpenApiValidator : IOpenApiValidator
 {
     private readonly List<IOpenApiValidationRule> _rules;
@@ -28,5 +30,12 @@ internal sealed class OpenApiValidator : IOpenApiValidator
         }
 
         return new OpenApiValidationResult(context.Diagnostics);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiValidator value)
+        {
+        }
     }
 }

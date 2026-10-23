@@ -28,6 +28,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="Includes(HttpMediaType)"/> to test whether a concrete media type falls within it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpMediaType : IEquatable<HttpMediaType>
 {
@@ -506,4 +507,22 @@ public readonly struct HttpMediaType : IEquatable<HttpMediaType>
 
     /// <summary>Determines whether two media types are not semantically equal.</summary>
     public static bool operator !=(HttpMediaType left, HttpMediaType right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpMediaType _target;
+
+        public DebugView(HttpMediaType value)
+        {
+            _target = value;
+        }
+
+        public string Type => _target.Type;
+        public string SubType => _target.SubType;
+        public bool IsWildcardType => _target.IsWildcardType;
+        public bool IsWildcardSubType => _target.IsWildcardSubType;
+        public bool HasWildcard => _target.HasWildcard;
+        public bool IsEmpty => _target.IsEmpty;
+        public int Specificity => _target.Specificity;
+    }
 }

@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Web.Testing;
 /// trimming-annotated entry-point invocation supplied by <c>ResourceRuntime</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationTestFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 {
     private readonly WebApplicationTestFactoryOptions _options;
@@ -338,5 +340,18 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
             .ConfigureAwait(false);
 
         return new ClientConnectionStream(connection);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebApplicationTestFactory _target;
+
+        public DebugView(WebApplicationTestFactory value)
+        {
+            _target = value;
+        }
+
+        public WebApplicationBuilder Builder => _target.Builder;
+        public bool IsStarted => _target.IsStarted;
     }
 }

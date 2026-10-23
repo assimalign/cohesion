@@ -33,6 +33,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="TryParse(ReadOnlySpan{char}, out HttpForwardedValues)"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("Count = {Count}")]
 public readonly struct HttpForwardedValues : IReadOnlyList<string>, IEquatable<HttpForwardedValues>
 {
@@ -215,4 +216,18 @@ public readonly struct HttpForwardedValues : IReadOnlyList<string>, IEquatable<H
 
     /// <summary>Determines whether two lists are not equal.</summary>
     public static bool operator !=(HttpForwardedValues left, HttpForwardedValues right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpForwardedValues _target;
+
+        public DebugView(HttpForwardedValues value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsEmpty => _target.IsEmpty;
+        public string? Nearest => _target.Nearest;
+    }
 }

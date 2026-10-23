@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.NotificationHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("NotificationHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class NotificationHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class NotificationHubControlPlaneEndpointService : IHostService,
                 ? address
                 : throw new InvalidOperationException($"The NotificationHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly NotificationHubControlPlaneEndpointService _target;
+
+        public DebugView(NotificationHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

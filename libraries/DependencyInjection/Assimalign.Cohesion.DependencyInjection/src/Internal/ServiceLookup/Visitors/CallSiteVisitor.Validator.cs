@@ -4,6 +4,8 @@ using System.Collections.Concurrent;
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteValidatorVisitor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidatorVisitor.CallSiteValidatorState, Type?>
 {
     // Keyed by call-site cache key (service type and slot), never by service type alone: a service
@@ -112,5 +114,12 @@ internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidat
     internal struct CallSiteValidatorState
     {
         public CallSiteService Singleton { get; set; }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteValidatorVisitor value)
+        {
+        }
     }
 }

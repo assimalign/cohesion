@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// <summary>
 /// Defines options for creating a QUIC connection listener.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("QuicConnectionListenerOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -292,5 +294,27 @@ public sealed class QuicConnectionListenerOptions
         {
             throw new ArgumentOutOfRangeException(nameof(errorCode), errorCode, string.Format(CultureInfo.CurrentCulture, ErrorMessages.ErrorCodeOutOfRange, minErrorCode, maxErrorCode));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicConnectionListenerOptions _target;
+
+        public DebugView(QuicConnectionListenerOptions value)
+        {
+            _target = value;
+        }
+
+        public IPEndPoint EndPoint => _target.EndPoint;
+        public int Backlog => _target.Backlog;
+        public TimeSpan HandshakeTimeout => _target.HandshakeTimeout;
+        public int MaxBidirectionalStreamCount => _target.MaxBidirectionalStreamCount;
+        public int MaxUnidirectionalStreamCount => _target.MaxUnidirectionalStreamCount;
+        public long? MaxReadBufferSize => _target.MaxReadBufferSize;
+        public long? MaxWriteBufferSize => _target.MaxWriteBufferSize;
+        public SslServerAuthenticationOptions ServerAuthenticationOptions => _target.ServerAuthenticationOptions;
+        public long DefaultStreamErrorCode => _target.DefaultStreamErrorCode;
+        public long DefaultCloseErrorCode => _target.DefaultCloseErrorCode;
+        public TimeSpan CloseDeliveryTimeout => _target.CloseDeliveryTimeout;
     }
 }

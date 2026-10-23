@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Dns.Internal;
 /// the name encoder to deduplicate suffixes per RFC 1035 &#167; 4.1.4.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsWireWriter {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal ref struct DnsWireWriter
 {
     private readonly Span<byte> _buffer;
@@ -138,5 +140,26 @@ internal ref struct DnsWireWriter
             DnsException.ThrowMalformed(
                 $"wire buffer overrun: tried to write {count} octets at offset {_position} but only {_buffer.Length - _position} remain");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly int _member0;
+        private readonly int _member1;
+        private readonly int _member2;
+        private readonly global::System.Collections.Generic.Dictionary<string, int> _member3;
+
+        public DebugView(DnsWireWriter value)
+        {
+            _member0 = value.Position;
+            _member1 = value.Length;
+            _member2 = value.Remaining;
+            _member3 = value.LabelOffsets;
+        }
+
+        public int Position => _member0;
+        public int Length => _member1;
+        public int Remaining => _member2;
+        public Dictionary<string, int> LabelOffsets => _member3;
     }
 }

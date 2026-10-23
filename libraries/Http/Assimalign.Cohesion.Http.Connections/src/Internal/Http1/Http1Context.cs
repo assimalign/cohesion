@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http1Context")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1Context : TransportHttpContext
 {
     private readonly Http1RequestBodyStream _requestBody;
@@ -90,4 +92,26 @@ internal sealed class Http1Context : TransportHttpContext
     /// <returns><see langword="true"/> when the body drained and the connection realigned; otherwise <see langword="false"/>.</returns>
     public ValueTask<bool> DrainRequestBodyAsync(CancellationToken cancellationToken)
         => _requestBody.DrainAsync(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly Http1Context _target;
+
+        public DebugView(Http1Context value)
+        {
+            _target = value;
+        }
+
+        public bool KeepAlive => _target.KeepAlive;
+        public bool ResponseFinalized => _target.ResponseFinalized;
+        public HttpStatusCode? RequestBodyRejectedStatusCode => _target.RequestBodyRejectedStatusCode;
+        public global::Assimalign.Cohesion.Http.HttpVersion Version => _target.Version;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpRequest Request => _target.Request;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpResponse Response => _target.Response;
+        public global::Assimalign.Cohesion.Http.HttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public global::Assimalign.Cohesion.Http.HttpFeatureCollection Features => _target.Features;
+        public global::System.Collections.Generic.IDictionary<string, object?> Items => _target.Items;
+        public global::System.Threading.CancellationToken RequestCancelled => _target.RequestCancelled;
+        public bool CancelRequested => _target.CancelRequested;
+    }
 }

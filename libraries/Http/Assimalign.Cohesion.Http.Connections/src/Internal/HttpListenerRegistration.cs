@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="IMultiplexedConnectionListener"/> plus an <see cref="HttpMultiplexedConnectionFactory"/>,
 /// the multiplexed listener type itself acting as the shape gate.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpListenerRegistration")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpListenerRegistration
 {
     // Capability validation selects these diagnostic fragments on every registration.
@@ -157,5 +159,18 @@ internal sealed class HttpListenerRegistration
         return paramName is null
             ? new ArgumentException(message)
             : new ArgumentException(message, paramName);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpListenerRegistration _target;
+
+        public DebugView(HttpListenerRegistration value)
+        {
+            _target = value;
+        }
+
+        public HttpProtocol Protocol => _target.Protocol;
+        public bool IsMultiplexed => _target.IsMultiplexed;
     }
 }

@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IsolatedStorageFileSystemFileHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IsolatedStorageFileSystemFileHandle : IFileSystemFileHandle
 {
     private readonly IsolatedStorageFileStream _stream;
@@ -205,4 +207,11 @@ internal sealed class IsolatedStorageFileSystemFileHandle : IFileSystemFileHandl
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+
+    private sealed class DebugView
+    {
+        public DebugView(IsolatedStorageFileSystemFileHandle value)
+        {
+        }
+    }
 }

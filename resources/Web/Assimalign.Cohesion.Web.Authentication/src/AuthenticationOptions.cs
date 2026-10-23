@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// resolution rules.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthenticationOptions
 {
     private readonly Dictionary<string, AuthenticationScheme> _schemes = new(StringComparer.Ordinal);
@@ -123,4 +125,22 @@ public sealed class AuthenticationOptions
     /// </summary>
     /// <returns>The scheme name, or <see langword="null"/> when none is configured.</returns>
     public string? ResolveDefaultSignOutScheme() => DefaultSignOutScheme ?? DefaultSignInScheme ?? DefaultScheme;
+
+    private sealed class DebugView
+    {
+        private readonly AuthenticationOptions _target;
+
+        public DebugView(AuthenticationOptions value)
+        {
+            _target = value;
+        }
+
+        public string? DefaultScheme => _target.DefaultScheme;
+        public string? DefaultAuthenticateScheme => _target.DefaultAuthenticateScheme;
+        public string? DefaultChallengeScheme => _target.DefaultChallengeScheme;
+        public string? DefaultForbidScheme => _target.DefaultForbidScheme;
+        public string? DefaultSignInScheme => _target.DefaultSignInScheme;
+        public string? DefaultSignOutScheme => _target.DefaultSignOutScheme;
+        public IReadOnlyCollection<AuthenticationScheme> Schemes => _target.Schemes;
+    }
 }

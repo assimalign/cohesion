@@ -63,6 +63,8 @@ internal sealed class TcpConnectionEventSource : EventSource
 1. **Internal, sealed, one per assembly.** An assembly that raises events owns exactly one
    `internal sealed class <Subject>EventSource : EventSource` in `src/Internal/EventSource/`, namespace
    `{RootNamespace}.Internal`. No intermediate base class. An assembly that raises nothing has none.
+   EventSource subclasses are exempt from the concrete debugger-view rule in `general-rules.md`;
+   do not add debugger display/proxy attributes or nested debugger views to them under that rule.
 2. **No public diagnostics surface.** No public type forwards to, wraps, or exposes an event source: no
    `XxxDiagnostics` forwarder classes, no public trace-code enums, no public counter snapshots. A
    public forwarder lets any caller write fabricated events into a process-global provider and freezes

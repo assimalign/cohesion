@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalResourceStateStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalResourceStateStore : ILocalResourceState
 {
     private readonly LocalPortStore _ports;
@@ -45,5 +47,12 @@ internal sealed class LocalResourceStateStore : ILocalResourceState
         ArgumentNullException.ThrowIfNull(environment);
         await _mounts.MaterializeTrustBundleAsync(application, resource, trustBundle, environment, cancellationToken).ConfigureAwait(false);
         await _mounts.MaterializeTelemetryHeadersAsync(application, resource, telemetryHeaders, environment, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalResourceStateStore value)
+        {
+        }
     }
 }

@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Logging;
 /// The provider is thread-safe. Output is serialized through an internal lock so concurrent
 /// log entries do not interleave on the same writer.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ConsoleLoggerProvider {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConsoleLoggerProvider : LoggerProvider
 {
     private readonly ConsoleLoggerOptions _options;
@@ -91,5 +93,17 @@ public sealed class ConsoleLoggerProvider : LoggerProvider
 
             writer.Flush();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConsoleLoggerProvider _target;
+
+        public DebugView(ConsoleLoggerProvider value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

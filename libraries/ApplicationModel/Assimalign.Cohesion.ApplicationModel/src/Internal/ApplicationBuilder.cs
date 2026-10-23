@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// <see cref="IApplicationProviderBuilder"/>. Maintains the working resource collection and descriptor
 /// graph, the selected gateway, and validates the graph at <see cref="Build"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProviderBuilder
 {
     private readonly GatewayCommandLineOptions _options;
@@ -984,4 +986,20 @@ internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProv
 
     private static bool IsAsciiLetterOrDigit(char character) =>
         character is >= 'a' and <= 'z' or >= '0' and <= '9';
+
+    private sealed class DebugView
+    {
+        private readonly ApplicationBuilder _target;
+
+        public DebugView(ApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public IApplicationEnvironment Environment => _target.Environment;
+        public GatewayRunMode RunMode => _target.RunMode;
+        public ResourceName? RequestedGateway => _target.RequestedGateway;
+        public ApplicationProviders Providers => _target.Providers;
+        public ApplicationName? Application => _target.Application;
+    }
 }

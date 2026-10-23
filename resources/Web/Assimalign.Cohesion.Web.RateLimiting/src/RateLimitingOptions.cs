@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.RateLimiting;
 /// Composition is dependency-free: policies, the rejection status, and the hooks are captured at
 /// builder time; no service container, configuration binding, or request-time service location occurs.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RateLimitingOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RateLimitingOptions
 {
     // Ordinal (case-sensitive) policy names, matching ASP.NET's rate-limiter policy map: a policy name
@@ -75,4 +77,19 @@ public sealed class RateLimitingOptions
     /// Resolves a named policy registered through <see cref="AddPolicy"/>.
     /// </summary>
     internal bool TryGetPolicy(string name, out RateLimitingPolicy? policy) => _policies.TryGetValue(name, out policy);
+
+    private sealed class DebugView
+    {
+        private readonly RateLimitingOptions _target;
+
+        public DebugView(RateLimitingOptions value)
+        {
+            _target = value;
+        }
+
+        public RateLimitingPolicy? GlobalPolicy => _target.GlobalPolicy;
+        public HttpStatusCode RejectionStatusCode => _target.RejectionStatusCode;
+        public Func<RateLimitingRejectionContext, CancellationToken, Task>? OnRejected => _target.OnRejected;
+        public Action<RateLimitingDecision>? OnDecision => _target.OnDecision;
+    }
 }

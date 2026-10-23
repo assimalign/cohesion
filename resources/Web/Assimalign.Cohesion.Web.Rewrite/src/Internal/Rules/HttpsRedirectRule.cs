@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// as secure, so a proxied deployment never redirects in a loop, and the <c>Location</c> names the host the
 /// client addressed. A request without a host this rule can safely echo is left alone.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpsRedirectRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpsRedirectRule : RewriteRule
 {
     private const int httpsDefaultPort = 443;
@@ -50,5 +52,12 @@ internal sealed class HttpsRedirectRule : RewriteRule
             context.SerializedQuery);
 
         context.Redirect(location, _statusCode);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpsRedirectRule value)
+        {
+        }
     }
 }

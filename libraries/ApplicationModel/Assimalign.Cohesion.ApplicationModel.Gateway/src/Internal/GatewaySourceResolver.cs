@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <see cref="ApplicationProviders.Sources"/> registrations, so a command-input resolver never
 /// needs to know how a source is served.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("GatewaySourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewaySourceResolver : IResourceSourceResolver
 {
     private readonly Func<string, ResourceMountKind, CancellationToken, ValueTask<ResourceMountInput>> _resolve;
@@ -27,5 +29,12 @@ internal sealed class GatewaySourceResolver : IResourceSourceResolver
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
         return _resolve(source, kind, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewaySourceResolver value)
+        {
+        }
     }
 }

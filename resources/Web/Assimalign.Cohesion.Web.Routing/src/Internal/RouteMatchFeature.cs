@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// publication (a re-route, or the 405 endpoint) replaces an earlier one instead of leaving two
 /// endpoints on the exchange.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouteMatchFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RouteMatchFeature : IRouteMatchFeature, IRouterEndpointFeature
 {
     private readonly WebApplicationMiddleware _endpoint;
@@ -135,5 +137,21 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IRouterEndpointFea
     {
         string methods = route.Methods.Count == 0 ? "*" : string.Join(",", route.Methods);
         return route.Pattern is { } pattern ? $"{methods} {pattern.RawText}" : methods;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RouteMatchFeature _target;
+
+        public DebugView(RouteMatchFeature value)
+        {
+            _target = value;
+        }
+
+        public IRouterRoute? Route => _target.Route;
+        public RouteValueDictionary? Values => _target.Values;
+        public bool IsPreflight => _target.IsPreflight;
+        public WebApplicationMiddleware Endpoint => _target.Endpoint;
+        public string? RouteTemplate => _target.RouteTemplate;
     }
 }

@@ -5,6 +5,8 @@ using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationTrustedIssuer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationTrustedIssuer
 {
     internal ConfigurationTrustedIssuer(string issuer, JsonElement publicKey)
@@ -33,4 +35,11 @@ internal sealed class ConfigurationTrustedIssuer
     internal JsonElement PublicKey { get; }
 
     internal JsonWebKeySet Keys { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationTrustedIssuer value)
+        {
+        }
+    }
 }

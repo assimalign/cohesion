@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// the sink owns the wire framing and header-commit timing, while this feature owns the ergonomic
 /// start/write/flush/complete surface and the write-after-complete guard.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpResponseStreamingFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpResponseStreamingFeature : IHttpResponseStreamingFeature
 {
     /// <summary>The name under which the response-streaming feature is registered.</summary>
@@ -87,5 +89,18 @@ internal sealed class HttpResponseStreamingFeature : IHttpResponseStreamingFeatu
             throw new InvalidOperationException(
                 ErrorMessages.StreamingResponseAlreadyCompleted);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpResponseStreamingFeature _target;
+
+        public DebugView(HttpResponseStreamingFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public bool HasStarted => _target.HasStarted;
     }
 }

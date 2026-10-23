@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Content.Bmff;
 /// <summary>A borrowed, bounded box payload stream with a window-relative cursor.</summary>
 /// <remarks>Offset is absolute; Position and Length are window-relative. Disposal leaves the parent open.
 /// Forward-only windows exclusively borrow the parent until consumed. Reads may return short counts.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("BmffStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class BmffStream : Stream
 {
     private readonly Stream _stream;
@@ -258,5 +260,25 @@ public sealed class BmffStream : Stream
         }
         _disposed = true;
         base.Dispose(disposing);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffStream _target;
+
+        public DebugView(BmffStream value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public long Offset => _target.Offset;
+        public long Limit => _target.Limit;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

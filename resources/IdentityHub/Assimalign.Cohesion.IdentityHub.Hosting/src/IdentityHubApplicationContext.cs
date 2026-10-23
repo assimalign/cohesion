@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 /// <summary>
 /// Provides the IdentityHub application environment and runtime composition.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubApplicationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityHubApplicationContext : HostContext, IIdentityHubApplicationContext
 {
     private IServiceProvider? _serviceProvider;
@@ -74,5 +76,22 @@ public sealed class IdentityHubApplicationContext : HostContext, IIdentityHubApp
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityHubApplicationContext _target;
+
+        public DebugView(IdentityHubApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public IHostEnvironment Environment => _target.Environment;
+        public IEnumerable<IHostService> HostedServices => _target.HostedServices;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

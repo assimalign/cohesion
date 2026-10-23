@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols;
 /// endpoint lookup by kind is normalization-path independent. The <see langword="default" />
 /// instance equals <see cref="Unknown" /> and its <see cref="Name" /> is never null.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolEndpointKind {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct ProtocolEndpointKind : IEquatable<ProtocolEndpointKind>
 {
     private const string UnknownName = "unknown";
@@ -69,4 +71,16 @@ public readonly struct ProtocolEndpointKind : IEquatable<ProtocolEndpointKind>
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    private sealed class DebugView
+    {
+        private readonly ProtocolEndpointKind _target;
+
+        public DebugView(ProtocolEndpointKind value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+    }
 }

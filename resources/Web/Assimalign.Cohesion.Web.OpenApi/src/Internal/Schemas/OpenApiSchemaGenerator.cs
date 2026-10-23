@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// met, which follows the route table and is therefore stable from build to build.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiSchemaGenerator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OpenApiSchemaGenerator
 {
     private const string componentPrefix = "#/components/schemas/";
@@ -504,5 +506,12 @@ internal sealed class OpenApiSchemaGenerator
         schema.Properties["instance"] = new OpenApiSchema { Type = SchemaType.String, Format = "uri-reference", Description = "A URI reference identifying this occurrence." };
 
         return schema;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiSchemaGenerator value)
+        {
+        }
     }
 }

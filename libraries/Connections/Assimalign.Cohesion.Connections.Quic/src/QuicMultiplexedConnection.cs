@@ -39,6 +39,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// <see cref="DisposeAsync"/> close with the configured default close code.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QuicMultiplexedConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -514,5 +516,27 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         {
             QuicConnectionEventSource.Log.ConnectionClosed(Id);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicMultiplexedConnection _target;
+
+        public DebugView(QuicMultiplexedConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public SslApplicationProtocol ApplicationProtocol => _target.ApplicationProtocol;
+        public SslProtocols TlsProtocol => _target.TlsProtocol;
+        public TlsCipherSuite CipherSuite => _target.CipherSuite;
+        public X509Certificate2? RemoteCertificate => _target.RemoteCertificate;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IntegerDecoder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal struct IntegerDecoder
 {
     private int _i;
@@ -100,6 +102,13 @@ internal struct IntegerDecoder
 
         result = 0;
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IntegerDecoder value)
+        {
+        }
     }
 }
 

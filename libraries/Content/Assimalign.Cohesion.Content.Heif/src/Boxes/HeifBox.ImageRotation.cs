@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The irot box in the HEIF item model.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ImageRotationBox : BmffBox
 {
     /// <summary>Creates an empty ImageRotationBox model.</summary>
@@ -54,5 +56,25 @@ public sealed class ImageRotationBox : BmffBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" angle={Angle}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ImageRotationBox _target;
+
+        public DebugView(ImageRotationBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte[] TrailingData => _target.TrailingData;
+        public byte Angle => _target.Angle;
+        public byte Reserved => _target.Reserved;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

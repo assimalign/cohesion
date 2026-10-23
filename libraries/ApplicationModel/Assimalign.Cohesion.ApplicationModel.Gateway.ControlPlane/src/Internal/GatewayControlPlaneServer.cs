@@ -19,6 +19,8 @@ using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {
     private const long MaximumCommandBytes = 1024 * 1024;
@@ -1467,5 +1469,12 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         }
 
         return new IPEndPoint(host, address.Port);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayControlPlaneServer value)
+        {
+        }
     }
 }

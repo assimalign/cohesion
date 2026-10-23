@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// workloads. Derived subkeys are zeroed immediately after use.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AesGcmDataProtector")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AesGcmDataProtector : IDataProtector
 {
     private const byte Version = 0x01;
@@ -123,5 +125,12 @@ internal sealed class AesGcmDataProtector : IDataProtector
         }
 
         return plaintext;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AesGcmDataProtector value)
+        {
+        }
     }
 }

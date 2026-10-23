@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// Realizes enabled, composable project resources by invoking their entry points under
 /// isolated ambient contexts in the gateway process.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InProcessGateway {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRenderer
 {
     private readonly InMemoryResourceStateManager _state = new();
@@ -196,5 +198,21 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
         return (
             manifestResource.Manifest.Artifact.Assembly,
             binding.ContentRootPath);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InProcessGateway _target;
+
+        public DebugView(InProcessGateway value)
+        {
+            _target = value;
+        }
+
+        public ResourceName Name => _target.Name;
+        public IReadOnlyList<IApplicationResourceController> Controllers => _target.Controllers;
+        public IApplicationResourceStateManager State => _target.State;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayOptions Options => _target.Options;
+        public global::System.TimeSpan ReadinessBudget => _target.ReadinessBudget;
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiParameter"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiParameterBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiParameterBuilder
 {
     private readonly OpenApiParameter _parameter;
@@ -114,5 +116,12 @@ public sealed class OpenApiParameterBuilder
         configure(builder);
         _parameter.Examples[name] = builder.Build();
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiParameterBuilder value)
+        {
+        }
     }
 }

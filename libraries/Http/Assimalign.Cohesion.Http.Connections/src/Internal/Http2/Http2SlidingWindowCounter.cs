@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// receive loop, which is the only caller. AOT-safe — plain queue arithmetic, no reflection.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2SlidingWindowCounter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2SlidingWindowCounter
 {
     private readonly Queue<long> _events = new();
@@ -60,5 +62,12 @@ internal sealed class Http2SlidingWindowCounter
         }
 
         return _events.Count > _maxEventsPerWindow;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(Http2SlidingWindowCounter value)
+        {
+        }
     }
 }

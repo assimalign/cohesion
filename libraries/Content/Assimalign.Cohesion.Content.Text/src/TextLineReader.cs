@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Content.Text;
 /// Line-derived formats (Markdown, plain text pipelines) build their segment models on this reader.
 /// The reader owns the underlying <see cref="TextReader"/> and disposes it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TextLineReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TextLineReader : IDisposable
 {
     private readonly TextReader _reader;
@@ -135,5 +137,17 @@ public sealed class TextLineReader : IDisposable
 
         _disposed = true;
         _reader.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TextLineReader _target;
+
+        public DebugView(TextLineReader value)
+        {
+            _target = value;
+        }
+
+        public int LineNumber => _target.LineNumber;
     }
 }

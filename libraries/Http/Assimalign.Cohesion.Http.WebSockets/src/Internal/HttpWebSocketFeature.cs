@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// installed in the exchange's features so every later read, a decorator's included, sees the same
 /// single-shot accept.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpWebSocketFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
 {
     /// <summary>The name under which the feature is installed.</summary>
@@ -197,5 +199,20 @@ internal sealed class HttpWebSocketFeature : IHttpWebSocketFeature
         {
             headers[key] = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpWebSocketFeature _target;
+
+        public DebugView(HttpWebSocketFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public HttpWebSocketHandshakeStatus HandshakeStatus => _target.HandshakeStatus;
+        public bool IsWebSocketRequest => _target.IsWebSocketRequest;
+        public IReadOnlyList<string> RequestedProtocols => _target.RequestedProtocols;
     }
 }

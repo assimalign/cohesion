@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// feature in the exchange's features: <c>context.WebSockets</c> then reads the decorator, and the
 /// handshake, the subprotocols and the single-shot accept stay the inner feature's.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebSocketPolicyFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebSocketPolicyFeature : IHttpWebSocketFeature
 {
     private readonly IHttpContext _context;
@@ -95,5 +97,20 @@ internal sealed class WebSocketPolicyFeature : IHttpWebSocketFeature
         {
             WebSocketEventSource.Log.WebSocketClosed(_context, accepted, closedByDrain);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebSocketPolicyFeature _target;
+
+        public DebugView(WebSocketPolicyFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public HttpWebSocketHandshakeStatus HandshakeStatus => _target.HandshakeStatus;
+        public bool IsWebSocketRequest => _target.IsWebSocketRequest;
+        public IReadOnlyList<string> RequestedProtocols => _target.RequestedProtocols;
     }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// thread-safely on first access — by <c>UseRouting</c> when the application's request pipeline is
 /// built — after which the builder rejects further routes.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouterFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RouterFeature : IRouterFeature
 {
     private readonly RouterBuilder _builder = new();
@@ -22,4 +24,16 @@ internal sealed class RouterFeature : IRouterFeature
 
     /// <inheritdoc />
     public IRouter Router => _builder.Build();
+
+    private sealed class DebugView
+    {
+        private readonly RouterFeature _target;
+
+        public DebugView(RouterFeature value)
+        {
+            _target = value;
+        }
+
+        public IRouterBuilder Builder => _target.Builder;
+    }
 }

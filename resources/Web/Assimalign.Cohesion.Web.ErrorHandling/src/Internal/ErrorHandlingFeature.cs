@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// seeded onto every exchange. <see cref="ErrorHandlingBuilder.Build"/> hands it a snapshot of the
 /// registrations, so the chain is immutable and the per-request read path takes no lock.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ErrorHandlingFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ErrorHandlingFeature : IErrorHandlingFeature
 {
     private readonly IErrorHandler[] _handlers;
@@ -52,5 +54,17 @@ internal sealed class ErrorHandlingFeature : IErrorHandlingFeature
         }
 
         await ProblemDetailsErrorHandler.Instance.TryHandleAsync(context, exception, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ErrorHandlingFeature _target;
+
+        public DebugView(ErrorHandlingFeature value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<IErrorHandler> Handlers => _target.Handlers;
     }
 }

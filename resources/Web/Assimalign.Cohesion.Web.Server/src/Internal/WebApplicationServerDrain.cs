@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// connection still open is aborted.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationServerDrain")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebApplicationServerDrain : IDisposable
 {
     private static readonly string _serverDrainBudgetExceededMessage = ErrorMessages.ServerDrainBudgetExceeded;
@@ -97,6 +99,8 @@ internal sealed class WebApplicationServerDrain : IDisposable
     /// <summary>
     /// One connection's two drain registrations.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("Registration")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal readonly struct Registration : IDisposable
     {
         private readonly CancellationTokenRegistration _gracefulClose;
@@ -120,5 +124,25 @@ internal sealed class WebApplicationServerDrain : IDisposable
             _gracefulClose.Dispose();
             _abort.Dispose();
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(Registration value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebApplicationServerDrain _target;
+
+        public DebugView(WebApplicationServerDrain value)
+        {
+            _target = value;
+        }
+
+        public CancellationToken Draining => _target.Draining;
+        public CancellationToken Aborted => _target.Aborted;
     }
 }

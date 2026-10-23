@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Web.Serialization.Internal;
 /// <see cref="JsonTypeInfo"/>-based System.Text.Json entry points only, so the path is
 /// reflection-free under NativeAOT.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JsonContentReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class JsonContentReader : IContentReader
 {
     private readonly JsonSerializerOptions _options;
@@ -43,5 +45,17 @@ internal sealed class JsonContentReader : IContentReader
         JsonTypeInfo typeInfo = JsonContentDefaults.GetRequiredTypeInfo(_options, type);
 
         return await JsonSerializer.DeserializeAsync(request.Body, typeInfo, cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly JsonContentReader _target;
+
+        public DebugView(JsonContentReader value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<HttpMediaType> MediaTypes => _target.MediaTypes;
     }
 }

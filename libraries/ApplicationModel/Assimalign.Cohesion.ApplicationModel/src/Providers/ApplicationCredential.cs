@@ -16,6 +16,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// <see cref="object.ToString"/> redacts <see cref="Value"/>; never log the credential itself.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Scheme,nq} <redacted>")]
 public sealed record ApplicationCredential(
     ApplicationCredentialScheme Scheme,
@@ -70,5 +71,12 @@ public sealed record ApplicationCredential(
         }
 
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ApplicationCredential value)
+        {
+        }
     }
 }

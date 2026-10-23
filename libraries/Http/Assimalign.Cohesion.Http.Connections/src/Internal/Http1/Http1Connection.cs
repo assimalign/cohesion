@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http1Connection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1Connection : HttpConnection
 {
     private readonly IDuplexConnection _connection;
@@ -145,5 +147,25 @@ internal sealed class Http1Connection : HttpConnection
             // timeout, fall through to disposal. The connection will be
             // aborted regardless.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http1Connection _target;
+
+        public DebugView(Http1Connection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public IConnectionFeatureCollection Features => _target.Features;
+        public HttpProtocol Protocol => _target.Protocol;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public bool IsSecure => _target.IsSecure;
     }
 }

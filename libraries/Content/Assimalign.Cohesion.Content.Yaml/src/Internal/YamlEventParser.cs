@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Yaml.Internal;
 /// Parses YAML 1.2 text into the event stream by recursive descent over a normalized character
 /// cursor. Line breaks are normalized to <c>\n</c> before parsing; positions are one-based.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("YamlEventParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class YamlEventParser
 {
     private readonly string _text;
@@ -1736,4 +1738,11 @@ internal sealed class YamlEventParser
 
     private YamlException Error(string message, ContentFormatErrorCode code = ContentFormatErrorCode.InvalidStructure)
         => YamlException.At(message, code, _line, Column + 1, _source);
+
+    private sealed class DebugView
+    {
+        public DebugView(YamlEventParser value)
+        {
+        }
+    }
 }

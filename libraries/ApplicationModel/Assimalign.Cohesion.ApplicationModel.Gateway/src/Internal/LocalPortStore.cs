@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalPortStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalPortStore
 {
     private const string loopbackHost = "127.0.0.1";
@@ -354,6 +356,13 @@ internal sealed class LocalPortStore
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalPortStore value)
+        {
         }
     }
 }

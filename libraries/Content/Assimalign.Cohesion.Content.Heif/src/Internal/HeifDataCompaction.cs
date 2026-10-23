@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Content.Bmff;
 namespace Assimalign.Cohesion.Content.Heif.Internal;
 
 // Removes the union of deleted extents minus the union of retained extents, without reading data.
+[global::System.Diagnostics.DebuggerDisplay("HeifDataCompaction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HeifDataCompaction
 {
     private readonly List<(long Start, long End)> _removed;
@@ -96,5 +98,12 @@ internal sealed class HeifDataCompaction
             return end ? range.Start - _removedBefore[index] : -1;
         }
         return offset - _removedBefore[index] - (range.End - range.Start);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HeifDataCompaction value)
+        {
+        }
     }
 }

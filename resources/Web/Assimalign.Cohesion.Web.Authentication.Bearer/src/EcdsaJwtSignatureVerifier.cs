@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// <summary>
 /// Adapts the reusable IdentityModel ECDSA verifier to Bearer's existing public seam.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("EcdsaJwtSignatureVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EcdsaJwtSignatureVerifier : IJwtSignatureVerifier
 {
     private readonly IJsonWebTokenSignatureVerifier _verifier;
@@ -39,4 +41,11 @@ public sealed class EcdsaJwtSignatureVerifier : IJwtSignatureVerifier
     /// <inheritdoc />
     public bool Verify(string algorithm, ReadOnlySpan<byte> signingInput, ReadOnlySpan<byte> signature)
         => _verifier.Verify(algorithm, signingInput, signature);
+
+    private sealed class DebugView
+    {
+        public DebugView(EcdsaJwtSignatureVerifier value)
+        {
+        }
+    }
 }

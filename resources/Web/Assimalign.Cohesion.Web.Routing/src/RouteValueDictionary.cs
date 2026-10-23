@@ -18,6 +18,8 @@ public class RouteValueDictionary : IDictionary<string, object?>, IReadOnlyDicti
     /// <summary>
     /// Enumerates dictionary entries without allocations.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public struct Enumerator : IEnumerator<KeyValuePair<string, object?>>
     {
         private readonly RouteValueDictionary _dictionary;
@@ -62,6 +64,18 @@ public class RouteValueDictionary : IDictionary<string, object?>, IReadOnlyDicti
         {
             _index = 0;
             Current = default;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly Enumerator _target;
+
+            public DebugView(Enumerator value)
+            {
+                _target = value;
+            }
+
+            public KeyValuePair<string, object?> Current => _target.Current;
         }
     }
 

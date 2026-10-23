@@ -5,6 +5,8 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BuiltApplicationResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BuiltApplicationResourceDescriptor : IResourceCommandDescriptor
 {
     private IReadOnlyList<IApplicationResourceDescriptor>? _dependencies;
@@ -61,5 +63,19 @@ internal sealed class BuiltApplicationResourceDescriptor : IResourceCommandDescr
         }
 
         _dependencies = new ReadOnlyCollection<IApplicationResourceDescriptor>(copy);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BuiltApplicationResourceDescriptor _target;
+
+        public DebugView(BuiltApplicationResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public IApplicationResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
     }
 }

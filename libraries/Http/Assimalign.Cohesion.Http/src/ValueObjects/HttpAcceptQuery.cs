@@ -26,6 +26,7 @@ namespace Assimalign.Cohesion.Http;
 /// semantics on top of it. The header name is exposed as the typed <see cref="HttpHeaderKey.AcceptQuery"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
 {
@@ -309,4 +310,17 @@ public readonly struct HttpAcceptQuery : IEquatable<HttpAcceptQuery>
     /// <param name="right">The second value.</param>
     /// <returns><see langword="true"/> if the values are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(HttpAcceptQuery left, HttpAcceptQuery right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpAcceptQuery _target;
+
+        public DebugView(HttpAcceptQuery value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// disagree.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthorizationOptions
 {
     private readonly Dictionary<string, AuthorizationPolicy> _policies = new(StringComparer.Ordinal);
@@ -272,5 +274,18 @@ public sealed class AuthorizationOptions
             throw new InvalidOperationException(
                 ErrorMessages.AuthorizationOptionsReadOnly);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuthorizationOptions _target;
+
+        public DebugView(AuthorizationOptions value)
+        {
+            _target = value;
+        }
+
+        public AuthorizationPolicy DefaultPolicy => _target.DefaultPolicy;
+        public AuthorizationPolicy? FallbackPolicy => _target.FallbackPolicy;
     }
 }

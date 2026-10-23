@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiPathItem"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiPathItemBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiPathItemBuilder
 {
     private readonly OpenApiPathItem _item = new();
@@ -97,5 +99,12 @@ public sealed class OpenApiPathItemBuilder
         configure(builder);
         _item.Parameters.Add(builder.Build());
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiPathItemBuilder value)
+        {
+        }
     }
 }

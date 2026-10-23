@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.MediaHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MediaHubControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MediaHubControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class MediaHubControlPlaneEndpointService : IHostService, IDispo
                 ? address
                 : throw new InvalidOperationException($"The MediaHub endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly MediaHubControlPlaneEndpointService _target;
+
+        public DebugView(MediaHubControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Internal;
 /// Observes reads from any request implementation, including upstream middleware request views.
 /// The request's context points back to the logging view so reads through it are observed too.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpLoggingHttpRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpLoggingHttpRequest : IHttpRequest
 {
     private readonly IHttpRequest _inner;
@@ -38,4 +40,24 @@ internal sealed class HttpLoggingHttpRequest : IHttpRequest
     public IHttpContext HttpContext => _context;
 
     public Stream Body => _body;
+
+    private sealed class DebugView
+    {
+        private readonly HttpLoggingHttpRequest _target;
+
+        public DebugView(HttpLoggingHttpRequest value)
+        {
+            _target = value;
+        }
+
+        public HttpHost Host => _target.Host;
+        public HttpPath Path => _target.Path;
+        public HttpMethod Method => _target.Method;
+        public HttpScheme Scheme => _target.Scheme;
+        public IHttpQueryCollection Query => _target.Query;
+        public IHttpHeaderCollection Headers => _target.Headers;
+        public IHttpTrailerCollection Trailers => _target.Trailers;
+        public IHttpContext HttpContext => _target.HttpContext;
+        public Stream Body => _target.Body;
+    }
 }

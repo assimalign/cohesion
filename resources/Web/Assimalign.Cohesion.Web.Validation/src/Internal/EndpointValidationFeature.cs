@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Web.Validation.Internal;
 /// when the application is composed. The host seeds it onto every exchange, where
 /// <c>context.ValidateAsync</c> reads it.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("EndpointValidationFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EndpointValidationFeature : IHttpFeature
 {
     private readonly FrozenDictionary<Type, IValidator> _validators;
@@ -41,4 +43,16 @@ internal sealed class EndpointValidationFeature : IHttpFeature
     /// <returns><see langword="true"/> when a validator is registered for the type.</returns>
     public bool TryGetValidator(Type type, [NotNullWhen(true)] out IValidator? validator)
         => _validators.TryGetValue(type, out validator);
+
+    private sealed class DebugView
+    {
+        private readonly EndpointValidationFeature _target;
+
+        public DebugView(EndpointValidationFeature value)
+        {
+            _target = value;
+        }
+
+        public bool Enabled => _target.Enabled;
+    }
 }

@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Dns;
 /// it as disposed.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StubDnsClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class StubDnsClient : DnsClient
 {
     private readonly DnsTransport _transport;
@@ -152,5 +154,17 @@ public sealed class StubDnsClient : DnsClient
         }
         DnsException.ThrowServerFailure(question.ToString(), rcode);
         throw new InvalidOperationException(); // unreachable
+    }
+
+    private sealed class DebugView
+    {
+        private readonly StubDnsClient _target;
+
+        public DebugView(StubDnsClient value)
+        {
+            _target = value;
+        }
+
+        public bool IsDisposed => _target.IsDisposed;
     }
 }

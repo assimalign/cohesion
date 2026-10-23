@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The TrackHeader box; ISO/IEC 14496-12 8.3.2.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TrackHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -124,5 +126,37 @@ public sealed class TrackHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" track-id={TrackId} duration={Duration} dimensions={Width}x{Height}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TrackHeaderBox _target;
+
+        public DebugView(TrackHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public ulong CreationTime => _target.CreationTime;
+        public ulong ModificationTime => _target.ModificationTime;
+        public uint TrackId => _target.TrackId;
+        public uint Reserved1 => _target.Reserved1;
+        public ulong Duration => _target.Duration;
+        public byte[] Reserved => _target.Reserved;
+        public short Layer => _target.Layer;
+        public short AlternateGroup => _target.AlternateGroup;
+        public FixedPoint8x8 Volume => _target.Volume;
+        public ushort Reserved2 => _target.Reserved2;
+        public int[] Matrix => _target.Matrix;
+        public UnsignedFixedPoint16x16 Width => _target.Width;
+        public UnsignedFixedPoint16x16 Height => _target.Height;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

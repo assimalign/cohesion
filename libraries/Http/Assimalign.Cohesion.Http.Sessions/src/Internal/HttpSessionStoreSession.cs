@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// delegated to <see cref="HttpSessionSerializer"/> so the exact bytes are
 /// backend-independent.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpSessionStoreSession {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpSessionStoreSession : IHttpStoredSession
 {
     private readonly Dictionary<string, byte[]> _values = new(StringComparer.Ordinal);
@@ -163,5 +165,20 @@ internal sealed class HttpSessionStoreSession : IHttpStoredSession
 
         _id = newId;
         _isModified = true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpSessionStoreSession _target;
+
+        public DebugView(HttpSessionStoreSession value)
+        {
+            _target = value;
+        }
+
+        public bool IsAvailable => _target.IsAvailable;
+        public string Id => _target.Id;
+        public bool IsModified => _target.IsModified;
+        public IEnumerable<string> Keys => _target.Keys;
     }
 }

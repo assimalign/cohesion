@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// <c>X-Frame-Options</c> field, so the two can never disagree.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ContentSecurityPolicyBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ContentSecurityPolicyBuilder
 {
     private readonly List<ContentSecurityPolicyDirective> _directives = new();
@@ -325,5 +327,12 @@ public sealed class ContentSecurityPolicyBuilder
 
         _directives.Add(directive);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ContentSecurityPolicyBuilder value)
+        {
+        }
     }
 }

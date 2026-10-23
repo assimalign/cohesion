@@ -8,6 +8,8 @@ using System.Text.Json;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DeclarativeResourceCommand {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DeclarativeResourceCommand : IResourceCommand
 {
     private readonly byte[] _payload;
@@ -109,5 +111,22 @@ internal sealed class DeclarativeResourceCommand : IResourceCommand
         BinaryPrimitives.WriteInt32BigEndian(length, value.Length);
         hash.AppendData(length);
         hash.AppendData(value);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DeclarativeResourceCommand _target;
+
+        public DebugView(DeclarativeResourceCommand value)
+        {
+            _target = value;
+        }
+
+        public string Id => _target.Id;
+        public string Kind => _target.Kind;
+        public string Key => _target.Key;
+        public IApplicationResource Target => _target.Target;
+        public ApplicationName Owner => _target.Owner;
+        public bool Optional => _target.Optional;
     }
 }

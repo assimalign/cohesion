@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// <summary>
 /// Writes ES256 compact JWS values with an externally owned ECDSA P-256 private key.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JsonWebTokenWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class JsonWebTokenWriter : IJsonWebTokenWriter
 {
     private readonly ECDsa _privateKey;
@@ -65,5 +67,12 @@ public sealed class JsonWebTokenWriter : IJsonWebTokenWriter
             DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
         return string.Concat(signingInput, ".", Base64Url.EncodeToString(signature));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(JsonWebTokenWriter value)
+        {
+        }
     }
 }

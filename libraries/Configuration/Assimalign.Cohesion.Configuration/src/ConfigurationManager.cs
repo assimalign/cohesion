@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// Represents a mutable configuration root that loads providers as they are added.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationManager : IConfigurationManager
 {
     private readonly Lock _lock;
@@ -397,5 +399,12 @@ public sealed class ConfigurationManager : IConfigurationManager
     ValueTask<IConfiguration> IConfigurationBuilder.BuildAsync(CancellationToken cancellationToken)
     {
         return ValueTask.FromResult<IConfiguration>(this);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationManager value)
+        {
+        }
     }
 }

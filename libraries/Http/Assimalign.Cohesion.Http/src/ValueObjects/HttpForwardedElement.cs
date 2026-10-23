@@ -28,6 +28,7 @@ namespace Assimalign.Cohesion.Http;
 /// <c>Forwarded</c> header is <see cref="HttpForwardedElementCollection"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
 {
@@ -418,4 +419,18 @@ public readonly struct HttpForwardedElement : IEquatable<HttpForwardedElement>
 
     /// <summary>Determines whether two elements are not equal.</summary>
     public static bool operator !=(HttpForwardedElement left, HttpForwardedElement right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpForwardedElement _target;
+
+        public DebugView(HttpForwardedElement value)
+        {
+            _target = value;
+        }
+
+        public HttpForwardedNode? For => _target.For;
+        public HttpForwardedNode? By => _target.By;
+        public bool IsEmpty => _target.IsEmpty;
+    }
 }

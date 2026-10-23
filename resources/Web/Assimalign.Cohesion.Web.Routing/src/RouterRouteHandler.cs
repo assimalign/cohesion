@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <summary>
 /// Serves a matched route with a terminal <see cref="WebApplicationMiddleware"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RouterRouteHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class RouterRouteHandler : IRouterRouteHandler
 {
     private readonly WebApplicationMiddleware _middleware;
@@ -50,5 +52,12 @@ public class RouterRouteHandler : IRouterRouteHandler
         }
 
         return _middleware.Invoke(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RouterRouteHandler value)
+        {
+        }
     }
 }

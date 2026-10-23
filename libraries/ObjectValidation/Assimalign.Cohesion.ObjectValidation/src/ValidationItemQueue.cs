@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// Enumeration, the indexer, <see cref="ToArray()"/>, <see cref="CopyTo(IValidationItem[], int)"/>,
 /// <c>Peek</c> and <c>Pop</c> all start at the item pushed first.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ValidationItemQueue {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class ValidationItemQueue : IValidationItemQueue
 {
 	private int _size;
@@ -303,6 +305,8 @@ public class ValidationItemQueue : IValidationItemQueue
 		return GetEnumerator();
 	}
 
+	[global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+	[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 	internal struct Enumerator : IEnumerator<IValidationItem>, IDisposable, IEnumerator
 	{
 		private readonly int _version;
@@ -375,5 +379,24 @@ public class ValidationItemQueue : IValidationItemQueue
 			_index = -2;
 			_current = default;
 		}
+
+		private sealed class DebugView
+		{
+			public DebugView(Enumerator value)
+			{
+			}
+		}
+	}
+
+	private sealed class DebugView
+	{
+		private readonly ValidationItemQueue _target;
+
+		public DebugView(ValidationItemQueue value)
+		{
+			_target = value;
+		}
+
+		public int Count => _target.Count;
 	}
 }

@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// as it arrived.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HPackDecodedHeaders")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HPackDecodedHeaders
 {
     private bool _sawRegularField;
@@ -217,5 +219,23 @@ internal sealed class HPackDecodedHeaders
             throw new InvalidDataException(
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http2TeFieldInvalid, value));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HPackDecodedHeaders _target;
+
+        public DebugView(HPackDecodedHeaders value)
+        {
+            _target = value;
+        }
+
+        public string? Authority => _target.Authority;
+        public string? Method => _target.Method;
+        public string? Path => _target.Path;
+        public string? Scheme => _target.Scheme;
+        public string? Protocol => _target.Protocol;
+        public string? RepeatedPseudoHeader => _target.RepeatedPseudoHeader;
+        public HttpHeaderCollection Headers => _target.Headers;
     }
 }

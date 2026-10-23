@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// Represents the shared state available while configuration providers are being registered.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationBuilderContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationBuilderContext : IConfigurationBuilderContext
 {
     private readonly Dictionary<string, object> _properties;
@@ -53,5 +55,18 @@ public sealed class ConfigurationBuilderContext : IConfigurationBuilderContext
         ArgumentNullException.ThrowIfNull(provider);
 
         _providers.Add(provider);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationBuilderContext _target;
+
+        public DebugView(ConfigurationBuilderContext value)
+        {
+            _target = value;
+        }
+
+        public TimeSpan Timeout => _target.Timeout;
+        public IDictionary<string, object> Properties => _target.Properties;
     }
 }

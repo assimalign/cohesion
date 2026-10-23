@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// from the listener's <see cref="ConnectionCapabilities.Security"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpConnectionListenerOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpConnectionListenerOptions
 {
     private int _backlogCapacity = 512;
@@ -584,5 +586,22 @@ public sealed class HttpConnectionListenerOptions
         Registrations.Add(HttpListenerRegistration.ForStream(protocol, listenerFactory, connectionFactoryBuilder));
 
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpConnectionListenerOptions _target;
+
+        public DebugView(HttpConnectionListenerOptions value)
+        {
+            _target = value;
+        }
+
+        public bool AllowAlternateSchemes => _target.AllowAlternateSchemes;
+        public bool AddDateHeader => _target.AddDateHeader;
+        public IList<IHttpExchangeInterceptor> Interceptors => _target.Interceptors;
+        public HttpAltServiceAdvertisementOptions AltServiceAdvertisement => _target.AltServiceAdvertisement;
+        public int BacklogCapacity => _target.BacklogCapacity;
+        public int ExchangeFeatureCapacity => _target.ExchangeFeatureCapacity;
     }
 }

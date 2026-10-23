@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Http;
 /// settable until the transport freezes them, and <see cref="CanHaveBody"/> is another.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpExchangeInterceptorRequestContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpExchangeInterceptorRequestContext
 {
     private long? _maxRequestBodySize;
@@ -375,5 +377,32 @@ public sealed class HttpExchangeInterceptorRequestContext
         {
             _responseInterceptors = new List<IHttpExchangeInterceptor>(2) { first, interceptor };
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpExchangeInterceptorRequestContext _target;
+
+        public DebugView(HttpExchangeInterceptorRequestContext value)
+        {
+            _target = value;
+        }
+
+        public HttpVersion Version => _target.Version;
+        public HttpMethod Method => _target.Method;
+        public HttpPath Path => _target.Path;
+        public HttpScheme Scheme => _target.Scheme;
+        public HttpHost Host => _target.Host;
+        public string? Protocol => _target.Protocol;
+        public bool CanHaveBody => _target.CanHaveBody;
+        public HttpHeaderCollection Headers => _target.Headers;
+        public IHttpFeatureCollection Features => _target.Features;
+        public HttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public long? MaxRequestBodySize => _target.MaxRequestBodySize;
+        public bool IsMaxRequestBodySizeReadOnly => _target.IsMaxRequestBodySizeReadOnly;
+        public HttpMinDataRate? MinRequestBodyDataRate => _target.MinRequestBodyDataRate;
+        public bool IsMinRequestBodyDataRateReadOnly => _target.IsMinRequestBodyDataRateReadOnly;
+        public HttpMinDataRate? MinResponseDataRate => _target.MinResponseDataRate;
+        public bool IsMinResponseDataRateReadOnly => _target.IsMinResponseDataRateReadOnly;
     }
 }

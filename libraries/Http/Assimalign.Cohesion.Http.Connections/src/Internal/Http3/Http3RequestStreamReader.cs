@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// overlap.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http3RequestStreamReader")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3RequestStreamReader
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
@@ -437,5 +439,18 @@ internal sealed class Http3RequestStreamReader
         return new Http3ConnectionException(
             Http3ErrorCode.FrameError,
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.Http3RequestFrameTruncated, what));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3RequestStreamReader _target;
+
+        public DebugView(Http3RequestStreamReader value)
+        {
+            _target = value;
+        }
+
+        public PipeReader Input => _target.Input;
+        public bool IsCompleted => _target.IsCompleted;
     }
 }

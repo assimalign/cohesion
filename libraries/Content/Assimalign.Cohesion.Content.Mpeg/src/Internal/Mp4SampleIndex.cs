@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Content.Media;
 
 namespace Assimalign.Cohesion.Content.Mpeg.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Mp4SampleIndex {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Mp4SampleIndex : MediaSampleIndex
 {
     private readonly SampleDecodingTimeBox _times;
@@ -349,6 +351,8 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
     }
 
     // This value cursor holds one native run position per table, never one object per sample.
+    [global::System.Diagnostics.DebuggerDisplay("Cursor")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private struct Cursor
     {
         private readonly Mp4SampleIndex _owner;
@@ -424,5 +428,28 @@ internal sealed class Mp4SampleIndex : MediaSampleIndex
             _index++;
             return true;
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(Cursor value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Mp4SampleIndex _target;
+
+        public DebugView(Mp4SampleIndex value)
+        {
+            _target = value;
+        }
+
+        public ulong TrackId => _target.TrackId;
+        public long? Count => _target.Count;
+        public bool CanLookupByIndex => _target.CanLookupByIndex;
+        public bool CanLookupByTime => _target.CanLookupByTime;
+        public bool CanSeek => _target.CanSeek;
     }
 }

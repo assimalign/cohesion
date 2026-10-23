@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Dns.Internal;
 /// path do not allocate.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsAnswerCache {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DnsAnswerCache
 {
     private readonly int _capacity;
@@ -205,4 +207,16 @@ internal sealed class DnsAnswerCache
     }
 
     private sealed record Entry(DnsQuestion Question, DnsMessage Message, DateTimeOffset ExpiresAtUtc);
+
+    private sealed class DebugView
+    {
+        private readonly DnsAnswerCache _target;
+
+        public DebugView(DnsAnswerCache value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

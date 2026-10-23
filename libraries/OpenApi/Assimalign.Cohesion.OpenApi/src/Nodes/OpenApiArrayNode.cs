@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi;
 /// <summary>
 /// An ordered sequence of <see cref="OpenApiNode"/> values in the OpenAPI value tree.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiArrayNode {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiArrayNode : OpenApiNode, IEnumerable<OpenApiNode>
 {
     private readonly List<OpenApiNode> _items = new();
@@ -40,4 +42,16 @@ public sealed class OpenApiArrayNode : OpenApiNode, IEnumerable<OpenApiNode>
     public IEnumerator<OpenApiNode> GetEnumerator() => _items.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiArrayNode _target;
+
+        public DebugView(OpenApiArrayNode value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

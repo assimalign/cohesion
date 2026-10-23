@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.OpenApi;
 /// Insertion order is preserved so that serialized output is deterministic and readable. Key order is
 /// not semantically significant in OpenAPI, but preserving it keeps generated documents stable across runs.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiObjectNode {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiObjectNode : OpenApiNode, IEnumerable<KeyValuePair<string, OpenApiNode>>
 {
     private readonly List<string> _order = new();
@@ -81,4 +83,17 @@ public sealed class OpenApiObjectNode : OpenApiNode, IEnumerable<KeyValuePair<st
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiObjectNode _target;
+
+        public DebugView(OpenApiObjectNode value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public IReadOnlyList<string> Keys => _target.Keys;
+    }
 }

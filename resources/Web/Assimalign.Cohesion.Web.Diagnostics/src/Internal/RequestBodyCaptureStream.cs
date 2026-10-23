@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Internal;
 /// buffer. The body itself streams through untouched — no additional buffering, so transport
 /// backpressure and request-size limits behave exactly as without the wrapper.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RequestBodyCaptureStream {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestBodyCaptureStream : Stream
 {
     private readonly Stream _inner;
@@ -132,5 +134,25 @@ internal sealed class RequestBodyCaptureStream : Stream
         int take = Math.Min(data.Length, _captureLimit - _capturedCount);
         data[..take].CopyTo(_captured.AsSpan(_capturedCount));
         _capturedCount += take;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RequestBodyCaptureStream _target;
+
+        public DebugView(RequestBodyCaptureStream value)
+        {
+            _target = value;
+        }
+
+        public long BytesRead => _target.BytesRead;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

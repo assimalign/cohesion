@@ -29,6 +29,7 @@ namespace Assimalign.Cohesion.Http;
 /// elements are ignored (RFC 9110 &#167; 5.6.1.2).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpCacheControl
 {
@@ -546,5 +547,34 @@ public readonly struct HttpCacheControl
         {
             builder.Append(", ");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpCacheControl _target;
+
+        public DebugView(HttpCacheControl value)
+        {
+            _target = value;
+        }
+
+        public bool NoStore => _target.NoStore;
+        public bool NoCache => _target.NoCache;
+        public bool NoTransform => _target.NoTransform;
+        public bool Public => _target.Public;
+        public bool Private => _target.Private;
+        public bool MustRevalidate => _target.MustRevalidate;
+        public bool ProxyRevalidate => _target.ProxyRevalidate;
+        public bool MustUnderstand => _target.MustUnderstand;
+        public bool Immutable => _target.Immutable;
+        public bool OnlyIfCached => _target.OnlyIfCached;
+        public bool HasMaxStale => _target.HasMaxStale;
+        public TimeSpan? MaxAge => _target.MaxAge;
+        public TimeSpan? SharedMaxAge => _target.SharedMaxAge;
+        public TimeSpan? MinFresh => _target.MinFresh;
+        public TimeSpan? MaxStale => _target.MaxStale;
+        public TimeSpan? StaleWhileRevalidate => _target.StaleWhileRevalidate;
+        public TimeSpan? StaleIfError => _target.StaleIfError;
+        public bool IsEmpty => _target.IsEmpty;
     }
 }

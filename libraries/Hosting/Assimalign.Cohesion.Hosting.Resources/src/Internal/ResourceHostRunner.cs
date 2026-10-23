@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ResourceHostRunner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceHostRunner : IHostRunner
 {
     internal ResourceHostRunner(ResourceHostOptions options)
@@ -82,6 +84,13 @@ internal sealed class ResourceHostRunner : IHostRunner
         if (exitCode != ResourceHost.SuccessExitCode)
         {
             throw new ResourceEntryExitException(exitCode);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResourceHostRunner value)
+        {
         }
     }
 }

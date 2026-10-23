@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.ObjectMapping;
 /// <summary>
 /// The default <see cref="IMapperContext"/> implementation passed to mapping actions.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MapperContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MapperContext : IMapperContext
 {
     private readonly object _target;
@@ -37,4 +39,20 @@ public sealed class MapperContext : IMapperContext
 
     /// <inheritdoc cref="IMapperContext.Profiles"/>
     public required IReadOnlyList<IMapperProfile> Profiles { get; init; }
+
+    private sealed class DebugView
+    {
+        private readonly MapperContext _target;
+
+        public DebugView(MapperContext value)
+        {
+            _target = value;
+        }
+
+        public object Target => _target.Target;
+        public object Source => _target.Source;
+        public MapperIgnoreHandling IgnoreHandling => _target.IgnoreHandling;
+        public MapperCollectionHandling CollectionHandling => _target.CollectionHandling;
+        public IReadOnlyList<IMapperProfile> Profiles => _target.Profiles;
+    }
 }

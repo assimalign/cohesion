@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// and the transport answers with its own status (#1340).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LimitedDecompressionStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LimitedDecompressionStream : Stream
 {
     private readonly Stream _inner;
@@ -131,4 +133,21 @@ internal sealed class LimitedDecompressionStream : Stream
     }
 
     public override ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        private readonly LimitedDecompressionStream _target;
+
+        public DebugView(LimitedDecompressionStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }

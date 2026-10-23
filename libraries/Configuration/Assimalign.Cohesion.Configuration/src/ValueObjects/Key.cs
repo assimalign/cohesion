@@ -332,6 +332,8 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
     public static bool operator !=(in Key? left, in Key? right) => (!left.HasValue && right.HasValue) || (left.HasValue && !right.HasValue) || (left.HasValue && right.HasValue && !left.Value.Equals(right.Value));
 
 
+    [global::System.Diagnostics.DebuggerDisplay("KeyJsonConverter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     partial class KeyJsonConverter : JsonConverter<Key>
     {
         public override Key Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -354,6 +356,19 @@ public readonly struct Key : IEquatable<Key>, IComparable<Key>
         public override void Write(Utf8JsonWriter writer, Key value, JsonSerializerOptions options)
         {
             writer.WritePropertyName(value);
+        }
+
+        private sealed class DebugView
+        {
+            private readonly KeyJsonConverter _target;
+
+            public DebugView(KeyJsonConverter value)
+            {
+                _target = value;
+            }
+
+            public bool HandleNull => _target.HandleNull;
+            public global::System.Type Type => _target.Type;
         }
     }
 }

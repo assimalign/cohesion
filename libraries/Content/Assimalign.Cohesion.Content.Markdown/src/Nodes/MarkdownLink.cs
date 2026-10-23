@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// Autolinks (<c>&lt;scheme:…&gt;</c>) parse into this node with the URI as both destination and
 /// text.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownLink")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownLink : MarkdownInline
 {
     private string _destination;
@@ -40,4 +42,18 @@ public sealed class MarkdownLink : MarkdownInline
 
     /// <summary>Gets the inline content of the link text, in order.</summary>
     public IList<MarkdownInline> Inlines { get; } = new List<MarkdownInline>();
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownLink _target;
+
+        public DebugView(MarkdownLink value)
+        {
+            _target = value;
+        }
+
+        public string Destination => _target.Destination;
+        public string? Title => _target.Title;
+        public IList<MarkdownInline> Inlines => _target.Inlines;
+    }
 }

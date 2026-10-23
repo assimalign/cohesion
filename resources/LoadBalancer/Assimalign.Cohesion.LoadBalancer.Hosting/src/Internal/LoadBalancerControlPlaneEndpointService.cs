@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LoadBalancerControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LoadBalancerControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class LoadBalancerControlPlaneEndpointService : IHostService, ID
                 ? address
                 : throw new InvalidOperationException($"The LoadBalancer endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly LoadBalancerControlPlaneEndpointService _target;
+
+        public DebugView(LoadBalancerControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

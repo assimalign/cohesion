@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// <c>UseCookiePolicy</c> registration reuses the outer registration's instance, and a consent feature
 /// the application installed earlier takes this one's place.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookieConsentFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CookieConsentFeature : ICookieConsentFeature
 {
     private readonly IHttpContext _context;
@@ -99,5 +101,12 @@ internal sealed class CookieConsentFeature : ICookieConsentFeature
         }
 
         cookies.Add(cookie);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CookieConsentFeature value)
+        {
+        }
     }
 }

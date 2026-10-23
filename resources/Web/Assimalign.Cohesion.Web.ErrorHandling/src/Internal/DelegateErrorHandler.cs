@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// Adapts an <see cref="HttpErrorHandler"/> delegate registration to the
 /// <see cref="IErrorHandler"/> chain contract.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DelegateErrorHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DelegateErrorHandler : IErrorHandler
 {
     private readonly HttpErrorHandler _handler;
@@ -23,5 +25,12 @@ internal sealed class DelegateErrorHandler : IErrorHandler
     public ValueTask<bool> TryHandleAsync(IHttpContext context, Exception exception, CancellationToken cancellationToken = default)
     {
         return _handler.Invoke(context, exception, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(DelegateErrorHandler value)
+        {
+        }
     }
 }

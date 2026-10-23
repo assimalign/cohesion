@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Http;
 /// A single parsed <c>Accept</c> header entry: a media range paired with its RFC 9110
 /// &#167; 12.4.2 quality weight.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpMediaTypeQuality : IEquatable<HttpMediaTypeQuality>
 {
@@ -47,4 +48,17 @@ public readonly struct HttpMediaTypeQuality : IEquatable<HttpMediaTypeQuality>
 
     /// <summary>Determines whether two entries are not equal.</summary>
     public static bool operator !=(HttpMediaTypeQuality left, HttpMediaTypeQuality right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpMediaTypeQuality _target;
+
+        public DebugView(HttpMediaTypeQuality value)
+        {
+            _target = value;
+        }
+
+        public HttpMediaType MediaType => _target.MediaType;
+        public HttpQuality Quality => _target.Quality;
+    }
 }

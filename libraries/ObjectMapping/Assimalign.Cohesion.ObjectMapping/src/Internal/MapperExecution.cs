@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
 /// <summary>Invocation-local state; custom actions share one lazily created public context.</summary>
+[global::System.Diagnostics.DebuggerDisplay("MapperExecution")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal struct MapperExecution
 {
     private MapperContext? _context;
@@ -48,5 +50,21 @@ internal struct MapperExecution
                 action.Invoke(GetContext());
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MapperExecution _target;
+
+        public DebugView(MapperExecution value)
+        {
+            _target = value;
+        }
+
+        public object Target => _target.Target;
+        public object Source => _target.Source;
+        public List<IMapperProfile> Profiles => _target.Profiles;
+        public MapperIgnoreHandling IgnoreHandling => _target.IgnoreHandling;
+        public MapperCollectionHandling CollectionHandling => _target.CollectionHandling;
     }
 }

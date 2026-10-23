@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// separated from method acceptance so a <see cref="Router"/> can distinguish a 404 (no path
 /// matched) from a 405 (a path matched but the method did not).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Route")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Route : IRouterRoute
 {
     private static readonly IRouterRouteHandler _emptyHandler = new EmptyRouterRouteHandler();
@@ -681,5 +683,22 @@ public sealed class Route : IRouterRoute
             cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Route _target;
+
+        public DebugView(Route value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyCollection<HttpMethod> Methods => _target.Methods;
+        public RoutePattern Pattern => _target.Pattern;
+        public RouteParameterPolicyMap PolicyMap => _target.PolicyMap;
+        public decimal InboundPrecedence => _target.InboundPrecedence;
+        public IRouterRouteHandler Handler => _target.Handler;
+        public IRouterRouteMetadataCollection Metadata => _target.Metadata;
     }
 }

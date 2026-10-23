@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// only derived, purpose-bound subkeys are used for encryption, and those are zeroed after
 /// each operation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ManagedKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ManagedKey : IKey
 {
     /// <summary>The length, in bytes, of a key's master secret (256 bits).</summary>
@@ -54,4 +56,20 @@ internal sealed class ManagedKey : IKey
 
     /// <summary>Gets the 32-byte master secret used as HKDF input keying material.</summary>
     public ReadOnlySpan<byte> Master => _master;
+
+    private sealed class DebugView
+    {
+        private readonly ManagedKey _target;
+
+        public DebugView(ManagedKey value)
+        {
+            _target = value;
+        }
+
+        public Guid KeyId => _target.KeyId;
+        public DateTimeOffset CreatedAt => _target.CreatedAt;
+        public DateTimeOffset ActivatedAt => _target.ActivatedAt;
+        public DateTimeOffset ExpiresAt => _target.ExpiresAt;
+        public bool IsRevoked => _target.IsRevoked;
+    }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The auxC box in the HEIF item model.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuxiliaryTypeBox : BmffFullBox
 {
     /// <summary>Creates an empty AuxiliaryTypeBox model.</summary>
@@ -67,5 +69,26 @@ public sealed class AuxiliaryTypeBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" auxiliary-type={AuxiliaryType}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuxiliaryTypeBox _target;
+
+        public DebugView(AuxiliaryTypeBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte[] TrailingData => _target.TrailingData;
+        public byte[] Subtype => _target.Subtype;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

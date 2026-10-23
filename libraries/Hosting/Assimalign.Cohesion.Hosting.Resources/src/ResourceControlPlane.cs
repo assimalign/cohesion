@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>Provides the transport-neutral control plane configured by a resource area.</summary>
 /// <remarks>Create isolated instances with <see cref="Create"/> and use them through <see cref="IResourceControlPlane"/>.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResourceControlPlane")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ResourceControlPlane : IResourceControlPlane
 {
     /// <summary>
@@ -393,5 +395,17 @@ public sealed class ResourceControlPlane : IResourceControlPlane
         }
 
         return contribution with { Data = new ReadOnlyDictionary<string, object>(withheld) };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ResourceControlPlane _target;
+
+        public DebugView(ResourceControlPlane value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<string> AcceptedCommandKinds => _target.AcceptedCommandKinds;
     }
 }

@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.LogSpace.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LogSpaceApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
 {
     private readonly LogSpaceApplicationContext _context;
@@ -195,4 +197,16 @@ public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
     }
 
     ILogSpaceApplication ILogSpaceApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly LogSpaceApplicationBuilder _target;
+
+        public DebugView(LogSpaceApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

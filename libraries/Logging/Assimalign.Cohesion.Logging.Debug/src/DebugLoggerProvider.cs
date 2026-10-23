@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Logging.Internal;
 /// Output is line-oriented so it surfaces nicely in Visual Studio's Output window or any other
 /// <c>Debug</c> listener.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DebugLoggerProvider {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DebugLoggerProvider : LoggerProvider
 {
     private readonly DebugLoggerOptions _options;
@@ -130,4 +132,16 @@ public sealed class DebugLoggerProvider : LoggerProvider
         LogLevel.None => "NONE",
         _ => level.ToString().ToUpperInvariant(),
     };
+
+    private sealed class DebugView
+    {
+        private readonly DebugLoggerProvider _target;
+
+        public DebugView(DebugLoggerProvider value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+    }
 }

@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="TryGetValue(string, out HttpFormFile)"/> returns the first part with the name. Names
 /// compare case-insensitively.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpFormFileCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpFormFileCollection : IHttpFormFileCollection
 {
     private readonly List<HttpFormFile> _files = new();
@@ -73,5 +75,17 @@ public sealed class HttpFormFileCollection : IHttpFormFileCollection
 
         file = null!;
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpFormFileCollection _target;
+
+        public DebugView(HttpFormFileCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

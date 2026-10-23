@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// <c>SETTINGS_MAX_CONCURRENT_STREAMS</c>, HTTP/3 QUIC stream credit.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MultiplexedExchangeTracker")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MultiplexedExchangeTracker
 {
     private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -92,6 +94,13 @@ internal sealed class MultiplexedExchangeTracker
         if (Interlocked.Decrement(ref _outstanding) == 0)
         {
             _drained.TrySetResult();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MultiplexedExchangeTracker value)
+        {
         }
     }
 }

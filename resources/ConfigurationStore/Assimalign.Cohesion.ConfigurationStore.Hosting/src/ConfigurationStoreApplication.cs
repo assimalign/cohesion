@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 /// <summary>
 /// Hosts a ConfigurationStore application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreApplicationContext>, IConfigurationStoreApplication
 {
     private readonly ConfigurationStoreApplicationContext _context;
@@ -72,5 +74,18 @@ public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreAppli
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationStoreApplication _target;
+
+        public DebugView(ConfigurationStoreApplication value)
+        {
+            _target = value;
+        }
+
+        public ConfigurationStoreApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

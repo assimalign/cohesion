@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 /// Applying it to a response is a presence check and an assignment per field; only a nonce-bearing
 /// Content Security Policy does any per-response work (one string join).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SecurityHeadersPlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecurityHeadersPlan
 {
     private const string noSniff = "nosniff";
@@ -137,5 +139,12 @@ internal sealed class SecurityHeadersPlan
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SecurityHeadersPlan value)
+        {
+        }
     }
 }

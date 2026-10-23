@@ -42,6 +42,8 @@ namespace Assimalign.Cohesion.Web.Rewrite;
 /// options afterwards has no effect.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RewriteOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RewriteOptions
 {
     private static readonly TimeSpan _patternTimeout = TimeSpan.FromSeconds(1);
@@ -563,5 +565,17 @@ public sealed class RewriteOptions
         {
             throw new ArgumentOutOfRangeException(nameof(target), target, ErrorMessages.UndefinedRewriteMatchTarget);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RewriteOptions _target;
+
+        public DebugView(RewriteOptions value)
+        {
+            _target = value;
+        }
+
+        public int MaxPasses => _target.MaxPasses;
     }
 }

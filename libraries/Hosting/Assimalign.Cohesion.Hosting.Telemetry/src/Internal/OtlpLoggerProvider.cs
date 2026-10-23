@@ -6,6 +6,8 @@ using Assimalign.Cohesion.OpenTelemetry;
 
 namespace Assimalign.Cohesion.Hosting.Telemetry.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("OtlpLoggerProvider {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OtlpLoggerProvider : LoggerProvider
 {
     /// <summary>Initializes a new instance of the <see cref="OtlpLoggerProvider"/> class.</summary>
@@ -60,6 +62,8 @@ internal sealed class OtlpLoggerProvider : LoggerProvider
         _ => throw new ArgumentOutOfRangeException(nameof(level), "Unknown log severity.")
     };
 
+    [global::System.Diagnostics.DebuggerDisplay("OtlpLogger")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class OtlpLogger : Logger
     {
         private readonly OtlpLoggerProvider _provider;
@@ -79,8 +83,22 @@ internal sealed class OtlpLoggerProvider : LoggerProvider
             _provider.Write(entry);
             return new OtlpScope(Category, _provider, entry.Id);
         }
+
+        private sealed class DebugView
+        {
+            private readonly OtlpLogger _target;
+
+            public DebugView(OtlpLogger value)
+            {
+                _target = value;
+            }
+
+            public string Category => _target.Category;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("OtlpScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class OtlpScope : ScopedLogger
     {
         private readonly OtlpLoggerProvider _provider;
@@ -101,5 +119,30 @@ internal sealed class OtlpLoggerProvider : LoggerProvider
             _provider.Write(entry);
             return new OtlpScope(Category, _provider, entry.Id);
         }
+
+        private sealed class DebugView
+        {
+            private readonly OtlpScope _target;
+
+            public DebugView(OtlpScope value)
+            {
+                _target = value;
+            }
+
+            public LogId ParentId => _target.ParentId;
+            public string Category => _target.Category;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OtlpLoggerProvider _target;
+
+        public DebugView(OtlpLoggerProvider value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

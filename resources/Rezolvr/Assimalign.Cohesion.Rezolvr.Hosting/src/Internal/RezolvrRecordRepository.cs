@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("RezolvrRecordRepository")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RezolvrRecordRepository
 {
     private readonly string _path;
@@ -148,14 +150,57 @@ internal sealed class RezolvrRecordRepository
         }
         return value.GetString()!;
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(RezolvrRecordRepository value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("StoredRezolvrRecord {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed record StoredRezolvrRecord(string Id, string Kind, string Owner, string Key, byte[] Payload, string Value, int TtlSeconds)
 {
     [JsonIgnore]
     internal ResourceCommand Command => new(Id, Kind, Owner, Key, Payload);
+
+    private sealed class DebugView
+    {
+        private readonly StoredRezolvrRecord _target;
+
+        public DebugView(StoredRezolvrRecord value)
+        {
+            _target = value;
+        }
+
+        public string Id => _target.Id;
+        public string Kind => _target.Kind;
+        public string Owner => _target.Owner;
+        public string Key => _target.Key;
+        public byte[] Payload => _target.Payload;
+        public string Value => _target.Value;
+        public int TtlSeconds => _target.TtlSeconds;
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("RezolvrRecordJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(StoredRezolvrRecord[]))]
-internal sealed partial class RezolvrRecordJsonContext : JsonSerializerContext;
+internal sealed partial class RezolvrRecordJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly RezolvrRecordJsonContext _target;
+
+        public DebugView(RezolvrRecordJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}

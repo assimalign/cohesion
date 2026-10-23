@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiSecurityScheme"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiSecuritySchemeBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiSecuritySchemeBuilder
 {
     private readonly OpenApiSecurityScheme _scheme = new();
@@ -120,6 +122,13 @@ public sealed class OpenApiSecuritySchemeBuilder
         foreach (var (name, description) in scopes ?? [])
         {
             flow.Scopes[name] = description;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiSecuritySchemeBuilder value)
+        {
         }
     }
 }

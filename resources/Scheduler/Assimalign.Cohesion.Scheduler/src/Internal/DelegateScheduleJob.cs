@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Scheduler.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DelegateScheduleJob {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DelegateScheduleJob : IScheduleJob
 {
     private readonly Func<IScheduleContext, CancellationToken, ValueTask> _execute;
@@ -30,5 +32,19 @@ internal sealed class DelegateScheduleJob : IScheduleJob
     {
         ArgumentNullException.ThrowIfNull(context);
         return _execute.Invoke(context, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DelegateScheduleJob _target;
+
+        public DebugView(DelegateScheduleJob value)
+        {
+            _target = value;
+        }
+
+        public JobId Id => _target.Id;
+        public string Name => _target.Name;
+        public JobState State => _target.State;
     }
 }

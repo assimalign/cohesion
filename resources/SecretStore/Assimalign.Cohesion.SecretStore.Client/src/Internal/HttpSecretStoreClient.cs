@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.SecretStore.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("HttpSecretStoreClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpSecretStoreClient : ISecretStoreClient
 {
     private const string certificateRoute = "/cohesion/v1/certificates";
@@ -167,5 +169,12 @@ internal sealed class HttpSecretStoreClient : ISecretStoreClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(acceptMediaType));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _credential.Token);
         return request;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpSecretStoreClient value)
+        {
+        }
     }
 }

@@ -11,6 +11,8 @@ using System.Linq.Expressions;
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("ValidationItemCollection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(ValidationItemCollection<,>.DebugView))]
 internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T, IEnumerable<TValue>>
 {
     private readonly Type _paramType;
@@ -105,6 +107,20 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
         }
 
         return source.Insert(collectionSource.Length, "[" + index.ToString(CultureInfo.InvariantCulture) + "]");
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ValidationItemCollection<T, TValue> _target;
+
+        public DebugView(ValidationItemCollection<T, TValue> value)
+        {
+            _target = value;
+        }
+
+        public global::System.Linq.Expressions.Expression<global::System.Func<T, global::System.Collections.Generic.IEnumerable<TValue>>> ItemExpression => _target.ItemExpression;
+        public global::System.Func<T, bool> ValidationCondition => _target.ValidationCondition;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationRuleQueue ItemRuleStack => _target.ItemRuleStack;
     }
 }
 

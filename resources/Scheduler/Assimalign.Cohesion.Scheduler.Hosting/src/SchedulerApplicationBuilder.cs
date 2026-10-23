@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 /// closes registration, creates the service provider once, validates the schedules, and resolves
 /// the lifecycle services once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SchedulerApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
 {
     private readonly SchedulerApplicationOptions _options;
@@ -270,5 +272,17 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
                 yield return instance;
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchedulerApplicationBuilder _target;
+
+        public DebugView(SchedulerApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
     }
 }

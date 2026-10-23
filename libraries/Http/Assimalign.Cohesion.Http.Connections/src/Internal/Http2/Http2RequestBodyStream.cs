@@ -72,6 +72,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// otherwise — and the read fails with an <see cref="IOException"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2RequestBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
 {
     // While the connection's receive window is low, a wait may run past the reader's allowance on its
@@ -554,5 +556,22 @@ internal sealed class Http2RequestBodyStream : Stream, IHttpPacedRequestBody
         {
             await _onConsumed(_streamId, debt, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2RequestBodyStream _target;
+
+        public DebugView(Http2RequestBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

@@ -22,6 +22,7 @@ using Assimalign.Cohesion.Internal;
 /// Represents a Universally Unique Lexicographically Sortable Identifier (ULID).
 /// Spec: https://github.com/ulid/spec
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [StructLayout(LayoutKind.Explicit, Size = 16)]
 [DebuggerDisplay("{ToString(),nq}")]
 [TypeConverter(typeof(UlidTypeConverter))]
@@ -870,4 +871,16 @@ public readonly partial struct Ulid :
         }
     }
     #endregion
+
+    private sealed class DebugView
+    {
+        private readonly Ulid _target;
+
+        public DebugView(Ulid value)
+        {
+            _target = value;
+        }
+
+        public byte[] Random => _target.Random;
+    }
 }

@@ -13,6 +13,8 @@ using HostingMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayCertificateAuthority")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayCertificateAuthority
 {
     private readonly string _directory;
@@ -209,6 +211,13 @@ internal sealed class GatewayCertificateAuthority
             {
                 File.Delete(temporary);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayCertificateAuthority value)
+        {
         }
     }
 }

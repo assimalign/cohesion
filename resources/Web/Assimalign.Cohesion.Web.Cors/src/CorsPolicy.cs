@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Web.Cors;
 /// attached inline to an endpoint through <see cref="CorsMetadata"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CorsPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CorsPolicy
 {
     private readonly FrozenSet<string> _origins;
@@ -181,4 +183,24 @@ public sealed class CorsPolicy
         => AllowsAnyMethod || CorsSyntax.IsSafelistedMethod(method) || _methods.Contains(method);
 
     internal bool AllowsHeader(ReadOnlySpan<char> name) => AllowsAnyHeader || _headers.Contains(name);
+
+    private sealed class DebugView
+    {
+        private readonly CorsPolicy _target;
+
+        public DebugView(CorsPolicy value)
+        {
+            _target = value;
+        }
+
+        public bool AllowsAnyOrigin => _target.AllowsAnyOrigin;
+        public IReadOnlyList<string> Origins => _target.Origins;
+        public bool AllowsAnyMethod => _target.AllowsAnyMethod;
+        public IReadOnlyList<string> Methods => _target.Methods;
+        public bool AllowsAnyHeader => _target.AllowsAnyHeader;
+        public IReadOnlyList<HttpFieldName> Headers => _target.Headers;
+        public IReadOnlyList<HttpFieldName> ExposedHeaders => _target.ExposedHeaders;
+        public bool SupportsCredentials => _target.SupportsCredentials;
+        public TimeSpan? PreflightMaxAge => _target.PreflightMaxAge;
+    }
 }

@@ -122,6 +122,8 @@ internal sealed class HttpLoggingEventSource : EventSource
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("FailureThrottle")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class FailureThrottle
     {
         private readonly Lock _lock = new();
@@ -149,6 +151,13 @@ internal sealed class HttpLoggingEventSource : EventSource
             }
             // The caller emits after leaving this lock: listeners run synchronously and may
             // themselves encounter another logging failure.
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(FailureThrottle value)
+            {
+            }
         }
     }
 }

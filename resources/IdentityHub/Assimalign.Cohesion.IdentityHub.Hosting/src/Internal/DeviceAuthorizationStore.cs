@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DeviceAuthorizationStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DeviceAuthorizationStore
 {
     private const string UserCodeAlphabet = "BCDFGHJKLMNPQRSTVWXYZ23456789";
@@ -126,8 +128,17 @@ internal sealed class DeviceAuthorizationStore
         _byDeviceCode.Remove(authorization.DeviceCode);
         _deviceCodeByUserCode.Remove(authorization.UserCode);
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(DeviceAuthorizationStore value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("DeviceAuthorization")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed record DeviceAuthorization(
     string DeviceCode,
     string UserCode,
@@ -137,6 +148,23 @@ internal sealed record DeviceAuthorization(
     DateTimeOffset ExpiresAt)
 {
     internal string? Subject { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly DeviceAuthorization _target;
+
+        public DebugView(DeviceAuthorization value)
+        {
+            _target = value;
+        }
+
+        public string DeviceCode => _target.DeviceCode;
+        public string UserCode => _target.UserCode;
+        public IdentityHubClientRegistration Client => _target.Client;
+        public string Audience => _target.Audience;
+        public string? Scope => _target.Scope;
+        public DateTimeOffset ExpiresAt => _target.ExpiresAt;
+    }
 }
 
 internal readonly record struct DeviceAuthorizationResult(

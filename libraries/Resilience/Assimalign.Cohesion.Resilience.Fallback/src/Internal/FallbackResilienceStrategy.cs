@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("FallbackResilienceStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class FallbackResilienceStrategy : IResilienceStrategy
 {
     public FallbackResilienceStrategy(FallbackStrategyOptions options)
@@ -61,6 +63,13 @@ internal sealed class FallbackResilienceStrategy : IResilienceStrategy
         catch (Exception exception)
         {
             return exception;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(FallbackResilienceStrategy value)
+        {
         }
     }
 }

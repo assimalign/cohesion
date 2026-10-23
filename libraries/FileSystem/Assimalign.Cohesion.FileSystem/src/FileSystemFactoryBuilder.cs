@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.FileSystem;
 /// The builder is single-use: after <see cref="Build"/> returns, subsequent calls throw
 /// <see cref="InvalidOperationException"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemFactoryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileSystemFactoryBuilder
 {
     private readonly Dictionary<string, Func<IFileSystem>> _registrations =
@@ -99,6 +101,13 @@ public sealed class FileSystemFactoryBuilder
         {
             throw new InvalidOperationException(
                 "FileSystemFactoryBuilder has already been used to build a factory; create a new builder.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(FileSystemFactoryBuilder value)
+        {
         }
     }
 }

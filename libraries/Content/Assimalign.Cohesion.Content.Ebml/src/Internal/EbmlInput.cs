@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Ebml.Internal;
 
 // A counted, bounded view lets Content.Binary own exact-read loops while EBML supplies
 // absolute positions even when the original source cannot seek.
+[global::System.Diagnostics.DebuggerDisplay("EbmlInput")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EbmlInput : Stream
 {
     private readonly Stream _source;
@@ -86,6 +88,24 @@ internal sealed class EbmlInput : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly EbmlInput _target;
+
+        public DebugView(EbmlInput value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Position => _target.Position;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
+    }
 }
 
 internal delegate void BytesRead(ReadOnlySpan<byte> bytes);

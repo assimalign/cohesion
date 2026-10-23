@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// The builder is a composition-time object and is not thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationPolicyBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthorizationPolicyBuilder
 {
     private readonly List<IAuthorizationRequirement> _requirements = new();
@@ -221,5 +223,12 @@ public sealed class AuthorizationPolicyBuilder
         }
 
         return new AuthorizationPolicy(_requirements, _authenticationSchemes);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AuthorizationPolicyBuilder value)
+        {
+        }
     }
 }

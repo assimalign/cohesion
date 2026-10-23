@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 /// Verifies the default application-key credential against the store's trusted issuers: the ambient
 /// application's gateway and every peer issuer granted through <c>cohesion.trust.add</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("BootstrapTokenVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BootstrapTokenVerifier
 {
     private readonly TrustedIssuerStore _trustedIssuers;
@@ -70,5 +72,12 @@ internal sealed class BootstrapTokenVerifier
         return token.HasAudience(expectedAudience)
             ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
             : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BootstrapTokenVerifier value)
+        {
+        }
     }
 }

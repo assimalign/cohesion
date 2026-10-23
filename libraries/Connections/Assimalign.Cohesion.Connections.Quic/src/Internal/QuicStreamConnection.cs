@@ -57,6 +57,8 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 /// Once every usable native direction completes or native release finishes, the token is signaled.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QuicStreamConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -525,6 +527,8 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
     /// Completing it ends the receiving direction alone (<see cref="EndReads"/>), once. Everything else passes
     /// straight through, so a read before the abort costs one flag check.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("AbortableInput")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class AbortableInput : PipeReader
     {
         private readonly QuicStreamConnection _connection;
@@ -600,6 +604,13 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
                 ? ValueTask.FromException<ReadResult>(ReadAborted())
                 : _inner.ReadAtLeastAsync(minimumSize, cancellationToken);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(AbortableInput value)
+            {
+            }
+        }
     }
 
     /// <summary>
@@ -609,6 +620,8 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
     /// fails, and leaves the stream readable (<see cref="EndWrites"/>), once. Everything else passes straight
     /// through.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("HalfClosingOutput")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class HalfClosingOutput : PipeWriter
     {
         private readonly QuicStreamConnection _connection;
@@ -686,5 +699,40 @@ internal sealed class QuicStreamConnection : MultiplexedConnectionStream, IMulti
                 _connection.EndWrites(failure);
             }
         }
+
+        private sealed class DebugView
+        {
+            private readonly HalfClosingOutput _target;
+
+            public DebugView(HalfClosingOutput value)
+            {
+                _target = value;
+            }
+
+            public bool CanGetUnflushedBytes => _target.CanGetUnflushedBytes;
+            public long UnflushedBytes => _target.UnflushedBytes;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicStreamConnection _target;
+
+        public DebugView(QuicStreamConnection value)
+        {
+            _target = value;
+        }
+
+        public bool IsInputCompleted => _target.IsInputCompleted;
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
+        public ConnectionDirection Direction => _target.Direction;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

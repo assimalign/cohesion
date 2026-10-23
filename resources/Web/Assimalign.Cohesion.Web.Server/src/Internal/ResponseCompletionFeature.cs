@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Web.Internal;
 /// <see cref="WebApplicationServer"/>. Keeping the callbacks on the exchange lets terminal
 /// middleware defer host-lifetime signals without coupling the HTTP transport to Hosting.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResponseCompletionFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResponseCompletionFeature : IWebResponseCompletionFeature
 {
     private readonly List<Func<ValueTask>> _callbacks = new();
@@ -57,6 +59,13 @@ internal sealed class ResponseCompletionFeature : IWebResponseCompletionFeature
         if (failures is not null)
         {
             throw new AggregateException(ErrorMessages.ResponseCompletionCallbacksFailed, failures);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResponseCompletionFeature value)
+        {
         }
     }
 }

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Content.Exe.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BoundedCapture")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BoundedCapture : IDisposable
 {
     private readonly byte[] _buffer;
@@ -40,4 +42,11 @@ internal sealed class BoundedCapture : IDisposable
     }
 
     public void Dispose() => ArrayPool<byte>.Shared.Return(_buffer, clearArray: true);
+
+    private sealed class DebugView
+    {
+        public DebugView(BoundedCapture value)
+        {
+        }
+    }
 }

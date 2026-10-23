@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiOperation"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiOperationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiOperationBuilder
 {
     private readonly OpenApiOperation _operation = new();
@@ -191,5 +193,12 @@ public sealed class OpenApiOperationBuilder
         ArgumentNullException.ThrowIfNull(value);
         _operation.Extensions[name] = value;
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiOperationBuilder value)
+        {
+        }
     }
 }

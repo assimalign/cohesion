@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Web.Routing.Metadata;
 /// allocation-free through the value-type <see cref="Enumerator"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouterRouteMetadataCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RouterRouteMetadataCollection : IRouterRouteMetadataCollection
 {
     /// <summary>
@@ -118,6 +120,8 @@ public sealed class RouterRouteMetadataCollection : IRouterRouteMetadataCollecti
     /// Enumerates the metadata items of an <see cref="RouterRouteMetadataCollection"/>
     /// without allocating.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public struct Enumerator : IEnumerator<object>
     {
         private readonly object[] _items;
@@ -162,5 +166,29 @@ public sealed class RouterRouteMetadataCollection : IRouterRouteMetadataCollecti
         public void Dispose()
         {
         }
+
+        private sealed class DebugView
+        {
+            private readonly Enumerator _target;
+
+            public DebugView(Enumerator value)
+            {
+                _target = value;
+            }
+
+            public object Current => _target.Current;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RouterRouteMetadataCollection _target;
+
+        public DebugView(RouterRouteMetadataCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

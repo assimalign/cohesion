@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="HttpContentRange"/> a <c>206</c> response advertises for it (in a multipart
 /// <c>206</c> this is the part's <c>Content-Range</c> header).
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpRangeSlice : IEquatable<HttpRangeSlice>
 {
@@ -59,4 +60,19 @@ public readonly struct HttpRangeSlice : IEquatable<HttpRangeSlice>
 
     /// <summary>Determines whether two slices cover different bytes.</summary>
     public static bool operator !=(HttpRangeSlice left, HttpRangeSlice right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpRangeSlice _target;
+
+        public DebugView(HttpRangeSlice value)
+        {
+            _target = value;
+        }
+
+        public long Offset => _target.Offset;
+        public long Length => _target.Length;
+        public long EndInclusive => _target.EndInclusive;
+        public HttpContentRange ContentRange => _target.ContentRange;
+    }
 }

@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// a single underlying logger are isolated: an exception from one sink never aborts fan-out to
 /// the others.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CompositeLogger")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CompositeLogger : Logger
 {
     private readonly ILogger[] _underlying;
@@ -159,6 +161,8 @@ internal sealed class CompositeLogger : Logger
     /// Restricted view on the enrichment attribute bag: enrichers may add new keys but cannot
     /// overwrite values supplied by the entry author.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("EnricherAttributeView {Count,nq}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class EnricherAttributeView : IDictionary<string, object?>
     {
         private readonly Dictionary<string, object?> _inner;
@@ -205,5 +209,32 @@ internal sealed class CompositeLogger : Logger
         public bool Remove(KeyValuePair<string, object?> item) => ((ICollection<KeyValuePair<string, object?>>)_inner).Remove(item);
         public bool TryGetValue(string key, out object? value) => _inner.TryGetValue(key, out value);
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => _inner.GetEnumerator();
+
+        private sealed class DebugView
+        {
+            private readonly EnricherAttributeView _target;
+
+            public DebugView(EnricherAttributeView value)
+            {
+                _target = value;
+            }
+
+            public ICollection<string> Keys => _target.Keys;
+            public ICollection<object?> Values => _target.Values;
+            public int Count => _target.Count;
+            public bool IsReadOnly => _target.IsReadOnly;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CompositeLogger _target;
+
+        public DebugView(CompositeLogger value)
+        {
+            _target = value;
+        }
+
+        public string Category => _target.Category;
     }
 }

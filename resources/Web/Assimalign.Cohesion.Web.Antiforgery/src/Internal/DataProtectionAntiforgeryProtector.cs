@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Web.Antiforgery.Internal;
 /// <see cref="Protect(ReadOnlySpan{byte})"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DataProtectionAntiforgeryProtector")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DataProtectionAntiforgeryProtector : IHttpAntiforgeryProtector
 {
     private readonly IDataProtector _protector;
@@ -56,6 +58,13 @@ internal sealed class DataProtectionAntiforgeryProtector : IHttpAntiforgeryProte
             AntiforgeryEventSource.Log.TokenUnprotectFailed(exception);
             plaintext = null;
             return false;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(DataProtectionAntiforgeryProtector value)
+        {
         }
     }
 }
