@@ -1,14 +1,13 @@
 # Cohesion developer tooling
 
-This L1 area contains the application CLI, installable .NET templates and repository
-maintenance scripts. These tools reuse the SDK and gateway contracts in
+This L1 area contains the application CLI and installable .NET templates.
+Repository maintenance scripts live in [root scripts](../scripts/README.md). These tools reuse the SDK and gateway contracts in
 [developer-experience design §4.4 and §7](../docs/DEVELOPER_EXPERIENCE_DESIGN.md).
 
 | Project | Purpose |
 | --- | --- |
 | [CLI](Cli/Assimalign.Cohesion.Cli/docs/OVERVIEW.md) | `Assimalign.Cohesion.Cli`: the `cohesion` .NET tool and local developer state readers/writers. |
 | [Templates](templates/README.md) | `Assimalign.Cohesion.Templates`: `dotnet new` applications, landing zones, gateways, composites and standalone resources. |
-| [Dev scripts](scripts/README.md) | PowerShell `New-CohesionDotnetSolution` for repository solution generation. |
 | [Database Studio](Assimalign.Cohesion.Database.Studio/README.md) | Throw-away, Windows-only MAUI editor for exercising the Database engines as a consumer. Not shipped: `IsPackable=false`, in no solution or CI matrix. |
 
 ## The cohesion tool
@@ -162,7 +161,7 @@ dotnet build tooling/Cli/Assimalign.Cohesion.Cli/src/Assimalign.Cohesion.Cli.csp
 dotnet build tooling/Cli/Assimalign.Cohesion.Cli/tests/Assimalign.Cohesion.Cli.Tests.csproj
 dotnet test tooling/Cli/Assimalign.Cohesion.Cli/tests/
 dotnet pack tooling/Cli/Assimalign.Cohesion.Cli/src/Assimalign.Cohesion.Cli.csproj -o _out/verify-40
-$cliVersion = & ./installer/scripts/Get-CohesionVersion.ps1
+$cliVersion = & ./scripts/Get-CohesionVersion.ps1
 dotnet tool install --add-source _out/verify-40 --tool-path _out/verify-40/tool --version $cliVersion Assimalign.Cohesion.Cli
 ./_out/verify-40/tool/cohesion.exe --help
 ```

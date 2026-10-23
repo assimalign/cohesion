@@ -301,7 +301,7 @@
           "dependsOn": ["P7"],
           "state": "open",
           "boardStatus": "Backlog",
-          "note": "THE ONLY UNDELIVERED PHASE OF THIS PROGRAM. Tightens QueryRow, QueryResultSet, QueryResult, QueryRequest, the parser/analyzer bases; docs/Assembly pages, area README, cohesion-docs mirror."
+          "note": "THE ONLY UNDELIVERED PHASE OF THIS PROGRAM. Tightens QueryRow, QueryResultSet, QueryResult, QueryRequest, the parser/analyzer bases; API reference in cohesion-docs, project overviews and design docs, area README."
         }
       ],
       "openFollowUps": [

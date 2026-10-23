@@ -53,6 +53,6 @@ text. A rejected statement leaves the session usable. A malformed or
 unfinished exchange invalidates it. Cancellation of a write does not establish whether it committed.
 
 [DESIGN.md](DESIGN.md) explains the exchange and ownership contracts; the
-[API reference](Assembly/Assimalign.Cohesion.Database.Documents.Client/OVERVIEW.md) lists the
+[API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs) lists the
 concrete public surface. The [consumer sample](../samples/Assimalign.Cohesion.Database.Documents.AotSample/Program.cs)
 executes its checks against real in-memory and TCP servers after NativeAOT publishing.

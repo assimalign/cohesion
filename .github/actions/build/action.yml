@@ -10,7 +10,7 @@
 #
 # This action does NOT publish. Package publication happens only in .github/workflows/release.yml,
 # driven by a published GitHub Release, from the single authoritative inventory in
-# installer/scripts/modules/CohesionPackaging.psm1. Publishing from here would have every area
+# scripts/modules/CohesionPackaging.psm1. Publishing from here would have every area
 # workflow racing to push a package built from whatever happened to be on main, at a version that
 # had passed no release gate.
 name: Cohesion Build
@@ -76,7 +76,7 @@ runs:
         if ('${{ inputs.local-sdk-use-canonical-version }}' -eq 'true') {
           $install.UseCanonicalVersion = $true
         }
-        ./installer/scripts/Install-Local.ps1 @install
+        ./scripts/Install-Local.ps1 @install
 
     - name: Plan ${{ inputs.project || inputs.category || inputs.area }}
       id: plan

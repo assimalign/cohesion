@@ -82,12 +82,12 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 
 ## Documentation
 
-- [ ] Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`) — except tool-fixed names (`.github/pull_request_template.md`, files under `.claude/**`); `docs/Assembly/` complies via folder-per-type (`<Type>/OVERVIEW.md`)
+- [ ] Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`) — except tool-fixed names (`.github/pull_request_template.md`, files under `.claude/**`)
 - [ ] If a new project was added, `docs/OVERVIEW.md` and `docs/DESIGN.md` were created
 - [ ] If a new area was added, an area `README.md` was created
 - [ ] Every library touched has a `docs/DESIGN.md` — if one was missing, it was created in this change (canonical example: `libraries/Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md`)
 - [ ] If this change altered or extended a design decision (lifecycle, error model, contract shape, family layout, AOT posture, non-goals), `docs/DESIGN.md` was updated in the same commit
-- [ ] Public API additions are reflected in `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md` if that page exists for the type
+- [ ] Public API additions carry XML documentation in source; reference pages are maintained in `cohesion-docs`
 - [ ] A newly created `docs/DESIGN.md` carries at least one `mermaid` diagram (family/dependency direction, lifecycle, protocol exchange, or pipeline); a new area `README.md` carries the area project map — see `documentation.md`
 - [ ] Existing diagrams in touched docs still match what they depict; arrows still read as "references", and no `%%{init}%%` theming or hardcoded `fill:`/`color:` was introduced
 - [ ] Any mermaid block added or edited was render-previewed — parse errors show up on GitHub and nothing in CI catches them
@@ -100,7 +100,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 
 ## Sanity build
 
-- [ ] If the change touches MSBuild or SDK plumbing, a local pack via `pwsh installer/scripts/Install-Local.ps1` was at least considered (or run if the change is non-trivial)
+- [ ] If the change touches MSBuild or SDK plumbing, a local pack via `pwsh scripts/Install-Local.ps1` was at least considered (or run if the change is non-trivial)
 - [ ] If the change touches a specific library, `dotnet build` and `dotnet test` were considered for that project
 
 ---

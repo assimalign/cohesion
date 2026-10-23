@@ -246,7 +246,7 @@ These are intentional behavioral breaks under the preview compatibility policy.
 4. Add an entry to the workflow matrix in
    `.github/workflows/library-dns.yml`.
 5. Add the project to `$script:CohesionReleaseLibrary` in
-   `installer/scripts/modules/CohesionPackaging.psm1`. Dns packages ship
+   `scripts/modules/CohesionPackaging.psm1`. Dns packages ship
    as ordinary NuGet packages: no shared framework lists the family, so
    there is no framework list to edit.
 6. Add `docs/OVERVIEW.md` + `docs/DESIGN.md` + populate the package

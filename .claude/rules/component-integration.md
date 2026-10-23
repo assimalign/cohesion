@@ -5,7 +5,7 @@ paths:
   - "**/ComponentIntegrations.cs"
   - "libraries/Core/**/ComponentIntegration/**"
   - "analyzers/Assimalign.Cohesion.SourceGeneration/**"
-  - "build/IntegrationCheck/**"
+  - "fixtures/IntegrationCheck/**"
 ---
 
 # Component integration

@@ -20,4 +20,4 @@ persists their registrations beside the signing key and uses them during token i
 
 - [Overview](docs/OVERVIEW.md)
 - [Design](docs/DESIGN.md)
-- [Public API](docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)

@@ -19,12 +19,6 @@
 		<File Path="Assimalign.Cohesion.Rezolvr/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Rezolvr/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/docs/Assembly/Assimalign.Cohesion.Rezolvr/IRezolvrApplication/">
-		<File Path="Assimalign.Cohesion.Rezolvr/docs/Assembly/Assimalign.Cohesion.Rezolvr/IRezolvrApplication/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/docs/Assembly/Assimalign.Cohesion.Rezolvr/IRezolvrApplicationBuilder/">
-		<File Path="Assimalign.Cohesion.Rezolvr/docs/Assembly/Assimalign.Cohesion.Rezolvr/IRezolvrApplicationBuilder/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
 		<Project Path="Assimalign.Cohesion.Rezolvr/tests/Assimalign.Cohesion.Rezolvr.Tests.csproj" />
 	</Folder>
@@ -34,9 +28,6 @@
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/Assembly/Assimalign.Cohesion.Rezolvr.Hosting/RezolvrApplication/">
-		<File Path="Assimalign.Cohesion.Rezolvr.Hosting/docs/Assembly/Assimalign.Cohesion.Rezolvr.Hosting/RezolvrApplication/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.Rezolvr.Hosting/src/Assimalign.Cohesion.Rezolvr.Hosting.csproj" />
@@ -60,12 +51,6 @@
 	</Folder>
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/Assimalign.Cohesion.Rezolvr.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/">
-		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Refs/">
 		<File Path="Assimalign.Cohesion.Rezolvr.Refs/Directory.Build.props" />

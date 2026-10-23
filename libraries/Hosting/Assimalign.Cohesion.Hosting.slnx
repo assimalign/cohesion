@@ -63,7 +63,4 @@
 	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/">
 		<Project Path="Assimalign.Cohesion.Hosting.Telemetry/tests/Assimalign.Cohesion.Hosting.Telemetry.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/">
-		<File Path="Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/OVERVIEW.md" />
-	</Folder>
 </Solution>

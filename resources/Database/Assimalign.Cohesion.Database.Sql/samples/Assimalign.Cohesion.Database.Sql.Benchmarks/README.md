@@ -179,7 +179,7 @@ tar -xf C:/cw/b2/_out/b2/b2-source.tar -C C:/cw/b2/_out/b2/b2-source
 if ($LASTEXITCODE -ne 0) { throw 'B2 extraction failed' }
 Copy-Item -LiteralPath "$benchmark/Q8PhaseInstrumentation.targets" -Destination _out/b2/Q8PhaseInstrumentation.targets
 foreach ($label in @('base','b2')) {
-    & "$benchmark/Prepare-Q8PhaseInstrumentation.ps1" -TreeRoot "C:/cw/b2/_out/b2/$label-source" -Label $label -OutputRoot C:/cw/b2/_out/b2 -CopyCurrentHarness
+    & ./scripts/resources/Database/Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot "C:/cw/b2/_out/b2/$label-source" -Label $label -OutputRoot C:/cw/b2/_out/b2 -CopyCurrentHarness
     Push-Location "C:/cw/b2/_out/b2/$label-source"
     try {
         dotnet build build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj -c Release *> "C:/cw/b2/_out/b2/bootstrap-phase-$label.log"
@@ -292,7 +292,7 @@ git archive --format=tar "--output=$output/native-source.tar" da23b378fbaf346ad0
 New-Item -ItemType Directory -Path $source | Out-Null
 tar -xf "$output/native-source.tar" -C $source
 Copy-Item -LiteralPath "$benchmark/Q8PhaseInstrumentation.targets" -Destination "$output/Q8PhaseInstrumentation.targets"
-& "$benchmark/Prepare-Q8PhaseInstrumentation.ps1" -TreeRoot $source -Label review -OutputRoot $output
+& ./scripts/resources/Database/Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot $source -Label review -OutputRoot $output
 Push-Location $source
 try {
     dotnet build build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj -c Release *> "$output/native-bootstrap-release.log"
@@ -347,7 +347,7 @@ are under `_out/q49`, with `publish.log`, `run-{1..5}.log`, `results.json` and
 `phase-timer/current/preparation.json`; the tracked helper refuses instrumenting a live worktree.
 
 Reproduce by archiving the revision beneath `_out/q49/src`, building its Release build tasks,
-running `Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot C:/cw/b2/_out/q49/src -Label current
+running `scripts/resources/Database/Prepare-Q8PhaseInstrumentation.ps1 -TreeRoot C:/cw/b2/_out/q49/src -Label current
 -OutputRoot C:/cw/b2/_out/q49`, then publishing the archived benchmark with
 `-p:CustomAfterMicrosoftCommonTargets=<Q8PhaseInstrumentation.targets>` and
 `-p:B2PhaseTimerSource=C:/cw/b2/_out/q49/phase-timer/current/SqlDeclaredDatabase.cs`.

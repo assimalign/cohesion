@@ -378,7 +378,7 @@ The repeatable runner measures baseline/candidate/baseline/candidate, builds the
 variants, and restores both source files byte-for-byte in `finally`:
 
 ```powershell
-pwsh -NoProfile -File resources/Web/Assimalign.Cohesion.Web.Caching/tests/Measure-OutputCacheCounters.ps1
+pwsh -NoProfile -File scripts/resources/Web/Measure-OutputCacheCounters.ps1
 ```
 
 The baseline removes only the two middleware calls to `OutputCacheEventSource.Log.CacheHit()` and

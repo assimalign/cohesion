@@ -51,8 +51,8 @@
           * CollectShippedVersionProps (below) - includes it in the nupkg.
           * The Copy step here - places it in the local SDK output dir
             ($(CohesionOutputPathForSdk)/.../sdks/<PackageId>/Targets/) for
-            consumers that resolve the SDK via the local resolver path rather
-            than NuGet (e.g. installer/scripts/Install-Local.ps1 consumers).
+            inspection of the loose SDK build output. Install-Local.ps1 consumers
+            resolve the SDK through NuGet packages.
     -->
     <Target Name="GenerateShippedVersionProps" AfterTargets="Build">
         <PropertyGroup>

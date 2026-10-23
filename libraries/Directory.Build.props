@@ -37,7 +37,7 @@
 		    race only manifests when the build graph includes an analyzer-style
 		    ProjectReference (OutputItemType=Analyzer + ReferenceOutputAssembly=false),
 		    which happens for any library using CohesionAnalyzerReference.
-		    Use `dotnet pack` (or installer/scripts/Install-Local.ps1) to pack;
+		    Use `dotnet pack` (or scripts/Install-Local.ps1) to pack;
 		    `dotnet build` should just build.
 
 		    Same reasoning for not setting GenerateRuntimeConfigurationFiles=true:

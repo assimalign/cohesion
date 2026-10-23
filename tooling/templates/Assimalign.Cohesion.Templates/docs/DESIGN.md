@@ -8,7 +8,7 @@ It owns eleven short names: `cohesion-app`, `cohesion-landing-zone`, `cohesion-g
 `cohesion-composite`, `cohesion-web`, `cohesion-spa`, `cohesion-database`, `cohesion-secretstore`,
 `cohesion-configurationstore`, `cohesion-identityhub` and `cohesion-rezolvr`.
 
-There is no runtime API or assembly reference surface to document under `docs/Assembly/`.
+There is no runtime API or assembly reference surface for this package.
 The package is L1 tooling; its output consumes the corresponding resource-area SDKs and frameworks.
 The CLI wrapper belongs to item 40, and further resource-area templates are deferred until their
 SDKs mature. The retired generic resource and zone template names are not aliases.

@@ -25,7 +25,7 @@ plane advertises identityhub.add-audience and identityhub.add-client for the typ
 ## Links
 
 - [Design](DESIGN.md)
-- [Public API](Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 
 ## Commands
 

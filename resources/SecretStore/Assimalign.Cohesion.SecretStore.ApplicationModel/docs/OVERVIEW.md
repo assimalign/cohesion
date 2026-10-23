@@ -58,7 +58,7 @@ or platform packages. Runtime endpoint and mount values flow through the shared
 ## Links
 
 - [Design](DESIGN.md)
-- [Public API](Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 
 ## Commands
 

@@ -80,6 +80,6 @@ unresolved mount input, as it did before the provider seams.
 ## Links
 
 - [Design](./DESIGN.md)
-- [API reference](./Assembly/Assimalign.Cohesion.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 - [Area README](../../README.md)
 - [ConfigurationStore.Client design](../../Assimalign.Cohesion.ConfigurationStore.Client/docs/DESIGN.md)

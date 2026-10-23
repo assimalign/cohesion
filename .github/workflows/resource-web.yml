@@ -8,7 +8,8 @@ on:
       - 'resources/Web/**'
       - 'sdks/Assimalign.Cohesion.Sdk.Web/**'
       - 'build/TestSupport/**'
-      - 'build/ResourceGenerationCheck/**'
+      - 'fixtures/ResourceGenerationCheck/**'
+      - 'fixtures/Directory.Build.props'
       - '!resources/Web/**/*.slnx'
       - '!resources/Web/**/*.md'
       - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
@@ -147,10 +148,10 @@ jobs:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
       - name: Check build-generated resources with the CLI
-        run: dotnet run --project build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -p:ContinuousIntegrationBuild=true
+        run: dotnet run --project fixtures/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -p:ContinuousIntegrationBuild=true
       - name: Check build-generated resources with NativeAOT
         run: |
-          dotnet publish build/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -r linux-x64 -p:PublishAot=true -o "${{ runner.temp }}/resource-generation-check"
+          dotnet publish fixtures/ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj -c Release -r linux-x64 -p:PublishAot=true -o "${{ runner.temp }}/resource-generation-check"
           "${{ runner.temp }}/resource-generation-check/Assimalign.Cohesion.ResourceGenerationCheck"
       - name: Publish without EventSource support for the binary-size baseline
         run: dotnet publish resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj -c Release -r linux-x64 -p:EventSourceSupport=false -o "${{ runner.temp }}/web-aot-guard-no-events"

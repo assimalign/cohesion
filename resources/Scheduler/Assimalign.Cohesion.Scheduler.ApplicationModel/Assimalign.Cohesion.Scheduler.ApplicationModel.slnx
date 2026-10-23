@@ -4,9 +4,6 @@
     <File Path="docs/DESIGN.md" />
     <File Path="docs/OVERVIEW.md" />
   </Folder>
-  <Folder Name="/docs/Assembly/">
-    <File Path="docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/OVERVIEW.md" />
-  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Assimalign.Cohesion.Scheduler.ApplicationModel.csproj" />
   </Folder>

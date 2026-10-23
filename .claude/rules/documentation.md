@@ -8,12 +8,12 @@ paths:
 
 ## Markdown file naming
 
-Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`). Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`). API reference under `docs/Assembly/` needs no exception — its **folders** mirror CLR namespace/type names, while every file is `OVERVIEW.md` (see "Assembly documentation layout" below).
+Markdown files use UPPERCASE names (`README.md`, `OVERVIEW.md`, `DESIGN.md`). Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`).
 
 ## Where documentation lives
 
 A document's home is decided by its **scope** — how much of the repository it describes — never by
-which folder was convenient when it was written. There are four homes:
+which folder was convenient when it was written. The homes are:
 
 | Scope | Home | Example |
 | --- | --- | --- |
@@ -22,6 +22,7 @@ which folder was convenient when it was written. There are four homes:
 | **Area** — architecture record | `docs/resources/<Area>/*.md`, `docs/libraries/<Area>/*.md` | `docs/resources/Web/DESIGN.md` |
 | **Area** — orientation card | `resources/<Area>/README.md`, `libraries/<Area>/README.md` | `resources/Web/README.md` |
 | Project (one shipped assembly) | `<project>/docs/` beside `src/` and `tests/` | `libraries/Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md` |
+| Public API reference | [`cohesion-docs`](https://github.com/assimalign/cohesion-docs) | Namespace, type, and member reference pages |
 
 **`docs/` mirrors the repository root.** `docs/resources/<Area>/` maps to `resources/<Area>/` and
 `docs/libraries/<Area>/` to `libraries/<Area>/`, one segment for one segment, same casing. The
@@ -48,10 +49,9 @@ wants more than a screen belongs in `docs/<root>/<Area>/`.
 
 ### Project docs stay beside the code — why
 
-`<project>/docs/OVERVIEW.md`, `DESIGN.md`, and `docs/Assembly/` describe **one assembly's** surface
-and reasoning. They are versioned, moved, renamed, and deleted with that assembly, and a reviewer
-reading `src/` wants them one directory up, not seven. Centralizing ~370 of them would replace a
-local edit with a cross-tree edit and guarantee drift. Do not move them.
+`<project>/docs/OVERVIEW.md` and `DESIGN.md` describe one project's purpose and design decisions.
+They stay beside the source so implementation changes and their rationale can be reviewed together.
+Public API reference pages belong in `cohesion-docs`.
 
 ### Two standing rules
 
@@ -68,7 +68,7 @@ local edit with a cross-tree edit and guarantee drift. Do not move them.
 ### The three layers, by audience
 
 1. **Area-level** — `resources/<Area>/README.md` (the card) plus `docs/<root>/<Area>/` (the record)
-2. **Project-level** — `OVERVIEW.md`, `DESIGN.md`, and `docs/Assembly/` per project
+2. **Project-level** — `OVERVIEW.md` and `DESIGN.md` per project
 3. **XML doc comments** — on public APIs
 
 Each project with `src/` and `tests/` folders should also have a sibling `docs/` folder.
@@ -95,8 +95,6 @@ nothing is checked in as an image and no build step is involved.
 - **`docs/OVERVIEW.md`** — at most one *orientation* diagram: where this project sits relative to
   its neighbors. Optional, and only when it answers "what talks to what". Never restate
   `DESIGN.md`'s diagram; link to it.
-- **`docs/Assembly/<Namespace>/<Type>/OVERVIEW.md`** — normally none. Add one only for a type
-  hierarchy or state machine that can't be read off the signatures.
 
 **There is no backfill mandate.** A diagram is added when the file is created, or when a change
 alters the structure a diagram would show — not as a sweep across the ~200 existing `DESIGN.md`
@@ -179,7 +177,7 @@ reports exactly what the project files declare, which is the thing `COHRES001`�
 > **When a dependency is added or removed, rerun the generator in the same commit.**
 
 ```bash
-pwsh build/scripts/Update-CohesionDependencyGraph.ps1
+pwsh scripts/Update-CohesionDependencyGraph.ps1
 ```
 
 This applies to every reference flavor the graph tracks — `CohesionProjectReference`,
@@ -196,7 +194,7 @@ would assert an independence that is not true.
 project files. That is the CI form, and it is the reason this is a rule rather than a suggestion:
 
 ```bash
-pwsh build/scripts/Update-CohesionDependencyGraph.ps1 -Check
+pwsh scripts/Update-CohesionDependencyGraph.ps1 -Check
 ```
 
 Never hand-edit `docs/DEPENDENCIES.md`. It opens with a generated-file banner; an edit survives
@@ -209,7 +207,6 @@ Required files per project:
 
 - `docs/OVERVIEW.md` — project purpose, scope, dependencies, and usage at a high level
 - `docs/DESIGN.md` — architecture, important design choices, lifecycle behavior, extension points, operational concerns, known constraints
-- `docs/Assembly/` — API reference material organized by namespace and type
 
 ### `docs/DESIGN.md` — required for every library
 
@@ -243,13 +240,11 @@ When a code change alters or extends a design decision, `DESIGN.md` is updated i
 
 A `DESIGN.md` that lags the code actively misleads — worse than not having one. If you're not sure whether a change rises to the level of a `DESIGN.md` update, ask: *"would the existing DESIGN.md surprise or mislead someone reading it after this change?"* If yes, update it.
 
-### Assembly documentation layout
+### API reference ownership
 
-- Namespace folders under `docs/Assembly/` mirror the documented namespace (e.g., `docs/Assembly/System.IO/`)
-- Each documented type gets a **folder** named for the type, containing an `OVERVIEW.md` (e.g., `docs/Assembly/System.IO/Glob/OVERVIEW.md`). The folder leaves room for additional per-member or design pages beside the overview later.
-- A namespace folder may also carry its own `OVERVIEW.md` introducing the assembly/namespace (the IdentityModel family uses this while its per-type reference is pending).
-- Folder names mirror CLR namespace and type names exactly; the markdown files themselves stay UPPERCASE (`OVERVIEW.md`), so API reference needs no naming exception.
-- API reference docs should outline: public surface area, constructor or factory behavior, methods, properties, exceptions, usage notes
+Public API reference is maintained in [`cohesion-docs`](https://github.com/assimalign/cohesion-docs).
+Do not recreate per-project API reference trees in this repository. Keep public XML documentation
+comments in source and project overview and design documents beside the implementation.
 
 ## Area-level `README.md`
 

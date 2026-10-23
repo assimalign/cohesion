@@ -25,21 +25,12 @@
 		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/">
 		<File Path="Assimalign.Cohesion.Scheduler/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Scheduler/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplication/">
-		<File Path="Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplication/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplicationBuilder/">
-		<File Path="Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplicationBuilder/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
 		<Project Path="Assimalign.Cohesion.Scheduler/tests/Assimalign.Cohesion.Scheduler.Tests.csproj" />
@@ -63,9 +54,6 @@
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/docs/Assembly/Assimalign.Cohesion.Scheduler.Hosting/SchedulerApplication/">
-		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/Assembly/Assimalign.Cohesion.Scheduler.Hosting/SchedulerApplication/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler.Hosting/src/Assimalign.Cohesion.Scheduler.Hosting.csproj" />

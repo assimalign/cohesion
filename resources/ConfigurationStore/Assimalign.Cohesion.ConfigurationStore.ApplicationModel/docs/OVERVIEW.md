@@ -51,7 +51,7 @@ variables.
 ## Links
 
 - [Design](DESIGN.md)
-- [Public API](Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 
 ## Commands
 

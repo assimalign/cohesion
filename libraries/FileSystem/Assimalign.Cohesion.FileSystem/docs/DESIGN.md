@@ -218,7 +218,7 @@ mount-relative paths; it also catches `FileSystemException`, so a refusal is a 4
    separate file.
 5. Add an entry to `.github/workflows/library-filesystem.yml`'s matrix.
 6. Add the project to `$script:CohesionReleaseLibrary` in
-   `installer/scripts/modules/CohesionPackaging.psm1`; a provider ships as an
+   `scripts/modules/CohesionPackaging.psm1`; a provider ships as an
    ordinary NuGet package. It needs no framework entry: `Assimalign.Cohesion.App`
    derives its members from its kernel roots (`FileSystem.Physical` is one),
    and an area framework carries a provider only through a

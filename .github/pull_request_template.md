@@ -29,7 +29,7 @@ Do NOT put a closing keyword on items this PR does not actually resolve (e.g. ba
 items for deferred work) — link those with a plain "#123" instead.
 
 Generate this block from your branch:
-  .claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -EmitClosesBlock
+  scripts/New-CohesionWorkItem.ps1 -EmitClosesBlock
 -->
 
 Closes #

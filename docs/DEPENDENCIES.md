@@ -1,7 +1,7 @@
 <!--
     GENERATED FILE - DO NOT EDIT BY HAND.
-    Regenerate with: pwsh build/scripts/Update-CohesionDependencyGraph.ps1
-    Verify with:     pwsh build/scripts/Update-CohesionDependencyGraph.ps1 -Check
+    Regenerate with: pwsh scripts/Update-CohesionDependencyGraph.ps1
+    Verify with:     pwsh scripts/Update-CohesionDependencyGraph.ps1 -Check
 -->
 
 # Dependency Graph
@@ -13,7 +13,7 @@ most-depended-on assemblies are.
 **This file is generated.** Edit the csprojs, then rerun the generator:
 
 ```bash
-pwsh build/scripts/Update-CohesionDependencyGraph.ps1
+pwsh scripts/Update-CohesionDependencyGraph.ps1
 ```
 
 An arrow always means "references" / "depends on", the same direction the dependency rules are
@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 667 |
+| Projects indexed | 666 |
 | Shipped library/resource projects | 238 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -48,7 +48,7 @@ ambiguous and the winner is whichever the resolver indexed last. Where a name is
 | --- | --- |
 | `Assimalign.Cohesion.Database.Cache.Tests` | `resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.Tests.csproj`<br>`resources/Database/Assimalign.Cohesion.Database.Cache/tests/Assimalign.Cohesion.Database.Cache.Tests.csproj` |
 | `DisabledResource` | `sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj`<br>`sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj` |
-| `CohesionProject` | `tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-composite/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-spa/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-web/CohesionProject.csproj` |
+| `CohesionProject` | `tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-composite/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-spa/CohesionProject.csproj`<br>`tooling/Templates/Assimalign.Cohesion.Templates/src/content/cohesion-web/CohesionProject.csproj` |
 
 ## Area roll-up
 
@@ -1061,7 +1061,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Http` | 102 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, … |
 | `Assimalign.Cohesion.Hosting.Resources` | 91 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApiManager.ApplicationModel.Tests, Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, … |
 | `Assimalign.Cohesion.Web` | 75 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 69 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
+| `Assimalign.Cohesion.Core` | 68 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Connections` | 43 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 41 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Blob.Client.Tests, … |
@@ -1086,7 +1086,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-317 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+319 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1099,8 +1099,8 @@ membership is an item list, not a project reference: App's kernel roots in
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `fixtures/` | 10 |
-| `samples/` | 14 |
+| `fixtures/` | 16 |
+| `samples/` | 10 |
 | `tests/` | 288 |
 
 Samples, which live in the repository-root `samples/` tree:
@@ -1116,9 +1116,5 @@ Samples, which live in the repository-root `samples/` tree:
 | `Assimalign.Cohesion.Web.AotGuard` | `resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj` | `Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Antiforgery`<br>`Assimalign.Cohesion.Web.Api`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Authentication.Bearer`<br>`Assimalign.Cohesion.Web.Authentication.Cookie`<br>`Assimalign.Cohesion.Web.Authorization`<br>`Assimalign.Cohesion.Web.Compression`<br>`Assimalign.Cohesion.Web.CookiePolicy`<br>`Assimalign.Cohesion.Web.Cors`<br>`Assimalign.Cohesion.Web.ErrorHandling`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.OpenApi`<br>`Assimalign.Cohesion.Web.RateLimiting`<br>`Assimalign.Cohesion.Web.RequestTimeouts`<br>`Assimalign.Cohesion.Web.Rewrite`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.SecurityHeaders`<br>`Assimalign.Cohesion.Web.Serialization`<br>`Assimalign.Cohesion.Web.StaticFiles`<br>`Assimalign.Cohesion.Web.Validation`<br>`Assimalign.Cohesion.Web.WebSockets` |
 | `Database` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Database/Database.csproj` | _(SDK-delivered)_ |
 | `Gateway` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Gateway/Gateway.csproj` | _(SDK-delivered)_ |
-| `SdkSmoke.Analyzer` | `samples/SdkSmoke/SdkSmoke.Analyzer/SdkSmoke.Analyzer.csproj` | _(SDK-delivered)_ |
-| `SdkSmoke.App` | `samples/SdkSmoke/SdkSmoke.App/SdkSmoke.App.csproj` | _(SDK-delivered)_ |
-| `SdkSmoke.Database` | `samples/SdkSmoke/SdkSmoke.Database/SdkSmoke.Database.csproj` | _(SDK-delivered)_ |
-| `SdkSmoke.Web` | `samples/SdkSmoke/SdkSmoke.Web/SdkSmoke.Web.csproj` | _(SDK-delivered)_ |
 | `Web` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Web/Web.csproj` | _(SDK-delivered)_ |
 

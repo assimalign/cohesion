@@ -4,11 +4,11 @@ on:
   push:
     paths:
       - ".github/workflows/sdk-smoke.yml"
-      - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
+      - "scripts/sdks/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
       - "docs/EVENT_SOURCES.md"
-      - "installer/scripts/**"
+      - "scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
       - "libraries/Caching/**"
@@ -45,7 +45,7 @@ on:
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/**"
-      - "samples/SdkSmoke/**"
+      - "fixtures/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -53,11 +53,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/sdk-smoke.yml"
-      - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
+      - "scripts/sdks/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
       - "docs/EVENT_SOURCES.md"
-      - "installer/scripts/**"
+      - "scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
       - "libraries/Caching/**"
@@ -94,7 +94,7 @@ on:
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/**"
-      - "samples/SdkSmoke/**"
+      - "fixtures/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -139,7 +139,7 @@ jobs:
         id: identity
         shell: pwsh
         run: |
-          $version = (& ./installer/scripts/Get-CohesionVersion.ps1).Trim()
+          $version = (& ./scripts/Get-CohesionVersion.ps1).Trim()
           if (-not $version) {
             throw 'Get-CohesionVersion.ps1 produced no version.'
           }
@@ -168,7 +168,7 @@ jobs:
             throw 'Resolving the checked-out commit failed.'
           }
 
-          ./installer/scripts/Pack-Release.ps1 `
+          ./scripts/Pack-Release.ps1 `
               -Version $env:COHESION_VERSION `
               -RepositoryCommit $commit `
               -RuntimeIdentifier $env:COHESION_HOST_RID `
@@ -213,7 +213,7 @@ jobs:
           COHESION_VERSION: ${{ steps.identity.outputs.version }}
           COHESION_HOST_RID: ${{ steps.identity.outputs.rid }}
         run: |
-          ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 `
+          ./scripts/sdks/Invoke-SdkConsumerSmoke.ps1 `
               -PackageDirectory ./_out/release/packages `
               -Version $env:COHESION_VERSION `
               -RuntimeIdentifier $env:COHESION_HOST_RID
@@ -292,19 +292,19 @@ jobs:
       - name: Validate release inventory
         shell: pwsh
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
           Assert-CohesionReleaseInventory -RepositoryDirectory (Get-Location).Path
 
       - name: Strict-pack canonical SDK and framework closure
         shell: pwsh
         run: |
-          $version = (& ./installer/scripts/Get-CohesionVersion.ps1).Trim()
+          $version = (& ./scripts/Get-CohesionVersion.ps1).Trim()
           $commit = (& git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or -not $commit) {
             throw 'Resolving the checked-out commit failed.'
           }
 
-          ./installer/scripts/Pack-Release.ps1 `
+          ./scripts/Pack-Release.ps1 `
               -Version $version `
               -RepositoryCommit $commit `
               -RuntimeIdentifier linux-x64,linux-arm64,win-x64,osx-arm64 `
@@ -313,7 +313,7 @@ jobs:
       - name: Pack Gateway package dependency closure
         shell: pwsh
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
           $repository = (Get-Location).Path
           $packageDirectory = Join-Path $repository "_out/release/packages"
           # No area client package is a gateway dependency. Database.Client and Database.Sql.Client
@@ -392,7 +392,7 @@ jobs:
       - name: Verify package-boundary feed
         shell: pwsh
         run: |
-          $version = & ./installer/scripts/Get-CohesionVersion.ps1 -RepoRoot (Get-Location).Path
+          $version = & ./scripts/Get-CohesionVersion.ps1 -RepoRoot (Get-Location).Path
           $required = @(
             "Assimalign.Cohesion.ApplicationModel"
             "Assimalign.Cohesion.ApplicationModel.Gateway"

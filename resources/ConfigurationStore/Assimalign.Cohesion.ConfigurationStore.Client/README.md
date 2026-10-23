@@ -47,4 +47,4 @@ ConfigurationStore.Hosting, dependency injection, or a shared framework.
 
 - [Overview](./docs/OVERVIEW.md)
 - [Design](./docs/DESIGN.md)
-- [Assembly reference](./docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
