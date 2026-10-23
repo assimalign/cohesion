@@ -31,3 +31,13 @@ flowchart LR
 The following public types move from their Catalog or Storage assembly into Assimalign.Cohesion.Database.Cache. Their namespaces, members, diagnostic codes and serialized representations are unchanged. Public members whose signatures expose these types also reference their new assembly identity. Consumers must replace satellite project/package/assembly references with the model reference and recompile; assembly-qualified type names change. No type forwarding or compatibility assembly is supplied. Empty Security (and Cache Catalog/Storage) projects had no public types.
 
 This deferred model has no public Catalog or Storage types to move.
+
+
+## Deferred conventions (#1470)
+
+`CC` is reserved for Cache diagnostic identities under the [Database code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md).
+Cache currently defines no runtime errors, factories, exception templates, wire protocol or disk
+format. The existing placeholder `Class1` is sealed to follow the Database public-leaf rule;
+its implicit public parameterless constructor remains. This introduces no Cache implementation.
+Future errors use generated resources and explicit category/condition allocations rather than
+adding a second code vocabulary. The Client and Language projects remain empty scaffolds.

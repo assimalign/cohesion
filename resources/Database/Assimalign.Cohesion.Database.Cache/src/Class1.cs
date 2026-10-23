@@ -1,6 +1,6 @@
-﻿namespace Assimalign.Cohesion.Database.CacheDb;
+namespace Assimalign.Cohesion.Database.CacheDb;
 
-public class Class1
+public sealed class Class1
 {
 
 }
