@@ -45,13 +45,13 @@ public sealed class OqlFunctionTests
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse($"SELECT {call} FROM items d").Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0008");
+        diagnostic.Code.ShouldBe("CD00008");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("LOWER2", Case.Sensitive);
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(13);
     }
 
-    [Theory(DisplayName = "Cohesion Test [OQL] - Functions: invalid arity and stars produce one located OQL0006")]
+    [Theory(DisplayName = "Cohesion Test [OQL] - Functions: invalid arity and stars produce one located CD00006")]
     [InlineData("LOWER()", 5)]
     [InlineData("LOWER(a,b)", 5)]
     [InlineData("CONCAT(a)", 6)]
@@ -67,7 +67,7 @@ public sealed class OqlFunctionTests
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse($"SELECT {call} FROM items").Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0006");
+        diagnostic.Code.ShouldBe("CD00006");
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(7 + length);
         string function = call[..call.IndexOf('(')];

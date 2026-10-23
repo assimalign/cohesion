@@ -25,7 +25,7 @@ internal sealed class DocumentReadStream : Stream
     {
         if (content.Length < 0 || (content.Head == 0) != (content.Length == 0))
         {
-            throw new StorageCorruptionException("Invalid document content reference.");
+            throw new StorageCorruptionException(ErrorMessages.DocumentReadStreamFailure);
         }
 
         _storage = storage;
@@ -66,7 +66,7 @@ internal sealed class DocumentReadStream : Stream
         }
         if (_position == _content.Length && ~_checksum != _content.Checksum)
         {
-            throw new StorageCorruptionException("Document content checksum disagrees with its catalog metadata.");
+            throw new StorageCorruptionException(ErrorMessages.DocumentReadStreamReadFailure);
         }
 
         return total;

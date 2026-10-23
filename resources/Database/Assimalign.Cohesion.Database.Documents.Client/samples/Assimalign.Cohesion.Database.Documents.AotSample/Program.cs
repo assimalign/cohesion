@@ -129,7 +129,7 @@ internal static class Program
                 throw new InvalidOperationException("Unique index accepted a duplicate.");
             }
             catch (DocumentClientException exception)
-            { Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC020"), "unique execution failure"); }
+            { Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD03020"), "unique execution failure"); }
             Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS by_name_score ON items", cancellationToken: token) == 0, "conditional index drop");
             Check(await connection.ExecuteAsync("DROP INDEX IF EXISTS absent ON items", cancellationToken: token) == 0, "absent index drop");
             try
@@ -168,7 +168,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC012"), "INSERT duplicate diagnostic");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD03012"), "INSERT duplicate diagnostic");
             }
             Check(await connection.ExecuteAsync("DELETE FROM archive WHERE META().id = 'e'", cancellationToken: token) == 1, "DELETE META affected count");
             Check(await connection.GetAsync("archive", "e", token) is null, "DELETE readback");
@@ -185,7 +185,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC016"), "UPDATE path diagnostic");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD02016"), "UPDATE path diagnostic");
             }
             var deletePlan = await connection.QueryAsync("EXPLAIN DELETE FROM archive WHERE amount >= 1", cancellationToken: token);
             Check(deletePlan.Documents.Any(document => document.GetProperty("operator").GetString() == "Delete" &&
@@ -206,7 +206,7 @@ internal static class Program
             }
             catch (DocumentClientException exception)
             {
-                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "COHDOC008"), "UPSERT invalid key");
+                Check(exception.Code == ProtocolErrorCode.ExecutionFailure && exception.Diagnostics.Any(d => d.Code == "CD02008"), "UPSERT invalid key");
             }
             Check(await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, 1 AS v FROM items", cancellationToken: token) == 3, "UPSERT SELECT session reuse");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");

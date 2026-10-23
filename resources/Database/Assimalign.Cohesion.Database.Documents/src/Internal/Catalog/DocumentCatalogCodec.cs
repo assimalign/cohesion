@@ -98,7 +98,7 @@ internal static class DocumentCatalogCodec
             byte version = reader.ReadByte();
             EnsureVersion(kind, version);
             var id = new Guid(reader.ReadBytes(16));
-            string name = ReadString(reader) ?? throw new DocumentCatalogException("Catalog names cannot be null.");
+            string name = ReadString(reader) ?? throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog);
             CatalogRecord result;
             switch (kind)
             {
@@ -108,7 +108,7 @@ internal static class DocumentCatalogCodec
                     if (owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
                         || (owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(schema)))
                     {
-                        throw new DocumentCatalogException("Invalid collection ownership metadata.");
+                        throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog2);
                     }
                     result = new CatalogRecord(new DocumentCollectionMetadata(id, name, owner, schema), null);
                     break;
@@ -119,7 +119,7 @@ internal static class DocumentCatalogCodec
                     uint checksum = reader.ReadUInt32();
                     if (documentVersion == 0 || head == 0 || length <= 0 || length > int.MaxValue)
                     {
-                        throw new DocumentCatalogException("Invalid document version or content reference.");
+                        throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog3);
                     }
                     result = new CatalogRecord(null, new DocumentCatalogEntry(id, name, documentVersion, head, length, checksum));
                     break;
@@ -129,7 +129,7 @@ internal static class DocumentCatalogCodec
                     var paths = new string[count];
                     for (int i = 0; i < count; i++)
                     {
-                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException("Index paths cannot be null.");
+                        paths[i] = ReadString(reader) ?? throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog4);
                         DocumentIndexKeys.ValidatePath(paths[i]);
                     }
                     byte flags = reader.ReadByte();
@@ -137,22 +137,22 @@ internal static class DocumentCatalogCodec
                     ulong objectId = reader.ReadUInt64();
                     if (objectId == 0)
                     {
-                        throw new DocumentCatalogException("Index identities cannot be zero.");
+                        throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog5);
                     }
                     result = new CatalogRecord(null, null, new DocumentIndexMetadata(id, name, paths, flags == 1, objectId));
                     break;
                 default:
-                    throw new DocumentCatalogException($"Unexpected document metadata record kind {kind}.");
+                    throw new DocumentCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogCodecDecodeDocumentCatalog6, kind));
             }
             if (id == Guid.Empty || string.IsNullOrWhiteSpace(name) || stream.Position != stream.Length)
             {
-                throw new DocumentCatalogException("Invalid or trailing document catalog metadata.");
+                throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog7);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new DocumentCatalogException("Malformed document catalog metadata.", error);
+            throw new DocumentCatalogException(ErrorMessages.CatalogCodecDecodeDocumentCatalog8, error);
         }
     }
 
@@ -187,7 +187,7 @@ internal static class DocumentCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new DocumentCatalogException("Invalid catalog string length.");
+            throw new DocumentCatalogException(ErrorMessages.CatalogCodecReadStringDocumentCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

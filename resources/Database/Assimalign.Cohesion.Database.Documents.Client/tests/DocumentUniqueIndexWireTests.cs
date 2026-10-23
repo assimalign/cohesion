@@ -25,14 +25,14 @@ public sealed class DocumentUniqueIndexWireTests
         put.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         ((int)put.Code).ShouldBe(6);
         put.Message.ShouldContain("uq"); put.Message.ShouldContain("items");
-        put.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC020");
+        put.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03020");
         (await connection.QueryAsync("SELECT a FROM items WHERE a = 1 AND b = 2", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1m);
         await connection.ExecuteAsync("DROP INDEX uq ON items", cancellationToken: harness.Token);
         await connection.PutAsync("items", "two", "{\"a\":1,\"b\":2}"u8.ToArray(), cancellationToken: harness.Token);
         var build = await Should.ThrowAsync<DocumentClientException>(async () =>
             await connection.ExecuteAsync("CREATE UNIQUE INDEX uq ON items (a,b)", cancellationToken: harness.Token));
         build.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        build.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC020");
+        build.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03020");
         (await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: harness.Token)).ShouldBeEmpty();
         (await connection.QueryAsync("SELECT COUNT(*) FROM items", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(2L);
     }

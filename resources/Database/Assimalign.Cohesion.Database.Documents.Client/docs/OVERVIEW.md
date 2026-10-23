@@ -36,7 +36,7 @@ values. A stored `Document` carries its exact UTF-8 content, identity and versio
 
 OQL LIMIT/OFFSET accepts literals or JSON parameters in either order. Empty pages retain column
 metadata, and Complete counts returned frames while query AffectedCount remains -1. Invalid
-counts retain OQL0007 and the operand location over both transports.
+counts retain CD00007 and the operand location over both transports.
 UNNEST and quantified predicates use the same query exchange. A star with UNNEST returns
 synthetic whole-document objects; a MISSING LEFT binding is omitted while actual null elements
 remain null. Grouped counts over expanded rows retain Int64 values and metadata.
@@ -69,3 +69,13 @@ IndexIntersection has IndexSeek children and a minimum-input upper bound, before
 actual_rows remains JSON null. The existing nullable count members and Document frames carry
 these values over InMemory and TCP, without a protocol-version or client API change. The AOT
 consumer checks intersection results, both input descriptions and nonexecuting behavior.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

@@ -30,7 +30,7 @@ public sealed class DocumentStorageOperationsTests
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a read, a write, a query, BEGIN, COMMIT and ROLLBACK of an
-    /// open transaction — is refused with COHDBD002, and nothing reaches the file set, through the
+    /// open transaction — is refused with CD06102, and nothing reaches the file set, through the
     /// workers' passes and the sessions' close included. The root bases' checks come first
     /// (concrete-types plan §6.4): BEGIN on the session holding the open transaction is refused as
     /// already active, a canceled token is refused before the offline refusal of a new session,
@@ -92,7 +92,7 @@ public sealed class DocumentStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBD002. The collection and
+        // BEGIN. Before the bases, each of these was refused with CD06102. The collection and
         // document operations do not pass the session's execute seams, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
         using var canceled = new CancellationTokenSource();
@@ -134,14 +134,14 @@ public sealed class DocumentStorageOperationsTests
         var ids = await IdsAsync(observer);
 
         // Assert
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBD002");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CD06102");
         unconfirmed.Message.ShouldStartWith("Database 'test' went offline while a transaction was committing", Case.Sensitive);
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBD002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CD06102" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CD06102" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        collectionRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002");
+        collectionRefusals.ShouldAllBe(refusal => refusal.Code == "CD06102");
         nullRequest.ParamName.ShouldBe("request");
         blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);

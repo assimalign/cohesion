@@ -67,7 +67,7 @@ internal sealed class DocumentOperation
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
-            throw new DatabaseException("The document operation's transaction is no longer active.");
+            throw new DatabaseException(ErrorMessages.DocumentOperationEnsureActiveDatabase);
         }
     }
 

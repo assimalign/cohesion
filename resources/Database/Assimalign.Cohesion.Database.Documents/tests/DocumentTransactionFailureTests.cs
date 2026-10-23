@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// <summary>
 /// A statement that fails inside an explicit transaction aborts the whole transaction (#1225, the
 /// contract #1188 set for Graph): the session keeps it as <see cref="TransactionState.Faulted"/> and
-/// refuses every later statement and BEGIN with COHDBD001 until the caller rolls back, and nothing
+/// refuses every later statement and BEGIN with CD04101 until the caller rolls back, and nothing
 /// the transaction wrote survives. A started rollback always ends the transaction (#1226): a lost
 /// abort record changes nothing, and an undo the journal rejects is deferred with the writer lock
 /// held until the version-purge pass completes it, even against a late operation of the ended
@@ -72,14 +72,14 @@ public sealed class DocumentTransactionFailureTests
         chunks.ShouldBe(failAt);
         transaction.State.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         if (cancel)
         {
             refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>().ShouldNotBeNull().CancellationToken.ShouldBe(cancellation.Token);
         }
         else { refused.InnerException.ShouldBeSameAs(failure); }
         database.IsOffline.ShouldBeFalse();
-        if (!cancel) { ((DatabaseException)failure).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004"); }
+        if (!cancel) { ((DatabaseException)failure).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06104"); }
         await transaction.RollbackAsync(CancellationToken.None);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
@@ -118,7 +118,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         refused.Message.ShouldContain(error.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(error);
         faultedState.ShouldBe(TransactionState.Faulted);
@@ -168,7 +168,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "COHDBD001"));
+        refusals.Cast<DatabaseException>().ShouldAllBe(error => error.Diagnostics.Any(diagnostic => diagnostic.Code == "CD04101"));
         (await collection.GetAsync(session, "keep")).ShouldNotBeNull();
         await using (var next = await session.BeginTransactionAsync())
         {
@@ -179,7 +179,7 @@ public sealed class DocumentTransactionFailureTests
         (await IdsAsync(session)).ShouldBe(["keep", "next"]);
     }
 
-    /// <summary>COMMIT on a faulted transaction fails with COHDBD001, commits nothing, and ends the transaction.</summary>
+    /// <summary>COMMIT on a faulted transaction fails with CD04101, commits nothing, and ends the transaction.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after a failed statement fails and commits nothing")]
     public async Task CommitAsync_AfterFailedStatement_ShouldThrowAndCommitNothing()
     {
@@ -197,7 +197,7 @@ public sealed class DocumentTransactionFailureTests
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert: every commit reports the cause, as the model's own state machine did.
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         error.InnerException.ShouldBeSameAs(failure);
         repeated.Message.ShouldBe(error.Message);
@@ -362,7 +362,7 @@ public sealed class DocumentTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        refused.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await IdsAsync(waiting)).ShouldBe(["blocker"]);
@@ -392,7 +392,7 @@ public sealed class DocumentTransactionFailureTests
     }
 
     /// <summary>
-    /// A commit after the session closed under an open transaction fails with COHDBD001 naming why
+    /// A commit after the session closed under an open transaction fails with CD04101 naming why
     /// nothing committed, whichever is asked first, and commits nothing; a rollback afterwards is a
     /// no-op. For an active transaction the cause is the root session base's teardown cause, "The
     /// session closed before the transaction ended." (concrete-types plan §6.4), for the model's
@@ -401,7 +401,7 @@ public sealed class DocumentTransactionFailureTests
     /// keeps (the model's own close did the same before phase 4).
     /// </summary>
     /// <param name="aborted">True when a statement aborted the transaction before the session closed.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed reports COHDBD001 naming why nothing committed")]
+    [Theory(DisplayName = "Cohesion Test [Database.Documents] - Transaction: COMMIT after the session closed reports CD04101 naming why nothing committed")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
@@ -424,7 +424,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         error.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         if (failure is null)
         {
@@ -470,7 +470,7 @@ public sealed class DocumentTransactionFailureTests
         await transaction.CommitAsync();
 
         // Assert
-        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "COHDBD001"));
+        rejections.OfType<DatabaseException>().ShouldAllBe(error => error.Diagnostics.All(diagnostic => diagnostic.Code != "CD04101"));
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         (await IdsAsync(session)).ShouldBe(["pending"]);
@@ -559,7 +559,7 @@ public sealed class DocumentTransactionFailureTests
 
     /// <summary>
     /// Closing a session aborts the statement running on it, and the statement's abort is the
-    /// cause a later commit of its transaction reports with <c>COHDBD001</c>: the teardown's own
+    /// cause a later commit of its transaction reports with <c>CD04101</c>: the teardown's own
     /// cause does not replace it. The model's teardown did the same; since the concrete-types plan's
     /// phase 4 the session's root base runs it (§6.4), so the order is pinned here.
     /// </summary>
@@ -587,7 +587,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         statement.ShouldNotBeOfType<TimeoutException>();
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         commit.Message.ShouldEndWith("Cause: The document session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
@@ -701,12 +701,12 @@ public sealed class DocumentTransactionFailureTests
     /// A transaction the kernel ended under its caller (its database was dropped while the session
     /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
     /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
-    /// with <c>COHDBD001</c> before it checks anything of the model, where the model reported the
+    /// with <c>CD04101</c> before it checks anything of the model, where the model reported the
     /// disposed database; both execute seams check a canceled token before the model reports the
     /// disposed database, which they still report for a live token, and so does BEGIN once the
     /// caller rolled the ended transaction back.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a transaction the kernel ended refuses BEGIN with COHDBD001; the execute seams check a canceled token first")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Session: a transaction the kernel ended refuses BEGIN with CD04101; the execute seams check a canceled token first")]
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
@@ -732,7 +732,7 @@ public sealed class DocumentTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+        begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         text.ShouldNotBeNull();
         canceledRequest.CancellationToken.ShouldBe(canceled.Token);
@@ -1060,7 +1060,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Diagnostics.ShouldContain(d => d.Code == "COHDBD002");
+        error.Diagnostics.ShouldContain(d => d.Code == "CD06102");
         error.Message.ShouldStartWith("Database 'test' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
@@ -1111,7 +1111,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Code.ShouldBe("COHDBD002");
+        error.Code.ShouldBe("CD06102");
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
         (await IdsAsync(observer)).ShouldBeEmpty();
@@ -1259,7 +1259,7 @@ public sealed class DocumentTransactionFailureTests
     /// kernel's exception is kept as the inner exception. Before #1272 this path kept the kernel's
     /// message, uncoded.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by COHDBD002")]
+    [Fact(DisplayName = "Cohesion Test [Database.Documents] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by CD06102")]
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
@@ -1273,7 +1273,7 @@ public sealed class DocumentTransactionFailureTests
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBD002");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CD06102");
         unconfirmed.Message.ShouldBe(
             "Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
             "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +

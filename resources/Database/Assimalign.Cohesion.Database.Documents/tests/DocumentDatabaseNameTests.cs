@@ -172,11 +172,11 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var created = await engine.CreateDatabaseAsync("Sales", Token());
 
         // Assert: not found rather than a missing file, refused with the remedy, then cleared.
-        open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         open.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
         listed.ShouldBeEmpty();
         create.ShouldNotBeOfType<DatabaseNotFoundException>();
-        create.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        create.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         create.Message.ShouldContain("without a database in it", Case.Sensitive);
         afterDrop.ShouldBeEmpty();
         created.Name.ToString().ShouldBe("Sales");
@@ -231,7 +231,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         });
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         Directory.GetFiles(directory).Select(Path.GetFileName).Order().ShouldBe(before.Keys.Order());
         foreach (var file in before) { File.ReadAllBytes(Path.Combine(directory, file.Key!)).ShouldBe(file.Value); }
     }
@@ -254,12 +254,12 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseException>(() => engine.CreateDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         refusal.Message.ShouldContain("OpenDatabaseAsync", Case.Sensitive);
         (await File.ReadAllBytesAsync(data, CancellationToken.None)).ShouldBe(before);
         File.Exists(Path.Combine(directory, "document.log")).ShouldBeFalse();
         (await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask()))
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Documents] - Interrupted create: truncated data and leftover directories have coded, actionable refusals (#1421)")]
@@ -279,19 +279,19 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseException>(() => builder.BuildAsync(CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         refusal.Message.ShouldContain("DropDatabaseAsync", Case.Sensitive);
         File.Exists(Path.Combine(directory, "document.log")).ShouldBeFalse();
         await using var engine = CreateEngine(onDisk: true);
         if (truncatedData)
         {
             var open = await Should.ThrowAsync<DatabaseException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
-            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         }
         else
         {
             var open = await Should.ThrowAsync<DatabaseNotFoundException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
-            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+            open.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
         }
     }
 
@@ -351,7 +351,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         {
             var before = File.ReadAllBytes(Path.Combine(directory, "document.dat"));
             var refusal = await Should.ThrowAsync<DatabaseException>(() => reopened.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD003");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06103");
             File.ReadAllBytes(Path.Combine(directory, "document.dat")).ShouldBe(before);
             File.Exists(Path.Combine(directory, "document.log")).ShouldBeFalse();
         }
@@ -378,7 +378,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         var refusal = await Should.ThrowAsync<DatabaseCorruptionException>(() => engine.OpenDatabaseAsync("sales", CancellationToken.None).AsTask());
 
         // Assert
-        refusal.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "COHDBD003"]);
+        refusal.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CD06103"]);
         refusal.Database.ShouldBe((DatabaseName)"sales");
         refusal.PageId.ShouldBe((PageId)1L);
         refusal.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe((PageId)1L);
@@ -450,7 +450,7 @@ public sealed class DocumentDatabaseNameTests : IDisposable
         refusal.Message.ShouldContain("Retry OpenDatabaseAsync", Case.Sensitive);
         refusal.Message.ShouldNotContain("restore");
         refusal.Message.ShouldNotContain("drop");
-        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004");
+        refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06104");
         (await ReadAsync(reopened, identity)).ShouldBe("acknowledged");
     }
 

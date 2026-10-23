@@ -26,7 +26,7 @@ internal static class DocumentSystemCollections
     {
         if (Find(name) is string systemName)
         {
-            throw new DocumentPlanningException("COHDOC004", $"System collection '{systemName}' is read-only.", location);
+            throw new DocumentPlanningException("CD04004", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionsEnsureReadOnlyFailure, systemName), location);
         }
     }
 

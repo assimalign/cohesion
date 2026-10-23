@@ -22,7 +22,7 @@ public readonly struct DocumentId : IEquatable<DocumentId>
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Document id cannot be null or empty.", nameof(value));
+            throw new ArgumentException(ErrorMessages.DocumentIdArgument, nameof(value));
         }
         _value = value;
     }

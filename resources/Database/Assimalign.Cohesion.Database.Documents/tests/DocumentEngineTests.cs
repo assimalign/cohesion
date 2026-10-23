@@ -352,7 +352,7 @@ public sealed class DocumentEngineTests
             // Assert: the manager's disposed guard must fire, even though storage has also closed.
             failure.Message.ShouldStartWith($"Database 'legacy' cannot be opened. Document catalog kind {kind} format: found 1, supported 2.", Case.Sensitive);
             failure.Message.ShouldContain("Recreate the database", Case.Sensitive);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD005");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06105");
             var refused = failure.InnerException.ShouldBeOfType<DocumentCatalogException>();
             refused.IsFormatRefusal.ShouldBeTrue();
             refused.PageId.ShouldNotBeNull();

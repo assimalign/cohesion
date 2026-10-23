@@ -76,14 +76,14 @@ public sealed class OqlPredicateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Predicates: malformed and deferred forms have exact diagnostic spans")]
-    [InlineData("SELECT a IN («)» FROM c", "OQL0002", null)]
-    [InlineData("SELECT a IN (1,«»", "OQL0002", null)]
-    [InlineData("SELECT a BETWEEN 1«»", "OQL0002", null)]
-    [InlineData("SELECT a BETWEEN 1 «OR» 2 FROM c", "OQL0002", null)]
-    [InlineData("SELECT a LIKE 'x' ESCAPE «'ab'» FROM c", "OQL0002", null)]
-    [InlineData("SELECT CASE «END» FROM c", "OQL0002", null)]
-    [InlineData("SELECT CASE WHEN a = 1 THEN 2 «FROM» c", "OQL0002", null)]
-    [InlineData("SELECT a NOT«»", "OQL0002", null)]
+    [InlineData("SELECT a IN («)» FROM c", "CD00002", null)]
+    [InlineData("SELECT a IN (1,«»", "CD00002", null)]
+    [InlineData("SELECT a BETWEEN 1«»", "CD00002", null)]
+    [InlineData("SELECT a BETWEEN 1 «OR» 2 FROM c", "CD00002", null)]
+    [InlineData("SELECT a LIKE 'x' ESCAPE «'ab'» FROM c", "CD00002", null)]
+    [InlineData("SELECT CASE «END» FROM c", "CD00002", null)]
+    [InlineData("SELECT CASE WHEN a = 1 THEN 2 «FROM» c", "CD00002", null)]
+    [InlineData("SELECT a NOT«»", "CD00002", null)]
     [InlineData("SELECT a IN («SELECT» b FROM d) FROM c", "CK00001", "SUBQUERY")]
     [InlineData("SELECT «EXISTS» (a) FROM c", "CK00001", "EXISTS")]
     public void Parse_InvalidPredicate_ShouldLocateOneDiagnostic(string marked, string code, string? construct)

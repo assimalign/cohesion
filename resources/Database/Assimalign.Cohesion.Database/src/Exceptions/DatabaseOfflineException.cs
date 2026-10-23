@@ -39,7 +39,7 @@ namespace Assimalign.Cohesion.Database;
 /// The commit whose flush failed is reported to its caller as
 /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>; this exception is what every
 /// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
-/// <c>CS04004</c> (SQL), <c>COHDBK002</c> (key-value), <c>COHDBD002</c> (documents),
+/// <c>CS04004</c> (SQL), <c>COHDBK002</c> (key-value), <c>CD06102</c> (documents),
 /// <c>COHDBG012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
 /// <c>CK06002</c> error is the inner exception.
 /// </para>
@@ -78,7 +78,7 @@ public sealed class DatabaseOfflineException : DatabaseException
     /// <summary>
     /// Creates the refusal an engine raises for an operation on an offline database.
     /// </summary>
-    /// <param name="code">The model's code, for example <c>COHDBD002</c>.</param>
+    /// <param name="code">The model's code, for example <c>CD06102</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The storage's offline error.</param>
     /// <returns>The exception to throw.</returns>

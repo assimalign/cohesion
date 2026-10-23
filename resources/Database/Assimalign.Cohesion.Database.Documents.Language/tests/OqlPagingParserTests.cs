@@ -63,7 +63,7 @@ public sealed class OqlPagingParserTests
             .ShouldBe(b.Offset.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBeOfType<JsonElement>().GetInt64());
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Paging: invalid counts have one OQL0007 at the complete operand")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Paging: invalid counts have one CD00007 at the complete operand")]
     [InlineData("-1")]
     [InlineData("1.5")]
     [InlineData("2.0")]
@@ -89,7 +89,7 @@ public sealed class OqlPagingParserTests
         {
             string text = "SELECT * FROM c " + clause + " " + operand;
             var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("OQL0007");
+            diagnostic.Code.ShouldBe("CD00007");
             diagnostic.Message.ShouldBe($"{clause} requires a non-negative integer in the signed 64-bit range.");
             diagnostic.Start.ShouldBe(text.Length - operand.Length);
             diagnostic.End.ShouldBe(text.Length);
@@ -105,7 +105,7 @@ public sealed class OqlPagingParserTests
         // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0007");
+        diagnostic.Code.ShouldBe("CD00007");
         diagnostic.Line.ShouldBe(1);
         diagnostic.Start.ShouldBe(text.IndexOf('-'));
         diagnostic.End.ShouldBe(text.Length);
@@ -134,7 +134,7 @@ public sealed class OqlPagingParserTests
         // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Start.ShouldBe(start);
         diagnostic.End.ShouldBe(end);
     }
@@ -155,7 +155,7 @@ public sealed class OqlPagingParserTests
         // Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Start.ShouldBe(text.IndexOf("ORDER", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(diagnostic.Start + 5);
     }
@@ -202,7 +202,7 @@ public sealed class OqlPagingParserTests
         string text = "SELECT * FROM c LIMIT " + operand;
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Start.ShouldBe(text.Length - operand.Length);
         diagnostic.End.ShouldBe(text.Length);
     }

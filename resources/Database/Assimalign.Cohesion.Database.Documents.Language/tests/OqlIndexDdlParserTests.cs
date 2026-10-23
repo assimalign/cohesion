@@ -80,7 +80,7 @@ public sealed class OqlIndexDdlParserTests
         var diagnostics = Parse(query).Diagnostics.ToArray();
 
         diagnostics.ShouldNotBeEmpty();
-        var diagnostic = diagnostics.First(item => item.Code == "OQL0002");
+        var diagnostic = diagnostics.First(item => item.Code == "CD00002");
         diagnostic.Start.ShouldBe(expectedStart);
         diagnostic.End!.Value.ShouldBeInRange(expectedStart, query.Length);
         diagnostic.Line.ShouldBe(1);
@@ -93,7 +93,7 @@ public sealed class OqlIndexDdlParserTests
     {
         const string query = "CREATE INDEX ix\npeople (address.city)";
 
-        var diagnostic = Parse(query).Diagnostics.First(item => item.Code == "OQL0002");
+        var diagnostic = Parse(query).Diagnostics.First(item => item.Code == "CD00002");
 
         diagnostic.Start.ShouldBe(16);
         diagnostic.End.ShouldBe(22);

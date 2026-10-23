@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.Database;
 /// bracket whose commit record was written before the flush failed
 /// (<see cref="Create(string, string, StorageOfflineException)"/>). The codes are those of
 /// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>COHDBK002</c>,
-/// <c>COHDBD002</c>, <c>COHDBG012</c> and <c>COHDBB002</c>.
+/// <c>CD06102</c>, <c>COHDBG012</c> and <c>COHDBB002</c>.
 /// </para>
 /// </remarks>
 public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseException
@@ -90,7 +90,7 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
     /// transaction ended committed in this process; the reopen's recovery keeps it exactly when
     /// its record reached stable storage.
     /// </summary>
-    /// <param name="code">The model's structured offline code, for example <c>COHDBD002</c>.</param>
+    /// <param name="code">The model's structured offline code, for example <c>CD06102</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The kernel's unconfirmed commit, which becomes the inner exception.</param>
     /// <returns>The exception to throw.</returns>

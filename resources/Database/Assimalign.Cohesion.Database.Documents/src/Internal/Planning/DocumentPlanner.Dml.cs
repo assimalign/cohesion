@@ -22,7 +22,7 @@ internal sealed partial class DocumentPlanner
         foreach (var path in update.Unset) { Add(path, null); }
         if (targets.Count == 0)
         {
-            throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetsMissing, update.Location);
+            throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetsMissing, update.Location);
         }
         if (update.Predicate is { } predicate)
         {
@@ -41,14 +41,14 @@ internal sealed partial class DocumentPlanner
                 _cancellationToken.ThrowIfCancellationRequested();
                 if ((segment.Name is null) == (segment.Index is null) || segment.Index < 0)
                 {
-                    throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+                    throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetInvalid, path.Location);
                 }
                 segments.Add(segment);
             }
             if (segments.Count == 0 ||
                 value is null && segments[^1].Index is not null)
             {
-                throw new DocumentPlanningException("COHDOC016", ErrorMessages.UpdateTargetInvalid, path.Location);
+                throw new DocumentPlanningException("CD02016", ErrorMessages.UpdateTargetInvalid, path.Location);
             }
             var node = paths;
             foreach (var segment in segments)
@@ -56,7 +56,7 @@ internal sealed partial class DocumentPlanner
                 _cancellationToken.ThrowIfCancellationRequested();
                 if (node.IsTarget)
                 {
-                    throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+                    throw new DocumentPlanningException("CD01017", ErrorMessages.UpdateTargetsOverlap, path.Location);
                 }
                 if (!node.Children.TryGetValue(segment, out var child))
                 {
@@ -67,7 +67,7 @@ internal sealed partial class DocumentPlanner
             }
             if (node.IsTarget || node.Children.Count > 0)
             {
-                throw new DocumentPlanningException("COHDOC017", ErrorMessages.UpdateTargetsOverlap, path.Location);
+                throw new DocumentPlanningException("CD01017", ErrorMessages.UpdateTargetsOverlap, path.Location);
             }
             node.IsTarget = true;
             targets.Add(new DocumentUpdateTarget(path, segments.AsReadOnly(), value));
@@ -104,7 +104,7 @@ internal sealed partial class DocumentPlanner
         {
             if (values.Count == 0)
             {
-                throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
+                throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location);
             }
             foreach (var pair in values)
             {
@@ -112,7 +112,7 @@ internal sealed partial class DocumentPlanner
                 {
                     if (!IsConstant(expression))
                     {
-                        throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
+                        throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
                     Validate(expression, allowAggregate: false);
                 }
@@ -135,7 +135,7 @@ internal sealed partial class DocumentPlanner
             {
                 if (logical.Projections[i].Name == name) { return i; }
             }
-            throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture,
+            throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
     }
@@ -156,7 +156,7 @@ internal sealed partial class DocumentPlanner
                     meta.Arguments.Count == 1 && (alias is null || meta.Arguments[0] is not OqlPathExpression { Segments.Count: 1 } path ||
                         path.Segments[0].Name != alias))
                 {
-                    throw new DocumentPlanningException("COHDOC001", ErrorMessages.MetaContextInvalid, meta.Location);
+                    throw new DocumentPlanningException("CD05001", ErrorMessages.MetaContextInvalid, meta.Location);
                 }
                 break;
             case OqlBinaryExpression binary:

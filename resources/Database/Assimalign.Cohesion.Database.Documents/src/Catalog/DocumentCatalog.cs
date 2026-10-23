@@ -160,12 +160,12 @@ public sealed partial class DocumentCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(collection.Name);
         if (collection.Id == Guid.Empty)
         {
-            throw new ArgumentException("A collection must have a nonempty identity.", nameof(collection));
+            throw new ArgumentException(ErrorMessages.CatalogSaveCollectionAsyncArgument, nameof(collection));
         }
         if (collection.Owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
             || (collection.Owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(collection.OwningSchema)))
         {
-            throw new ArgumentException("A schema-owned collection must name its owning schema.", nameof(collection));
+            throw new ArgumentException(ErrorMessages.CatalogSaveCollectionAsyncArgument2, nameof(collection));
         }
 
         Found? previous;
@@ -265,7 +265,7 @@ public sealed partial class DocumentCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(document.Name);
         if (document.CollectionId == Guid.Empty || document.Length <= 0 || document.Length > int.MaxValue || document.HeadLocation == 0 || document.Version == 0)
         {
-            throw new ArgumentException("Document metadata requires a collection identity and a head for nonempty content.", nameof(document));
+            throw new ArgumentException(ErrorMessages.CatalogSaveDocumentAsyncArgument, nameof(document));
         }
 
         Found? previous;
@@ -586,7 +586,7 @@ public sealed partial class DocumentCatalog
     {
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.DocumentCatalogEnsureActiveFailure);
         }
     }
 

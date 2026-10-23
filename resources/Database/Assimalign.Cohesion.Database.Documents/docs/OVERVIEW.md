@@ -16,7 +16,7 @@ transaction-start instant. COUNT and string/array lengths and positions return I
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
-OQL0007. Column types remain independent of the page, including empty results.
+CD00007. Column types remain independent of the page, including empty results.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
@@ -39,13 +39,13 @@ engine forgets it, and `OpenDatabaseAsync` opens it again with its documents, in
 disk (owner decision 33). Index definitions are changed with OQL on the session, using its
 active transaction or an automatic statement transaction; neither the database nor the session
 has index-management members. A statement that fails inside an explicit transaction aborts the
-whole transaction: the session refuses further statements and BEGIN with `COHDBD001` until the
+whole transaction: the session refuses further statements and BEGIN with `CD04101` until the
 caller rolls back, and a commit fails without committing.
 
 OQL INSERT creates externally keyed documents from VALUES pairs or SELECT output names and
 reports the number inserted. META([alias]).id and .version read stored identity and version;
 missing object members are omitted and explicit NULL members are stored. Duplicates fail the
-whole statement with DocumentDuplicateKeyException (COHDOC012).
+whole statement with DocumentDuplicateKeyException (CD03012).
 
 OQL UPSERT shares INSERT's grammar and validation, inserting an absent key or replacing its
 whole document with a fresh version. Repeated keys fail atomically. It reports written-document
@@ -66,7 +66,7 @@ OQL also creates and removes collections with `CREATE COLLECTION [IF NOT EXISTS]
 ownership rules and return Success with affected count zero. `IF` remains usable as a name.
 
 A failed journal or data fsync takes the database offline: every later operation is refused
-with `DatabaseOfflineException` (`COHDBD002`) until `OpenDatabaseAsync` reopens it and recovery
+with `DatabaseOfflineException` (`CD06102`) until `OpenDatabaseAsync` reopens it and recovery
 decides the unconfirmed commit (#1243). `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize`
 (256 MiB) and `CheckpointInterval` (5 minutes) size the buffer pool and trigger checkpoints
 (#1254); a failed undo is retried on a 100 ms backoff (#1226). See DESIGN.md, "Storage
@@ -223,3 +223,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

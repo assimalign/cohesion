@@ -240,7 +240,7 @@ public sealed class DocumentDeleteTests
             "DELETE FROM items WHERE CASE WHEN META().id = 'b' THEN 1 / 0 ELSE 1 END", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC006");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02006");
         if (transaction is not null)
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
@@ -251,10 +251,10 @@ public sealed class DocumentDeleteTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - DELETE: invalid predicates are validated even over empty collections")]
-    [InlineData("DELETE FROM items WHERE 0 AND $absent", "COHDOC005")]
-    [InlineData("DELETE FROM items d WHERE META(other).id = 'b'", "COHDOC001")]
-    [InlineData("DELETE FROM items WHERE COUNT(*) > 0", "COHDOC001")]
-    [InlineData("DELETE FROM absent", "COHDOC002")]
+    [InlineData("DELETE FROM items WHERE 0 AND $absent", "CD01005")]
+    [InlineData("DELETE FROM items d WHERE META(other).id = 'b'", "CD05001")]
+    [InlineData("DELETE FROM items WHERE COUNT(*) > 0", "CD05001")]
+    [InlineData("DELETE FROM absent", "CD01002")]
     public async Task Execute_InvalidContext_ShouldRejectBeforeMutationAsync(string statement, string code)
     {
         // Arrange
@@ -266,7 +266,7 @@ public sealed class DocumentDeleteTests
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
-        if (code == "COHDOC002") { error.Message.ShouldBe("Collection 'absent' does not exist."); }
+        if (code == "CD01002") { error.Message.ShouldBe("Collection 'absent' does not exist."); }
         (await session.ExecuteAsync("DELETE FROM items", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(0);
     }
 

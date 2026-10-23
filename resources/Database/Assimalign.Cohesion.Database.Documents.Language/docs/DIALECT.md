@@ -2,7 +2,7 @@
 
 Double-quoted collection, property and alias names accept doubled `""` as one embedded
 double quote: `"a""b"` names `a"b`. This extends the existing double-quoted identifier syntax;
-it does not add backtick quoting. A missing closing delimiter is OQL0003 (#1235).
+it does not add backtick quoting. A missing closing delimiter is CD00003 (#1235).
 
 ## Storage integrity errors (#1160)
 
@@ -28,10 +28,10 @@ NIL is a NULL synonym; UNDEFINED is reserved and rejected.
 LIMIT n, OFFSET m, LIMIT n OFFSET m and OFFSET m LIMIT n execute after HAVING, DISTINCT
 and ORDER BY, including system sources and INSERT/UPSERT SELECT. Each operand is an optionally
 signed integer literal or a parameter with an integral, non-negative signed Int64 value.
-NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give OQL0007
+NULL/NIL, MISSING, Boolean, string, fractional, nonfinite and out-of-range counts give CD00007
 at the operand; literal 2.0/1e2, LIMIT ALL and arbitrary expressions are also invalid.
-Integral decimal/JSON numeric parameters normalize before checking. Missing names retain COHDOC005.
-Missing operands and duplicate clauses give OQL0002; LIMIT m, n gives one CK00001 before
+Integral decimal/JSON numeric parameters normalize before checking. Missing names retain CD01005.
+Missing operands and duplicate clauses give CD00002; LIMIT m, n gives one CK00001 before
 validating m, including ALL, negative and string operands. FETCH FIRST gives one CK00001
 only when FETCH starts a construct; c.fetch FIRST and c.limit ALL still reject FIRST and ALL.
 LIMIT/OFFSET are reserved: quote field names or use d.limit/d.offset; SELECT a AS limit is valid.
@@ -45,7 +45,7 @@ only returned frames; query AffectedCount remains -1. EXPLAIN includes resolved 
 The [function table](DESIGN.md#supported-clause-matrix) declares META, five aggregates and 34
 SQL++ scalar functions (#1137). Scalars execute in projections, WHERE, GROUP BY, HAVING, ORDER BY,
 UPDATE expressions and INSERT/UPSERT SELECT; VALUES remains constant-only. Unknown calls report
-OQL0008 and invalid arities report OQL0006. ARRAY_AGG and the deferred REGEXP functions retain
+CD00008 and invalid arities report CD00006. ARRAY_AGG and the deferred REGEXP functions retain
 CK00001. Function tokens stay usable as fields and iteration aliases.
 
 LENGTH counts Unicode scalars. SUBSTR and POSITION use zero-based code-point positions;
@@ -57,13 +57,13 @@ Its optional second argument is a set of code points. Empty REPLACE patterns lea
 REPLACE accepts an optional fourth integer argument n and replaces the first n occurrences;
 omitting n or using any negative integer replaces all, as
 [Couchbase documents](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
-Zero replaces none; a fractional count gives COHDOC008.
+Zero replaces none; a fractional count gives CD02008.
 Constructed string results and work buffers are capped at 1,048,576 UTF-16 units; inputs are
 not capped. LENGTH, searching, string predicates and SUBSTR scan without input-sized buffers,
 and loops observe cancellation at least every 1,024 iterations.
 ROUND uses half-away-from-zero for exact numbers, with negative scales; TRUNC rounds toward zero.
-SQRT of a negative number and invalid POWER domains give COHDOC019; overflow gives COHDOC007.
-Fractional ROUND/TRUNC scales give COHDOC019. SQRT and nonintegral POWER use BCL double
+SQRT of a negative number and invalid POWER domains give CD02019; overflow gives CD02007.
+Fractional ROUND/TRUNC scales give CD02019. SQRT and nonintegral POWER use BCL double
 calculations converted through the double's shortest round-trip representation to the decimal
 scalar domain, retaining full double precision; integral POWER uses decimal arithmetic.
 
@@ -84,7 +84,7 @@ The array form `x IN d.tags` also executes; a NULL or non-array right operand gi
 and a MISSING operand on either side gives MISSING. `NULL IN []` deliberately retains NULL.
 LIKE is ordinal and case-sensitive, `%`
 matches any number of Unicode scalars and `_` matches one. Backslash is the default escape;
-`ESCAPE ''` disables it. Invalid evaluated escapes and trailing pattern escapes give COHDOC013.
+`ESCAPE ''` disables it. Invalid evaluated escapes and trailing pattern escapes give CD02013.
 
 For IN, a match wins over NULL/MISSING items; without a match NULL wins over MISSING.
 A MISSING left operand gives MISSING, and a NULL left operand gives NULL. BETWEEN propagates
@@ -104,10 +104,10 @@ counts expanded rows. With UNNEST, `SELECT *` returns synthetic `{"d":...,"t":..
 without a FROM alias the source member is named items, while paths keep existing resolution.
 A plain star without UNNEST preserves stored bytes. ORDER BY projection aliases outrank
 UNNEST variables. Variables shadow fields; quantified bindings may shadow enclosing variables.
-Duplicate names in one binding list give OQL0010. The unaliased collection name is reserved
+Duplicate names in one binding list give CD00010. The unaliased collection name is reserved
 for this check: `FROM items LEFT UNNEST tags items` is a duplicate, while paths still do not
 resolve an implicit items variable. Inferred duplicate aliases span the final path-name token.
-Direct AST duplicates give COHDOC023. Group-key equivalence preserves lexical binding scope;
+Direct AST duplicates give CD01023. Group-key equivalence preserves lexical binding scope;
 a quantified t cannot match an outer t in a grouping expression.
 
 `ANY | SOME | EVERY x IN array SATISFIES predicate END` executes with one scoped variable.
@@ -128,7 +128,7 @@ UPSERT INTO collection (KEY outputName [, VALUE outputName]) SELECT ... execute 
 INSERT's validation and MISSING rules. Existing identities receive complete replacements;
 absent properties disappear and each written identity receives a fresh version. Without VALUE,
 the complete projected row becomes the document. Every source row is staged before writes.
-A repeated key fails the whole statement with DocumentDuplicateKeyException (COHDOC012).
+A repeated key fails the whole statement with DocumentDuplicateKeyException (CD03012).
 OPTIONS and RETURNING remain CK00001 at their tokens. INSERT and UPSERT both reject
 (KEY k, OPTIONS o) SELECT ... with one diagnostic naming OPTIONS, including its expression form. No statement-level version precondition is available;
 PutAsync(expectedVersion) and UPDATE WHERE META().version = $v provide optimistic replacement.
@@ -155,9 +155,9 @@ Every index segment requires an existing array and an in-range index, including 
 SET-to-MISSING beneath missing members; arrays are never created or expanded implicitly.
 UNSET of an absent object member is a no-op. SET-to-MISSING removes object members, while
 MISSING assigned to an existing array element becomes JSON null. UNSET cannot end in an index,
-and root replacement is invalid. Incompatible paths give COHDOC016; duplicate and prefix-overlapping
-SET/UNSET targets after alias normalization give COHDOC017. Invalid stored JSON or a patched
-document deeper than 128 levels gives COHDOC018. Temporary constructors retain query depth.
+and root replacement is invalid. Incompatible paths give CD02016; duplicate and prefix-overlapping
+SET/UNSET targets after alias normalization give CD01017. Invalid stored JSON or a patched
+document deeper than 128 levels gives CD02018. Temporary constructors retain query depth.
 Untouched values and property-name spellings retain their bytes; rewritten-container whitespace
 may be normalized. A successful UPDATE returns the matched count, including unchanged matches,
 and allocates fresh versions. Failure or cancellation writes nothing under the transaction rules
@@ -170,8 +170,8 @@ root bracket-string names such as ['x.y'], nested members and integer array subs
 UNIQUE is a Cohesion extension in SQL spelling and remains reserved elsewhere (SELECT UNIQUE(a)
 is CK00001). Conditional creation skips an existing name regardless of its definition.
 An absent conditional DROP is a no-op; existing schema ownership and snapshot conflicts still refuse.
-Unconditional duplicate creation fails with COHDOC024; an absent unconditional DROP fails with
-COHDOC025. An encoded composite key beyond 1024 bytes fails with COHDOC026. These errors
+Unconditional duplicate creation fails with CD03024; an absent unconditional DROP fails with
+CD01025. An encoded composite key beyond 1024 bytes fails with CD02026. These errors
 carry structured diagnostics, abort an explicit transaction, and leave the session usable after
 rollback. In autocommit the next statement can run immediately.
 PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, and IS_UNIQUE is real.
@@ -179,12 +179,12 @@ PATHS in COHESION_SCHEMA.INDEXES is the ordered array, PATH is its first entry, 
 Leading MISSING omits the entry. Components sort MISSING, NULL, FALSE, TRUE, numbers, ordinal
 strings, arrays, objects; full predicates always filter seek candidates. UNIQUE keys containing
 any NULL or MISSING do not conflict (PostgreSQL NULLS DISTINCT, diverging from Cohesion SQL).
-Duplicate valued scalar keys fail COHDOC020 (23505), naming index and collection without key data;
-array/object UNIQUE components fail COHDOC021 naming index and path. Constraints are immediate
+Duplicate valued scalar keys fail CD03020 (23505), naming index and collection without key data;
+array/object UNIQUE components fail CD02021 naming index and path. Constraints are immediate
 per row, so key swaps may fail. A failed explicit transaction requires RollbackAsync before reuse.
 The wire uses ExecutionFailure (6) without a protocol change and keeps the connection usable.
-The path-count cap reports OQL0009 at the 33rd key (COHDOC022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
-WHERE and INCLUDE MISSING receive OQL0002. ALL and DISTINCT ARRAY index keys get one CK00001
+The path-count cap reports CD00009 at the 33rd key (CD03022 for a directly constructed AST). Duplicate/empty keys, expressions, wildcards, ASC/DESC, partial
+WHERE and INCLUDE MISSING receive CD00002. ALL and DISTINCT ARRAY index keys get one CK00001
 at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
 and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
@@ -217,3 +217,13 @@ diagnostic code, wire contract or on-disk format.
 A malformed confirmed stored record fails execution with the existing corruption diagnostic
 and physical page/slot context. It is not a missing row, document or graph element. D1 confirms
 the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid data retains the same language results.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

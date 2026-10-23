@@ -87,7 +87,7 @@ public sealed class OqlProjectionParserTests
         // Arrange / Act
         var diagnostics = new OqlQueryParser().Parse(text).Diagnostics.ToArray();
         // Assert
-        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0002");
+        diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00002");
         diagnostics[0].Start.ShouldBe(start);
         diagnostics[0].End.ShouldBe(end);
         diagnostics[0].Line.ShouldBe(1);
@@ -126,7 +126,7 @@ public sealed class OqlProjectionParserTests
         // Arrange / Act
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
         // Assert
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Message.ShouldNotBeNull().ShouldContain("parameter", Case.Insensitive);
     }
 
@@ -141,6 +141,6 @@ public sealed class OqlProjectionParserTests
         // Act
         var diagnostics = new OqlQueryParser().Parse("SELECT " + expression + " FROM items").Diagnostics;
         // Assert
-        diagnostics.ShouldContain(diagnostic => diagnostic.Code == "OQL0005");
+        diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CD00005");
     }
 }

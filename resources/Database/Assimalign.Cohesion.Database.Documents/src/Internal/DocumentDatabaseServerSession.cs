@@ -447,7 +447,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             }
             var diagnostic = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } diagnosticCode && !exception.Message.Contains(diagnosticCode + ":", StringComparison.Ordinal)
-                ? $"{diagnosticCode}: {exception.Message}" : exception.Message;
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncFailure, diagnosticCode, exception.Message) : exception.Message;
             await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
                 CreateFailure(code, errorText, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
             return;
@@ -516,7 +516,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing);
         }
         var session = _databaseSession!;
         long count = 0;

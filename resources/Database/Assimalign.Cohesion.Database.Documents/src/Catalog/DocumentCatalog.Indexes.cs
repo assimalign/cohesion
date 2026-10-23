@@ -79,7 +79,7 @@ public sealed partial class DocumentCatalog
     /// <returns>The published index definition.</returns>
     /// <exception cref="ArgumentNullException">The paths or context are null.</exception>
     /// <exception cref="ArgumentException">A name or path is invalid.</exception>
-    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (COHDOC022).</exception>
+    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (CD03022).</exception>
     /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, or a key exceeds 1024 bytes.</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
@@ -95,19 +95,19 @@ public sealed partial class DocumentCatalog
         if (paths.Count is < 1 or > 32)
         {
             string message = ErrorMessages.IndexPathCount;
-            throw new DatabaseException(message, [new Types.Diagnostic { Code = "COHDOC022", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
+            throw new DatabaseException(message, [new Types.Diagnostic { Code = "CD03022", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
         }
         paths = Array.AsReadOnly(paths.ToArray());
         foreach (string path in paths) { DocumentIndexKeys.ValidatePath(path); }
         if (!GetCollections(context.Snapshot).Any(collection => collection.Id == collectionId))
         {
-            throw new DocumentCatalogException("The collection does not exist.");
+            throw new DocumentCatalogException(ErrorMessages.CreateIndexAsyncDocumentCatalog);
         }
         lock (_sync)
         {
             if (FindIndex(collectionId, name, context.Snapshot) is not null)
             {
-                throw new DocumentCatalogException("COHDOC024", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexAlreadyExists, name));
+                throw new DocumentCatalogException("CD03024", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexAlreadyExists, name));
             }
         }
         var metadata = new DocumentIndexMetadata(collectionId, name, paths, isUnique, (ulong)_storage.ReserveTransactionSequence());
@@ -177,7 +177,7 @@ public sealed partial class DocumentCatalog
         }
         if (previous is null)
         {
-            throw new DocumentCatalogException("COHDOC025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
+            throw new DocumentCatalogException("CD01025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
         }
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
@@ -235,7 +235,7 @@ public sealed partial class DocumentCatalog
         lock (_sync)
         {
             definition = FindIndex(collectionId, indexName, snapshot)?.Record.Index
-                ?? throw new DocumentCatalogException($"Index '{indexName}' is not visible.");
+                ?? throw new DocumentCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SearchIndexAsyncDocumentCatalog, indexName));
         }
         var index = ResolveIndex(definition);
         var range = SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper);
@@ -345,7 +345,7 @@ public sealed partial class DocumentCatalog
         var key = DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)), metadata, out distinct);
         if (key is { Length: > 1024 })
         {
-            throw new DocumentCatalogException("COHDOC026", ErrorMessages.IndexKeyTooLarge);
+            throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge);
         }
         return key;
     }
@@ -396,7 +396,7 @@ public sealed partial class DocumentCatalog
 
     private BTreeIndex ResolveIndex(DocumentIndexMetadata metadata)
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
-            ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
+            ? index : throw new DocumentCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
@@ -512,7 +512,7 @@ public sealed partial class DocumentCatalog
     // coordinator owns, or this catalog's own error when there is none.
     private StorageTransaction ResolveStatementBracket(TransactionContext context)
         => _coordinator.TryGetStorageTransaction(context, out var bracket)
-            ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
+            ? bracket : throw new InvalidOperationException(ErrorMessages.CatalogResolveStatementBracketFailure);
 
     private sealed class IndexUndo : RecordVersionIndex
     {

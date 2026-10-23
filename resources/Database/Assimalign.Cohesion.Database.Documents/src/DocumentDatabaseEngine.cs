@@ -70,7 +70,7 @@ namespace Assimalign.Cohesion.Database.Documents;
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public sealed class DocumentDatabaseEngine : DatabaseEngine
 {
-    private const string interruptedCreationCode = "COHDBD003";
+    private const string interruptedCreationCode = "CD06103";
 
     // How the model's messages start: "Document engine '{name}' …".
     internal const string ModelName = "Document";
@@ -431,7 +431,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             bool open = _databases.Remove(name, out var database);
             if (!open && !StorageExists(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             // The engine lets the database go before it closes it, and the close waits for one a
@@ -559,7 +559,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
 
         if (failures is not null)
         {
-            throw new AggregateException("One or more document databases failed to close.", failures);
+            throw new AggregateException(ErrorMessages.EngineDisposeAsyncCoreAggregate, failures);
         }
     }
 
@@ -575,7 +575,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             {
                 if (create)
                 {
-                    throw new DatabaseException($"Database '{name}' already exists.");
+                    throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
                 }
 
                 if (existing.IsClosed || !existing.IsOffline)
@@ -621,12 +621,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             }
             if (create && StorageExists(name, directory))
             {
-                throw new DatabaseException($"Database '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name));
             }
 
             if (!create && !HasDatabase(name, directory))
             {
-                throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
             }
 
             if (directory is not null && create)
@@ -641,7 +641,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
                 if (storage is null)
                 {
-                    throw new InvalidOperationException("The storage strategy returned null.");
+                    throw new InvalidOperationException(ErrorMessages.DatabaseEngineGetDatabaseFailure);
                 }
                 // Recovery may retain a partial tail described only by uncommitted work.
                 // Storage ignores it until the next allocation overwrites it.
@@ -677,7 +677,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 && DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(exception) is { } indexCorruption)
             {
                 var refusal = DatabaseCorruptionException.Create(name, indexCorruption, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }]);
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, refusal.Message, exception);
                 storage?.Dispose();
                 throw refusal;
@@ -688,26 +688,26 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 storage?.TakeOffline(StorageOfflineCause.RecoveryInterrupted, message, exception);
                 storage?.Dispose();
                 throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "COHDBD004", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06104", Message = message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Assimalign.Cohesion.Database.Indexing.IndexException exception)
             {
                 storage?.Dispose();
                 throw new DatabaseException(exception.Message, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (Documents.Catalog.DocumentCatalogException exception)
             {
                 storage?.Dispose();
                 throw new DatabaseException(exception.Message, [new Types.Diagnostic
-                { Code = "COHDBD005", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
+                { Code = "CD06105", Message = exception.Message, Severity = Types.DiagnosticSeverity.Error }], exception);
             }
             catch (StorageFormatException exception)
             {
                 // The storage refused the file set before recovery wrote anything; the refusal
                 // names the formats and the remedy, and this names the database.
                 storage?.Dispose();
-                throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogOpenFailed, name, exception.Message), exception);
             }
             catch
             {
@@ -733,8 +733,8 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
                 if (!found)
                 {
                     throw create
-                        ? new DatabaseException($"Database '{name}' already exists.")
-                        : new DatabaseNotFoundException($"Database '{name}' does not exist.");
+                        ? new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineGetDatabaseDatabase, name))
+                        : new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDropDatabaseCoreAsyncFailure, name));
                 }
             }
             else

@@ -83,7 +83,7 @@ public sealed partial class OqlQueryParser
         do
         {
             var token = Current;
-            if (paths.Count == 32) { Error("OQL0009", "An index supports at most 32 key paths.", token); break; }
+            if (paths.Count == 32) { Error("CD00009", ErrorMessages.OqlQueryParserParseCreateIndexVoid, token); break; }
             if (Is("ALL") || Is("DISTINCT"))
             {
                 string form = Is("ALL") ? "ALL array index key" : "DISTINCT ARRAY array index key";
@@ -101,7 +101,7 @@ public sealed partial class OqlQueryParser
             else { path = ParseDocumentPath(); }
             if (Failed) { break; }
             if (paths.Any(prior => prior.Segments.SequenceEqual(path.Segments)))
-            { Error("OQL0002", "Index key paths must be distinct.", token); break; }
+            { Error("CD00002", ErrorMessages.OqlQueryParserParseCreateIndexVoid2, token); break; }
             paths.Add(path);
         } while (Take(TokenType.Comma));
         if (!Failed) { Expect(TokenType.RightParen, "')'"); }

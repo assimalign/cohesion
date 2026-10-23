@@ -40,7 +40,7 @@ public sealed class StorageOpenFailureTests
 
         // Assert
         faults.RottenPageReads.ShouldBeGreaterThan(0);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06104");
         engine.TryGetDatabase("test", out _).ShouldBeFalse();
         var reopened = await engine.OpenDatabaseAsync("test", CancellationToken.None);
         await using var reader = await reopened.CreateSessionAsync(CancellationToken.None);

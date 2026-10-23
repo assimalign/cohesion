@@ -103,20 +103,20 @@ public sealed class DocumentUpsertTests
         failure.DocumentId.Value.ShouldBe(key);
         failure.Message.ShouldBe($"Document key '{key}' appears more than once in one statement.");
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC012");
+        diagnostic.Code.ShouldBe("CD03012");
         diagnostic.Message.ShouldBe(failure.Message);
         await AssertUnchangedAsync(items, session, before);
         (await items.GetAsync(session, "n", CancellationToken.None)).ShouldBeNull();
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UPSERT: invalid third rows preserve content, versions and indexes")]
-    [InlineData("NULL", "1", "COHDOC008")]
-    [InlineData("12", "1", "COHDOC008")]
-    [InlineData("'  '", "1", "COHDOC008")]
-    [InlineData("MISSING", "1", "COHDOC008")]
-    [InlineData("'z'", "MISSING", "COHDOC008")]
-    [InlineData("'z'", "$absent", "COHDOC005")]
-    [InlineData("'z'", "1e-29", "COHDOC007")]
+    [InlineData("NULL", "1", "CD02008")]
+    [InlineData("12", "1", "CD02008")]
+    [InlineData("'  '", "1", "CD02008")]
+    [InlineData("MISSING", "1", "CD02008")]
+    [InlineData("'z'", "MISSING", "CD02008")]
+    [InlineData("'z'", "$absent", "CD01005")]
+    [InlineData("'z'", "1e-29", "CD02007")]
     public async Task Execute_InvalidThirdRow_ShouldLeaveAutocommitSessionReusableAsync(string key, string value, string code)
     {
         // Arrange
@@ -162,7 +162,7 @@ public sealed class DocumentUpsertTests
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refusal = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await AssertUnchangedAsync(items, session, before);
@@ -224,7 +224,7 @@ public sealed class DocumentUpsertTests
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
             $"UPSERT INTO items ({header}) SELECT {projection} FROM items", cancellationToken: CancellationToken.None));
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         await AssertUnchangedAsync(items, session, before);
     }
 
@@ -358,18 +358,18 @@ public sealed class DocumentUpsertTests
         const string json = "JSON must be valid and nested no deeper than 128 levels.";
         (string Input, string Code, string Message)[] cases =
         [
-            ("(KEY, VALUE) VALUES (MISSING, 1)", "COHDOC008", "KEY must evaluate to a nonblank string."),
-            ("(KEY, VALUE) VALUES ('n', MISSING)", "COHDOC008", "VALUE must be a JSON value and cannot be MISSING."),
-            ("(KEY, VALUE) VALUES ('n', d.name)", "COHDOC001", context),
-            ("(KEY, VALUE) VALUES ('n', META().id)", "COHDOC001", context),
-            ("(KEY, VALUE) VALUES ('n', COUNT(*))", "COHDOC001", context),
-            ("(KEY absent) SELECT 'n' AS k FROM items", "COHDOC001", "binding 'absent' must name a SELECT output column."),
-            ("(KEY k, VALUE absent) SELECT 'n' AS k FROM items", "COHDOC001", "binding 'absent' must name a SELECT output column."),
-            ("(KEY, VALUE) VALUES ('n', $deep)", "COHDOC008", json),
-            ("(KEY, VALUE) VALUES ('n', {'v':$limit})", "COHDOC008", json),
-            ("(KEY, VALUE) VALUES ('n', [$limit])", "COHDOC008", json),
-            ("(KEY k, VALUE v) SELECT 'n' AS k, {'v':$limit} AS v FROM items", "COHDOC008", json),
-            ("(KEY k) SELECT 'n' AS k, $limit AS v FROM items", "COHDOC008", json),
+            ("(KEY, VALUE) VALUES (MISSING, 1)", "CD02008", "KEY must evaluate to a nonblank string."),
+            ("(KEY, VALUE) VALUES ('n', MISSING)", "CD02008", "VALUE must be a JSON value and cannot be MISSING."),
+            ("(KEY, VALUE) VALUES ('n', d.name)", "CD05001", context),
+            ("(KEY, VALUE) VALUES ('n', META().id)", "CD05001", context),
+            ("(KEY, VALUE) VALUES ('n', COUNT(*))", "CD05001", context),
+            ("(KEY absent) SELECT 'n' AS k FROM items", "CD05001", "binding 'absent' must name a SELECT output column."),
+            ("(KEY k, VALUE absent) SELECT 'n' AS k FROM items", "CD05001", "binding 'absent' must name a SELECT output column."),
+            ("(KEY, VALUE) VALUES ('n', $deep)", "CD02008", json),
+            ("(KEY, VALUE) VALUES ('n', {'v':$limit})", "CD02008", json),
+            ("(KEY, VALUE) VALUES ('n', [$limit])", "CD02008", json),
+            ("(KEY k, VALUE v) SELECT 'n' AS k, {'v':$limit} AS v FROM items", "CD02008", json),
+            ("(KEY k) SELECT 'n' AS k, $limit AS v FROM items", "CD02008", json),
         ];
         foreach (var test in cases)
         {
@@ -387,12 +387,12 @@ public sealed class DocumentUpsertTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UPSERT: input validation rejects unused invalid inputs before EXPLAIN or an empty SELECT")]
-    [InlineData(false, "$absent", "COHDOC005")]
-    [InlineData(true, "$absent", "COHDOC005")]
-    [InlineData(false, "$n", "COHDOC007")]
-    [InlineData(true, "$n", "COHDOC007")]
-    [InlineData(false, "1e-29", "COHDOC007")]
-    [InlineData(true, "1e-29", "COHDOC007")]
+    [InlineData(false, "$absent", "CD01005")]
+    [InlineData(true, "$absent", "CD01005")]
+    [InlineData(false, "$n", "CD02007")]
+    [InlineData(true, "$n", "CD02007")]
+    [InlineData(false, "1e-29", "CD02007")]
+    [InlineData(true, "1e-29", "CD02007")]
     public async Task Execute_UnusedInvalidInput_ShouldRejectBeforeExecutionAsync(bool explain, string operand, string code)
     {
         // Arrange

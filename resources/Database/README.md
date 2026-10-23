@@ -8,7 +8,7 @@ The multi-model OLTP database engine family for Cohesion: five independent datab
 including corruption wrapped in coded engine exceptions or an `AggregateException`. It names
 the database and affected page and retains the storage cause. When open is refused, an engine
 also includes its previous model diagnostic as an additional entry: Graph `COHDBG018`,
-Documents `COHDBD003`, and Blob `COHDBB004` retain their unrecoverable-files diagnosis. Existing
+Documents `CD06103`, and Blob `COHDBB004` retain their unrecoverable-files diagnosis. Existing
 coded diagnostics are preserved too. Wire consumers can recognize either the common corruption
 signal or the model code; a damaged read never becomes a successful result with data omitted.
 

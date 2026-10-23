@@ -15,22 +15,22 @@ public sealed class DocumentClientDiagnosticTests
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Rejections preserve carrier diagnostics and compose text once on both transports")]
     [InlineData(false, "\nMERGE INTO items", "CK00001", "MERGE", ProtocolErrorCode.ParseFailure)]
     [InlineData(true, "\nMERGE INTO items", "CK00001", "MERGE", ProtocolErrorCode.ParseFailure)]
-    [InlineData(false, "SELECT *\nFROM absent", "COHDOC002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "SELECT *\nFROM absent", "COHDOC002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(false, "CREATE COLLECTION \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "CREATE COLLECTION \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(false, "DROP COLLECTION IF EXISTS \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "DROP COLLECTION IF EXISTS \" \"", "COHDOC001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(false, "CREATE COLLECTION \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
-    [InlineData(true, "CREATE COLLECTION \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
-    [InlineData(false, "DROP COLLECTION IF EXISTS \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
-    [InlineData(true, "DROP COLLECTION IF EXISTS \"\"", "OQL0002", "\"\"", ProtocolErrorCode.ParseFailure)]
-    [InlineData(false, "SELECT\n n / 0 FROM items", "COHDOC006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "SELECT\n n / 0 FROM items", "COHDOC006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(false, "SELECT\n $missing FROM items", "COHDOC005", "$missing", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "SELECT\n $missing FROM items", "COHDOC005", "$missing", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(false, "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", "COHDOC004", "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", ProtocolErrorCode.ExecutionFailure)]
-    [InlineData(true, "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", "COHDOC004", "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "SELECT *\nFROM absent", "CD01002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "SELECT *\nFROM absent", "CD01002", "SELECT *\nFROM absent", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "CREATE COLLECTION \" \"", "CD05001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "CREATE COLLECTION \" \"", "CD05001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "DROP COLLECTION IF EXISTS \" \"", "CD05001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "DROP COLLECTION IF EXISTS \" \"", "CD05001", "\" \"", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "CREATE COLLECTION \"\"", "CD00002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(true, "CREATE COLLECTION \"\"", "CD00002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(false, "DROP COLLECTION IF EXISTS \"\"", "CD00002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(true, "DROP COLLECTION IF EXISTS \"\"", "CD00002", "\"\"", ProtocolErrorCode.ParseFailure)]
+    [InlineData(false, "SELECT\n n / 0 FROM items", "CD02006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "SELECT\n n / 0 FROM items", "CD02006", "n / 0", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "SELECT\n $missing FROM items", "CD01005", "$missing", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "SELECT\n $missing FROM items", "CD01005", "$missing", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(false, "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", "CD04004", "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData(true, "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", "CD04004", "CREATE INDEX ix ON COHESION_SCHEMA.OBJECT_OWNERSHIP(NAME)", ProtocolErrorCode.ExecutionFailure)]
     public async Task QueryAsync_CodedRejection_ShouldPreserveDiagnosticsAndSession(bool tcp, string statement,
         string code, string span, ProtocolErrorCode classification)
     {
@@ -112,10 +112,10 @@ public sealed class DocumentClientDiagnosticTests
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC004");
+        diagnostic.Code.ShouldBe("CD04004");
         diagnostic.Start.ShouldBeNull();
         diagnostic.End.ShouldBeNull();
-        failure.Message.ShouldBe($"COHDOC004: {diagnostic.Message}");
+        failure.Message.ShouldBe($"CD04004: {diagnostic.Message}");
         (await connection.GetCollectionsAsync(harness.Token)).ShouldBeEmpty();
     }
 

@@ -9,14 +9,14 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 /// <summary>
-/// Parse strictness (#1101): a stray character is one OQL0002 that binds nothing, a
+/// Parse strictness (#1101): a stray character is one CD00002 that binds nothing, a
 /// recognized-unsupported word is one CK00001 at its own span wherever a clause can start,
 /// and every statement form still rejects leftover text.
 /// </summary>
 public sealed class OqlParseStrictnessTests
 {
     /// <param name="marked">The statement; the stray character sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: a stray character is one OQL0002 at its span and binds nothing")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: a stray character is one CD00002 at its span and binds nothing")]
     [InlineData("SELECT * FROM people «^»")]
     [InlineData("SELECT * FROM people «#»;")]
     [InlineData("SELECT * FROM c WHERE c.a = «?»", true)]
@@ -36,7 +36,7 @@ public sealed class OqlParseStrictnessTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("OQL0002");
+        error.Code.ShouldBe("CD00002");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
         error.Message!.ShouldStartWith(parameterForm ? "Unsupported parameter form;" : "Unexpected character ", Case.Sensitive);
@@ -59,12 +59,12 @@ public sealed class OqlParseStrictnessTests
     }
 
     /// <summary>
-    /// Each used to fall through to OQL0002, or to bind a word as an alias and then fail at
+    /// Each used to fall through to CD00002, or to bind a word as an alias and then fail at
     /// the next token. Each is now one CK00001 at the word that names the construct.
     /// </summary>
     /// <param name="marked">The statement; the reported span sits between '«' and '»'.</param>
     /// <param name="construct">The construct the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one CK00001 and no OQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Strictness: SQL++ words report one CK00001 and no CD00002")]
     [InlineData("«MERGE» INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE")]
     [InlineData("SELECT c.fetch «first» FROM c", "FIRST")]
     [InlineData("SELECT c.limit «ALL» FROM c", "ALL")]
@@ -156,7 +156,7 @@ public sealed class OqlParseStrictnessTests
 
         // Assert: recovery reached the ~ from three rules and used to report it three times.
         var diagnostic = diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Code.ShouldBe("CD00002");
         diagnostic.Start.ShouldBe("SELECT ".Length);
         diagnostic.End.ShouldBe("SELECT ~".Length);
     }
@@ -187,7 +187,7 @@ public sealed class OqlParseStrictnessTests
         // Assert: the error is at the first token after the form, or after its ';'.
         bool terminated = separator.Contains(';', StringComparison.Ordinal);
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("OQL0002");
+        error.Code.ShouldBe("CD00002");
         error.Start.ShouldBe(terminated
             ? oql.IndexOf("extra", StringComparison.Ordinal)
             : form.Length + separator.Length - separator.TrimStart().Length);

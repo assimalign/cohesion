@@ -146,7 +146,7 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
         }
         if (remaining != 0)
         {
-            throw new StorageCorruptionException("Document chain ends before its catalog length.");
+            throw new StorageCorruptionException(ErrorMessages.StorageTombstoneContentAsyncFailure);
         }
     }
 

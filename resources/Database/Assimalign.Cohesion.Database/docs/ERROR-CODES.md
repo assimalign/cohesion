@@ -170,3 +170,49 @@ structured-carrier messages remain unprefixed.
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
+
+## Documents migration
+
+| Previous code | Code | Category |
+|---|---|---|
+| OQL0001 | CD00001 | Language/syntax |
+| OQL0002 | CD00002 | Language/syntax |
+| OQL0003 | CD00003 | Language/syntax |
+| OQL0004 | CD00004 | Language/syntax |
+| OQL0005 | CD00005 | Language/syntax |
+| OQL0006 | CD00006 | Language/syntax |
+| OQL0007 | CD00007 | Language/syntax |
+| OQL0008 | CD00008 | Language/syntax |
+| OQL0009 | CD00009 | Language/syntax |
+| OQL0010 | CD00010 | Language/syntax |
+| COHDOC002 | CD01002 | Binding/names |
+| COHDOC003 | CD01003 | Binding/names |
+| COHDOC005 | CD01005 | Binding/names |
+| COHDOC009 | CD01009 | Binding/names |
+| COHDOC014 | CD01014 | Binding/names |
+| COHDOC017 | CD01017 | Binding/names |
+| COHDOC023 | CD01023 | Binding/names |
+| COHDOC025 | CD01025 | Binding/names |
+| COHDOC006 | CD02006 | Values/types |
+| COHDOC007 | CD02007 | Values/types |
+| COHDOC008 | CD02008 | Values/types |
+| COHDOC013 | CD02013 | Values/types |
+| COHDOC016 | CD02016 | Values/types |
+| COHDOC018 | CD02018 | Values/types |
+| COHDOC019 | CD02019 | Values/types |
+| COHDOC021 | CD02021 | Values/types |
+| COHDOC026 | CD02026 | Values/types |
+| COHDOC010 | CD03010 | Schema/constraints |
+| COHDOC011 | CD03011 | Schema/constraints |
+| COHDOC012 | CD03012 | Schema/constraints |
+| COHDOC020 | CD03020 | Schema/constraints |
+| COHDOC022 | CD03022 | Schema/constraints |
+| COHDOC024 | CD03024 | Schema/constraints |
+| COHDOC004 | CD04004 | Transactions/locking |
+| COHDBD001 | CD04101 | Transactions/locking |
+| COHDOC001 | CD05001 | Execution/budgets |
+| COHDOC015 | CD05015 | Execution/budgets |
+| COHDBD002 | CD06102 | Storage/durability |
+| COHDBD003 | CD06103 | Storage/durability |
+| COHDBD004 | CD06104 | Storage/durability |
+| COHDBD005 | CD06105 | Storage/durability |

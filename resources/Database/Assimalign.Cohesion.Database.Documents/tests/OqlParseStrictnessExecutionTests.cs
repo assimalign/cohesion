@@ -24,10 +24,10 @@ public sealed class OqlParseStrictnessExecutionTests
     /// <param name="oql">A statement with a stray character or an unsupported SQL++ word.</param>
     /// <param name="code">The single error code it reports.</param>
     [Theory(DisplayName = "Cohesion Test [Documents] - Strictness: stray characters and SQL++ words fail at parse time and execute nothing")]
-    [InlineData("SELECT * FROM items ^", "OQL0002")]
-    [InlineData("SELECT * FROM items WHERE items.amount = ?", "OQL0002")]
-    [InlineData("SELECT ? FROM items", "OQL0002")]
-    [InlineData("CREATE INDEX by_name ON items (name) #", "OQL0002")]
+    [InlineData("SELECT * FROM items ^", "CD00002")]
+    [InlineData("SELECT * FROM items WHERE items.amount = ?", "CD00002")]
+    [InlineData("SELECT ? FROM items", "CD00002")]
+    [InlineData("CREATE INDEX by_name ON items (name) #", "CD00002")]
     [InlineData("MERGE INTO items", "CK00001")]
     [InlineData("MERGE INTO items USING other ON items.name = other.name WHEN MATCHED THEN DELETE", "CK00001")]
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string oql, string code)

@@ -180,7 +180,7 @@ internal sealed class DocumentWriteStream : Stream
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_failed)
         {
-            throw new InvalidOperationException("The document upload has failed and cannot be published.");
+            throw new InvalidOperationException(ErrorMessages.WriteStreamEnsureWritableFailure);
         }
     }
 
@@ -188,7 +188,7 @@ internal sealed class DocumentWriteStream : Stream
     {
         if (_context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("The document upload's transaction is no longer active.");
+            throw new InvalidOperationException(ErrorMessages.WriteStreamEnsureTransactionFailure);
         }
     }
 

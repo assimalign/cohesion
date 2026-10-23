@@ -68,7 +68,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlLikeExpression like => Like(like, document, group),
                 OqlCaseExpression conditional => Case(conditional, document, group),
                 OqlCallExpression call => Call(call, document, group),
-                _ => throw new DocumentPlanningException("COHDOC001", "The OQL expression is not executable."),
+                _ => throw new DocumentPlanningException("CD05001", ErrorMessages.ExpressionEvaluatorEvaluateFailure),
             };
         }
         catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
@@ -77,7 +77,7 @@ internal sealed partial class DocumentExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain.", expression.Location, exception);
+            throw new DocumentPlanningException("CD02007", ErrorMessages.ExpressionEvaluatorEvaluateFailure2, expression.Location, exception);
         }
     }
 
@@ -110,7 +110,7 @@ internal sealed partial class DocumentExpressionEvaluator
             case OqlParameterExpression parameter:
                 if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(parameter.Name), out var value))
                 {
-                    throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{parameter.Name}' has no value.", parameter.Location);
+                    throw new DocumentPlanningException("CD01005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorValidateInputsFailure, parameter.Name), parameter.Location);
                 }
                 if (value is JsonElement) { _ = Evaluate(parameter, default); }
                 break;
@@ -189,7 +189,7 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         if (_parameters is null || !_parameters.TryGetValue(ParameterBindings.BareName(name), out var value))
         {
-            throw new DocumentPlanningException("COHDOC005", $"OQL parameter '{name}' has no value.");
+            throw new DocumentPlanningException("CD01005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorValidateInputsFailure, name));
         }
         return value;
     }
@@ -266,7 +266,7 @@ internal sealed partial class DocumentExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            throw new DocumentPlanningException("COHDOC007", "OQL numbers must fit the decimal scalar domain.", innerException: exception);
+            throw new DocumentPlanningException("CD02007", ErrorMessages.ExpressionEvaluatorEvaluateFailure2, innerException: exception);
         }
     }
 
@@ -279,7 +279,7 @@ internal sealed partial class DocumentExpressionEvaluator
         float number when float.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         double number when double.IsFinite(number) => Convert.ToDecimal(number, CultureInfo.InvariantCulture),
         bool or string => value,
-        _ => throw new DocumentPlanningException("COHDOC008", "OQL parameters must be JSON scalars or JsonElement values."),
+        _ => throw new DocumentPlanningException("CD02008", ErrorMessages.EvaluatorNormalizeCoreFailure),
     };
 
     private static object? NormalizeJson(JsonElement json)
@@ -316,7 +316,7 @@ internal sealed partial class DocumentExpressionEvaluator
                     }
                     catch (JsonException exception)
                     {
-                        throw new DocumentPlanningException("COHDOC007", ErrorMessages.NumberOutsideDecimalDomain, innerException: exception);
+                        throw new DocumentPlanningException("CD02007", ErrorMessages.NumberOutsideDecimalDomain, innerException: exception);
                     }
                     break;
                 case JsonValueKind.Object:
@@ -363,9 +363,9 @@ internal sealed partial class DocumentExpressionEvaluator
             "+" => Number(left) + Number(right),
             "-" => Number(left) - Number(right),
             "*" => Number(left) * Number(right),
-            "/" => Number(right) == 0 ? throw new DocumentPlanningException("COHDOC006", "OQL division by zero.") : Number(left) / Number(right),
-            "%" => Number(right) == 0 ? throw new DocumentPlanningException("COHDOC006", "OQL remainder by zero.") : Number(left) % Number(right),
-            _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{expression.Operator}' is not executable."),
+            "/" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure) : Number(left) / Number(right),
+            "%" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure2) : Number(left) % Number(right),
+            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, expression.Operator)),
         };
     }
 
@@ -381,12 +381,12 @@ internal sealed partial class DocumentExpressionEvaluator
         "NOT" => Truth(value) is bool boolean ? !boolean : null,
         "+" => value is null ? null : Number(value),
         "-" => value is null ? null : -Number(value),
-        _ => throw new DocumentPlanningException("COHDOC001", $"OQL operator '{operation}' is not executable."),
+        _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, operation)),
     };
 
     private object? Aggregate(OqlCallExpression call, IReadOnlyList<DocumentEvaluationContext> group)
     {
-        if (call.Arguments.Count != 1) { throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' requires one argument."); }
+        if (call.Arguments.Count != 1) { throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorAggregateFailure, call.Name)); }
         if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (long)group.Count; }
         var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null and not DocumentMissing).ToArray();
         if (call.Name == "COUNT") { return (long)values.Length; }
@@ -397,12 +397,12 @@ internal sealed partial class DocumentExpressionEvaluator
             "AVG" => values.Average(value => Number(value!)),
             "MIN" => values.MinBy(value => value, ValueComparer.Instance),
             "MAX" => values.MaxBy(value => value, ValueComparer.Instance),
-            _ => throw new DocumentPlanningException("COHDOC001", $"OQL aggregate '{call.Name}' is not executable."),
+            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorAggregateFailure2, call.Name)),
         };
     }
 
     private static decimal Number(object value) => value switch { decimal number => number, long number => number,
-        _ => throw new DocumentPlanningException("COHDOC008", "OQL arithmetic requires numeric operands.") };
+        _ => throw new DocumentPlanningException("CD02008", ErrorMessages.ExpressionEvaluatorNumberFailure) };
     private static bool SameScalarKind(object left, object right) => Kind(left) == Kind(right) && Kind(left) is >= 1 and <= 3;
 
     // Total order for grouping and sorting. Predicates only compare ranges within
@@ -433,7 +433,7 @@ internal sealed partial class DocumentExpressionEvaluator
         string => 3,
         JsonElement { ValueKind: JsonValueKind.Array } => 4,
         JsonElement { ValueKind: JsonValueKind.Object } => 5,
-        _ => throw new DocumentPlanningException("COHDOC008", "Unsupported OQL value."),
+        _ => throw new DocumentPlanningException("CD02008", ErrorMessages.ExpressionEvaluatorKindFailure),
     };
 
     private static int CompareComposite(JsonElement left, JsonElement right)

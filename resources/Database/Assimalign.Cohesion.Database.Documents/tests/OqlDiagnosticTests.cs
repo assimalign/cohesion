@@ -54,7 +54,7 @@ public sealed class OqlDiagnosticTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC003");
+        diagnostic.Code.ShouldBe("CD01003");
         diagnostic.Start.ShouldBe(location!.Start);
         diagnostic.End.ShouldBe(location.End);
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);

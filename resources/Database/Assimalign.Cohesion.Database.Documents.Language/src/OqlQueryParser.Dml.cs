@@ -34,7 +34,7 @@ public sealed partial class OqlQueryParser
         RejectDmlUnnest();
         if (!Failed && assignments.Count == 0 && unset.Count == 0)
         {
-            Error("OQL0002", "UPDATE requires at least one SET assignment or UNSET path.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseUpdateVoid, Current);
         }
         OqlExpression? predicate = !Failed && Take("WHERE") ? ParseExpression() : null;
         RejectDmlUnnest();
@@ -102,7 +102,7 @@ public sealed partial class OqlQueryParser
         string? valueName = null;
         if (!Take(TokenType.LeftParen))
         {
-            Error("OQL0002", $"{verb} requires an explicit KEY header; document ids are not generated.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseWriteVoid, verb), Current);
             return Build([], null);
         }
         Expect("KEY");
@@ -148,7 +148,7 @@ public sealed partial class OqlQueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT after the KEY output binding.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseWriteVoid2, Current);
         }
         return Build(values.AsReadOnly(), select);
 

@@ -96,7 +96,7 @@ internal static partial class DocumentPlanExecutor
             {
                 DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, writeVerb: verb).ConfigureAwait(false),
                 DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, writeVerb: verb),
-                _ => throw new DocumentPlanningException("COHDOC001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location),
+                _ => throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), statement.Location),
             });
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -128,11 +128,11 @@ internal static partial class DocumentPlanExecutor
         {
             if (key is not string text || string.IsNullOrWhiteSpace(text))
             {
-                throw new DocumentPlanningException("COHDOC008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteKeyInvalid, verb), statement.Location);
+                throw new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteKeyInvalid, verb), statement.Location);
             }
             if (value is DocumentMissing)
             {
-                throw new DocumentPlanningException("COHDOC008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValueMissing, verb), statement.Location);
+                throw new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValueMissing, verb), statement.Location);
             }
             var id = new DocumentId(text);
             if (!keys.Add(text)) { throw DocumentDuplicateKeyException.RepeatedInStatement(metadata.Name, id); }
@@ -144,7 +144,7 @@ internal static partial class DocumentPlanExecutor
             }
             catch (Exception exception) when (exception is JsonException or InvalidOperationException)
             {
-                throw new DocumentPlanningException("COHDOC008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, verb), statement.Location, exception);
+                throw new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, verb), statement.Location, exception);
             }
             pending.Add((id, content));
         }

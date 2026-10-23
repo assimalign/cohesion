@@ -91,6 +91,6 @@ internal sealed class DocumentQueryResult : DatabaseResultSet
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => GetValue(ordinal) ?? throw new DatabaseException($"Field {ordinal} is null.");
+        private object Required(int ordinal) => GetValue(ordinal) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentQueryRowRequiredDatabase, ordinal));
     }
 }

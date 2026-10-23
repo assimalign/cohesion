@@ -70,7 +70,7 @@ public sealed class DocumentCollectionDdlWireTests
         var operation = scenario == "duplicate" ? DocumentProtocolOperation.CreateCollection : DocumentProtocolOperation.DropCollection;
         string statement = "-- DDL\n" + (scenario == "duplicate" ? "CREATE COLLECTION " :
             scenario == "locked-conditional" ? "DROP COLLECTION IF EXISTS " : "DROP COLLECTION ") + name + ";";
-        string code = scenario == "duplicate" ? "COHDOC010" : locked ? "COHDOC011" : "COHDOC002";
+        string code = scenario == "duplicate" ? "CD03010" : locked ? "CD03011" : "CD01002";
         var original = await Should.ThrowAsync<DatabaseException>(async () =>
         {
             if (oql) { await embedded.ExecuteAsync(statement, cancellationToken: token); }

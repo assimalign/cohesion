@@ -73,7 +73,7 @@ public sealed class ChildRootFailureWireTests
         // Assert
         embedded.PageId.ShouldBe((PageId)child);
         embedded.InnerException.ShouldBeOfType<IndexCorruptionException>().PageId.ShouldBe(child);
-        embedded.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "COHDBD005"]);
+        embedded.Diagnostics.Select(d => d.Code).ShouldBe(["CK06003", "CK06102", "CD06105"]);
         frame.Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Failure);
         var failure = DocumentProtocolFailureMessage.Decode(frame.Payload.Span);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
@@ -116,10 +116,10 @@ public sealed class ChildRootFailureWireTests
 
         // Assert
         attempts.ShouldBe(2);
-        embedded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004");
+        embedded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06104");
         embedded.InnerException.ShouldBeSameAs(cause);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD004");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD06104");
         await SendAsync(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute,
             new DocumentProtocolExecuteMessage("CREATE COLLECTION after", "{}"u8.ToArray()).Encode(), token);
         (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull().Type.ShouldBe((ProtocolMessageType)DocumentProtocolMessageType.Complete);

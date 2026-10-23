@@ -91,7 +91,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
 outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+(`COHDBG018`, `CD06103` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 
@@ -437,7 +437,7 @@ undoes a writer only as a whole transaction, with no savepoints. Until #1225 the
 dropped the rolled-back transaction from view, so the next operation silently ran in autocommit
 and the caller's `RollbackAsync` threw. The session now follows the contract the Graph engine set
 in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
-with its own code, `COHDBB001`; the Documents engine follows the same contract with `COHDBD001`,
+with its own code, `COHDBB001`; the Documents engine follows the same contract with `CD04101`,
 and its [DESIGN.md](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#failed-statements-in-explicit-transactions-1225)
 records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines follow.
 

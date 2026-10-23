@@ -78,7 +78,7 @@ internal static class DocumentIndexKeys
             tag = 4;
             writer.AppendDecimal(Convert.ToDecimal(value, CultureInfo.InvariantCulture));
         }
-        else { throw new ArgumentException("Index bounds require a boolean, decimal, integer, or string.", nameof(value)); }
+        else { throw new ArgumentException(ErrorMessages.DocumentIndexKeysEncodeArgument, nameof(value)); }
         var payload = IndexKey.From(writer).Encoded;
         var encoded = new byte[payload.Length + 1];
         encoded[0] = tag;
@@ -130,7 +130,7 @@ internal static class DocumentIndexKeys
             }
             else
             {
-                throw new ArgumentException("Malformed index path separator.", nameof(path));
+                throw new ArgumentException(ErrorMessages.DocumentIndexKeysParsePathArgument, nameof(path));
             }
         }
         return parts;
@@ -146,7 +146,7 @@ internal static class DocumentIndexKeys
             }
             if (cursor == start)
             {
-                throw new ArgumentException("An index path requires nonempty field names.", nameof(path));
+                throw new ArgumentException(ErrorMessages.DocumentIndexKeysParsePathArgument2, nameof(path));
             }
             parts.Add(path[start..cursor]);
         }
@@ -175,9 +175,9 @@ internal static class DocumentIndexKeys
                     parts.Add(name.ToString());
                     return;
                 }
-                throw new ArgumentException("Quoted index path properties require doubled apostrophes and a closing bracket.", nameof(path));
+                throw new ArgumentException(ErrorMessages.DocumentIndexKeysParsePathArgument3, nameof(path));
             }
-            throw new ArgumentException("Quoted index path properties require a closing apostrophe and bracket.", nameof(path));
+            throw new ArgumentException(ErrorMessages.DocumentIndexKeysParsePathArgument4, nameof(path));
         }
 
         void ReadArrayIndex()
@@ -190,7 +190,7 @@ internal static class DocumentIndexKeys
             if (cursor == start || cursor == path.Length || path[cursor] != ']'
                 || !int.TryParse(path.AsSpan(start, cursor - start), NumberStyles.None, CultureInfo.InvariantCulture, out int index))
             {
-                throw new ArgumentException("Index array subscripts require a nonnegative Int32.", nameof(path));
+                throw new ArgumentException(ErrorMessages.DocumentIndexKeysParsePathArgument5, nameof(path));
             }
             parts.Add(index);
             cursor++;

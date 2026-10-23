@@ -88,7 +88,7 @@ public sealed class DocumentInsertTests
             new Dictionary<string, object?> { ["doc"] = json.RootElement }, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC008");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02008");
         failure.InnerException.ShouldBeOfType<JsonException>();
         (await RowsAsync(session, "SELECT * FROM items")).ShouldBeEmpty();
     }
@@ -142,7 +142,7 @@ public sealed class DocumentInsertTests
         duplicate.CollectionName.ShouldBe("items");
         duplicate.DocumentId.ShouldBe(new DocumentId("a"));
         duplicate.Message.ShouldBe("Collection 'items' already contains document key 'a'.");
-        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC012");
+        duplicate.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03012");
         (await RowsAsync(session, "SELECT META().id, META().version FROM items")).SelectMany(row => row).ShouldBe(before.SelectMany(row => row));
         (await items.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
     }

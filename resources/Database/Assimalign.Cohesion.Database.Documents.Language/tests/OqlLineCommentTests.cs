@@ -81,7 +81,7 @@ public sealed class OqlLineCommentTests
         var statement = Parse(oql);
 
         // Assert
-        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0002");
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00002");
     }
 
     /// <summary>

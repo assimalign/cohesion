@@ -71,8 +71,8 @@ internal static class DocumentJsonValue
 
     private static DocumentPlanningException Depth(string constructor, string? writeVerb, Exception exception)
         => writeVerb is not null
-            ? new DocumentPlanningException("COHDOC008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, writeVerb), innerException: exception)
-            : new DocumentPlanningException("COHDOC015", string.Format(CultureInfo.CurrentCulture,
+            ? new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, writeVerb), innerException: exception)
+            : new DocumentPlanningException("CD05015", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.SelectConstructorDepthExceeded, constructor), innerException: exception);
 
     internal static void Write(Utf8JsonWriter writer, object? value, string? writeVerb = null)
@@ -85,7 +85,7 @@ internal static class DocumentJsonValue
             case long number: writer.WriteNumberValue(number); break;
             case string text: writer.WriteStringValue(text); break;
             case JsonElement json: json.WriteTo(writer); break;
-            default: throw new DocumentPlanningException("COHDOC008", writeVerb is null ? ErrorMessages.JsonScalarInvalid :
+            default: throw new DocumentPlanningException("CD02008", writeVerb is null ? ErrorMessages.JsonScalarInvalid :
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValueMissing, writeVerb));
         }
     }

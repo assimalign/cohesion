@@ -52,7 +52,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
 outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+(`COHDBG018`, `CD06103` and `COHDBB004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 Lifecycle translation removes an existing `CK06003` from the carried diagnostics before
@@ -240,7 +240,7 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   to keep (PostgreSQL holds interrupts through `AbortTransaction`). A
   transaction that did not commit accepts any number of rollbacks; a commit ends it whatever its
   outcome, and one after an abort completes the rollback and fails with the model's coded error
-  (`COHDBG007`, `COHDBD001`, `COHDBB001`, `COHDBK001` in the models' vocabularies; SQL, which
+  (`COHDBG007`, `CD04101`, `COHDBB001`, `COHDBK001` in the models' vocabularies; SQL, which
   never aborts, refuses work on a transaction the kernel ended with `CS04005`). `State`
   reports `Faulted` while an operation's failure or the kernel ended the transaction under its
   caller, until the caller ends it. A commit is refused while an operation of the transaction
@@ -993,7 +993,7 @@ or data files: the storage stopped writing (the storage's `StorageOfflineExcepti
 `DatabaseEngine.OpenDatabaseAsync` reopens it and recovery decides the unconfirmed
 commit — PostgreSQL's `PANIC` on a failed WAL fsync, scoped to one database instead of
 the process. Its `Diagnostics` carry the model code (also exposed by the existing `Code` getter): `CS04004`,
-`COHDBK002`, `COHDBD002`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
+`COHDBK002`, `CD06102`, `COHDBG012`, `COHDBB002`. Every wire server reports it as
 `Unavailable`. `DatabaseOfflineException.Create` builds it from the storage error, and its
 message names what failed from the storage's typed `StorageOfflineException.Cause`
 (`JournalFlush`, `DataFlush`, `HeaderWrite` for a device operation; `CheckpointFailures`,
@@ -1334,7 +1334,7 @@ original inner exception survives. The existing `DatabaseOfflineException.Code` 
 no nullable Code property is added to DatabaseException and no public signature changes.
 Servers compose the legacy wire error prefix once and emit the existing negotiated diagnostic
 frame. There is no storage-format or protocol-version change. The model codes remain
-CS04004, COHDBK002, COHDBD002, COHDBG012 and COHDBB002. SQL division by zero remains
+CS04004, COHDBK002, CD06102, COHDBG012 and COHDBB002. SQL division by zero remains
 CS02001 / SQLSTATE 22012; Graph syntax remains GQL0008. Error locations come from the
 existing carriers and are not synthesized by tracing.
 

@@ -115,7 +115,7 @@ public sealed partial class DocumentQueryTests
         var error = await Should.ThrowAsync<DocumentConstraintViolationException>(async () =>
             await PutAsync(collection, session, "two", "{\"a\":1.00,\"b\":2}"));
         error.IndexName.ShouldBe("uq"); error.CollectionName.ShouldBe("items"); error.SqlState.ShouldBe("23505");
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC020");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03020");
         await PutAsync(collection, session, "one", "{\"a\":1,\"b\":2}");
         foreach (string json in new[] { "{}", "{\"a\":1}", "{\"a\":null,\"b\":2}", "{\"a\":1,\"b\":null}" })
         {
@@ -125,7 +125,7 @@ public sealed partial class DocumentQueryTests
         foreach (string json in new[] { "{\"a\":1,\"b\":[]}", "{\"a\":{},\"b\":2}" })
         {
             var shape = await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await PutAsync(collection, session, "bad", json));
-            shape.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC021");
+            shape.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02021");
             shape.Message.ShouldContain("uq"); shape.Path.ShouldNotBeNull();
         }
         await using (var transaction = await session.BeginTransactionAsync())
@@ -138,7 +138,7 @@ public sealed partial class DocumentQueryTests
         {
             await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await PutAsync(collection, session, "bad", "{\"a\":1,\"b\":2}"));
             var aborted = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items"));
-            aborted.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+            aborted.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         await session.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS uq ON items (other)");
@@ -173,7 +173,7 @@ public sealed partial class DocumentQueryTests
         detail.Single(row => row.GetString(2) == "IndexSeek").GetString(5).ShouldBe("a = 1 AND b = 2 AND c <= 3; estimate_kind=exact_index_entries; probe_entries=0; probe_pages=1");
         var cap = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync($"CREATE INDEX too_wide ON items ({string.Join(',', Enumerable.Range(0,33).Select(i => "p" + i))})"));
-        cap.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0009");
+        cap.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00009");
     }
     [Fact(DisplayName = "Cohesion Test [Documents] - UNIQUE DML failures roll back every index and document (#1135)")]
     public async Task Execute_MultirowUniqueViolation_ShouldRollbackWholeStatementAsync()
@@ -226,7 +226,7 @@ public sealed partial class DocumentQueryTests
             await session.ExecuteAsync("DROP INDEX ix ON items");
             await PutAsync(collection, session, "a", "{\"a\":1,\"b\":" + value + "}");
             var error = await Should.ThrowAsync<DocumentConstraintViolationException>(async () => await session.ExecuteAsync("CREATE UNIQUE INDEX ix ON items (a,b)"));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC021");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02021");
             (await RowsAsync(session, "SELECT * FROM COHESION_SCHEMA.INDEXES")).ShouldBeEmpty();
             await session.ExecuteAsync("CREATE INDEX ix ON items (a,b)");
         }
@@ -262,7 +262,7 @@ public sealed partial class DocumentQueryTests
         var path = new OqlPathExpression([new("a",null)]);
         var invalid = new OqlCreateIndexExpression("wide", "items", Enumerable.Repeat(path,33).ToArray(), false, false);
         var cap = Should.Throw<DatabaseException>(() => new DocumentPlanner(database.Catalog, context.Snapshot, null).Plan(invalid));
-        cap.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC022");
+        cap.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD03022");
     }
 
 }

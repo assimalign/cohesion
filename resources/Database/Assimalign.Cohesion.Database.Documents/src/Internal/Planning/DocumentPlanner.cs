@@ -54,7 +54,7 @@ internal sealed partial class DocumentPlanner
         OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-        _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),
+        _ => throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanFailure, expression.Location),
     };
 
     internal DocumentPlan Plan(OqlSelectExpression query)
@@ -97,7 +97,7 @@ internal sealed partial class DocumentPlanner
                 }
             }
         }
-        throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing, location);
+        throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing, location);
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
@@ -105,15 +105,15 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollections.EnsureReadOnly(create.Collection, create.Location);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
-            throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanCreateIndexFailure, create.Location);
         }
 
         if (create.Paths.Count is < 1 or > 32)
-        { throw new DocumentPlanningException("COHDOC022", ErrorMessages.IndexPathCount, create.Location); }
+        { throw new DocumentPlanningException("CD03022", ErrorMessages.IndexPathCount, create.Location); }
         var paths = create.Paths.Select(path => IndexPath(path, alias: null)
-            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", path.Location)).ToArray();
+            ?? throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentPlannerPlanCreateIndexFailure2, create.IndexName), path.Location)).ToArray();
         if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
-        { throw new DocumentPlanningException("COHDOC001", ErrorMessages.IndexPathsDuplicate, create.Location); }
+        { throw new DocumentPlanningException("CD05001", ErrorMessages.IndexPathsDuplicate, create.Location); }
         return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, paths, create.IsUnique, create.IfNotExists);
     }
 
@@ -122,7 +122,7 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollections.EnsureReadOnly(drop.Collection, drop.Location);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
-            throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanDropIndexFailure, drop.Location);
         }
 
         return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName, drop.IfExists);
@@ -132,11 +132,11 @@ internal sealed partial class DocumentPlanner
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new DocumentPlanningException("COHDOC001", "An OQL statement requires a collection name.", location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerResolveCollectionFailure, location);
         }
 
         return _catalog.FindCollection(name, _snapshot)
-            ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
+            ?? throw new DocumentPlanningException("CD01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name), location);
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default,
@@ -150,9 +150,9 @@ internal sealed partial class DocumentPlanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(binding.Variable))
-            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameMissing, binding.Location); }
+            { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, binding.Location); }
             if (!variables!.Add(binding.Variable))
-            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameDuplicate, binding.Location); }
+            { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameDuplicate, binding.Location); }
             Validate(binding.Collection, allowAggregate: false);
             ValidateMetadata(binding.Collection, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
@@ -162,11 +162,11 @@ internal sealed partial class DocumentPlanner
             cancellationToken.ThrowIfCancellationRequested();
             ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
-        if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
+        if (query.Projections.Count == 0) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure, query.Location); }
         if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
             query.Projections[0].Expression is OqlStarExpression))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.ValueProjectionInvalid, query.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.ValueProjectionInvalid, query.Location);
         }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
@@ -185,7 +185,7 @@ internal sealed partial class DocumentPlanner
             Validate(query.Predicate, allowAggregate: false);
         }
         foreach (var key in query.GroupBy) { Validate(key, allowAggregate: false); }
-        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("COHDOC001", "OQL HAVING requires grouping or an aggregate.", query.Having.Location); }
+        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure2, query.Having.Location); }
         var projections = new List<DocumentProjection>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var projection in query.Projections)
@@ -203,7 +203,7 @@ internal sealed partial class DocumentPlanner
             };
             if (!names.Add(name))
             {
-                throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
+                throw new DocumentPlanningException("CD01003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerCreateLogicalPlanFailure3, name), projection.Expression.Location);
             }
             projections.Add(new DocumentProjection(name, projection.Expression, StaticType(projection.Expression)));
         }
@@ -217,7 +217,7 @@ internal sealed partial class DocumentPlanner
             if (query.IsDistinct && !query.Projections.Any(projection =>
                 EquivalentExpression(projection.Expression, order.Expression, query.Alias, unnestVariables, scopes!)))
             {
-                throw new DocumentPlanningException("COHDOC014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
+                throw new DocumentPlanningException("CD01014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
             Validate(order.Expression, allowAggregate: true);
             if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!); }
@@ -478,7 +478,7 @@ internal sealed partial class DocumentPlanner
                 (!function.IsAggregate || allowAggregate):
                 if (!function.AcceptsArity(call.Arguments.Count))
                 {
-                    throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid, call.Location);
+                    throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid, call.Location);
                 }
                 for (int i = 0; i < call.Arguments.Count; i++)
                 {
@@ -487,7 +487,7 @@ internal sealed partial class DocumentPlanner
                 }
                 return;
             default:
-                throw new DocumentPlanningException("COHDOC001", "The expression is not valid in this OQL planning context.", expression.Location);
+                throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateFailure, expression.Location);
         }
     }
 
@@ -534,7 +534,7 @@ internal sealed partial class DocumentPlanner
             return;
         }
         if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query, variables, scopes, bound); return; }
-        throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
+        throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateGroupedFailure, expression.Location);
     }
 
     private static bool IsVariablePath(OqlPathExpression path, IReadOnlySet<string>? variables)
