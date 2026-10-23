@@ -361,10 +361,10 @@ describes.
 
 Snapshot and ReadCommitted isolation are supported. ReadCommitted captures and pins a statement
 snapshot, so metadata and each hop of a traversal share a visibility horizon. Serializable is
-rejected rather than silently weakened. Explicit transactions use the existing session API;
-GQL transaction-control syntax is outside the profile. Wire transactions are deliberately deferred:
-`BEGIN`/`COMMIT`/`ROLLBACK` do not parse and reserved `Transaction` byte 9 is rejected with
-`ProtocolViolation`. No connection-level transaction API is exposed. Results materialize before
+rejected rather than silently weakened. Explicit transactions use the session API or ISO text
+`START TRANSACTION`, `COMMIT` and `ROLLBACK` over Execute (#1540, D5). Text START uses Snapshot.
+`BEGIN` remains outside the GQL profile, and reserved `Transaction` byte 9 is still rejected with
+`ProtocolViolation`. Results materialize before
 the statement transaction is released, so result iteration cannot race record reclamation.
 Statement pins use `TransactionCoordinator.BeginSnapshotPinAsync` (#1351), retaining their
 manager registration, fixed snapshot and existing rollback/disposal release paths. Pins remain
@@ -505,8 +505,8 @@ and the explicit transaction stays active with its earlier writes, as
 [Unknown labels and relationship types in reads](#unknown-labels-and-relationship-types-in-reads-1228)
 describes.
 
-The graph protocol has no transaction control, so a wire session runs inside an explicit
-transaction only when its host opens one on the server session's engine session
+A wire session starts an explicit transaction through START TRANSACTION on Execute, or its
+host can open one through the server session's engine session
 (`DatabaseServerSession.DatabaseSession`, through `GraphDatabaseServer.Sessions`). The server hands
 parsing and request validation to
 that engine session, so a parse failure or an entity projection on `Execute` aborts the
@@ -2719,3 +2719,20 @@ engine diagnostic sequence remains COHDBS003, COHDBG018, COHDBG017. Earlier form
 before scrub writes any file. The original prefix-dependent implementation lost COHDBG017 after
 location was added (four full-suite failures); the revised format regression requires the same
 complete codes plus structured physical context and byte-identical files.
+
+## Explicit transaction text (#1540, D5)
+
+START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
+existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+statement composition and EXPLAIN of transaction controls remain outside this profile.
+A failed statement aborts the transaction; subsequent work is refused with COHDBG007 until
+ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
+uses COHDBG022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction
+uses COHDBG023. ExecutePaths refuses controls with COHDBG001 before any control takes effect.
+Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
+also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
+The server owns the connection's existing transaction, following Neo4j's
+community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
+(local Neo4j clone). No code is copied, and no transaction wire message is added.

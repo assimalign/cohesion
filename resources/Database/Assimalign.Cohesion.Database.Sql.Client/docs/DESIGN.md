@@ -278,11 +278,9 @@ exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
 documents and enforces this boundary by faulting its scope/store and refusing replay;
 see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
 
-**Known gap (#1540):** end or roll back an explicit transaction before disposing a connection.
-The pool currently preserves unfinished transaction state, which the next renter can inherit.
-Server-reported transaction status and rollback on pool return belong to #1540 (and P8 #1264).
-The skipped `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` regression
-records that required behavior. A disposed core lease rejects SQL extension calls permanently,
+**Pool reset (#1540):** negotiated server status certifies a clean session. Return rolls back
+an unfinished transaction before pooling; reset failure or legacy status support discards the
+connector. `DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental` is enabled. A disposed core lease rejects SQL extension calls permanently,
 even when its authenticated session is rented again.
 
 In-process sessions carry engine codes in `DatabaseException.Diagnostics` (#1103).
@@ -545,3 +543,12 @@ No client API or protocol format changes are needed.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.

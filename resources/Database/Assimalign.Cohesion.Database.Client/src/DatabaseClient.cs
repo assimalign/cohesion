@@ -228,7 +228,8 @@ public sealed class DatabaseClient : IAsyncDisposable
     {
         try
         {
-            if (Volatile.Read(ref _isDisposed) == 0 && connection.IsOpen)
+            if (Volatile.Read(ref _isDisposed) == 0 && connection.IsOpen &&
+                await connection.ResetAsync().ConfigureAwait(false))
             {
                 // Written before the push, so a rental of the pooled connection is never traced first.
                 DatabaseClientEventSource.Log.ConnectionReturned(connection, pooled: true);

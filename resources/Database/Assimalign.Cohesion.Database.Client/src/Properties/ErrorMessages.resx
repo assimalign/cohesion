@@ -8,4 +8,6 @@
   <data name="ConnectionNotOpen" xml:space="preserve"><value>The connection is not open.</value></data>
   <data name="ResponseReadClosed" xml:space="preserve"><value>The connection closed while reading a response.</value></data>
   <data name="TerminalFrameUnexpected" xml:space="preserve"><value>Expected a terminal error before a new exchange but received {0}.</value></data>
+  <data name="TransactionStatusMissing" xml:space="preserve"><value>The server did not complete Execute with a transaction-status Ready frame.</value></data>
+  <data name="TransactionResetInvalid" xml:space="preserve"><value>The server did not acknowledge transaction rollback with an empty successful result.</value></data>
 </root>

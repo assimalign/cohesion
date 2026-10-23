@@ -38,8 +38,9 @@ completion warnings, including COHDBG010 for an unknown label. Each result is en
 
 Dispose each connection to return a healthy authenticated session to the pool, and dispose the
 client to close the pool. Scalar parse/execution failures and terminal path rejections before any
-path output retain the session; later path failures discard it. Explicit transactions are not exposed:
-BEGIN/COMMIT/ROLLBACK and the reserved Transaction message are unsupported.
+path output retain the session; later path failures discard it. Execute accepts START TRANSACTION,
+COMMIT and ROLLBACK. Negotiated server status makes pool return roll back unfinished transactions.
+BEGIN and the reserved Transaction message remain unsupported.
 
 Parameters use scalar components, or GraphValueCodec when graph.composite-values is negotiated, and bind `$name` or `@name` in property maps, WHERE
 operands and RETURN expressions. Bare names match case-sensitively after removing one sigil; runtime scalar types are

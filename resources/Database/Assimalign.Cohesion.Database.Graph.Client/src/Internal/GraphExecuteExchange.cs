@@ -25,7 +25,7 @@ internal sealed class GraphExecuteExchange
     /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
     /// <param name="compositeValues">Whether the session negotiated composite value framing.</param>
     public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters, bool compositeValues = false)
-        : base(GraphProtocol.Family)
+        : base(GraphProtocol.Family, transactionStatus: true)
     {
         _compositeValues = compositeValues;
         _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);

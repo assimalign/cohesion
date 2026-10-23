@@ -7543,3 +7543,12 @@ repository under Temp/Wave11SqlCostProbe and Temp/wave11-1522-probe-*. The final
 and its hashes are -after-final.jsonl and -final-hashes.json; earlier after data precedes a
 comment-only cleanup and is retained as superseded evidence. The stored-query Release guard
 remains 4280 B/query in three runs, below its unchanged 4293.296 bound.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.

@@ -41,10 +41,22 @@ public abstract class DatabaseProtocolExchange<TResult>
     /// clients as well as here.
     /// </remarks>
     protected DatabaseProtocolExchange(ProtocolMessageFamily family)
+        : this(family, false)
+    {
+    }
+
+    /// <summary>Initializes an exchange that optionally ends with the negotiated Execute status postamble.</summary>
+    /// <param name="family">The exact message family required by this operation.</param>
+    /// <param name="transactionStatus">True for Execute exchanges; false for operations such as Ping.</param>
+    /// <exception cref="ArgumentNullException">The family is null.</exception>
+    protected DatabaseProtocolExchange(ProtocolMessageFamily family, bool transactionStatus)
     {
         ArgumentNullException.ThrowIfNull(family);
         Family = family;
+        ExpectsTransactionStatus = transactionStatus;
     }
+
+    internal bool ExpectsTransactionStatus { get; }
 
     /// <summary>Gets the exact family instance required by this operation.</summary>
     /// <remarks>A connection bound to another instance rejects the exchange before it sends any bytes,

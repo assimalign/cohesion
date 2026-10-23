@@ -122,4 +122,7 @@
   <data name="QueryMemoryBudgetExceeded" xml:space="preserve"><value>The query exceeded its retained execution-memory budget of {0} bytes.</value></data>
   <data name="QueryLimitsInvalid" xml:space="preserve"><value>Query memory and work limits must be positive and must not exceed the engine ceilings.</value></data>
   <data name="QueryBudgetOptionInvalid" xml:space="preserve"><value>COHDBG021: Query budget ceilings must be positive.</value></data>
+  <data name="TransactionPathsInvalid" xml:space="preserve"><value>Transaction control requires Execute, not ExecutePaths.</value></data>
+  <data name="TransactionAlreadyOpen" xml:space="preserve"><value>START TRANSACTION requires a session without an open transaction.</value></data>
+  <data name="TransactionNotOpen" xml:space="preserve"><value>COMMIT and ROLLBACK require an open transaction.</value></data>
 </root>

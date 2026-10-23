@@ -140,4 +140,7 @@ public sealed class GqlQueryExpression : GqlExpression
     public GqlExpression? Limit { get; init; }
     /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>
     public GqlCatalogSurface? CatalogSurface { get; init; }
+
+    /// <summary>Gets the transaction command, or None for an ordinary statement.</summary>
+    public GqlTransactionCommand TransactionCommand { get; internal init; }
 }

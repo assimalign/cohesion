@@ -246,8 +246,8 @@ public sealed class GraphClientWireTests
     [InlineData("MATCH (a) RETURN b.name", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("MATCH (a) RETURN a", ProtocolErrorCode.ExecutionFailure)]
     [InlineData("BEGIN", ProtocolErrorCode.ParseFailure)]
-    [InlineData("COMMIT", ProtocolErrorCode.ParseFailure)]
-    [InlineData("ROLLBACK", ProtocolErrorCode.ParseFailure)]
+    [InlineData("COMMIT", ProtocolErrorCode.ExecutionFailure)]
+    [InlineData("ROLLBACK", ProtocolErrorCode.ExecutionFailure)]
     public async Task QueryAsync_StatementFailure_ShouldReuseExactSession(string statement, ProtocolErrorCode code)
     {
         // Arrange

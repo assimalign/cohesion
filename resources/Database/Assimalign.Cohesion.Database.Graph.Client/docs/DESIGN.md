@@ -90,7 +90,7 @@ writer admission with COHDBG016. No codec, capability or frame changes are intro
 The static Execute gate rejects nodes/edges/relationships/startNode/endNode entity outputs before
 mutations, including when wrapped in lists/CASE or accessed to an entity. Scalar fields through
 them are supported. A mandatory LET s=startNode(r) can be projected as a bare entity through
-QueryPathsAsync. Graph wire has no explicit transactions; datetime functions therefore share
+QueryPathsAsync. Graph wire explicit transactions preserve one datetime instant; autocommit functions share
 one captured UTC instant per statement. Their date/instant values sort without numeric coercion.
 Function and CAST value failures, including floating underflow, arrive as COHDBG013 ExecutionFailure
 before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
@@ -242,8 +242,8 @@ through GraphDatabaseServer over Connections.InMemory without a codec change.
 
 GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
-Graph transactions remain a deliberate limit: there are no connection transaction members;
-BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. Mutations retain
+Graph transaction control uses Execute text START TRANSACTION, COMMIT and ROLLBACK;
+BEGIN and the reserved Transaction message remain unsupported. Mutations retain
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
 
@@ -358,3 +358,24 @@ COHDBP001 reports diagnostic overflow without turning successful reads into fail
 ## Linear composition (#1145)
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.
+
+## Explicit transaction text (#1540, D5)
+
+START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
+existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+statement composition and EXPLAIN of transaction controls remain outside this profile.
+A failed statement aborts the transaction; subsequent work is refused with COHDBG007 until
+ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
+uses COHDBG022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction
+uses COHDBG023. ExecutePaths refuses controls with COHDBG001 before any control takes effect.
+Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
+also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
+The server owns the connection's existing transaction, following Neo4j's
+community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
+(local Neo4j clone). No code is copied, and no transaction wire message is added.
+
+The twenty-path TCP allocation ceiling remains 386,699 bytes per operation and is enforced only
+in Release, per the allocation-budget convention. Debug still executes the fixture and verifies
+all twenty path results and their digest; its allocation samples are recorded only.

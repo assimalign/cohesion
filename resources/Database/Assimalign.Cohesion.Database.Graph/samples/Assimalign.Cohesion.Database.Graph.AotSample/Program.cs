@@ -36,6 +36,15 @@ await Refuse(new() { WorkUnits = 3 }, "COHDBG004");
 await Refuse(new() { MemoryBytes = 1024 }, "COHDBG020");
 await Refuse(new() { WorkUnits = 0 }, "COHDBG021");
 await Check("RETURN 7", [[7L]]);
+await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("INSERT (:Uncommitted)", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:Uncommitted) RETURN count(*)", [[1L]]);
+await session.ExecuteAsync("ROLLBACK", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:Uncommitted) RETURN count(*)", [[0L]]);
+await session.ExecuteAsync("START TRANSACTION", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("INSERT (:Committed)", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("COMMIT", cancellationToken: CancellationToken.None);
+await Check("MATCH (n:Committed) RETURN count(*)", [[1L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

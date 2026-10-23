@@ -47,3 +47,5 @@ diagnostic codes, and the conformance corpus's relationship to ISO GQL.
 The engine defaults are 64 MiB retained memory and 1,000,000 physical work units. Internal read
 bindings stream and an unordered LIMIT can stop upstream work; final results remain materialized.
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
+
+Standalone START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540).

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -118,8 +119,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         => (GraphDatabaseTransaction)await base.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Parses and executes one statement. An aborted transaction refuses the statement before it is
-    /// parsed; a parse or request-validation failure aborts the explicit transaction exactly as an
+    /// Parses and executes one statement. An aborted transaction permits only ROLLBACK (or failed
+    /// COMMIT); other statements retain the transaction refusal, including malformed text. A parse or
+    /// request-validation failure aborts the explicit transaction exactly as an
     /// execution failure does, so every failed statement has one outcome. The wire server runs its
     /// statements through it.
     /// </summary>
@@ -130,7 +132,6 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         ThrowIfNotOpen();
         _database.ThrowIfOffline();
-        ThrowIfTransactionRefuses();
         GraphRequest request;
         try
         {
@@ -138,6 +139,7 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         }
         catch (DatabaseException error)
         {
+            ThrowIfTransactionRefuses();
             await AbortTransactionAsync(error).ConfigureAwait(false);
             throw;
         }
@@ -297,6 +299,11 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.GqlExpression.TransactionCommand != GqlTransactionCommand.None &&
+            !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        {
+            return ExecuteTransactionControlAsync(request, cancellationToken);
+        }
         return _database.RunAsync(this, operation =>
         {
             StartQueryBudget(operation, request.Limits, request.Statement.GqlExpression.Location);
@@ -320,6 +327,40 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     }
 
     internal GraphPlanExecutor.ExpansionBudget? LastStatementMetrics { get; private set; }
+
+    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(GraphRequest request, CancellationToken cancellationToken)
+    {
+        ThrowIfNotOpen();
+        cancellationToken.ThrowIfCancellationRequested();
+        var expression = request.Statement.GqlExpression;
+        if (request.Paths)
+        {
+            var error = new GraphPlanningException("COHDBG001", ErrorMessages.TransactionPathsInvalid, expression.Location);
+            await AbortTransactionAsync(error).ConfigureAwait(false);
+            throw error;
+        }
+        var transaction = CurrentTransaction;
+        if (expression.TransactionCommand == GqlTransactionCommand.Start)
+        {
+            ThrowIfTransactionRefuses();
+            if (transaction is not null)
+            {
+                var error = new GraphPlanningException("COHDBG022", ErrorMessages.TransactionAlreadyOpen, expression.Location);
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw error;
+            }
+            await BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            if (transaction is null)
+            { throw new GraphPlanningException("COHDBG023", ErrorMessages.TransactionNotOpen, expression.Location); }
+            if (expression.TransactionCommand == GqlTransactionCommand.Commit)
+            { await transaction.CommitAsync(cancellationToken).ConfigureAwait(false); }
+            else { await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false); }
+        }
+        return new GraphMutationResult(0, []);
+    }
     private readonly GraphQueryMemoryPool _queryMemoryPool = new();
 
     internal GraphPlanExecutor.ExpansionBudget StartQueryBudget(GraphOperation operation, Assimalign.Cohesion.Database.Graph.Protocol.GraphQueryLimits? limits,

@@ -265,8 +265,7 @@ public class SqlClientTests
         harness.Server.Sessions.ShouldHaveSingleItem();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: return rolls back an unfinished explicit transaction",
-        Skip = "#1540: server-reported transaction status and pool rollback on return are not implemented.")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Pooling: return rolls back an unfinished explicit transaction")]
     public async Task DisposeAsync_WithExplicitTransaction_ShouldRollbackBeforeNextRental()
     {
         // Arrange

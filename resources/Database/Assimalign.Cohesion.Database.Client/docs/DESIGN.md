@@ -211,13 +211,18 @@ its transport instead of reusing the session. This is non-cancellable; abort on 
 lease joins the same return task as repeated disposal, without touching the connector. It makes no claim about whether the server completed an
 unacknowledged command; transaction outcome and reconciliation remain model concerns.
 
-### Known gap: transaction reset (#1540)
+### Transaction reset (#1540)
 
-End or roll back an explicit transaction before disposing a connection. The pool currently
-returns a healthy session with its transaction state intact, so a later renter can inherit an
-unfinished transaction. #1540 (with P8 #1264) owns server-reported transaction status and pool
-rollback on return; #1313 does not infer transaction state from commands. The SQL client carries
-a skipped regression test naming #1540 until that design is implemented.
+SQL and Graph negotiate transaction-status. The connector consumes the terminal Ready status
+before completing an Execute exchange, including complete statement errors. Pool return sends
+ROLLBACK for active or failed transactions, then requires a successful zero-count completion and
+Idle status before reuse. It performs this I/O outside the pool lock, after joining the last
+lease operation, with a five-second cleanup timeout. Failure, missing/invalid status, cancellation
+or an unnegotiated transaction-capable peer discards the connector. Idle sessions need no reset
+exchange. No state is inferred from statement text; custom Execute exchanges opt into the status
+postamble with protected DatabaseProtocolExchange(ProtocolMessageFamily, bool transactionStatus).
+Ping and other non-Execute exchanges retain their existing completion contract. The original
+statement exception survives a failure reading its status, and the connector is discarded.
 
 ## Streaming exchange and ownership
 
@@ -488,3 +493,12 @@ DatabaseConnection.ServerVersion and Capabilities expose the actual agreement. A
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Server-reported transaction reset (#1540)
+
+SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute
+completion or a statement error. The shared client drains it before returning, rolls back open
+or failed transactions on pool return, and only reuses an Idle session. Cleanup runs outside the
+pool lock with a five-second timeout. Missing/invalid state or legacy transaction-capable peers
+are discarded. SQL's formerly skipped pool-rollback regression is enabled. No new wire identifier,
+public interface, protocol version or persistent format is introduced.

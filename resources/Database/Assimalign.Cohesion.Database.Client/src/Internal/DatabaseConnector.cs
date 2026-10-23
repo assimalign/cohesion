@@ -25,6 +25,7 @@ internal sealed class DatabaseConnector
     private volatile bool _isOpen;
     private bool _isClosed;
     private int _opened;
+    private ProtocolTransactionStatus? _transactionStatus;
 
     internal DatabaseConnector(IDuplexConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
@@ -142,6 +143,8 @@ internal sealed class DatabaseConnector
                 channel.SetAgreement(agreement);
                 ServerVersion = agreement.Version;
                 Capabilities = channel.Capabilities;
+                if (Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                { _transactionStatus = ProtocolTransactionStatus.Idle; }
             }
             catch (ProtocolException exception)
             {
@@ -267,7 +270,21 @@ internal sealed class DatabaseConnector
                 }
                 throw FromErrorFrame(terminal.Value);
             }
-            return await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
+            TResult result;
+            try
+            {
+                result = await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
+            }
+            catch when (exchange.IsResponseComplete && exchange.ExpectsTransactionStatus && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            {
+                // Preserve the original statement exception, even if its trailing status is broken.
+                try { await ReadTransactionStatusAsync(cancellationToken).ConfigureAwait(false); }
+                catch { _isOpen = false; }
+                throw;
+            }
+            if (exchange.ExpectsTransactionStatus && Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+            { await ReadTransactionStatusAsync(cancellationToken).ConfigureAwait(false); }
+            return result;
         }
         catch (DatabaseClientException exception) when (exception.Code == ProtocolErrorCode.ConnectionFailure)
         {
@@ -309,6 +326,58 @@ internal sealed class DatabaseConnector
                 _isOpen = false;
             }
             throw;
+        }
+    }
+
+    private async ValueTask ReadTransactionStatusAsync(CancellationToken cancellationToken)
+    {
+        _transactionStatus = null;
+        var frame = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+        if (frame is null || frame.Value.Type != ProtocolMessageType.Ready)
+        { throw new ProtocolException(ErrorMessages.TransactionStatusMissing); }
+        _transactionStatus = ProtocolTransactionStatusMessage.Decode(frame.Value.Payload.Span).Status;
+    }
+
+    // Return owns the connector exclusively, after the lease joined its last exchange. No pool lock
+    // is held across this I/O. Legacy transaction-capable peers cannot certify a clean session.
+    internal async ValueTask<bool> ResetAsync()
+    {
+        if (!Family.Capabilities.Contains(ProtocolCapability.TransactionStatus)) { return true; }
+        if (!Capabilities.Contains(ProtocolCapability.TransactionStatus.Name)) { return false; }
+        if (_transactionStatus == ProtocolTransactionStatus.Idle) { return true; }
+        if (_transactionStatus is null) { return false; }
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            await ExecuteAsync(new TransactionRollbackExchange(Family), timeout.Token).ConfigureAwait(false);
+            return _transactionStatus == ProtocolTransactionStatus.Idle;
+        }
+        catch
+        {
+            _isOpen = false;
+            return false;
+        }
+    }
+
+    private sealed class TransactionRollbackExchange(ProtocolMessageFamily family) : DatabaseProtocolExchange<bool>(family, transactionStatus: true)
+    {
+        protected override async ValueTask<bool> ExecuteCoreAsync(ProtocolFrameReader reader, ProtocolFrameWriter writer,
+            CancellationToken cancellationToken)
+        {
+            // transaction-status defines this common parameterless Execute/reset envelope. The
+            // shared client has no model assembly dependency and never infers state from SQL text.
+            var payload = new List<byte>();
+            ProtocolPayload.WriteString(payload, "ROLLBACK");
+            ProtocolPayload.WriteInt32(payload, 0);
+            await writer.WriteFrameAsync(new ProtocolFrame((ProtocolMessageType)5, payload.ToArray()), cancellationToken).ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            if (frame is null || (byte)frame.Value.Type != 8 || frame.Value.Payload.Length != sizeof(long))
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
+            int position = 0;
+            if (ProtocolPayload.ReadInt64(frame.Value.Payload.Span, ref position) != 0)
+            { throw new ProtocolException(ErrorMessages.TransactionResetInvalid); }
+            return true;
         }
     }
 

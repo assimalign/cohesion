@@ -26,8 +26,8 @@ namespace Assimalign.Cohesion.Database.Client;
 /// returning its session, and an overlapping exchange is rejected before it writes any frame.
 /// </para>
 /// <para>
-/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
-/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
+/// Pool return rolls back an active or failed transaction using negotiated server status. A session
+/// that cannot certify a clean state is closed instead of reused (#1540).
 /// </para>
 /// </remarks>
 public sealed class DatabaseConnection : IAsyncDisposable

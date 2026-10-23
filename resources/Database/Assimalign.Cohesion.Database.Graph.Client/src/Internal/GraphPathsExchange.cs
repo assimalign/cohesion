@@ -36,7 +36,7 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
     internal IReadOnlyList<ProtocolDiagnostic> Diagnostics => _diagnostics;
 
     internal GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters, bool compositeValues = false)
-        : base(GraphProtocol.Family)
+        : base(GraphProtocol.Family, transactionStatus: true)
     {
         _request = GraphRequestEncoder.Create(statement, parameters, compositeValues);
         _consumeFrame = ConsumeFrame;

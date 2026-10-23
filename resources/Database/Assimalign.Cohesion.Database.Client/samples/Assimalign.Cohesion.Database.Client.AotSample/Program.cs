@@ -78,6 +78,7 @@ internal static class Program
         try
         {
             await using var connection = await graph.ConnectAsync(cancellationToken);
+            await connection.ExecuteAsync("START TRANSACTION", cancellationToken: cancellationToken);
             GraphPath? retained = null;
             int count = 0;
             await foreach (var path in connection.QueryPathsAsync("MATCH (n) RETURN n", cancellationToken: cancellationToken))
@@ -114,6 +115,16 @@ internal static class Program
         var ready = channel.Negotiate(ProtocolVersion.Current, startup!.Capabilities);
         await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready, ready.Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Execute);
+            Check(GraphProtocolExecuteMessage.Decode(frame.Payload.Span).Statement == "START TRANSACTION");
+        }, cancellationToken));
+        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
+            new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
         Check(await channel.Reader.ReadBorrowedFrameAsync(
             frame => Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths), cancellationToken));
         var node = new GraphNode(new(1), ["Canary"], new Dictionary<string, object?> { ["name"] = "canary" });
@@ -126,6 +137,18 @@ internal static class Program
         }
         await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
             new GraphProtocolPathsCompleteMessage(20).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Active).Encode()), cancellationToken);
+        await channel.Writer.FlushAsync(cancellationToken);
+        Check(await channel.Reader.ReadBorrowedFrameAsync(frame =>
+        {
+            Check(frame.Type == (ProtocolMessageType)GraphProtocolMessageType.Execute);
+            Check(GraphProtocolExecuteMessage.Decode(frame.Payload.Span).Statement == "ROLLBACK");
+        }, cancellationToken));
+        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.ResultComplete,
+            new GraphProtocolResultCompleteMessage(0).Encode()), cancellationToken);
+        await channel.Writer.WriteFrameAsync(new(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(ProtocolTransactionStatus.Idle).Encode()), cancellationToken);
         await channel.Writer.FlushAsync(cancellationToken);
         await finished.WaitAsync(cancellationToken);
     }

@@ -16,7 +16,7 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
     private readonly ProtocolExecuteMessage _request;
 
     internal SqlExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
-        : base(SqlProtocol.Family)
+        : base(SqlProtocol.Family, transactionStatus: true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
         var encoded = new Dictionary<string, byte[]>(parameters?.Count ?? 0);

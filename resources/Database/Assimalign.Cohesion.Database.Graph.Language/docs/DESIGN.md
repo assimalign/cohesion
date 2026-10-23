@@ -713,7 +713,7 @@ maps, grouping and sorting. It never lives on TransactionContext: ReadCommitted 
 context per statement. Every row, stage and statement of one transaction sees the same instant;
 each autocommit statement captures its own. This mirrors SQL #1120's capture/carrier/reader seam.
 The existing clock remains internal; no public option or visibility grant is added. Graph wire
-has no transaction controls, so each wire statement is autocommit.
+accepts START TRANSACTION / COMMIT / ROLLBACK over Execute; one explicit wire transaction shares that instant.
 
 Temporal values compare and sort by DateOnly date or DateTimeOffset instant, including nested
 composite sort keys. Total ordering puts zoned timestamps then dates between paths and strings;
@@ -1270,3 +1270,20 @@ completion. GraphQueryLimits carries optional lower MemoryBytes and WorkUnits, w
 ceilings of 64 MiB and 1,000,000 units by default. It is an in-process request contract; no grammar,
 Execute payload, capability, wire version or disk format changes. See the engine DESIGN for ownership,
 COHDBG020/COHDBG021 and the preserved 64-hop trail limit.
+
+## Explicit transaction text (#1540, D5)
+
+START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
+existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+statement composition and EXPLAIN of transaction controls remain outside this profile.
+A failed statement aborts the transaction; subsequent work is refused with COHDBG007 until
+ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
+uses COHDBG022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction
+uses COHDBG023. ExecutePaths refuses controls with COHDBG001 before any control takes effect.
+Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
+also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
+The server owns the connection's existing transaction, following Neo4j's
+community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
+(local Neo4j clone). No code is copied, and no transaction wire message is added.

@@ -14,4 +14,5 @@
   <data name="FrameWriterFaulted" xml:space="preserve">
     <value>The batched frame writer cannot be reused after a failed transport write.</value>
   </data>
+  <data name="TransactionStatusInvalid" xml:space="preserve"><value>COHDBP002: Invalid transaction-status Ready payload.</value></data>
 </root>

@@ -46,7 +46,7 @@ public sealed class ProtocolMessageFamily
         foreach (var capability in capabilities)
         {
             ArgumentNullException.ThrowIfNull(capability);
-            bool core = ReferenceEquals(capability, ProtocolCapability.Diagnostics);
+            bool core = ReferenceEquals(capability, ProtocolCapability.Diagnostics) || ReferenceEquals(capability, ProtocolCapability.TransactionStatus);
             if (!names.Add(capability.Name) || (!core && !capability.Name.StartsWith(name.ToLowerInvariant() + ".", StringComparison.Ordinal)))
             {
                 throw new ArgumentException(ErrorMessages.CapabilityListInvalid, nameof(capabilities));

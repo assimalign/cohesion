@@ -386,6 +386,15 @@ internal sealed class GraphDatabaseServerSession : DatabaseServerSession
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name))
+                    {
+                        var transaction = _databaseSession!.CurrentTransaction;
+                        var status = transaction is null ? ProtocolTransactionStatus.Idle
+                            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+                        await WriteFrameAsync(ProtocolMessageType.Ready,
+                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                    }
                     break;
 
                 case ProtocolMessageType.Ping:

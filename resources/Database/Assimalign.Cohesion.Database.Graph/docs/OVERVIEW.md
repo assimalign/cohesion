@@ -64,7 +64,7 @@ For real path results, pass `GraphPathsQueryRequest.FromGql(...)` to the existin
 one-node path, a single relationship includes its stored endpoints, and
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p` preserves the matched traversal order. Scalar and mutation
 requests continue to use ordinary execution. Explicit transactions remain available through the
-in-process session API; Graph wire transaction control is deliberately deferred. A statement that
+in-process session API and ISO START TRANSACTION / COMMIT / ROLLBACK over Execute. A statement that
 fails inside an explicit transaction aborts the whole transaction: the session refuses further
 statements with `COHDBG007` until the caller rolls back, and a commit fails without committing.
 A read that names a label or relationship type the database does not have is not a failure: as in

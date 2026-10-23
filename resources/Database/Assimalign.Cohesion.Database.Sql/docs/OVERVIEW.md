@@ -354,3 +354,5 @@ executes to report candidate work in the same eight-column description; unavaila
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
 statement-wide totals include all invocations. No standalone ANALYZE, persisted statistics,
 format change or new wire message is added.
+
+Pool return now rolls back unfinished SQL/Graph transactions using negotiated server status before reusing a session; uncertified sessions are discarded (#1540).

@@ -448,3 +448,10 @@ diagnostic code, wire contract or on-disk format.
 A malformed confirmed stored record fails execution with the existing corruption diagnostic
 and physical page/slot context. It is not a missing row, document or graph element. D1 confirms
 the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid data retains the same language results.
+
+## Transaction control (#1540)
+
+`START TRANSACTION`, `COMMIT` and `ROLLBACK` are standalone ISO statements, including over Execute.
+START uses Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
+A failed explicit transaction refuses work until rollback. BEGIN, savepoints, transaction options,
+EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
