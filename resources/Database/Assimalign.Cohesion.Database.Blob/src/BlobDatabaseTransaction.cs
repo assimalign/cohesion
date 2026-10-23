@@ -18,15 +18,15 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <para>
 /// <b>The end state machine is the root base's</b> (<see cref="DatabaseTransaction"/>, the
 /// #1188, #1225 and #1226 contracts): until the caller ends an aborted transaction, the session
-/// refuses every operation and BEGIN with <c>COHDBB001</c>; a rollback ends it, and a commit ends
-/// it with <c>COHDBB001</c> and commits nothing, as every later commit does. A transaction that
+/// refuses every operation and BEGIN with <c>CB04001</c>; a rollback ends it, and a commit ends
+/// it with <c>CB04001</c> and commits nothing, as every later commit does. A transaction that
 /// did not commit accepts any number of rollbacks, a token is observed only before a commit or
 /// rollback starts, and a commit is refused while an operation of the transaction (an open blob
 /// stream included) still runs. A commit or rollback that started always ends the context: the
 /// transaction kernel completes a started rollback whatever fails or is canceled, and aborts a
 /// commit it cannot complete (#1226). This type supplies the model's vocabulary only: the kernel
 /// state, the kernel commit and rollback with the engine's exception translation, the offline
-/// refusal (<c>COHDBB002</c>, #1243) and the <c>COHDBB001</c> aborted error. Blob DESIGN.md,
+/// refusal (<c>CB06002</c>, #1243) and the <c>CB04001</c> aborted error. Blob DESIGN.md,
 /// "Failed operations in explicit transactions", records the contract and the reference engines
 /// it follows.
 /// </para>
@@ -160,6 +160,6 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
             ? ErrorMessages.TransactionCommitAborted + reason
             : ErrorMessages.TransactionOperationsAborted + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHDBB001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CB04001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 }

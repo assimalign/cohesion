@@ -58,14 +58,14 @@ its pending-commit and dirty-page scheduling hints without exposing buffer-pool 
 ## Upload and begin failures (#1247, #1364)
 
 Upload state failures originate in the stream's failed/inactive guards, through a dedicated
-internal `BlobUploadException` carrying `COHDBB007`. The engine translates only that type
+internal `BlobUploadException` carrying `CB02007`. The engine translates only that type
 into area Diagnostics; the guarded stream's inactive-operation check uses the same translation.
 A writable guarded stream marks its operation as an upload, so the upload code remains
 specific to uploads. The storage component retains its independent vocabulary. Unrelated `InvalidOperationException`
 and `ObjectDisposedException` pass through unchanged. An upload cannot accept buffered writes
 after rollback or a failed write, and cannot publish its partial content. Both explicit and
 automatic begin use the full failure translator. Wire exchange failures retain Blob's terminal
-connection rule. Aborted-transaction refusals carry `COHDBB001` in Diagnostics; only wire
+connection rule. Aborted-transaction refusals carry `CB04001` in Diagnostics; only wire
 writers add its message prefix. The internal begin seam exercises both callers without a new
 coordinator API or visibility grant.
 
@@ -73,7 +73,7 @@ coordinator API or visibility grant.
 ## Storage corruption (#1160)
 
 A StorageIOException or IOException while opening storage crosses the engine boundary as
-DatabaseException with structured COHDBB005 diagnostics (#1364). Open releases any acquired
+DatabaseException with structured CB06005 diagnostics (#1364). Open releases any acquired
 file set and publishes no database, so callers may resolve the I/O condition and retry.
 
 
@@ -91,7 +91,7 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
 outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`CG06018`, `CD06103` and `COHDBB004` respectively). The original storage exception remains
+(`CG06018`, `CD06103` and `CB06004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 
@@ -181,7 +181,7 @@ first pass that finishes that database's work clears its record. A failure that 
 failed durable flush (#1243) or drain of the journal's append buffer (#1252), or a header slot
 write that failed (#1268), after which no checkpoint could truncate its journal — is not the
 worker's: every later operation is refused
-with `COHDBB002`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
+with `CB06002`, the workers skip the database, and the engine lists it in `OfflineDatabases`.
 The root engine base's pump runs a worker again after the backoff if its loop ever ends early,
 and the engine then reports Faulted until disposal; a `DatabaseEngineWorker`, the only kind the
 engine attaches since phase 4 of the concrete-types plan, records a failed pass instead and its
@@ -226,7 +226,7 @@ that fails while the database's journal holds `JournalSizeLimit` bytes (an engin
 default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes it offline with
 `JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
 is retried like any other. Either way the database goes offline through the #1243 machinery: every
-operation is refused with `COHDBB002`, its lock waits end, nothing more is written to it, and the
+operation is refused with `CB06002`, its lock waits end, nothing more is written to it, and the
 engine lists it in `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's
 application reopens it with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
 so a give-up that waits for a hung fsync of that database holds back none of the others, and it
@@ -304,7 +304,7 @@ storage's `StorageFormatException` as its inner exception, the files byte-identi
 
 ### Interrupted creation (#1421)
 
-Missing journals and backups are refused with COHDBB004 in DatabaseException.Diagnostics,
+Missing journals and backups are refused with CB06004 in DatabaseException.Diagnostics,
 including the DatabaseNotFoundException for a directory without its data file. A complete
 header proves sidecars existed at creation; their absence can mean an interrupted drop or
 lost acknowledged commits. No sidecar is silently recreated, even beside an empty closed
@@ -437,7 +437,7 @@ undoes a writer only as a whole transaction, with no savepoints. Until #1225 the
 dropped the rolled-back transaction from view, so the next operation silently ran in autocommit
 and the caller's `RollbackAsync` threw. The session now follows the contract the Graph engine set
 in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
-with its own code, `COHDBB001`; the Documents engine follows the same contract with `CD04101`,
+with its own code, `CB04001`; the Documents engine follows the same contract with `CD04101`,
 and its [DESIGN.md](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#failed-statements-in-explicit-transactions-1225)
 records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines follow.
 
@@ -446,12 +446,12 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    the kernel keeps the writer lock until its version-purge pass completes the undo; see
    `Database.Transactions` DESIGN.md, "Ending a transaction".)
 2. The transaction stays the session's `CurrentTransaction` and reports `TransactionState.Faulted`.
-   Every later operation on the session fails with `COHDBB001`: `OpenWriteAsync`,
+   Every later operation on the session fails with `CB04001`: `OpenWriteAsync`,
    `OpenReadAsync`, `GetPropertiesAsync`, `DeleteAsync`, `GetBlobsAsync` and `GetOwnershipAsync`
    on session-bound containers, and the session's own container operations
    (`CreateContainerAsync`, `GetContainerAsync`, `DropContainerAsync`, `GetContainersAsync`).
    `BeginTransactionAsync` fails with
-   `COHDBB001` too. The error names the original failure in its message (`Cause: ...`) and carries
+   `CB04001` too. The error names the original failure in its message (`Cause: ...`) and carries
    it as `InnerException`. A refused operation does not change the transaction.
 3. `RollbackAsync` succeeds, leaves none of the transaction's writes, and returns the session to
    autocommit. Disposing the transaction or the session ends it the same way. A rollback of any
@@ -466,10 +466,10 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    rolled-back sequence after the undo; once a checkpoint truncated the abort record, recovery
    read those tombstones as committed and the purge reclaimed the content of a blob that was never
    deleted. An operation still waiting for the writer lock fails at once.
-4. `CommitAsync` fails with `COHDBB001`, commits nothing, and ends the transaction (`RolledBack`).
+4. `CommitAsync` fails with `CB04001`, commits nothing, and ends the transaction (`RolledBack`).
    It keeps that answer after the transaction has ended some other way, so a host's commit gets
-   `COHDBB001` whether it runs before or after the server session's teardown disposed the
-   transaction. A commit after the session closed fails with `COHDBB001` too, naming the closure
+   `CB04001` whether it runs before or after the server session's teardown disposed the
+   transaction. A commit after the session closed fails with `CB04001` too, naming the closure
    ("The session closed before the transaction ended.") when no operation failed first, or the
    operation the closure aborted ("The blob session closed while the operation was running.",
    an open stream included). A
@@ -492,7 +492,7 @@ records the reference-engine evidence (PostgreSQL, Neo4j, RavenDB) both engines 
    completes a started rollback whatever fails (a lost abort record is ignored, and a failed undo
    is retried by the kernel with the writer lock held), and it aborts a commit it cannot complete.
    Until #1226 a journal or storage failure could leave the context active behind a failed
-   rollback, and the session kept the transaction `Faulted`, refusing work with `COHDBB001`, until a
+   rollback, and the session kept the transaction `Faulted`, refusing work with `CB04001`, until a
    later rollback completed; that end-failure state is gone, as it is in Graph. The kernel still
    refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
    manager's disposal flags itself before it claims any end, so every end refused during the
@@ -516,8 +516,8 @@ kernel's `TransactionCommitUnconfirmedException` as its inner exception; before 
 carried the kernel's message alone. The lifecycle is the Documents state diagram with operations
 in place of statements. Since phase 4 of the concrete-types plan the end state machine this
 section describes is the root `DatabaseTransaction` base's, and the session state, the "already active" check and the
-one-operation hold are the root `DatabaseSession` base's; the model supplies `COHDBB001`,
-`COHDBB002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
+one-operation hold are the root `DatabaseSession` base's; the model supplies `CB04001`,
+`CB06002`, the kernel calls and this translation ([Concrete types](#concrete-types-concrete-types-plan-phase-4-1260)).
 
 Over the wire a failure is terminal (see "Server lifecycle and failure semantics"): the server
 writes `ExecutionFailure` and closes the connection, and the session's teardown disposes the
@@ -529,9 +529,9 @@ with the failure before it writes `ExecutionFailure`. No later request can reach
 over the same connection, and a request on a new connection runs in a new session. A host that
 opened the transaction on `DatabaseServerSession.DatabaseSession` sees the contract's ROLLBACK
 and COMMIT answers whichever of its call and the teardown runs first: ROLLBACK raises nothing,
-and COMMIT fails with `COHDBB001` naming the failure. A teardown without a failure (the client
+and COMMIT fails with `CB04001` naming the failure. A teardown without a failure (the client
 disconnects, a protocol violation, a server stop) ends the transaction too, and a later COMMIT
-fails with `COHDBB001` naming the session's closure (`BlobTransactionFailureWireTests` in
+fails with `CB04001` naming the session's closure (`BlobTransactionFailureWireTests` in
 `Blob.Client`). An upload always begins its own transaction on the server session, so an upload on
 a connection whose engine session already has a host transaction is refused at BEGIN ("A
 transaction or operation is already active on this session.", the root session base's message).
@@ -777,14 +777,14 @@ reads the engine's per-database view of its workers' failures, not its state:
   write-back, write-ahead flush, version purge) holds a failure of one database
   (`DatabaseEngine.HasFailingWorker`), that database's handshakes, after authentication, and the
   exchanges of its sessions already open are refused with `Unavailable` and a message led by
-  `COHDBB003` ("Database '{name}' is unavailable while its engine's background work on it keeps
+  `CB06003` ("Database '{name}' is unavailable while its engine's background work on it keeps
   failing; …"), and the session closes, as on every refusal. Every other database of the engine
   is served: the server starts, accepts connections, completes their handshakes and runs their
   exchanges. The refusal ends with the failure (the next pass that finishes the database's
-  work), or turns into the offline refusal, `COHDBB002`, once the engine gives up on the
+  work), or turns into the offline refusal, `CB06002`, once the engine gives up on the
   database and takes it offline. A give-up the engine's leaf could not complete is that
   database's failure too, and keeps refusing it alone.
-- The offline refusal wins: a database that is offline is refused with `COHDBB002` even while a
+- The offline refusal wins: a database that is offline is refused with `CB06002` even while a
   worker's record of it lingers. A database a failure of its own storage took offline (a failed
   fsync, journal write or header write), not the engine's give-up, keeps the record until that
   worker's next pass, which for the version purge is a full pass's retry a `FailureBackoff` after
@@ -810,7 +810,7 @@ reads the engine's per-database view of its workers' failures, not its state:
   handshake or an exchange.
 - A refused exchange is a wire failure like any other, so it ends a host-opened transaction: the
   server aborts the session's still-usable transaction with the refusal before it writes the
-  error, and the host's COMMIT fails with `COHDBB001` naming the refusal whichever of the commit
+  error, and the host's COMMIT fails with `CB04001` naming the refusal whichever of the commit
   and the teardown runs first ("Failed operations in explicit transactions", above).
 
 `BlobDatabaseEngine.RefusesEveryDatabase` and `BlobDatabase.GetWorkerFailureRefusal` hold the two
@@ -869,9 +869,9 @@ matching names, authenticator evidence, session limits, idle/authentication time
 lifecycle, engine-state rejection (a start refused for an engine failed as a whole disposes the
 listener once and stays stopped), a worker failing on one database (the engine `Faulted`, the
 server started, the healthy database written and read over the wire, the failing one refused at
-its handshake and at an open session's next exchange with `COHDBB003`, and served again once its
+its handshake and at an open session's next exchange with `CB06003`, and served again once its
 work succeeds; `Server_WorkerFailingOnOneDatabase_ShouldRefuseOnlyThatDatabase`), an offline
-database refused with `COHDBB002` while a worker's record of it lingers
+database refused with `CB06002` while a worker's record of it lingers
 (`Server_FailingDatabaseGoesOffline_ShouldRefuseItAsOffline`), a refused exchange that aborts the
 host's transaction first (`Server_ExchangeRefusedForAFailingWorker_ShouldAbortTheHostTransactionFirst`),
 an index-maintenance worker's failure that refuses nothing
@@ -892,7 +892,7 @@ the file set, closing included — PostgreSQL's `PANIC` on a failed WAL fsync (`
 off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database.
 
 - The upload whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException` from
-  its stream's disposal, its message leading with `COHDBB002` (owner decision 24). Before #1243
+  its stream's disposal, its message leading with `CB06002` (owner decision 24). Before #1243
   an upload's completion failures reached the caller untranslated (the kernel's own exception
   types) because the upload stream's callbacks bypassed the engine's translation; `BlobGuardedStream` now translates every write, flush, read and
   disposal failure the way the other operations' failures are translated, and the upload's abort
@@ -900,7 +900,7 @@ off, `src/backend/storage/file/fd.c:3966-3987`), scoped to the database.
 - Every later operation — a new session, a container call, `OpenWriteAsync`, `OpenReadAsync`, a
   read from a download stream opened before the failure, that stream's disposal, BEGIN, and the
   COMMIT or ROLLBACK of a transaction open at the failure — is refused with
-  `DatabaseOfflineException`, code `COHDBB002`, carrying the storage's `StorageOfflineException`.
+  `DatabaseOfflineException`, code `CB06002`, carrying the storage's `StorageOfflineException`.
 - `BlobDatabaseServer` answers an operation on an existing session, and a handshake for the
   database, with `Unavailable` and the coded message.
 - A storage bracket whose commit record was written before its flush failed is reported as
@@ -967,7 +967,7 @@ rollback's failed undo about 100 ms after the deferral, then at doubling delays 
 `MaintenanceInterval`, so a transient failure releases the database writer lock within about a
 second (`Database.Transactions` DESIGN.md). A retry that fails makes the engine report
 `Faulted`; the first pass with no failure and no undo still deferred clears it. A full pass that
-fails keeps the database's failure, and the server's `COHDBB003` refusal of it, until a later
+fails keeps the database's failure, and the server's `CB06003` refusal of it, until a later
 full pass completes: the retries between full passes do not redo its work (owner decision 42
 review; "Server lifecycle and failure semantics", above). That later full pass is the database's
 own retry, a `FailureBackoff` after the failure (owner decision 46).
@@ -1117,7 +1117,7 @@ behind its `Open` factory.
   operations (the model's former operation counter) and the abort; the server base owns the
   lifecycle; the server session base owns the identity, the negotiated version and the
   authenticated principal (pending owner confirmation of rule 6, plan §7). The model supplies its
-  vocabulary: `COHDBB001`, `COHDBB002`, the kernel calls and the translation of the kernel's
+  vocabulary: `CB04001`, `CB06002`, the kernel calls and the translation of the kernel's
   exceptions. It keeps its per-operation rule (#1225): a failed operation aborts the explicit
   transaction through the base's `AbortAsync`, and an operation holds the session from its start
   to its end.
@@ -1126,11 +1126,11 @@ behind its `Open` factory.
   an active transaction or operation ("A transaction or operation is already active on this
   session.", was "A transaction or stream is already active on this session."), then a canceled
   token, before the isolation-level and offline refusals, which came first; on an offline database
-  BEGIN from the session that holds an open transaction fails "already active" (was `COHDBB002`),
+  BEGIN from the session that holds an open transaction fails "already active" (was `CB06002`),
   and a canceled token is refused by `CreateSessionAsync`, both execute seams and BEGIN before
-  `COHDBB002`, and so are the seams' argument errors, a null request and a blank statement (the
+  `CB06002`, and so are the seams' argument errors, a null request and a blank statement (the
   container and blob operations keep their order, the offline refusal first); BEGIN refuses a
-  transaction the kernel ended under its caller with `COHDBB001`, where it reported the disposed
+  transaction the kernel ended under its caller with `CB04001`, where it reported the disposed
   database; BEGIN and both execute seams refuse a closed session as closed before they check its
   database, so a closed session of a dropped or closed database reports "The session is closed."
   where it reported `ObjectDisposedException` (the container and blob operations check the
@@ -1142,7 +1142,7 @@ behind its `Open` factory.
   runs fails with "An operation of the transaction is still running; commit after it completes."
   (was "Dispose every blob stream before committing its transaction."); an operation refused after
   the caller's own end says the transaction "ended before the operation started" where it
-  reported `COHDBB001` without a cause; a session that fails to close reports "The session failed
+  reported `CB04001` without a cause; a session that fails to close reports "The session failed
   to close." (was "One or more blob operations failed to close."); and the engine's disposal
   aggregate is "One or more components of engine '{name}' failed to close." (was "One or more blob
   engine components failed to close."), with the databases that fail to close as one component,
@@ -1155,7 +1155,7 @@ behind its `Open` factory.
   pump thread is named for the worker (it was `{engine}/{kind}`); and a server start refused for
   the engine's state is terminal ("Server lifecycle and failure semantics").
 - **Unchanged for Blob**, though the bases now carry it: every commit of an aborted transaction,
-  a second one and one after the teardown included, reporting `COHDBB001` with the cause (the
+  a second one and one after the teardown included, reporting `CB04001` with the cause (the
   model's teardown already closed the transaction with a cause); the `Faulted` state of a
   transaction whose session closed while its database was offline; the one-operation hold's
   refusal, "Dispose the active blob stream before starting another operation on this session.";
@@ -1184,10 +1184,10 @@ transaction; after rollback the in-process session remains usable. Blob wire err
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBB004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
-| `COHDBB005` | Storage operation failure (including I/O); original cause retained |
-| `COHDBB006` | Malformed or unsupported catalog/index metadata |
-| `COHDBB007` | Upload stream is failed or its transaction is no longer active |
+| `CB06004` | Missing or unrecoverable database files; preserve files and restore the complete file set from backup |
+| `CB06005` | Storage operation failure (including I/O); original cause retained |
+| `CB06006` | Malformed or unsupported catalog/index metadata |
+| `CB02007` | Upload stream is failed or its transaction is no longer active |
 
 The create core accepts the root's explicit `object? creationState` parameter (#1349 review).
 This model's public create uses null/defaults; the root continues to own validation and
@@ -1216,7 +1216,7 @@ four servers.
 | 7 | `SessionFaulted` | Error | — | `sessionId`, `exceptionType` (full name), `exceptionMessage` |
 | 8 | `SessionCleanupFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 9 | `SessionsAborted` | Warning | — | `engineName`, `sessions`, `drainTimeoutMilliseconds` |
-| 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database` (cut to 256 characters), `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `COHDBB003`; cut to 1024 characters) |
+| 10 | `DatabaseRefused` | Warning | — | `sessionId`, `database` (cut to 256 characters), `phase` (`Handshake` or `Exchange`), `detail` (the refusal, led by `CB06003`; cut to 1024 characters) |
 | 11 | `EngineRefused` | Warning | — | `engineName`, `phase` (`Accept`, `Handshake` or `Exchange`), `state` (the `EngineState` name) |
 | 12 | `HostTransactionAbortFailed` | Warning | — | `sessionId`, `exceptionType`, `exceptionMessage` |
 | 13 | `TransferFailed` | Error | — | `sessionId`, `container` (cut to 256 characters), `code` (the error frame's `ProtocolErrorCode`: `ExecutionFailure`, or `Unavailable` for an offline database; empty for the guarded stream, which sends none), `exceptionType` |
@@ -1282,7 +1282,7 @@ transfer's `container` are cut to 256 characters and a `detail` or violation mes
 name, the strict manifest, the gauge's return, the counters, that no write allocates while nobody
 listens, events 1-7 and 9 once each with their payloads over real sessions on the in-memory
 driver (every handshake refusal code, a timeout at a read and inside the authenticator, the bound
-on an oversized startup), the `COHDBB003` refusal at the handshake and at an exchange, a disposed
+on an oversized startup), the `CB06003` refusal at the handshake and at an exchange, a disposed
 engine's refusals at the handshake and at the accept, a read of a missing blob (its failure by
 code and type, no blob name in any event), and a peer that resets its TCP connection while its
 session idles and while the server writes (a transport reason, never `SessionFaulted`; the write
@@ -1701,7 +1701,7 @@ all page mutations (#1365), including the copy-to-confirm window. Storage I/O, c
 timeout and existing storage exception identities are not caught by decoder-only wrappers.
 No file format, version, protocol frame, event, counter or diagnostic number changes.
 
-Recognized unsupported blob catalog versions keep the existing model refusal COHDBB006 and
+Recognized unsupported blob catalog versions keep the existing model refusal CB06006 and
 terminal wire behavior. An internal format-refusal marker preserves that identity while the
 original message gains page/slot context. Malformed current-format metadata still carries
 located CK06003. No public type/member, format version or frame is added by this distinction.
@@ -1748,3 +1748,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Blob diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

@@ -40,7 +40,7 @@ namespace Assimalign.Cohesion.Database;
 /// <see cref="DatabaseTransactionCommitUnconfirmedException"/>; this exception is what every
 /// operation after it gets. The diagnostic carrier holds the model's code (<see cref="Code"/>):
 /// <c>CS04004</c> (SQL), <c>COHDBK002</c> (key-value), <c>CD06102</c> (documents),
-/// <c>CG06012</c> (graph) and <c>COHDBB002</c> (blob). The storage's own
+/// <c>CG06012</c> (graph) and <c>CB06002</c> (blob). The storage's own
 /// <c>CK06002</c> error is the inner exception.
 /// </para>
 /// </remarks>

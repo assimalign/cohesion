@@ -17,7 +17,7 @@ public readonly record struct BlobPropertiesMessage(BlobProperties Properties)
     {
         if (Properties.Length < 0)
         {
-            throw new ProtocolException("A Blob property length must be nonnegative.");
+            throw new ProtocolException(ErrorMessages.BlobPropertiesMessageEncodeProtocol);
         }
         var buffer = new List<byte>();
         BlobProtocolPayload.WriteString(buffer, Properties.Name, allowEmpty: false);
@@ -47,7 +47,7 @@ public readonly record struct BlobPropertiesMessage(BlobProperties Properties)
         long length = BlobProtocolPayload.ReadInt64(payload, ref position);
         if (length < 0 || position >= payload.Length || payload[position] > 1)
         {
-            throw new ProtocolException("Malformed Blob property length or content-type flag.");
+            throw new ProtocolException(ErrorMessages.BlobPropertiesMessageDecodeProtocol);
         }
         string? contentType = payload[position++] == 0 ? null : BlobProtocolPayload.ReadString(payload, ref position, allowEmpty: true);
         ulong etag = unchecked((ulong)BlobProtocolPayload.ReadInt64(payload, ref position));
@@ -56,7 +56,7 @@ public readonly record struct BlobPropertiesMessage(BlobProperties Properties)
         if (created < DateTime.MinValue.Ticks || created > DateTime.MaxValue.Ticks ||
             modified < DateTime.MinValue.Ticks || modified > DateTime.MaxValue.Ticks || payload.Length - position != sizeof(uint))
         {
-            throw new ProtocolException("Malformed Blob property timestamps or checksum.");
+            throw new ProtocolException(ErrorMessages.BlobPropertiesMessageDecodeProtocol2);
         }
         uint checksum = BinaryPrimitives.ReadUInt32BigEndian(payload[position..]);
         return new(new(name, length, contentType, etag, new DateTimeOffset(created, TimeSpan.Zero),

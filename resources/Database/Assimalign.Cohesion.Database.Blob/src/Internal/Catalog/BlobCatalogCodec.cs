@@ -78,10 +78,10 @@ internal static class BlobCatalogCodec
             byte[] identity = reader.ReadBytes(16);
             if (identity.Length != 16)
             {
-                throw new BlobCatalogException("Truncated blob catalog identity.");
+                throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog);
             }
             var id = new Guid(identity);
-            string name = ReadString(reader) ?? throw new BlobCatalogException("A catalog name cannot be null.");
+            string name = ReadString(reader) ?? throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog2);
             CatalogRecord result;
             if (kind == 1)
             {
@@ -90,7 +90,7 @@ internal static class BlobCatalogCodec
                 if (owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
                     || (owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(schema)))
                 {
-                    throw new BlobCatalogException("Invalid container ownership metadata.");
+                    throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog3);
                 }
                 result = new CatalogRecord(new BlobContainerMetadata(id, name, owner, schema), null);
             }
@@ -105,23 +105,23 @@ internal static class BlobCatalogCodec
                 ulong head = reader.ReadUInt64();
                 if (length < 0 || ((length == 0) != (head == 0)))
                 {
-                    throw new BlobCatalogException("Invalid blob content length or head reference.");
+                    throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog4);
                 }
                 result = new CatalogRecord(null, new BlobCatalogEntry(id, name, length, contentType, etag, created, modified, checksum, head));
             }
             else
             {
-                throw new BlobCatalogException($"Unexpected blob metadata record kind {kind}.");
+                throw new BlobCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobCatalogCodecDecodeBlobCatalog5, kind));
             }
             if (id == Guid.Empty || string.IsNullOrWhiteSpace(name) || stream.Position != stream.Length)
             {
-                throw new BlobCatalogException("Invalid or trailing blob catalog metadata.");
+                throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog6);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new BlobCatalogException("Malformed blob catalog metadata.", error);
+            throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog7, error);
         }
     }
 
@@ -146,7 +146,7 @@ internal static class BlobCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new BlobCatalogException("Invalid catalog string length.");
+            throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecReadStringBlobCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

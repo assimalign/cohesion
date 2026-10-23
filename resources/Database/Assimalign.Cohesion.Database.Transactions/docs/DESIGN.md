@@ -1007,7 +1007,7 @@ A statement that fails keeps its own error. Its bracket rolls back before the fa
 propagates, and when only the bracket's rollback record cannot be appended (the bracket still
 ends, `Database.Storage` DESIGN.md, "Failed appends"), that advisory record's failure is
 dropped rather than thrown in place of the statement's. The engines name the statement's
-failure as the cause of an aborted transaction (`CD04101`, `COHDBB001`, `CG04007`), so a
+failure as the cause of an aborted transaction (`CD04101`, `CB04001`, `CG04007`), so a
 journal error must not take its place. A failure that leaves the bracket active (restoring
 its pages failed) still propagates.
 

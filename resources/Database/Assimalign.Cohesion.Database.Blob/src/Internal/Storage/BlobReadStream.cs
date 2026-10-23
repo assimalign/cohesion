@@ -23,7 +23,7 @@ internal sealed class BlobReadStream : Stream
     {
         if (content.Length < 0 || (content.Head == 0) != (content.Length == 0))
         {
-            throw new StorageCorruptionException("Invalid blob content reference.");
+            throw new StorageCorruptionException(ErrorMessages.BlobReadStreamFailure);
         }
 
         _storage = storage;
@@ -64,7 +64,7 @@ internal sealed class BlobReadStream : Stream
         }
         if (_position == _content.Length && ~_checksum != _content.Checksum)
         {
-            throw new StorageCorruptionException("Blob content checksum disagrees with its catalog metadata.");
+            throw new StorageCorruptionException(ErrorMessages.BlobReadStreamReadFailure);
         }
 
         return total;

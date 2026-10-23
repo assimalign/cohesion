@@ -254,3 +254,15 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
 | COHDBG019 | CG09019 | Lifecycle |
+
+## Blob migration
+
+| Previous code | Code | Category |
+|---|---|---|
+| COHDBB007 | CB02007 | Values/types |
+| COHDBB001 | CB04001 | Transactions/locking |
+| COHDBB002 | CB06002 | Storage/durability |
+| COHDBB003 | CB06003 | Storage/durability |
+| COHDBB004 | CB06004 | Storage/durability |
+| COHDBB005 | CB06005 | Storage/durability |
+| COHDBB006 | CB06006 | Storage/durability |

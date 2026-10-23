@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.Database;
 /// bracket whose commit record was written before the flush failed
 /// (<see cref="Create(string, string, StorageOfflineException)"/>). The codes are those of
 /// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>COHDBK002</c>,
-/// <c>CD06102</c>, <c>CG06012</c> and <c>COHDBB002</c>.
+/// <c>CD06102</c>, <c>CG06012</c> and <c>CB06002</c>.
 /// </para>
 /// </remarks>
 public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseException

@@ -486,8 +486,8 @@ public sealed class BlobDatabaseEventSourceTests
         await recorder.WaitForAsync(e => IsFor(e, 5, servedSession), TestTimeout.Token(30));
 
         // Assert
-        handshakeRefusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
-        exchangeRefusal.Message.ShouldStartWith("COHDBB003", Case.Sensitive);
+        handshakeRefusal.Message.ShouldStartWith("CB06003", Case.Sensitive);
+        exchangeRefusal.Message.ShouldStartWith("CB06003", Case.Sensitive);
         var atHandshake = recorder.Events.Where(e => IsFor(e, 10, refusedSession)).ShouldHaveSingleItem();
         atHandshake.EventName.ShouldBe("DatabaseRefused");
         atHandshake.Level.ShouldBe(EventLevel.Warning);

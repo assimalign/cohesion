@@ -15,14 +15,14 @@ internal static class BlobProtocolPayload
     {
         if (value is null || (!allowEmpty && value.Length == 0))
         {
-            throw new ProtocolException("A Blob metadata string is missing.");
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadWriteStringProtocol);
         }
         try
         {
             int length = _utf8.GetByteCount(value);
             if (length > MaxStringByteLength)
             {
-                throw new ProtocolException("A Blob metadata string exceeds 65,535 UTF-8 bytes.");
+                throw new ProtocolException(ErrorMessages.ProtocolPayloadWriteStringProtocol2);
             }
             Span<byte> prefix = stackalloc byte[sizeof(int)];
             BinaryPrimitives.WriteInt32BigEndian(prefix, length);
@@ -31,7 +31,7 @@ internal static class BlobProtocolPayload
         }
         catch (EncoderFallbackException exception)
         {
-            throw new ProtocolException("A Blob metadata string contains invalid Unicode.", exception);
+            throw new ProtocolException(ErrorMessages.ProtocolPayloadWriteStringProtocol3, exception);
         }
     }
 
@@ -39,13 +39,13 @@ internal static class BlobProtocolPayload
     {
         if (payload.Length - position < sizeof(int))
         {
-            throw new ProtocolException("Truncated Blob metadata string length.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolPayloadReadStringProtocol);
         }
         int length = BinaryPrimitives.ReadInt32BigEndian(payload[position..]);
         position += sizeof(int);
         if (length < 0 || length > MaxStringByteLength || length > payload.Length - position || (!allowEmpty && length == 0))
         {
-            throw new ProtocolException("Invalid Blob metadata string length.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolPayloadReadStringProtocol2);
         }
         try
         {
@@ -55,7 +55,7 @@ internal static class BlobProtocolPayload
         }
         catch (DecoderFallbackException exception)
         {
-            throw new ProtocolException("A Blob metadata string contains invalid UTF-8.", exception);
+            throw new ProtocolException(ErrorMessages.BlobProtocolPayloadReadStringProtocol3, exception);
         }
     }
 
@@ -70,7 +70,7 @@ internal static class BlobProtocolPayload
     {
         if (payload.Length - position < sizeof(long))
         {
-            throw new ProtocolException("Truncated Blob transfer length.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolPayloadReadInt64Protocol);
         }
         long value = BinaryPrimitives.ReadInt64BigEndian(payload[position..]);
         position += sizeof(long);
@@ -81,7 +81,7 @@ internal static class BlobProtocolPayload
     {
         if (position != payload.Length)
         {
-            throw new ProtocolException("Unexpected trailing bytes in a Blob payload.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolPayloadRequireEndProtocol);
         }
     }
 }

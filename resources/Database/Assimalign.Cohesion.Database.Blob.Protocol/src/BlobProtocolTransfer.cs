@@ -57,7 +57,7 @@ public static class BlobProtocolTransfer
         ArgumentNullException.ThrowIfNull(metadata);
         if (!source.CanRead)
         {
-            throw new ArgumentException("The content stream must be readable.", nameof(source));
+            throw new ArgumentException(ErrorMessages.BlobProtocolTransferSendAsyncArgument, nameof(source));
         }
         await WriteAsync(writer, BlobProtocolMessageType.TransferStart, metadata.Encode(), cancellationToken).ConfigureAwait(false);
         var buffer = new byte[BlobProtocol.MaxChunkLength];
@@ -76,12 +76,12 @@ public static class BlobProtocolTransfer
             if (acknowledgement.Type != (ProtocolMessageType)BlobProtocolMessageType.ChunkAcknowledgement ||
                 BlobChunkAcknowledgementMessage.Decode(acknowledgement.Payload.Span).Length != total)
             {
-                throw new ProtocolException("The Blob chunk acknowledgement disagrees with the transferred content.");
+                throw new ProtocolException(ErrorMessages.BlobProtocolTransferSendAsyncProtocol);
             }
         }
         if (metadata.Length >= 0 && total != metadata.Length)
         {
-            throw new ProtocolException("The Blob source ended before its declared length.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolTransferSendAsyncProtocol2);
         }
         await WriteAsync(writer, BlobProtocolMessageType.TransferComplete,
             new BlobTransferCompleteMessage(total).Encode(), cancellationToken).ConfigureAwait(false);
@@ -129,12 +129,12 @@ public static class BlobProtocolTransfer
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite)
         {
-            throw new ArgumentException("The content stream must be writable.", nameof(destination));
+            throw new ArgumentException(ErrorMessages.ProtocolTransferReceiveAsyncArgument, nameof(destination));
         }
         ProtocolFrame start = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
         if (start.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
         {
-            throw new ProtocolException("A Blob transfer must begin with TransferStart.");
+            throw new ProtocolException(ErrorMessages.ProtocolTransferReceiveAsyncProtocol);
         }
         BlobTransferStartMessage metadata = BlobTransferStartMessage.Decode(start.Payload.Span);
         return await ReceiveAsync(reader, writer, destination, metadata, cancellationToken).ConfigureAwait(false);
@@ -162,11 +162,11 @@ public static class BlobProtocolTransfer
         ArgumentNullException.ThrowIfNull(metadata);
         if (!destination.CanWrite)
         {
-            throw new ArgumentException("The content stream must be writable.", nameof(destination));
+            throw new ArgumentException(ErrorMessages.ProtocolTransferReceiveAsyncArgument, nameof(destination));
         }
         if (metadata.Length < -1)
         {
-            throw new ProtocolException("A Blob transfer length must be nonnegative or -1.");
+            throw new ProtocolException(ErrorMessages.ProtocolTransferReceiveAsyncProtocol2);
         }
 
         long total = 0;
@@ -186,11 +186,11 @@ public static class BlobProtocolTransfer
                     long completed = BlobTransferCompleteMessage.Decode(frame.Payload.Span).Length;
                     if (completed != total || (metadata.Length >= 0 && metadata.Length != total))
                     {
-                        throw new ProtocolException("The Blob completion length disagrees with the transferred content.");
+                        throw new ProtocolException(ErrorMessages.ProtocolTransferReceiveAsyncProtocol3);
                     }
                     return metadata with { Length = total };
                 default:
-                    throw new ProtocolException($"Unexpected message {(byte)frame.Type} during a Blob transfer.");
+                    throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolTransferReceiveAsyncProtocol4, (byte)frame.Type));
             }
         }
     }
@@ -200,7 +200,7 @@ public static class BlobProtocolTransfer
         ArgumentNullException.ThrowIfNull(channel);
         if (!ReferenceEquals(channel.Family, BlobProtocol.Family))
         {
-            throw new ArgumentException("The channel must be bound to BlobProtocol.Family.", nameof(channel));
+            throw new ArgumentException(ErrorMessages.TransferValidateChannelArgument, nameof(channel));
         }
     }
 
@@ -208,7 +208,7 @@ public static class BlobProtocolTransfer
     {
         if (count > long.MaxValue - total || (expected >= 0 && count > expected - total))
         {
-            throw new ProtocolException("The Blob content exceeds its declared or supported length.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolTransferAddLengthProtocol);
         }
         return total + count;
     }
@@ -218,12 +218,12 @@ public static class BlobProtocolTransfer
         ProtocolFrame? frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
         if (frame is null)
         {
-            throw new ProtocolException("The connection ended before the Blob transfer completed.");
+            throw new ProtocolException(ErrorMessages.BlobProtocolTransferReadAsyncProtocol);
         }
         if (frame.Value.Type == ProtocolMessageType.Error)
         {
             ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Value.Payload.Span);
-            throw new ProtocolException($"Blob transfer failed ({error.Code}): {error.Message}");
+            throw new ProtocolException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobProtocolTransferReadAsyncProtocol2, error.Code, error.Message));
         }
         return frame.Value;
     }

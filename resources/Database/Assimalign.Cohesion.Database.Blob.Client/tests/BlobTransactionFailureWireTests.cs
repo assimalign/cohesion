@@ -56,7 +56,7 @@ public sealed class BlobTransactionFailureWireTests
         (await next.GetPropertiesAsync("files", "keep", timeout.Token)).ShouldNotBeNull().Length.ShouldBe(8);
     }
 
-    /// <summary>COMMIT of a transaction a wire operation aborted fails with COHDBB001 and commits nothing.</summary>
+    /// <summary>COMMIT of a transaction a wire operation aborted fails with CB04001 and commits nothing.</summary>
     [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: COMMIT after a failed wire operation fails and commits nothing")]
     public async Task CommitAsync_AfterFailedWireOperation_ShouldFailWithCodeAndCommitNothing()
     {
@@ -76,9 +76,9 @@ public sealed class BlobTransactionFailureWireTests
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         error.Message.ShouldContain("Container 'missing' does not exist.", Case.Sensitive);
-        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
     }
@@ -86,11 +86,11 @@ public sealed class BlobTransactionFailureWireTests
     /// <summary>
     /// A wire request refused before its operation starts still ends a host-opened transaction,
     /// because a Blob wire failure is terminal: the server aborts the transaction before it reports
-    /// the failure, then closes the connection. The host's COMMIT fails with COHDBB001 naming the
+    /// the failure, then closes the connection. The host's COMMIT fails with CB04001 naming the
     /// refusal before and after the teardown, its earlier wire write is undone, and a fresh
     /// connection works.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with COHDBB001")]
+    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with CB04001")]
     public async Task UploadAsync_RefusedBeforeItStarts_ShouldEndHostTransactionAndFailCommitWithCode()
     {
         // Arrange
@@ -116,7 +116,7 @@ public sealed class BlobTransactionFailureWireTests
         // active on this session.".
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldContain("A transaction or operation is already active on this session.", Case.Sensitive);
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB001");
+        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
         commit.Message.ShouldContain(failure.Message, Case.Sensitive);
         repeated.Message.ShouldBe(commit.Message);

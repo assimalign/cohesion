@@ -34,7 +34,7 @@ public sealed class BlobStorageOperationsTests
     /// An upload's commit fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, an upload, a download, a read of a download stream opened
     /// before the failure, BEGIN, COMMIT and ROLLBACK of an open transaction, over the wire too —
-    /// is refused with COHDBB002, and nothing reaches the file set, through the workers' passes
+    /// is refused with CB06002, and nothing reaches the file set, through the workers' passes
     /// and the sessions' close included. The root bases' checks come first (concrete-types plan
     /// §6.4): BEGIN on the session holding the open transaction is refused as already active, a
     /// canceled token is refused before the offline refusal of a new session and BEGIN, and the
@@ -108,7 +108,7 @@ public sealed class BlobStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session and BEGIN. Before the bases,
-        // each of these was refused with COHDBB002. A blob session has no execute member; the
+        // each of these was refused with CB06002. A blob session has no execute member; the
         // container and blob operations check the database first, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync(token));
         using var canceled = new CancellationTokenSource();
@@ -153,18 +153,18 @@ public sealed class BlobStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "COHDBB002");
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CB06002");
         unconfirmed.Message.ShouldStartWith("Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "COHDBB002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CB06002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CB06002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");
+        containerRefusals.ShouldAllBe(refusal => refusal.Code == "CB06002");
         closedState.ShouldBe(TransactionState.Faulted);
         operationError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        operationError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        operationError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);

@@ -132,12 +132,12 @@ public sealed partial class BlobCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(container.Name);
         if (container.Id == Guid.Empty)
         {
-            throw new ArgumentException("A container must have a nonempty identity.", nameof(container));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveContainerAsyncArgument, nameof(container));
         }
         if (container.Owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
             || (container.Owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(container.OwningSchema)))
         {
-            throw new ArgumentException("A schema-owned container must name its owning schema.", nameof(container));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveContainerAsyncArgument2, nameof(container));
         }
 
         Found? previous;
@@ -238,7 +238,7 @@ public sealed partial class BlobCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(blob.Name);
         if (blob.ContainerId == Guid.Empty || blob.Length < 0 || ((blob.Length == 0) != (blob.HeadLocation == 0)))
         {
-            throw new ArgumentException("Blob metadata requires a container identity and a head for nonempty content.", nameof(blob));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveBlobAsyncArgument, nameof(blob));
         }
 
         Found? previous;
@@ -544,7 +544,7 @@ public sealed partial class BlobCatalog
     {
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.BlobCatalogEnsureActiveFailure);
         }
     }
 

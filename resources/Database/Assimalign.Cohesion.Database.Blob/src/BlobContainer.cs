@@ -83,9 +83,9 @@ public sealed class BlobContainer
     /// <exception cref="DatabaseException">
     /// The blob exists and overwrite is not permitted, or the container is no longer available; for
     /// a container bound to a session, the session is closed, another operation holds it, or its
-    /// transaction refuses operations (<c>COHDBB001</c>).
+    /// transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
     public async ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -105,7 +105,7 @@ public sealed class BlobContainer
 
             if (previous is not null && !overwrite)
             {
-                throw new DatabaseException($"Blob '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenWriteAsyncDatabase, name));
             }
 
             var stream = _database.DataStorage.OpenWrite(_database.Coordinator, operation.Context, async content =>
@@ -151,9 +151,9 @@ public sealed class BlobContainer
     /// <exception cref="DatabaseException">
     /// The blob does not exist, or the container is no longer available; for a container bound to a
     /// session, the session is closed, another operation holds it, or its transaction refuses
-    /// operations (<c>COHDBB001</c>).
+    /// operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     public async ValueTask<Stream> OpenReadAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -162,7 +162,7 @@ public sealed class BlobContainer
         {
             EnsureContainer(operation.Context);
             var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
-                ?? throw new DatabaseException($"Blob '{name}' does not exist.");
+                ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
             return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
         }
         catch (Exception error)
@@ -185,9 +185,9 @@ public sealed class BlobContainer
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The container is no longer available; for a container bound to a session, the session is
-    /// closed, another operation holds it, or its transaction refuses operations (<c>COHDBB001</c>).
+    /// closed, another operation holds it, or its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     public ValueTask<BlobProperties?> GetPropertiesAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -210,9 +210,9 @@ public sealed class BlobContainer
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The container is no longer available; for a container bound to a session, the session is
-    /// closed, another operation holds it, or its transaction refuses operations (<c>COHDBB001</c>).
+    /// closed, another operation holds it, or its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit operation's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteAsync(string name, CancellationToken cancellationToken = default)
@@ -252,9 +252,9 @@ public sealed class BlobContainer
     /// <exception cref="DatabaseException">
     /// The container is no longer available; for a container bound to a session, the session is
     /// closed (also while the properties are yielded), another operation holds it, or its
-    /// transaction refuses operations (<c>COHDBB001</c>).
+    /// transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     public async IAsyncEnumerable<BlobProperties> GetBlobsAsync(string? prefix = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var entries = await _database.RunAsync(_session, operation =>
@@ -281,9 +281,9 @@ public sealed class BlobContainer
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The container is no longer available; for a container bound to a session, the session is
-    /// closed, another operation holds it, or its transaction refuses operations (<c>COHDBB001</c>).
+    /// closed, another operation holds it, or its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <remarks>
     /// The read uses the bound session's isolation level. The returned property bag is
     /// detached from the catalog; all dictionary mutation operations throw <see cref="NotSupportedException"/>.
@@ -313,7 +313,7 @@ public sealed class BlobContainer
         var current = _database.Catalog.FindContainer(Name, context.Snapshot);
         if (current?.Id != _container.Id)
         {
-            throw new DatabaseException($"Container '{Name}' is no longer available in this transaction.");
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerEnsureContainerDatabase, Name));
         }
 
         if (writing && current != _database.Catalog.FindContainer(Name, _database.LatestSnapshot(context)))

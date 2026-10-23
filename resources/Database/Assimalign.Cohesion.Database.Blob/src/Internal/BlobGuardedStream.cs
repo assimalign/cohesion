@@ -173,7 +173,7 @@ internal sealed class BlobGuardedStream : Stream
         Check();
         if (!_inner.CanRead)
         {
-            throw new NotSupportedException("The blob stream does not support reading.");
+            throw new NotSupportedException(ErrorMessages.StreamCheckReadableNotSupported);
         }
     }
 

@@ -77,7 +77,7 @@ public sealed class BlobDatabaseEngineOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// An offline database refuses every operation with <c>COHDBB002</c> until it is reopened
+    /// An offline database refuses every operation with <c>CB06002</c> until it is reopened
     /// (<see cref="BlobDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>),
     /// whose recovery reads its journal; a hosted engine is reopened by the hosting module with
     /// backoff. A pass that finishes the database's work ends the streak, and the window starts
@@ -87,7 +87,7 @@ public sealed class BlobDatabaseEngineOptions
     /// The engine is <see cref="EngineState.Faulted"/> from a worker's first failure on any
     /// database until that failure is worked off or the database goes offline, but
     /// <see cref="BlobDatabaseServer"/> refuses only the failing database meanwhile (owner decision
-    /// 42 of 2026-10-07): its handshakes and exchanges, with <c>COHDBB003</c>, while the engine's
+    /// 42 of 2026-10-07): its handshakes and exchanges, with <c>CB06003</c>, while the engine's
     /// other databases are served. Before the decision the server refused every start, connection,
     /// handshake and operation while the engine was not <see cref="EngineState.Running"/>, so one
     /// database whose work kept failing made the whole server unavailable for the window.

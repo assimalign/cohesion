@@ -373,9 +373,9 @@ public sealed class VersionPurgeRefusalTests
         await existing.SendAsync(BlobProtocolMessageType.List, new BlobListMessage("missing", "").Encode());
         var response = await existing.ExpectAsync(ProtocolMessageType.Error);
 
-        // Assert: the operation is served and reports its missing container, not COHDBB003.
+        // Assert: the operation is served and reports its missing container, not CB06003.
         var error = ProtocolErrorMessage.Decode(response.Payload.Span);
-        error.Message.ShouldNotContain("COHDBB003", Case.Sensitive);
+        error.Message.ShouldNotContain("CB06003", Case.Sensitive);
         engine.HasFailingWorker(database.Name).ShouldBeFalse();
         worker.BeforeFullPass = null;
     }

@@ -183,7 +183,7 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
         }
         if (remaining != 0)
         {
-            throw new StorageCorruptionException("Blob chain ends before its catalog length.");
+            throw new StorageCorruptionException(ErrorMessages.StorageTombstoneContentAsyncFailure);
         }
     }
 

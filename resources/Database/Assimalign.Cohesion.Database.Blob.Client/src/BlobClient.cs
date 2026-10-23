@@ -33,7 +33,7 @@ public sealed class BlobClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         if (options.Settings is null || options.ConnectionFactory is null)
         {
-            throw new ArgumentException("Connection settings and a connection factory are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.BlobClientCreateArgument, nameof(options));
         }
 
         return new BlobClient(DatabaseClient.Create(new DatabaseClientOptions

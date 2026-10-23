@@ -69,7 +69,7 @@ public sealed class BlobConnection : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(source);
         if (!source.CanRead || length < -1)
         {
-            throw new ArgumentException("The source must be readable and the length must be nonnegative or -1.");
+            throw new ArgumentException(ErrorMessages.BlobConnectionUploadAsyncArgument);
         }
         return ExecuteAsync<long>(UploadOperation, container, async (reader, writer, token) =>
         {
@@ -81,7 +81,7 @@ public sealed class BlobConnection : IAsyncDisposable
             if (published.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferComplete ||
                 BlobTransferCompleteMessage.Decode(published.Payload.Span).Length != sent)
             {
-                throw new ProtocolException("The server did not acknowledge the uploaded Blob's publication and length.");
+                throw new ProtocolException(ErrorMessages.BlobConnectionUploadAsyncProtocol);
             }
             return sent;
         }, cancellationToken);
@@ -159,7 +159,7 @@ public sealed class BlobConnection : IAsyncDisposable
             long count = await ReadCountAsync(reader, token).ConfigureAwait(false);
             if (count > 1)
             {
-                throw new ProtocolException("A Blob delete acknowledged more than one object.");
+                throw new ProtocolException(ErrorMessages.BlobConnectionDeleteAsyncProtocol);
             }
             return count == 1;
         }, cancellationToken);
@@ -186,12 +186,12 @@ public sealed class BlobConnection : IAsyncDisposable
             }
             if (frame.Type != (ProtocolMessageType)BlobProtocolMessageType.Properties)
             {
-                throw new ProtocolException("Expected Blob properties or an empty completion.");
+                throw new ProtocolException(ErrorMessages.ConnectionGetPropertiesAsyncProtocol);
             }
             BlobProperties properties = BlobPropertiesMessage.Decode(frame.Payload.Span).Properties;
             if (properties.Name != name || await ReadCountAsync(reader, token).ConfigureAwait(false) != 1)
             {
-                throw new ProtocolException("The Blob properties response disagrees with its request or completion.");
+                throw new ProtocolException(ErrorMessages.ConnectionGetPropertiesAsyncProtocol2);
             }
             return properties;
         }, cancellationToken);
@@ -276,18 +276,18 @@ public sealed class BlobConnection : IAsyncDisposable
                     {
                         if (BlobOperationCompleteMessage.Decode(frame.Payload.Span).Count != count)
                         {
-                            throw new ProtocolException("The Blob listing completion count is incorrect.");
+                            throw new ProtocolException(ErrorMessages.BlobConnectionListCoreAsyncProtocol);
                         }
                         return count;
                     }
                     if (frame.Type != (ProtocolMessageType)BlobProtocolMessageType.Properties)
                     {
-                        throw new ProtocolException("Expected a Blob listing item or completion.");
+                        throw new ProtocolException(ErrorMessages.BlobConnectionListCoreAsyncProtocol2);
                     }
                     BlobProperties properties = BlobPropertiesMessage.Decode(frame.Payload.Span).Properties;
                     if (!properties.Name.StartsWith(prefix, StringComparison.Ordinal))
                     {
-                        throw new ProtocolException("A Blob listing item does not match the requested prefix.");
+                        throw new ProtocolException(ErrorMessages.BlobConnectionListCoreAsyncProtocol3);
                     }
                     await items.WriteAsync(properties, token).ConfigureAwait(false);
                     count = checked(count + 1);
@@ -385,14 +385,14 @@ public sealed class BlobConnection : IAsyncDisposable
         ProtocolFrame frame = await ExpectAsync(reader, token).ConfigureAwait(false);
         if (frame.Type != (ProtocolMessageType)BlobProtocolMessageType.OperationComplete)
         {
-            throw new ProtocolException("Expected a Blob operation completion.");
+            throw new ProtocolException(ErrorMessages.BlobConnectionReadCountAsyncProtocol);
         }
         return BlobOperationCompleteMessage.Decode(frame.Payload.Span).Count;
     }
 
     private static async ValueTask<ProtocolFrame> ExpectAsync(ProtocolFrameReader reader, CancellationToken token)
         => await reader.ReadFrameAsync(token).ConfigureAwait(false)
-            ?? throw new ProtocolException("The server closed the connection before completing the Blob exchange.");
+            ?? throw new ProtocolException(ErrorMessages.BlobConnectionExpectAsyncProtocol);
 
     private static async ValueTask WriteAsync(ProtocolFrameWriter writer, BlobProtocolMessageType type,
         ReadOnlyMemory<byte> payload, CancellationToken token)
@@ -448,7 +448,7 @@ public sealed class BlobConnection : IAsyncDisposable
                 // Retain Blob's existing transport diagnostics for materialized operations and
                 // uploads. Normalize only frame I/O, never exceptions from caller-owned streams.
                 throw new DatabaseClientException(ProtocolErrorCode.Internal,
-                    "The connection closed while reading a Blob response.", exception);
+                    ErrorMessages.ReadFrameCoreAsyncDatabaseClient, exception);
             }
             if (frame is { Type: ProtocolMessageType.Error } errorFrame)
             {
@@ -485,7 +485,7 @@ public sealed class BlobConnection : IAsyncDisposable
             catch (InvalidOperationException exception)
             {
                 throw new DatabaseClientException(ProtocolErrorCode.Internal,
-                    "The connection closed while sending a Blob request.", exception);
+                    ErrorMessages.WriteFrameCoreAsyncDatabaseClient, exception);
             }
         }
 
@@ -498,7 +498,7 @@ public sealed class BlobConnection : IAsyncDisposable
             catch (InvalidOperationException exception)
             {
                 throw new DatabaseClientException(ProtocolErrorCode.Internal,
-                    "The connection closed while flushing a Blob request.", exception);
+                    ErrorMessages.WriterFlushCoreAsyncDatabaseClient, exception);
             }
         }
 
@@ -540,7 +540,7 @@ public sealed class BlobConnection : IAsyncDisposable
             ProtocolFrame start = await ExpectAsync(new BlobErrorReader(reader), cancellationToken).ConfigureAwait(false);
             if (start.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
             {
-                throw new ProtocolException("A Blob download must begin with TransferStart.");
+                throw new ProtocolException(ErrorMessages.DownloadExchangeOpenCoreAsyncProtocol);
             }
             _metadata = BlobTransferStartMessage.Decode(start.Payload.Span);
         }
@@ -558,7 +558,7 @@ public sealed class BlobConnection : IAsyncDisposable
             try
             {
                 BlobTransferStartMessage received = await BlobProtocolTransfer.ReceiveAsync(new BlobErrorReader(reader), writer, destination,
-                    _metadata ?? throw new InvalidOperationException("The download metadata has not been read."),
+                    _metadata ?? throw new InvalidOperationException(ErrorMessages.ExchangeCopyToCoreAsyncFailure),
                     cancellationToken).ConfigureAwait(false);
                 bytes = received.Length;
             }

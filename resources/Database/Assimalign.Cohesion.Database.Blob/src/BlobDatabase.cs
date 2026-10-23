@@ -117,13 +117,13 @@ public sealed class BlobDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHDBB002";
+    internal const string OfflineCode = "CB06002";
 
     /// <summary>
     /// The code that leads the message of the server's refusal of the database while a background
     /// worker of its engine holds a failure of it (owner decision 42 of 2026-10-07).
     /// </summary>
-    internal const string WorkerFailureCode = "COHDBB003";
+    internal const string WorkerFailureCode = "CB06003";
 
     /// <summary>
     /// Gets whether a failed durable flush took the database offline.
@@ -174,7 +174,7 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     public new async ValueTask<BlobDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (BlobDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -221,7 +221,7 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateOffline(Exception error)
     {
-        if (error is DatabaseException { Diagnostics: [{ Code: "COHDBB001" }, ..] }) { return error; }
+        if (error is DatabaseException { Diagnostics: [{ Code: "CB04001" }, ..] }) { return error; }
         if (error is DatabaseCorruptionException) { return error; }
 
         if (Assimalign.Cohesion.Database.Storage.StorageCorruptionException.Find(error) is { } corruption)
@@ -232,7 +232,7 @@ public sealed class BlobDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBB006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CB06006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -275,9 +275,9 @@ public sealed class BlobDatabase : DatabaseInstance
         TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         TransactionCommitUnconfirmedException unconfirmed => DatabaseTransactionCommitUnconfirmedException.Create(OfflineCode, Name, unconfirmed),
-        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("COHDBB005", error),
+        _ when DatabaseFailure.Find<IOException>(error) is not null || DatabaseFailure.Find<Assimalign.Cohesion.Database.Storage.StorageException>(error) is not null => CodedFailure("CB06005", error),
         BlobUploadException => CodedFailure(BlobUploadException.Code, error),
-        BlobCatalogException catalog => CodedFailure("COHDBB006", catalog),
+        BlobCatalogException catalog => CodedFailure("CB06006", catalog),
         _ => error,
     };
 
@@ -299,7 +299,7 @@ public sealed class BlobDatabase : DatabaseInstance
 
             if (previous is not null)
             {
-                throw new DatabaseException($"Container '{name}' already exists.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreateContainerAsyncDatabase, name));
             }
 
             var metadata = new BlobContainerMetadata(Guid.NewGuid(), name);
@@ -312,7 +312,7 @@ public sealed class BlobDatabase : DatabaseInstance
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, operation => new ValueTask<BlobContainer>(new BlobContainer(this,
-            Catalog.FindContainer(name, operation.Context.Snapshot) ?? throw new DatabaseException($"Container '{name}' does not exist."), session)), token);
+            Catalog.FindContainer(name, operation.Context.Snapshot) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name)), session)), token);
     }
 
     internal async ValueTask DropContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
@@ -322,7 +322,7 @@ public sealed class BlobDatabase : DatabaseInstance
         {
             await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
             var container = Catalog.FindContainer(name, operation.Context.Snapshot)
-                ?? throw new DatabaseException($"Container '{name}' does not exist.");
+                ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name));
             if (container != Catalog.FindContainer(name, LatestSnapshot(operation.Context)))
             {
                 ThrowConflict();
@@ -452,7 +452,7 @@ public sealed class BlobDatabase : DatabaseInstance
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException("The blob operation's transaction ended while waiting for the writer lock.");
+                throw new DatabaseException(ErrorMessages.BlobDatabaseLockWriterAsyncDatabase);
             }
         }
         catch
@@ -469,7 +469,7 @@ public sealed class BlobDatabase : DatabaseInstance
     internal TransactionSnapshot LatestSnapshot(TransactionContext context) => new(context.Sequence,
         TransactionSequence.None, new TransactionSequence(ulong.MaxValue), Coordinator.GetOpenContexts().Where(item => item.State != TransactionState.Committed).Select(item => item.Sequence));
 
-    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException("The blob catalog changed since this transaction's snapshot. Retry the transaction.");
+    internal static void ThrowConflict() => throw new DatabaseTransactionAbortedException(ErrorMessages.BlobDatabaseThrowConflictFailure);
     internal static BlobContentReference Content(BlobCatalogEntry entry) => new(entry.HeadLocation, entry.Length, entry.Checksum);
     internal static BlobProperties Properties(BlobCatalogEntry entry)
         => new(entry.Name, entry.Length, entry.ContentType, entry.ETag, entry.CreatedAt, entry.ModifiedAt, entry.Checksum);

@@ -53,13 +53,13 @@ Session operations use the active explicit transaction when present; otherwise e
 automatic transaction. The engine has one writer at a time, so a write from one session while
 another session's explicit transaction has written waits for that transaction to end.
 An operation that fails inside an explicit transaction aborts the whole transaction: the session
-refuses further operations and BEGIN with `COHDBB001` until the caller rolls back, and a commit
+refuses further operations and BEGIN with `CB04001` until the caller rolls back, and a commit
 fails without committing.
 A failed journal or data fsync takes the database offline: every later operation, streams and
-the server included, is refused with `DatabaseOfflineException` (`COHDBB002`) until
+the server included, is refused with `DatabaseOfflineException` (`CB06002`) until
 `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed upload (#1243). While an
 engine worker's work on a database keeps failing, the server refuses that database alone with
-`COHDBB003` until the work succeeds or the engine gives up on the database
+`CB06003` until the work succeeds or the engine gives up on the database
 (`WorkerFailureWindow`, `WorkerFailureMinimumPasses`) and takes it offline.
 `BufferPoolCapacity` (32 MiB), `CheckpointJournalSize` (256 MiB) and `CheckpointInterval`
 (5 minutes) size the buffer pool and trigger checkpoints (#1254); a failed undo is retried on a
@@ -77,8 +77,8 @@ session to one database; requests identify only containers and objects in that d
 The default authenticator trusts every principal; configure `Authenticator` for authenticated
 access. Session limits, authentication deadlines, idle eviction, and bounded two-phase shutdown
 are configurable. While a background worker fails on one database, the server refuses only that
-database's handshakes and exchanges (`Unavailable`, `COHDBB003`) and serves the others; an
-offline database is refused as offline (`COHDBB002`). Only a disposed engine, or one that has
+database's handshakes and exchanges (`Unavailable`, `CB06003`) and serves the others; an
+offline database is refused as offline (`CB06002`). Only a disposed engine, or one that has
 failed as a whole (`DatabaseEngine.HasEngineWideFailure`), rejects every session, and a start
 refused for that reason releases the listener and leaves the server stopped for good (owner
 decision 42). A refused exchange, like every wire failure, ends the connection and aborts a
@@ -213,3 +213,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Blob diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.

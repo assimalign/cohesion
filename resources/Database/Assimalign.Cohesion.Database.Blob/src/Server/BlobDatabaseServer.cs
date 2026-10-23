@@ -29,8 +29,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// background worker of the engine holds a failure of one database
 /// (<see cref="DatabaseEngine.HasFailingWorker"/>), the server refuses that database's handshakes
 /// and exchanges with <see cref="ProtocolErrorCode.Unavailable"/> and a message led by
-/// <c>COHDBB003</c>, and serves the engine's other databases; the refusal ends with the failure,
-/// or turns into the offline refusal (<c>COHDBB002</c>) once the engine gives up on the database.
+/// <c>CB06003</c>, and serves the engine's other databases; the refusal ends with the failure,
+/// or turns into the offline refusal (<c>CB06002</c>) once the engine gives up on the database.
 /// The server refuses its start, new connections, handshakes and exchanges for every database only
 /// while the engine is disposed or has failed as a whole
 /// (<see cref="DatabaseEngine.HasEngineWideFailure"/>). Before the decision it refused all of them
@@ -130,7 +130,7 @@ public sealed class BlobDatabaseServer : DatabaseServer
             // The base leaves a server whose start failed stopped for good, so a later stop has
             // nothing to release: the listener the server owns is released here, before the
             // refusal propagates (concrete-types plan, row 9).
-            var refusal = new DatabaseException($"The Blob engine is {state} and cannot accept sessions.");
+            var refusal = new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseServerStartCoreAsyncDatabase, state));
             await DisposeListenerAfterFailedStartAsync().ConfigureAwait(false);
             throw refusal;
         }

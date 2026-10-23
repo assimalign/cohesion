@@ -313,7 +313,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
 
     /// <summary>
     /// Writes that the server refused one database while a background worker of its engine keeps
-    /// failing on it (owner decision 42; the refusal's message leads with <c>COHDBB003</c>).
+    /// failing on it (owner decision 42; the refusal's message leads with <c>CB06003</c>).
     /// </summary>
     /// <param name="session">The refused session.</param>
     /// <param name="database">The refused database.</param>
