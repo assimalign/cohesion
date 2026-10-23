@@ -29,11 +29,11 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 665 |
-| Shipped library/resource projects | 237 |
+| Projects indexed | 667 |
+| Shipped library/resource projects | 238 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 718 |
+| Declared project references | 722 |
 | Declared shared-source links | 51 |
 
 ## Ambiguous project names
@@ -742,7 +742,7 @@ flowchart LR
 
 ### `resources/IdentityHub`
 
-4 shipped projects.
+5 shipped projects.
 
 Intra-area references:
 
@@ -750,15 +750,19 @@ Intra-area references:
 flowchart LR
     N0["IdentityHub"]
     N1["IdentityHub.ApplicationModel"]
-    N2["IdentityHub.Hosting"]
-    N3["IdentityHub.Models"]
-    N2 --> N0
+    N2["IdentityHub.Client"]
+    N3["IdentityHub.Hosting"]
+    N4["IdentityHub.Models"]
+    N0 --> N4
+    N2 --> N4
+    N3 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
+| `Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityHub.Models`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 | `Assimalign.Cohesion.IdentityHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
+| `Assimalign.Cohesion.IdentityHub.Client` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityHub.Models`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 | `Assimalign.Cohesion.IdentityHub.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.SecurityHeaders` | — | — |
 | `Assimalign.Cohesion.IdentityHub.Models` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 
@@ -1057,7 +1061,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Http` | 102 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, … |
 | `Assimalign.Cohesion.Hosting.Resources` | 91 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApiManager.ApplicationModel.Tests, Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, … |
 | `Assimalign.Cohesion.Web` | 75 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.Core` | 68 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
+| `Assimalign.Cohesion.Core` | 69 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Connections` | 43 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 41 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Blob.Client.Tests, … |
@@ -1073,16 +1077,16 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.DependencyInjection` | 23 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |
 | `Assimalign.Cohesion.Web.Server` | 21 | Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.Http.Forwarded` | 20 | Assimalign.Cohesion.Http.Antiforgery, Assimalign.Cohesion.Http.Antiforgery.Tests, Assimalign.Cohesion.Http.Forwarded.Tests, Assimalign.Cohesion.Web.Authentication.Cookie, … |
+| `Assimalign.Cohesion.IdentityModel` | 20 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.Database.Types` | 19 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
 | `Assimalign.Cohesion.Hosting.Telemetry` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
-| `Assimalign.Cohesion.IdentityModel` | 19 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
 | `Assimalign.Cohesion.IdentityModel.Token` | 15 | Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, … |
 | `Assimalign.Cohesion.Database.Protocol` | 14 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Blob.Protocol, … |
 
 ## Harnesses
 
-316 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+317 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1097,7 +1101,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 10 |
 | `samples/` | 14 |
-| `tests/` | 287 |
+| `tests/` | 288 |
 
 Samples, which live in the repository-root `samples/` tree:
 
