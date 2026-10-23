@@ -52,8 +52,8 @@ jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
-    # Above the per-area 30 until the first main runs measure this job: run 38740702835's
-    # single-project legs bound it at 29 minutes on Linux and 42 on Windows (.claude/rules/build-system.md).
+    # Latest three successful consolidated main runs (39656175267, 39625288435, 39285511469):
+    # slowest build 24m 1s; twice that, rounded up to 15 minutes, is 60 (#1470).
     timeout-minutes: 60
     strategy:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
@@ -289,6 +289,8 @@ jobs:
     name: "Database.Testing E2E [${{ matrix.os }}]"
     needs: database-testing-pack
     runs-on: ${{ matrix.os }}
+    # Same healthy runs: slowest E2E 3m 15s; the #1470 minimum for this job is 45 minutes.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

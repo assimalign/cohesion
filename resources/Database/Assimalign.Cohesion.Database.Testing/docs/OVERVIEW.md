@@ -105,3 +105,13 @@ installed SDK/framework packs after Install-Local, so it verifies the same expor
 application consumes. Retained outputs compiled against the former Sql.Tcp namespace must not
 be used as evidence that a fresh compile succeeds. No fixture-specific listener or alternate
 bootstrap replaces the resource's ordinary Program entry point.
+
+
+## Workflow hang guards (#1470)
+
+The Database workflow keeps a 60-minute build-job timeout and an explicit 45-minute E2E-job
+timeout. The three latest successful consolidated main runs (39656175267, 39625288435 and
+39285511469) measured at most 24m 1s for a build leg and 3m 15s for an E2E leg. Twice each
+maximum rounded up to 15 minutes gives 60 and 15 minutes respectively; the issue's 45-minute
+E2E minimum governs the latter. These job timeouts and the fixture's existing two-minute test
+budget are hang guards. The shared build action retains blame-hang diagnostics and mini-dumps.
