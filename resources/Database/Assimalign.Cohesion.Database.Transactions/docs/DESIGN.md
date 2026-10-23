@@ -36,11 +36,12 @@ The area is concrete-first (`.claude/rules/database-area.md`); the project decla
 interface since phase 2 of the concrete-types program
 (`docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md`).
 
-- **Sealed, with internal constructors:** `TransactionManager` (since #1257),
-  `TransactionContext` (the most-consumed kernel contract, so every call on it is direct) and
-  `LockManager` ("The lock manager implementation", below). Each has one implementation and
-  is created here: by `TransactionManager.Create`, `TransactionManager.BeginAsync` and
-  `new LockManager()`.
+- **Sealed, with internal constructors:** `TransactionManager` (since #1257) and
+  `TransactionContext` (the most-consumed kernel contract, so every call on it is direct).
+  Each has one implementation and is created here by `TransactionManager.Create` and
+  `TransactionManager.BeginAsync`, respectively. `LockManager` is sealed with a public
+  parameterless constructor (`new LockManager()`, owner decision 61; "The lock manager
+  implementation", below).
 - **`TransactionContext.PinStatementSnapshot()`** returns a statement view: it shares the
   transaction's id, sequence, isolation level and state, and fixes the snapshot at the call.
   Documents, Graph and Blob pin one per read-committed operation, so every metadata lookup and

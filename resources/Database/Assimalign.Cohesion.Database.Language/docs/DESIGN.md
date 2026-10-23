@@ -15,7 +15,9 @@ CTS, timer or task list and ignores AnalyzerTimeout, including zero. After a tim
 observes a late aggregate fault so it cannot become an unobserved task exception.
 `QueryStatement.AddDiagnostic` rejects null before adding to its concurrent bag;
 diagnostic enumeration retains severity and source-end ordering. The mutable analyzer list and
-public virtual surface remain for the separate #1264 API audit.
+public virtual surface remain for the separate #1264 API audit. `QueryAnalyzerContext` is a
+sealed leaf constructed internally by the parser; its existing read-only `Statement` member and
+analyzer behavior are unchanged. No new overridable analyzer or parser member is introduced.
 
 ## Delimited identifiers (#1235)
 

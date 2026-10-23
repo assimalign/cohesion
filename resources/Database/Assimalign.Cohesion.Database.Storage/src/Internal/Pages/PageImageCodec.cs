@@ -102,7 +102,7 @@ internal static class PageImageCodec
     internal const int CommittedImageSlack = 64;
 
     // The reference an image is encoded against.
-    private static readonly byte[] ZeroPage = new byte[Page.Size];
+    private static readonly byte[] _zeroPage = new byte[Page.Size];
 
     /// <summary>
     /// Encodes the full image of <paramref name="page"/>: the runs in which it differs from an
@@ -112,7 +112,7 @@ internal static class PageImageCodec
     /// <param name="destination">At least <see cref="MaximumRunsLength"/> bytes.</param>
     /// <returns>The number of bytes written.</returns>
     internal static int EncodeImage(ReadOnlySpan<byte> page, Span<byte> destination)
-        => EncodeRuns(ZeroPage, page, destination);
+        => EncodeRuns(_zeroPage, page, destination);
 
     /// <summary>
     /// Encodes the runs in which <paramref name="current"/> differs from

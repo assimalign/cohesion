@@ -27,8 +27,8 @@ public class BTreeEntryTimingTests
     private const int manyVersions = 2_048;
     private const double allowedVersionGrowth = 2.5;
 
-    private static readonly IndexKey shortKey = IndexKey.FromInt64(25);
-    private static readonly IndexKey longKey = IndexKey.FromInt64(400);
+    private static readonly IndexKey _shortKey = IndexKey.FromInt64(25);
+    private static readonly IndexKey _longKey = IndexKey.FromInt64(400);
 
     public enum Operation
     {
@@ -59,17 +59,17 @@ public class BTreeEntryTimingTests
         {
             for (int i = 0; i < shortRun; i++)
             {
-                await index.InsertVersionAsync(build, shortKey, (ulong)i, writer, stamp);
+                await index.InsertVersionAsync(build, _shortKey, (ulong)i, writer, stamp);
             }
             for (int i = 0; i < longRun; i++)
             {
-                await index.InsertVersionAsync(build, longKey, (ulong)(shortRun + i), writer, stamp);
+                await index.InsertVersionAsync(build, _longKey, (ulong)(shortRun + i), writer, stamp);
             }
             build.Commit();
         }
 
-        var small = new Run(harness, index, operation, shortKey, 0, shortRun, writer, deleter);
-        var large = new Run(harness, index, operation, longKey, shortRun, longRun, writer, deleter);
+        var small = new Run(harness, index, operation, _shortKey, 0, shortRun, writer, deleter);
+        var large = new Run(harness, index, operation, _longKey, shortRun, longRun, writer, deleter);
 
         // Verify the operation before comparing physical work.
         await small.MeasureAsync(verify: true);

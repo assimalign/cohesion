@@ -19,9 +19,9 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public class TransactionCoordinatorLockWaitTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-    private static readonly LockResource Held = LockResource.Entry(3, 1);
-    private static readonly LockResource PreAcquired = LockResource.Entry(3, 2);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly LockResource _held = LockResource.Entry(3, 1);
+    private static readonly LockResource _preAcquired = LockResource.Entry(3, 2);
 
     /// <summary>
     /// A request that must wait inside a statement apply is refused at once, the statement's bracket
@@ -38,8 +38,8 @@ public class TransactionCoordinatorLockWaitTests
         var locks = coordinator.LockManager;
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await locks.AcquireAsync(holder.Sequence, Held, LockMode.Exclusive);
-        await locks.AcquireAsync(writer.Sequence, PreAcquired, LockMode.Exclusive);
+        await locks.AcquireAsync(holder.Sequence, _held, LockMode.Exclusive);
+        await locks.AcquireAsync(writer.Sequence, _preAcquired, LockMode.Exclusive);
         bool regrantedAtOnce = false;
 
         // Act: inside its apply the writer writes a record, re-requests its own lock, then requests
@@ -48,27 +48,27 @@ public class TransactionCoordinatorLockWaitTests
             await coordinator.ApplyStatementAsync<int>(writer, async bracket =>
             {
                 storage.Insert(bracket, Record(writer));
-                var regrant = locks.AcquireAsync(writer.Sequence, PreAcquired, LockMode.Exclusive);
+                var regrant = locks.AcquireAsync(writer.Sequence, _preAcquired, LockMode.Exclusive);
                 regrantedAtOnce = regrant.IsCompletedSuccessfully;
                 await regrant;
-                await locks.AcquireAsync(writer.Sequence, Held, LockMode.Exclusive);
+                await locks.AcquireAsync(writer.Sequence, _held, LockMode.Exclusive);
                 return 0;
-            }).AsTask().WaitAsync(Timeout));
+            }).AsTask().WaitAsync(_timeout));
         bool recordSurvived = storage.TryReadRecord(storage.LastInserted.PageId, storage.LastInserted.SlotIndex, out _);
 
         // The gate is free: another statement of the writer applies.
-        int applied = await coordinator.ApplyStatementAsync(writer, _ => 1).AsTask().WaitAsync(Timeout);
+        int applied = await coordinator.ApplyStatementAsync(writer, _ => 1).AsTask().WaitAsync(_timeout);
 
         // Outside an apply the same request waits for the holder, as any other.
-        var outside = locks.AcquireAsync(writer.Sequence, Held, LockMode.Exclusive).AsTask();
+        var outside = locks.AcquireAsync(writer.Sequence, _held, LockMode.Exclusive).AsTask();
         bool waitedOutside = !outside.IsCompleted;
         await coordinator.CommitAsync(holder);
-        await outside.WaitAsync(Timeout);
+        await outside.WaitAsync(_timeout);
         await coordinator.CommitAsync(writer);
 
         // Assert
         regrantedAtOnce.ShouldBeTrue();
-        refused.Message.ShouldStartWith($"Transaction {writer.Sequence}'s request for {LockMode.Exclusive} on {Held} would wait inside a statement apply", Case.Sensitive);
+        refused.Message.ShouldStartWith($"Transaction {writer.Sequence}'s request for {LockMode.Exclusive} on {_held} would wait inside a statement apply", Case.Sensitive);
         recordSurvived.ShouldBeFalse();
         applied.ShouldBe(1);
         waitedOutside.ShouldBeTrue();

@@ -36,7 +36,7 @@ public sealed class StoragePageLatchTests
         do
         {
             var (reader, waited, completedWhileHeld) = CancelReaderWhileWriting(latch);
-            await reader.WaitAsync(Wait);
+            await reader.WaitAsync(_wait);
             waited.ShouldBeTrue();
             queued++;
             completedWhileHeld.ShouldBeTrue("cancellation must finish while the writer still owns the latch");
@@ -63,21 +63,21 @@ public sealed class StoragePageLatchTests
         try
         {
             var reader = RunOnThread(() => Should.Throw<OperationCanceledException>(() => latch.EnterRead(stop.Token)));
-            bool waited = SpinWait.SpinUntil(() => latch.WaitingReaders == 1 || reader.IsCompleted, Wait) && !reader.IsCompleted;
+            bool waited = SpinWait.SpinUntil(() => latch.WaitingReaders == 1 || reader.IsCompleted, _wait) && !reader.IsCompleted;
             stop.Cancel();
-            bool completed = SpinWait.SpinUntil(() => reader.IsCompleted, Wait);
+            bool completed = SpinWait.SpinUntil(() => reader.IsCompleted, _wait);
             return (reader, waited, completed);
         }
         finally { stop.Cancel(); latch.ExitWrite(); }
     }
 
-    private const ulong RecordOwner = 7;
+    private const ulong recordOwner = 7;
 
     /// <summary>
     /// The longest a test waits for a rollback to reach or pass a latch. Every wait ends as soon as
     /// its condition holds, so the ceiling costs nothing when the test passes.
     /// </summary>
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _wait = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Page latch: a rollback restores a latched page only once the latch's reader has left (#1371)")]
     public async Task Rollback_WhileAReaderHoldsTheLatch_ShouldRestoreOnlyAfterTheReaderLeaves()
@@ -91,7 +91,7 @@ public sealed class StoragePageLatchTests
 
         // Act: the reader holds the latch while the rollback starts.
         var (heldByte, waited, completedWhileHeld, rollback) = RollBackWhileReading(storage, latch, transaction, pageId);
-        await rollback.WaitAsync(Wait);
+        await rollback.WaitAsync(_wait);
 
         // Assert: the reader saw the page as the bracket left it; the restore came after.
         waited.ShouldBeTrue("the rollback waits for the latch");
@@ -112,12 +112,12 @@ public sealed class StoragePageLatchTests
         (PageId PageId, int SlotIndex) committed;
         using (var setup = storage.BeginTransaction())
         {
-            committed = storage.Insert(setup, RecordOwner, [0x33]);
+            committed = storage.Insert(setup, recordOwner, [0x33]);
             setup.Commit();
         }
 
         var transaction = storage.BeginTransaction();
-        var inserted = storage.Insert(transaction, RecordOwner, [0x44]);
+        var inserted = storage.Insert(transaction, recordOwner, [0x44]);
         inserted.PageId.ShouldBe(committed.PageId);
         Write(storage, transaction, latch, pageId, 0x22);
 
@@ -127,10 +127,10 @@ public sealed class StoragePageLatchTests
         bool committedKept = false;
         var (heldByte, waited, completedWhileHeld, rollback) = RollBackWhileReading(storage, latch, transaction, pageId, () =>
         {
-            insertedLeft = !storage.TryReadRecord(inserted.PageId, inserted.SlotIndex, RecordOwner, out _);
-            committedKept = storage.TryReadRecord(committed.PageId, committed.SlotIndex, RecordOwner, out _);
+            insertedLeft = !storage.TryReadRecord(inserted.PageId, inserted.SlotIndex, recordOwner, out _);
+            committedKept = storage.TryReadRecord(committed.PageId, committed.SlotIndex, recordOwner, out _);
         });
-        await rollback.WaitAsync(Wait);
+        await rollback.WaitAsync(_wait);
 
         // Assert: the record page was restored before the rollback waited, the latched page after.
         waited.ShouldBeTrue("the rollback waits for the latch");
@@ -162,7 +162,7 @@ public sealed class StoragePageLatchTests
         // first and neither holds second; taken in enlistment order, the backward rollback would
         // hold second while it waits, and could then deadlock with the forward one.
         var (bothWaited, secondFree, rollbacks) = RollBackBothWhileReading(first, second, forward, backward);
-        await Task.WhenAll(rollbacks).WaitAsync(Wait);
+        await Task.WhenAll(rollbacks).WaitAsync(_wait);
 
         // Assert
         bothWaited.ShouldBeTrue("both rollbacks wait for the first latch");
@@ -253,7 +253,7 @@ public sealed class StoragePageLatchTests
         try
         {
             var rollback = RunOnThread(transaction.Rollback);
-            bool waited = SpinWait.SpinUntil(() => latch.WaitingWriters == 1 || rollback.IsCompleted, Wait) && !rollback.IsCompleted;
+            bool waited = SpinWait.SpinUntil(() => latch.WaitingWriters == 1 || rollback.IsCompleted, _wait) && !rollback.IsCompleted;
             whileHeld?.Invoke();
             return (Body(storage, pageId)[0], waited, rollback.IsCompleted, rollback);
         }
@@ -274,13 +274,13 @@ public sealed class StoragePageLatchTests
         try
         {
             Task[] rollbacks = [RunOnThread(forward.Rollback), RunOnThread(backward.Rollback)];
-            bool bothWaited = SpinWait.SpinUntil(() => first.WaitingWriters == 2, Wait);
+            bool bothWaited = SpinWait.SpinUntil(() => first.WaitingWriters == 2, _wait);
             var probe = RunOnThread(() =>
             {
                 second.EnterRead();
                 second.ExitRead();
             });
-            bool secondFree = SpinWait.SpinUntil(() => probe.IsCompleted, Wait);
+            bool secondFree = SpinWait.SpinUntil(() => probe.IsCompleted, _wait);
             return (bothWaited, secondFree, rollbacks);
         }
         finally

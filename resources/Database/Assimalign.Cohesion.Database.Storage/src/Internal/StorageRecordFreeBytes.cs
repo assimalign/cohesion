@@ -120,12 +120,21 @@ internal sealed class StorageRecordFreeBytes
         heap[right].Index = right;
     }
 
-    private sealed class Entry(ulong owner, long page, int capacity, bool known, int index)
+    private sealed class Entry
     {
-        internal readonly ulong Owner = owner;
-        internal readonly long Page = page;
-        internal int Capacity = capacity;
-        internal bool Known = known;
-        internal int Index = index;
+        internal readonly ulong Owner;
+        internal readonly long Page;
+        internal int Capacity;
+        internal bool Known;
+        internal int Index;
+
+        internal Entry(ulong owner, long page, int capacity, bool known, int index)
+        {
+            Owner = owner;
+            Page = page;
+            Capacity = capacity;
+            Known = known;
+            Index = index;
+        }
     }
 }

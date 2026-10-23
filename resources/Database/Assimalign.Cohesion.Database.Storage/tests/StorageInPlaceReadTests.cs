@@ -17,8 +17,8 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 [Collection(StorageRaceCollection.Name)]
 public sealed class StorageInPlaceReadTests
 {
-    private const ulong Owner = 1365;
-    private const int Length = 64;
+    private const ulong owner = 1365;
+    private const int length = 64;
     private readonly ITestOutputHelper _output;
 
     public StorageInPlaceReadTests(ITestOutputHelper output) => _output = output;
@@ -40,7 +40,7 @@ public sealed class StorageInPlaceReadTests
         // Assert
         _output.WriteLine($"Read {readKind}: signal={result.Signal}; bytes={Convert.ToHexString(result.Bytes)}; unchanged={result.Unchanged}.");
         result.Signal.ShouldBe(1, "the reader must wait rather than publish the half-written copy");
-        result.Bytes.Length.ShouldBe(Length);
+        result.Bytes.Length.ShouldBe(length);
         result.Bytes.ShouldAllBe(value => value == 0x22);
         result.Unchanged.ShouldBeFalse();
     }
@@ -64,7 +64,7 @@ public sealed class StorageInPlaceReadTests
             if (operation == "delete") { storage.Delete(transaction, location.PageId, location.SlotIndex); }
             else
             {
-                int size = operation == "shrink" ? Length / 2 : operation == "relocate" ? Length * 2 : Length;
+                int size = operation == "shrink" ? length / 2 : operation == "relocate" ? length * 2 : length;
                 storage.Update(transaction, location.PageId, location.SlotIndex, Enumerable.Repeat((byte)0x22, size).ToArray());
             }
             transaction.Commit();
@@ -121,7 +121,7 @@ public sealed class StorageInPlaceReadTests
         var location = Seed(storage);
         var result = ReadDuringWrite(storage, location, readKind, resize: true);
         result.Signal.ShouldBe(1);
-        result.Bytes.Length.ShouldBe(Length);
+        result.Bytes.Length.ShouldBe(length);
         result.Bytes.ShouldAllBe(value => value == 0x22);
     }
 
@@ -161,8 +161,8 @@ public sealed class StorageInPlaceReadTests
         writer.Entry.IsUnchangedSince(sequence).ShouldBeFalse();
         writer.Dispose();
         transaction.Commit();
-        storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out var bytes).ShouldBeTrue();
-        bytes.Length.ShouldBe(Length);
+        storage.TryReadRecord(location.PageId, location.SlotIndex, owner, out var bytes).ShouldBeTrue();
+        bytes.Length.ShouldBe(length);
     }
 
     [Theory(DisplayName = "Cohesion Test [Storage] - In-place writes: a writer after the copy forces a retry (#1365)")]
@@ -181,7 +181,7 @@ public sealed class StorageInPlaceReadTests
             // The exact copy-to-confirm window, independent of scheduling speed.
             using var transaction = storage.BeginTransaction();
             storage.Update(transaction, location.PageId, location.SlotIndex,
-                Enumerable.Repeat((byte)0x22, Length / 2).ToArray());
+                Enumerable.Repeat((byte)0x22, length / 2).ToArray());
             transaction.Commit();
         };
         byte[] bytes;
@@ -190,19 +190,19 @@ public sealed class StorageInPlaceReadTests
             if (readKind == "direct") { bytes = storage.ReadBytes(location.PageId, location.SlotIndex); }
             else if (readKind == "try")
             {
-                storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out var data).ShouldBeTrue();
+                storage.TryReadRecord(location.PageId, location.SlotIndex, owner, out var data).ShouldBeTrue();
                 bytes = data.ToArray();
             }
             else
             {
-                using var scan = storage.GetUnitIterator(Owner);
+                using var scan = storage.GetUnitIterator(owner);
                 scan.MoveNext().ShouldBeTrue();
                 bytes = scan.Current.Data.ToArray();
             }
         }
         finally { pin.Entry.ReadCopied = null; }
         copies.ShouldBe(2);
-        bytes.Length.ShouldBe(Length / 2);
+        bytes.Length.ShouldBe(length / 2);
         bytes.ShouldAllBe(value => value == 0x22);
     }
 
@@ -260,7 +260,7 @@ public sealed class StorageInPlaceReadTests
         var location = Seed(storage);
         var result = ReadOwnDuringRestore(storage, location, readKind);
         result.Signal.ShouldBe(1, "the overlapping copy must retry and observe the active restore");
-        result.Bytes.Length.ShouldBe(Length);
+        result.Bytes.Length.ShouldBe(length);
         result.Bytes.ShouldAllBe(value => value == 0x22);
     }
 
@@ -290,12 +290,12 @@ public sealed class StorageInPlaceReadTests
             if (readKind == "direct") { bytes = storage.ReadBytes(location.PageId, location.SlotIndex); }
             else if (readKind == "try")
             {
-                storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out var data).ShouldBeTrue();
+                storage.TryReadRecord(location.PageId, location.SlotIndex, owner, out var data).ShouldBeTrue();
                 bytes = data.ToArray();
             }
             else
             {
-                using var scan = storage.GetUnitIterator(Owner);
+                using var scan = storage.GetUnitIterator(owner);
                 scan.MoveNext().ShouldBeTrue();
                 bytes = scan.Current.Data.ToArray();
             }
@@ -316,12 +316,12 @@ public sealed class StorageInPlaceReadTests
         entry.BeginRestore(transaction);
         try
         {
-            var record = new Span<byte>(entry.Page.Pointer + offset, Length);
-            record[..(Length / 2)].Fill(0x22);
+            var record = new Span<byte>(entry.Page.Pointer + offset, length);
+            record[..(length / 2)].Fill(0x22);
             entered.Set();
             // Observed completion or frame wait, with a hang guard only.
             int signal = WaitHandle.WaitAny([finished.WaitHandle, waiting.WaitHandle], TimeSpan.FromSeconds(30));
-            record[(Length / 2)..].Fill(0x22);
+            record[(length / 2)..].Fill(0x22);
             return signal;
         }
         finally { entry.EndRestore(); }
@@ -330,7 +330,7 @@ public sealed class StorageInPlaceReadTests
     private static (PageId PageId, int SlotIndex) Seed(TornStorage storage)
     {
         using var transaction = storage.BeginTransaction();
-        var location = storage.Insert(transaction, Owner, Enumerable.Repeat((byte)0x11, Length).ToArray());
+        var location = storage.Insert(transaction, owner, Enumerable.Repeat((byte)0x11, length).ToArray());
         transaction.Commit();
         return location;
     }
@@ -356,9 +356,9 @@ public sealed class StorageInPlaceReadTests
             if (resize)
             {
                 storage.Update(transaction, location.PageId, location.SlotIndex,
-                    Enumerable.Repeat((byte)0x22, Length / 2).ToArray());
+                    Enumerable.Repeat((byte)0x22, length / 2).ToArray());
             }
-            else { record[..(Length / 2)].Fill(0x22); }
+            else { record[..(length / 2)].Fill(0x22); }
             writer.MarkDirty();
             var reader = DedicatedTestTask.Run(() =>
             {
@@ -367,10 +367,10 @@ public sealed class StorageInPlaceReadTests
                     if (readKind == "direct") { return storage.ReadBytes(location.PageId, location.SlotIndex); }
                     if (readKind == "try")
                     {
-                        storage.TryReadRecord(location.PageId, location.SlotIndex, Owner, out var bytes).ShouldBeTrue();
+                        storage.TryReadRecord(location.PageId, location.SlotIndex, owner, out var bytes).ShouldBeTrue();
                         return bytes.ToArray();
                     }
-                    using var scan = storage.GetUnitIterator(Owner);
+                    using var scan = storage.GetUnitIterator(owner);
                     scan.MoveNext().ShouldBeTrue();
                     return scan.Current.Data.ToArray();
                 }
@@ -381,9 +381,9 @@ public sealed class StorageInPlaceReadTests
             if (resize)
             {
                 storage.Update(transaction, location.PageId, location.SlotIndex,
-                    Enumerable.Repeat((byte)0x22, Length).ToArray());
+                    Enumerable.Repeat((byte)0x22, length).ToArray());
             }
-            else { record[(Length / 2)..].Fill(0x22); }
+            else { record[(length / 2)..].Fill(0x22); }
             writer.MarkDirty();
             writer.Dispose();
             transaction.Commit();

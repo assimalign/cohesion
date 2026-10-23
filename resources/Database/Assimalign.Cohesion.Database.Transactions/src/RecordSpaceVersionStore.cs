@@ -18,7 +18,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 {
     // A logical transaction can span a streamed object larger than RAM. Physical
     // undo/reclamation must bound the page pre-images a storage bracket retains independently of it.
-    private const int MutationBatchSize = 64;
+    private const int mutationBatchSize = 64;
     private readonly Storage _storage;
     private readonly TransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
@@ -212,17 +212,17 @@ public sealed class RecordSpaceVersionStore : VersionStore
         // The candidates a committed batch reclaimed or found stale. A batch that does not commit
         // rolls back, so its candidates stay tracked, as the unreadable ones do.
         var settled = new HashSet<PrunableVersion>(candidates.Count);
-        var batchSettled = new List<PrunableVersion>(Math.Min(MutationBatchSize, candidates.Count));
+        var batchSettled = new List<PrunableVersion>(Math.Min(mutationBatchSize, candidates.Count));
         ExceptionDispatchInfo? unreadable = null;
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int offset = 0; offset < candidates.Count; offset += MutationBatchSize)
+            for (int offset = 0; offset < candidates.Count; offset += mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
-                int end = Math.Min(offset + MutationBatchSize, candidates.Count);
+                int end = Math.Min(offset + mutationBatchSize, candidates.Count);
                 long batchPruned = 0;
                 batchSettled.Clear();
                 for (int index = offset; index < end; index++)
@@ -350,7 +350,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// <returns>The number of versions physically undone.</returns>
     internal long ScrubRecovered(IReadOnlySet<TransactionSequence> aborted, CancellationToken cancellationToken = default)
     {
-        var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(MutationBatchSize);
+        var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(mutationBatchSize);
         var prunable = new List<PrunableVersion>();
         long changed = 0;
 
@@ -395,7 +395,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 if (writer != TransactionSequence.None && aborted.Contains(writer))
                 {
                     mutations.Add((unit.PageId, unit.SlotIndex, null));
-                    if (mutations.Count == MutationBatchSize)
+                    if (mutations.Count == mutationBatchSize)
                     {
                         ApplyBatch();
                     }
@@ -408,7 +408,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                     if (aborted.Contains(deleter))
                     {
                         mutations.Add((unit.PageId, unit.SlotIndex, RecordVersionStamp.WithoutDeleter(unit.Data.Span)));
-                        if (mutations.Count == MutationBatchSize)
+                        if (mutations.Count == mutationBatchSize)
                         {
                             ApplyBatch();
                         }
@@ -440,11 +440,11 @@ public sealed class RecordSpaceVersionStore : VersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int offset = 0; offset < entries.Count; offset += MutationBatchSize)
+            for (int offset = 0; offset < entries.Count; offset += mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
-                int end = Math.Min(offset + MutationBatchSize, entries.Count);
+                int end = Math.Min(offset + mutationBatchSize, entries.Count);
                 for (int index = offset; index < end; index++)
                 {
                     var entry = entries[index];

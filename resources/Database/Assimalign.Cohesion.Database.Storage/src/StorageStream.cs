@@ -23,7 +23,7 @@ using Assimalign.Cohesion.FileSystem;
 /// var stream = StorageStream.FromInMemory();
 /// </code>
 /// </example>
-public class StorageStream : Stream, IFileSystemFileHandle
+public sealed class StorageStream : Stream, IFileSystemFileHandle
 {
     private readonly Stream _inner;
     private readonly IFileSystemFileHandle _handle;
@@ -43,6 +43,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
 
     /// <summary>Initializes storage over an explicitly durability-aware handle.</summary>
     /// <param name="handle">The owned backing handle.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="handle"/> is <c>null</c>.</exception>
     public StorageStream(IFileSystemFileHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);
@@ -52,6 +53,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
 
     /// <summary>Wraps storage while retaining its explicit handle contract.</summary>
     /// <param name="stream">The owned backing storage stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> is <c>null</c>.</exception>
     public StorageStream(StorageStream stream) : this((IFileSystemFileHandle)stream) { }
 
     /// <inheritdoc />

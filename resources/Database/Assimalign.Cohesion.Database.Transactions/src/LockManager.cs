@@ -81,8 +81,8 @@ public sealed class LockManager
         /* IX */ { false, false, false, true,  true  },
     };
 
-    private const int ModeCount = 5;
-    private const byte AllModes = (1 << ModeCount) - 1;
+    private const int modeCount = 5;
+    private const byte allModes = (1 << modeCount) - 1;
 
     // The modes each mode conflicts with, as a mask with bit (int)mode set for each: a row of the
     // matrix. The matrix is symmetric, so a row is also the held modes a request for the mode
@@ -154,20 +154,20 @@ public sealed class LockManager
     private Func<bool>? _insideApply;
 
     // How a lock request's wait ended, as the LockWaitStop event names it.
-    private const string WaitGranted = "Granted";
-    private const string WaitCancelled = "Cancelled";
-    private const string WaitTimedOut = "Timeout";
-    private const string WaitEnded = "Ended";
-    private const string WaitAbandoned = "Abandoned";
-    private const string WaitDeadlock = "Deadlock";
+    private const string waitGranted = "Granted";
+    private const string waitCancelled = "Cancelled";
+    private const string waitTimedOut = "Timeout";
+    private const string waitEnded = "Ended";
+    private const string waitAbandoned = "Abandoned";
+    private const string waitDeadlock = "Deadlock";
 
     // The most blockers a LockWaitBlocked report names for the waiting request, for each blocker
     // it describes in turn, and the most queued requests it lists for a blocker. The report is
     // built under _sync, and ETW drops an event larger than 64 KB, so it is bounded; the rest is
     // counted ("... (+N more)").
-    private const int MaxBlockersDescribed = 16;
-    private const int MaxNestedBlockersDescribed = 4;
-    private const int MaxQueuedDescribed = 4;
+    private const int maxBlockersDescribed = 16;
+    private const int maxNestedBlockersDescribed = 4;
+    private const int maxQueuedDescribed = 4;
 
     /// <summary>Initializes a standalone FIFO lock table with deadlock detection.</summary>
     public LockManager()
@@ -443,9 +443,9 @@ public sealed class LockManager
             // wait was traced: a late cancellation cannot reach CancelWaiter during a listener's
             // synchronous dispatch. The callback is static and the waiter its state, so a request
             // granted at once allocates no closure for a registration it never makes.
-            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(WaitCancelled), waiter);
-            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(WaitTimedOut), waiter);
-            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(WaitAbandoned), waiter);
+            using var registration = cancellationToken.Register(static state => ((Waiter)state!).Cancel(waitCancelled), waiter);
+            using var timeoutRegistration = timeoutToken.Register(static state => ((Waiter)state!).Cancel(waitTimedOut), waiter);
+            using var abandonRegistration = abandonToken.Register(static state => ((Waiter)state!).Cancel(waitAbandoned), waiter);
             await waiter.Completion.Task.ConfigureAwait(false);
         }
         finally
@@ -466,9 +466,9 @@ public sealed class LockManager
     /// </summary>
     private static string WaitOutcome(Waiter waiter) => waiter.CancellationOutcome ?? (waiter.Completion.Task.Status switch
     {
-        TaskStatus.RanToCompletion => WaitGranted,
-        _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => WaitDeadlock,
-        _ => WaitEnded,
+        TaskStatus.RanToCompletion => waitGranted,
+        _ when waiter.Completion.Task.Exception?.InnerException is TransactionDeadlockException => waitDeadlock,
+        _ => waitEnded,
     });
 
     private static TransactionDeadlockException Deadlock(TransactionSequence owner, LockResource resource, LockMode mode)
@@ -753,11 +753,11 @@ public sealed class LockManager
         // its completion owns the outcome even if its asynchronous notification has not run.
         if (removed)
         {
-            if (outcome == WaitTimedOut)
+            if (outcome == waitTimedOut)
             {
                 waiter.Completion.TrySetException(new TransactionLockTimeoutException(new OperationCanceledException()));
             }
-            else if (outcome == WaitAbandoned)
+            else if (outcome == waitAbandoned)
             {
                 waiter.Completion.TrySetException(Abandoned(new TransactionSequence(waiter.Owner), waiter.Resource,
                     waiter.Mode, Volatile.Read(ref _abandonCause)!));
@@ -809,10 +809,10 @@ public sealed class LockManager
 
     private static byte[] BuildConflicts()
     {
-        var conflicts = new byte[ModeCount];
-        for (int held = 0; held < ModeCount; held++)
+        var conflicts = new byte[modeCount];
+        for (int held = 0; held < modeCount; held++)
         {
-            for (int requested = 0; requested < ModeCount; requested++)
+            for (int requested = 0; requested < modeCount; requested++)
             {
                 if (!_compatible[held, requested])
                 {
@@ -826,10 +826,10 @@ public sealed class LockManager
 
     private static byte[] BuildHeldConflicts()
     {
-        var conflicts = new byte[AllModes + 1];
-        for (int mask = 1; mask <= AllModes; mask++)
+        var conflicts = new byte[allModes + 1];
+        for (int mask = 1; mask <= allModes; mask++)
         {
-            for (int mode = 0; mode < ModeCount; mode++)
+            for (int mode = 0; mode < modeCount; mode++)
             {
                 if ((mask & (1 << mode)) != 0)
                 {
@@ -1414,7 +1414,7 @@ public sealed class LockManager
     // counted.
     private void DescribeBlockersLocked(Waiter waiter, StringBuilder description, int depth)
     {
-        int limit = depth == 0 ? MaxBlockersDescribed : MaxNestedBlockersDescribed;
+        int limit = depth == 0 ? maxBlockersDescribed : maxNestedBlockersDescribed;
         int described = 0;
         int more = 0;
 
@@ -1476,7 +1476,7 @@ public sealed class LockManager
         int described = 0;
         foreach (var request in queued)
         {
-            if (described == MaxQueuedDescribed)
+            if (described == maxQueuedDescribed)
             {
                 break;
             }
@@ -1514,7 +1514,7 @@ public sealed class LockManager
     private static void AppendModes(StringBuilder description, byte held)
     {
         bool first = true;
-        for (int mode = 0; mode < ModeCount; mode++)
+        for (int mode = 0; mode < modeCount; mode++)
         {
             if ((held & (1 << mode)) == 0)
             {
@@ -1552,7 +1552,7 @@ public sealed class LockManager
         }
 
         // A timer's longest due time; a threshold past it (about 49 days) reports nothing.
-        private const double LongestDueMilliseconds = uint.MaxValue - 1;
+        private const double longestDueMilliseconds = uint.MaxValue - 1;
 
         public static BlockedWaitReport? Arm(LockManager manager, Waiter waiter, long started)
         {
@@ -1562,7 +1562,7 @@ public sealed class LockManager
             }
 
             double threshold = TransactionEventSource.Log.SlowLockWaitThresholdMilliseconds;
-            return threshold <= LongestDueMilliseconds
+            return threshold <= longestDueMilliseconds
                 ? new BlockedWaitReport(manager, waiter, started, TimeSpan.FromMilliseconds(threshold))
                 : null;
         }

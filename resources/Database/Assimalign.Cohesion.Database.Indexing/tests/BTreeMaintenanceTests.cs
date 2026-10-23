@@ -171,16 +171,16 @@ public class BTreeMaintenanceTests
         // Assert: two directory slots remain, and the third slot's bytes are zero again.
         using var handle = harness.Storage.PageManager.GetPage(root);
         byte[] body = handle.Page.AsBodySpan().ToArray();
-        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeCountOffset)).ShouldBe((ushort)2);
-        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeDirectoryOffset)).ShouldNotBe((ushort)0);
-        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(NodeDirectoryOffset + 2)).ShouldNotBe((ushort)0);
-        body.AsSpan(NodeDirectoryOffset + 4, 2).ToArray().ShouldBe(new byte[2]);
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(nodeCountOffset)).ShouldBe((ushort)2);
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(nodeDirectoryOffset)).ShouldNotBe((ushort)0);
+        BinaryPrimitives.ReadUInt16LittleEndian(body.AsSpan(nodeDirectoryOffset + 2)).ShouldNotBe((ushort)0);
+        body.AsSpan(nodeDirectoryOffset + 4, 2).ToArray().ShouldBe(new byte[2]);
     }
 
     // Offsets from BTreeNode's documented body layout, page format 2: the entry count at 4,
     // the directory of two-byte entry offsets at 32.
-    private const int NodeCountOffset = 4;
-    private const int NodeDirectoryOffset = 32;
+    private const int nodeCountOffset = 4;
+    private const int nodeDirectoryOffset = 32;
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Maintenance: the purge walk scrubs every unproven writer in one pass")]
     public async Task PurgeWritersAsync_UnprovenWriters_ShouldScrubEntriesAndTombstones()

@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed partial class StorageCompactionTests
 {
-    private const ulong Owner = 7;
+    private const ulong ownerValue = 7;
 
     [Theory(DisplayName = "Cohesion Test [Storage] - Compaction: borrowed input survives moves across its original address (#1161)")]
     [InlineData(false)]
@@ -24,9 +24,9 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) first;
         using (var bracket = storage.BeginTransaction())
         {
-            first = storage.Insert(bracket, Owner, Filled(firstLength, 0x11));
-            storage.Insert(bracket, Owner, source).PageId.ShouldBe(first.PageId);
-            storage.Insert(bracket, Owner, Filled(insert ? 2000 : 2800, 0x77)).PageId.ShouldBe(first.PageId);
+            first = storage.Insert(bracket, ownerValue, Filled(firstLength, 0x11));
+            storage.Insert(bracket, ownerValue, source).PageId.ShouldBe(first.PageId);
+            storage.Insert(bracket, ownerValue, Filled(insert ? 2000 : 2800, 0x77)).PageId.ShouldBe(first.PageId);
             bracket.Commit();
         }
         if (insert)
@@ -44,7 +44,7 @@ public sealed partial class StorageCompactionTests
         using (var bracket = storage.BeginTransaction())
         {
             var bytes = pin.Page.AsSpan().Slice(Page.HeaderSize + firstLength, length);
-            if (insert) { result = storage.Insert(bracket, Owner, bytes); }
+            if (insert) { result = storage.Insert(bracket, ownerValue, bytes); }
             else { storage.Update(bracket, first.PageId, first.SlotIndex, bytes); }
             bracket.Commit();
         }
@@ -52,7 +52,7 @@ public sealed partial class StorageCompactionTests
         // Assert
         result.PageId.ShouldBe(first.PageId);
         storage.Read(result.PageId, result.SlotIndex).Span.SequenceEqual(expected).ShouldBeTrue();
-        storage.GetOwnerPages(Owner).ShouldHaveSingleItem().ShouldBe(first.PageId);
+        storage.GetOwnerPages(ownerValue).ShouldHaveSingleItem().ShouldBe(first.PageId);
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Compaction: insufficient packed capacity leaves the page body and directory unchanged (#1161)")]
@@ -63,8 +63,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) target;
         using (var bracket = storage.BeginTransaction())
         {
-            target = storage.Insert(bracket, Owner, Filled(1000, 0x11));
-            storage.Insert(bracket, Owner, Filled(6500, 0x33)).PageId.ShouldBe(target.PageId);
+            target = storage.Insert(bracket, ownerValue, Filled(1000, 0x11));
+            storage.Insert(bracket, ownerValue, Filled(6500, 0x33)).PageId.ShouldBe(target.PageId);
             bracket.Commit();
         }
         using var pin = storage.PageManager.GetPage(target.PageId);
@@ -88,8 +88,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) target;
         using (var bracket = storage.BeginTransaction())
         {
-            target = storage.Insert(bracket, Owner, Filled(1000, 0x11));
-            storage.Insert(bracket, Owner, Filled(5800, 0x33)).PageId.ShouldBe(target.PageId);
+            target = storage.Insert(bracket, ownerValue, Filled(1000, 0x11));
+            storage.Insert(bracket, ownerValue, Filled(5800, 0x33)).PageId.ShouldBe(target.PageId);
             bracket.Commit();
         }
         using var transaction = storage.BeginTransaction();
@@ -117,8 +117,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) kept;
         using (var bracket = storage.BeginTransaction())
         {
-            storage.Insert(bracket, Owner, Filled(4000, 0x11));
-            kept = storage.Insert(bracket, Owner, Filled(3000, 0x33));
+            storage.Insert(bracket, ownerValue, Filled(4000, 0x11));
+            kept = storage.Insert(bracket, ownerValue, Filled(3000, 0x33));
             bracket.Commit();
         }
         using var transaction = storage.BeginTransaction();
@@ -133,7 +133,7 @@ public sealed partial class StorageCompactionTests
         int before = pin.Entry.PinCount;
 
         // Act
-        Should.Throw<StorageCorruptionException>(() => storage.Insert(transaction, Owner, Filled(1500, 0x77)));
+        Should.Throw<StorageCorruptionException>(() => storage.Insert(transaction, ownerValue, Filled(1500, 0x77)));
 
         // Assert: disposal of the active transaction later repairs the injected damage.
         pin.Entry.PinCount.ShouldBe(before);
@@ -152,8 +152,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) target, kept;
         using (var bracket = storage.BeginTransaction())
         {
-            target = storage.Insert(bracket, Owner, small);
-            kept = storage.Insert(bracket, Owner, neighbour);
+            target = storage.Insert(bracket, ownerValue, small);
+            kept = storage.Insert(bracket, ownerValue, neighbour);
             bracket.Commit();
         }
         kept.PageId.ShouldBe(target.PageId);
@@ -173,7 +173,7 @@ public sealed partial class StorageCompactionTests
 
         // Assert: physical relocation cannot invalidate either stored reference.
         storage.Read(target.PageId, target.SlotIndex).Span.SequenceEqual(small).ShouldBeTrue();
-        storage.GetOwnerPages(Owner).ShouldHaveSingleItem().ShouldBe(target.PageId);
+        storage.GetOwnerPages(ownerValue).ShouldHaveSingleItem().ShouldBe(target.PageId);
         using var pin = storage.PageManager.GetPage(target.PageId);
         new SlottedPage(pin.Page).SlotCount.ShouldBe((ushort)2);
     }
@@ -187,8 +187,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) deleted, kept;
         using (var bracket = storage.BeginTransaction())
         {
-            deleted = storage.Insert(bracket, Owner, Filled(4000, 0x11));
-            kept = storage.Insert(bracket, Owner, neighbour);
+            deleted = storage.Insert(bracket, ownerValue, Filled(4000, 0x11));
+            kept = storage.Insert(bracket, ownerValue, neighbour);
             bracket.Commit();
         }
         using (var bracket = storage.BeginTransaction())
@@ -202,17 +202,17 @@ public sealed partial class StorageCompactionTests
         byte[] payload = Filled(1500, 0x77);
         using (var bracket = storage.BeginTransaction())
         {
-            inserted = storage.Insert(bracket, Owner, payload);
+            inserted = storage.Insert(bracket, ownerValue, payload);
             bracket.Commit();
         }
 
         // Assert
         inserted.PageId.ShouldBe(kept.PageId);
         inserted.SlotIndex.ShouldBe(2);
-        storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, Owner, out _).ShouldBeFalse();
+        storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, ownerValue, out _).ShouldBeFalse();
         storage.Read(kept.PageId, kept.SlotIndex).Span.SequenceEqual(neighbour).ShouldBeTrue();
         storage.Read(inserted.PageId, inserted.SlotIndex).Span.SequenceEqual(payload).ShouldBeTrue();
-        storage.GetOwnerPages(Owner).ShouldHaveSingleItem().ShouldBe(kept.PageId);
+        storage.GetOwnerPages(ownerValue).ShouldHaveSingleItem().ShouldBe(kept.PageId);
     }
 
     private static byte[] Filled(int length, byte value)

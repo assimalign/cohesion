@@ -163,3 +163,12 @@ paths retain their allocation and exception-identity behavior.
 
 The [convention audit](CONVENTIONS.md) records the reusable-throw migration, retained local
 guards and shared-source resource ownership.
+
+## Lifecycle diagnostic completion
+
+Duplicate and absent logical databases now carry CK03001 and CK03002 across every model.
+Root session/transaction state refusals carry the shared CK04004–CK04007 and CK07003–CK07004
+conditions described in DESIGN. Messages, exception types, original causes and state behavior
+remain unchanged. DatabaseNotFoundException adds a diagnostics-bearing constructor whose third
+inner-exception argument is required; existing constructors and null-inner calls retain their
+contracts. Physical SQL/KeyValuePair refusals use CK06004/CK06005. No disk or wire version changes.

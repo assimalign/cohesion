@@ -26,8 +26,8 @@ public sealed partial class StorageCompactionTests
         {
             using (var seed = storage.BeginTransaction())
             {
-                target = storage.Insert(seed, Owner, original);
-                storage.Insert(seed, Owner, neighbour).PageId.ShouldBe(target.PageId);
+                target = storage.Insert(seed, ownerValue, original);
+                storage.Insert(seed, ownerValue, neighbour).PageId.ShouldBe(target.PageId);
                 seed.Commit();
             }
             if (insert)
@@ -45,7 +45,7 @@ public sealed partial class StorageCompactionTests
                 intermediateWrites++;
             };
             using var bracket = storage.BeginTransaction();
-            if (insert) { storage.Insert(bracket, Owner, changed).PageId.ShouldBe(target.PageId); }
+            if (insert) { storage.Insert(bracket, ownerValue, changed).PageId.ShouldBe(target.PageId); }
             else { storage.Update(bracket, target.PageId, target.SlotIndex, changed); }
             using (var pin = storage.PageManager.GetPage(target.PageId)) { pin.Entry.IsDirty.ShouldBeTrue(); }
             if (commit) { bracket.Commit(); }
@@ -58,8 +58,8 @@ public sealed partial class StorageCompactionTests
         recovered.Read(target.PageId, 1).Span.SequenceEqual(neighbour).ShouldBeTrue();
         if (insert)
         {
-            recovered.TryReadRecord(target.PageId, 0, Owner, out _).ShouldBeFalse();
-            bool found = recovered.TryReadRecord(target.PageId, 2, Owner, out var bytes);
+            recovered.TryReadRecord(target.PageId, 0, ownerValue, out _).ShouldBeFalse();
+            bool found = recovered.TryReadRecord(target.PageId, 2, ownerValue, out var bytes);
             found.ShouldBe(commit);
             if (found) { bytes.Span.SequenceEqual(changed).ShouldBeTrue(); }
         }
@@ -87,8 +87,8 @@ public sealed partial class StorageCompactionTests
                 bool isNew;
                 if (insert)
                 {
-                    recovered.TryReadRecord(run.Page, 0, Owner, out _).ShouldBeFalse();
-                    isNew = recovered.TryReadRecord(run.Page, 2, Owner, out var bytes);
+                    recovered.TryReadRecord(run.Page, 0, ownerValue, out _).ShouldBeFalse();
+                    isNew = recovered.TryReadRecord(run.Page, 2, ownerValue, out var bytes);
                     if (isNew) { bytes.Span.SequenceEqual(changed).ShouldBeTrue(); }
                 }
                 else
@@ -99,7 +99,7 @@ public sealed partial class StorageCompactionTests
                 }
                 // Only a commit whose acknowledgement was lost may recover either outcome.
                 if (run.CommitState != 1) { isNew.ShouldBe(run.CommitState == 2); }
-                recovered.GetOwnerPages(Owner).ShouldHaveSingleItem().ShouldBe(run.Page);
+                recovered.GetOwnerPages(ownerValue).ShouldHaveSingleItem().ShouldBe(run.Page);
             }
         }
     }
@@ -114,8 +114,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) target;
         using (var seed = storage.BeginTransaction())
         {
-            target = storage.Insert(seed, Owner, Filled(insert ? 4000 : 1000, 0x11));
-            storage.Insert(seed, Owner, Filled(insert ? 3000 : 5800, 0x33)).PageId.ShouldBe(target.PageId);
+            target = storage.Insert(seed, ownerValue, Filled(insert ? 4000 : 1000, 0x11));
+            storage.Insert(seed, ownerValue, Filled(insert ? 3000 : 5800, 0x33)).PageId.ShouldBe(target.PageId);
             seed.Commit();
         }
         if (insert)
@@ -130,7 +130,7 @@ public sealed partial class StorageCompactionTests
         try
         {
             using var bracket = storage.BeginTransaction();
-            if (insert) { storage.Insert(bracket, Owner, Filled(1500, 0x77)).PageId.ShouldBe(target.PageId); }
+            if (insert) { storage.Insert(bracket, ownerValue, Filled(1500, 0x77)).PageId.ShouldBe(target.PageId); }
             else { storage.Update(bracket, target.PageId, target.SlotIndex, Filled(2000, 0x77)); }
             storage.PageManager.FlushAll();
             commitState = 1;
@@ -177,8 +177,8 @@ public sealed partial class StorageCompactionTests
         {
             using (var bracket = storage.BeginTransaction())
             {
-                target = storage.Insert(bracket, Owner, original);
-                kept = storage.Insert(bracket, Owner, neighbour);
+                target = storage.Insert(bracket, ownerValue, original);
+                kept = storage.Insert(bracket, ownerValue, neighbour);
                 bracket.Commit();
             }
             if (insert)
@@ -191,12 +191,12 @@ public sealed partial class StorageCompactionTests
             storage.RecordPageCompacted = page => { page.ShouldBe(target.PageId); rewrites++; };
             using (var bracket = storage.BeginTransaction())
             {
-                if (insert) { inserted = storage.Insert(bracket, Owner, changed); }
+                if (insert) { inserted = storage.Insert(bracket, ownerValue, changed); }
                 else { storage.Update(bracket, target.PageId, target.SlotIndex, changed); }
                 if (steal)
                 {
                     // The one-frame pool must evict the compacted frame before this bracket resolves.
-                    storage.Insert(bracket, Owner + 1, Filled(6000, 0x55)).PageId.ShouldNotBe(target.PageId);
+                    storage.Insert(bracket, ownerValue + 1, Filled(6000, 0x55)).PageId.ShouldNotBe(target.PageId);
                 }
                 if (commit) { bracket.Commit(); }
                 rewrites.ShouldBe(1);
@@ -213,8 +213,8 @@ public sealed partial class StorageCompactionTests
         recovered.Read(kept.PageId, kept.SlotIndex).Span.SequenceEqual(neighbour).ShouldBeTrue();
         if (insert)
         {
-            recovered.TryReadRecord(target.PageId, target.SlotIndex, Owner, out _).ShouldBeFalse();
-            bool found = recovered.TryReadRecord(inserted.PageId, inserted.SlotIndex, Owner, out var bytes);
+            recovered.TryReadRecord(target.PageId, target.SlotIndex, ownerValue, out _).ShouldBeFalse();
+            bool found = recovered.TryReadRecord(inserted.PageId, inserted.SlotIndex, ownerValue, out var bytes);
             found.ShouldBe(commit);
             if (commit) { bytes.Span.SequenceEqual(changed).ShouldBeTrue(); }
         }
@@ -222,6 +222,6 @@ public sealed partial class StorageCompactionTests
         {
             recovered.Read(target.PageId, target.SlotIndex).Span.SequenceEqual(commit ? changed : original).ShouldBeTrue();
         }
-        recovered.GetOwnerPages(Owner).ShouldHaveSingleItem().ShouldBe(kept.PageId);
+        recovered.GetOwnerPages(ownerValue).ShouldHaveSingleItem().ShouldBe(kept.PageId);
     }
 }

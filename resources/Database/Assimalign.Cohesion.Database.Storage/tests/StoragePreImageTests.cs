@@ -19,8 +19,8 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class StoragePreImageTests
 {
-    private const int Pool = 128;
-    private const int TenPools = 10 * Pool;
+    private const int poolValue = 128;
+    private const int tenPools = 10 * poolValue;
 
     /// <summary>
     /// An index build in one bracket allocates and fills page after page: ten times the pool here.
@@ -31,13 +31,13 @@ public sealed class StoragePreImageTests
     public void Commit_IndexBuildTouchingTenTimesThePool_ShouldKeepCompactPreImages()
     {
         // Arrange: a 128-page (1 MiB) pool; its default budget is the 16 MiB minimum.
-        var storage = MemoryStorage.Create(Pool); // abandoned: a process crash
+        var storage = MemoryStorage.Create(poolValue); // abandoned: a process crash
         var pages = new List<PageId>();
 
         // Act: one bracket builds 1,280 index-like pages, about half full.
         using (var transaction = storage.BeginTransaction())
         {
-            for (int i = 0; i < TenPools; i++)
+            for (int i = 0; i < tenPools; i++)
             {
                 using var handle = storage.AllocatePageForWrite(transaction, PageType.Index);
                 Fill(handle.Page.AsBodySpan()[..4000], seed: i);
@@ -50,14 +50,14 @@ public sealed class StoragePreImageTests
 
         long peak = storage.PeakPreImageBytes;
         long spilled = storage.SpilledPreImages;
-        using var recovered = MemoryStorage.Open(storage.Capture(), Pool);
+        using var recovered = MemoryStorage.Open(storage.Capture(), poolValue);
 
         // Assert: under 2% of the 10 MiB that full copies of the pre-images cost.
         storage.PreImageBudget.ShouldBe(Storage.MinimumPreImageBudget);
         spilled.ShouldBe(0L);
-        peak.ShouldBeLessThan(TenPools * (long)Page.Size / 50, $"peak {peak} bytes");
+        peak.ShouldBeLessThan(tenPools * (long)Page.Size / 50, $"peak {peak} bytes");
         storage.PreImageBytes.ShouldBe(0L);
-        foreach (int i in new[] { 0, 1, TenPools / 2, TenPools - 1 })
+        foreach (int i in new[] { 0, 1, tenPools / 2, tenPools - 1 })
         {
             var expected = new byte[4000];
             Fill(expected, seed: i);
@@ -79,10 +79,10 @@ public sealed class StoragePreImageTests
         // interval, so no first touch below needs an image of its own. Their 9 MB of pre-images
         // would fit the default 16 MiB budget; a budget of the pool's size (1 MiB) stands in for a
         // bracket larger than the default.
-        var storage = MemoryStorage.Create(Pool); // abandoned: a process crash
-        storage.PreImageBudget = (long)Pool * Page.Size;
+        var storage = MemoryStorage.Create(poolValue); // abandoned: a process crash
+        storage.PreImageBudget = (long)poolValue * Page.Size;
         var rows = new List<(PageId PageId, int Slot)>();
-        for (int batch = 0; batch < TenPools / 64; batch++)
+        for (int batch = 0; batch < tenPools / 64; batch++)
         {
             using var transaction = storage.BeginTransaction();
             for (int i = 0; i < 64; i++)
@@ -116,11 +116,11 @@ public sealed class StoragePreImageTests
 
         long spilled = storage.SpilledPreImages - spilledBefore;
         long peak = storage.PeakPreImageBytes;
-        using var recovered = MemoryStorage.Open(storage.Capture(), Pool);
+        using var recovered = MemoryStorage.Open(storage.Capture(), poolValue);
 
         // Assert
         peak.ShouldBeLessThanOrEqualTo(budget);
-        spilled.ShouldBeGreaterThan(TenPools - (budget / 7000));
+        spilled.ShouldBeGreaterThan(tenPools - (budget / 7000));
         int version = commit ? 1 : 0;
         for (int i = 0; i < rows.Count; i += 37)
         {

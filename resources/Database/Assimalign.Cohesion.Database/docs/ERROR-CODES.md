@@ -295,3 +295,46 @@ SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Da
 | COHDBK004 | CV06104 | Storage/durability |
 | COHDBK005 | CV06105 | Storage/durability |
 | COHDBK006 | CV06106 | Storage/durability |
+
+## Rules-audit condition additions
+
+These identities fill previously empty diagnostic carriers. Existing messages, public exception types,
+SQLSTATEs, wire error categories and storage formats remain unchanged unless a SQLSTATE is shown.
+The CK conditions are shared where all models perform the same operation. Framework argument
+and invariant exceptions and lower child-root typed failures retain their documented contracts.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CK02001 | Row accessor requires another value type | — |
+| CK02002 | Required row value is NULL | — |
+| CK03001 | Logical database or storage already exists | — |
+| CK03002 | Logical database is absent | — |
+| CK04001 | Requested isolation level is unsupported | — |
+| CK04002 | Statement operation has already completed | — |
+| CK04003 | Active statement apply bracket is absent | — |
+| CK04004 | Session already has an active transaction | — |
+| CK04005 | Transaction has already ended | — |
+| CK04006 | Transaction commit or rollback is in progress | — |
+| CK04007 | Running operation prevents transaction commit | — |
+| CK06004 | Interrupted creation/drop left an orphan directory | — |
+| CK06005 | Physical data or catalog file set is absent | — |
+| CK07003 | Session operations overlap | — |
+| CK07004 | Session is closed | — |
+| CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
+| CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
+| CD04102 | Catalog snapshot conflict | — |
+| CD04103 | Expected document version differs | — |
+| CD05016 | Result byte/frame limit exceeded | — |
+| CD07001 | Session belongs to another database | — |
+| CD09001 | Collection handle is stale | — |
+| CB01001 | Container is absent | — |
+| CB01002 | Blob is absent | — |
+| CB03001 | Container already exists | — |
+| CB03002 | Blob exists while overwrite is disabled | — |
+| CB04002 | Catalog snapshot conflict | — |
+| CB09001 | Container handle is stale | — |
+| CB09002 | Engine cannot start the requested server | — |
+| CV05001 | Put execution produced no outcome row | — |
+| CV05002 | Executor request kind is unsupported | — |
+| CV06107 | Entry-space format is unsupported | — |
+| CV07001 | Session belongs to another database | — |

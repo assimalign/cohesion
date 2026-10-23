@@ -219,7 +219,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                         // the outcome never depends on whether the session's teardown ended it first.
                         throw _failure is not null
                             ? CreateAbortedException(_failure, commit: true)
-                            : new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitAsyncDatabase, state));
+                            : DatabaseException.CreateRootFailure("CK04005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitAsyncDatabase, state));
                     }
 
                     failure = _failure;
@@ -232,7 +232,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                     {
                         // The operation would race the commit record. The caller completes it first, as
                         // with any statement of an explicit transaction.
-                        throw new DatabaseException(ErrorMessages.TransactionCommitAsyncDatabase2);
+                        throw DatabaseException.CreateRootFailure("CK04007", ErrorMessages.TransactionCommitAsyncDatabase2);
                     }
 
                     _ended = true;
@@ -294,7 +294,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             {
                 if (GetKernelState() == TransactionState.Committed)
                 {
-                    throw new DatabaseException(ErrorMessages.TransactionRollbackAsyncDatabase);
+                    throw DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionRollbackAsyncDatabase);
                 }
 
                 _ended = true;
@@ -489,8 +489,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             if (_ended)
             {
                 return GetKernelState() == TransactionState.Active
-                    ? new DatabaseException(ErrorMessages.TransactionCreateRefusalDatabase)
-                    : new DatabaseException(ErrorMessages.TransactionCreateRefusalDatabase2);
+                    ? DatabaseException.CreateRootFailure("CK04006", ErrorMessages.TransactionCreateRefusalDatabase)
+                    : DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionCreateRefusalDatabase2);
             }
 
             return CreateAbortedException(null, commit: false);

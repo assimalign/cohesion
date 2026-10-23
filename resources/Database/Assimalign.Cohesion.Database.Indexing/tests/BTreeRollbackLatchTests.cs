@@ -27,13 +27,13 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 [Collection(BTreeRollbackRaceCollection.Name)]
 public sealed class BTreeRollbackLatchTests
 {
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _wait = TimeSpan.FromSeconds(10);
 
     /// <summary>The shortest time a race runs.</summary>
-    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan _raceMinimum = TimeSpan.FromSeconds(2);
 
     /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
-    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _raceCeiling = TimeSpan.FromSeconds(60);
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Rollback: a rolled-back root split is restored only once the tree's reader has left (#1371)")]
     public async Task Rollback_WhileACursorHoldsTheTreeLatch_ShouldRestoreOnlyAfterTheCursorLeaves()
@@ -61,7 +61,7 @@ public sealed class BTreeRollbackLatchTests
 
         // Act: the rollback starts while a reader holds the tree latch.
         var (heldRoot, completedWhileHeld, rollback) = RollBackWhileReading(harness, index, harness.GetStorageTransaction(doomed));
-        await rollback.WaitAsync(Wait);
+        await rollback.WaitAsync(_wait);
         await harness.Manager.RollbackAsync(doomed);
 
         // Assert: for as long as the reader held the latch, the rollback waited and the root was
@@ -151,8 +151,8 @@ public sealed class BTreeRollbackLatchTests
         // rollback, so the race never happened and the test could not tell.
         var elapsed = Stopwatch.StartNew();
         while (Volatile.Read(ref failure) is null
-            && (elapsed.Elapsed < RaceMinimum
-                || ((Interlocked.Read(ref rollbacks) < 5 || Interlocked.Read(ref reads) < 20 || Interlocked.Read(ref reverseReads) < 5) && elapsed.Elapsed < RaceMinimum + RaceCeiling)))
+            && (elapsed.Elapsed < _raceMinimum
+                || ((Interlocked.Read(ref rollbacks) < 5 || Interlocked.Read(ref reads) < 20 || Interlocked.Read(ref reverseReads) < 5) && elapsed.Elapsed < _raceMinimum + _raceCeiling)))
         {
             await Task.Delay(50);
         }

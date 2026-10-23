@@ -102,7 +102,7 @@ public sealed partial class StorageFreeBytesTests
         {
             using (var handle = storage.OpenPageForWrite(bracket, target.PageId))
             {
-                storage.Insert(bracket, Owner, Filled(1500, 0x66)).PageId.ShouldNotBe(target.PageId);
+                storage.Insert(bracket, owner, Filled(1500, 0x66)).PageId.ShouldNotBe(target.PageId);
                 new SlottedPage(handle.Page).UpdateSlot(target.SlotIndex, Filled(1000, 0x22));
                 handle.MarkDirty();
             }

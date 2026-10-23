@@ -44,7 +44,7 @@ public sealed partial class StorageFreeBytesTests
             selected.SetResult();
             resume.Wait(stop.Token);
         };
-        var writer = DedicatedTestTask.Run(() => storage.Insert(stale, Owner, Filled(2000, 0x77)));
+        var writer = DedicatedTestTask.Run(() => storage.Insert(stale, owner, Filled(2000, 0x77)));
         (PageId PageId, int SlotIndex) inserted = default;
         try
         {
@@ -54,7 +54,7 @@ public sealed partial class StorageFreeBytesTests
                 storage.Delete(freeing, target.PageId, target.SlotIndex);
                 freeing.Commit();
             }
-            storage.Insert(replacement, Owner, [7]).PageId.ShouldBe(target.PageId);
+            storage.Insert(replacement, owner, [7]).PageId.ShouldBe(target.PageId);
             if (replacementCommitted) { replacement.Commit(); }
         }
         finally

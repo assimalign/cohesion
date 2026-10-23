@@ -228,8 +228,7 @@ internal static class DatabaseFileNames
     /// <param name="directory">The database's directory (<see cref="GetDirectory"/>).</param>
     /// <returns>The message.</returns>
     internal static string GetLeftoverRefusal(string name, string directory)
-        => $"Database '{name}' cannot be created: its directory '{directory}' is already there without a database in it, " +
-            "left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.";
+        => string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.FileNamesOrphanDirectory, name, directory);
 
     /// <summary>
     /// Gets how a SQL or key-value database's catalog file set is named in messages and in its

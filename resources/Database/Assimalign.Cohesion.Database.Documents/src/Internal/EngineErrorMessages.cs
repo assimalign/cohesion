@@ -1,4 +1,4 @@
-using ModelErrorMessages = Assimalign.Cohesion.Database.Graph.ErrorMessages;
+using ModelErrorMessages = Assimalign.Cohesion.Database.Documents.ErrorMessages;
 
 // Deviates from RootNamespace: this assembly-local binding belongs to the shared Engine module
 // and keeps its owning Database namespace, as the module's linked types do.
@@ -34,4 +34,5 @@ internal static class EngineErrorMessages
     internal static string DatabaseNameTrailingDot => ModelErrorMessages.DatabaseNameTrailingDot;
     internal static string DatabaseNameConsecutiveDots => ModelErrorMessages.DatabaseNameConsecutiveDots;
     internal static string DatabaseNameDeviceReserved => ModelErrorMessages.DatabaseNameDeviceReserved;
+    internal static string FileNamesOrphanDirectory => ModelErrorMessages.FileNamesOrphanDirectory;
 }

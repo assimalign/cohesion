@@ -178,6 +178,7 @@ public class DatabaseTransactionTests
 
         // Assert
         error.Message.ShouldBe("The transaction is Committed; a committed transaction cannot roll back.");
+        CheckDiagnostic(error, "CK04005");
         transaction.Rollbacks.ShouldBe(0);
         transaction.State.ShouldBe(TransactionState.Committed);
     }
@@ -194,6 +195,7 @@ public class DatabaseTransactionTests
 
         // Assert
         error.Message.ShouldBe("The transaction is Committed.");
+        CheckDiagnostic(error, "CK04005");
         transaction.Commits.ShouldBe(1);
     }
 
@@ -327,6 +329,7 @@ public class DatabaseTransactionTests
         // Assert
         commitWaited.ShouldBeTrue();
         refusalWhileEnding.Message.ShouldBe("The session's transaction is being committed or rolled back; start the operation after it ends.");
+        CheckDiagnostic(refusalWhileEnding, "CK04006");
         error.Message.ShouldBe("The transaction is RolledBack.");
         transaction.Commits.ShouldBe(0);
         transaction.Rollbacks.ShouldBe(1);
@@ -350,6 +353,7 @@ public class DatabaseTransactionTests
         error.Message.ShouldBe("An operation of the transaction is still running; commit after it completes.");
         running.ShouldBe(1);
         stateWhileRunning.ShouldBe(TransactionState.Active);
+        CheckDiagnostic(error, "CK04007");
         transaction.Commits.ShouldBe(1);
         transaction.State.ShouldBe(TransactionState.Committed);
     }
@@ -386,6 +390,7 @@ public class DatabaseTransactionTests
 
         // Assert
         refusal.Message.ShouldBe("The session's transaction ended before the operation started; nothing was written.");
+        CheckDiagnostic(refusal, "CK04005");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - Transaction: a commit the kernel aborts ends the transaction and surfaces the leaf's error")]
@@ -548,5 +553,14 @@ public class DatabaseTransactionTests
         await Should.ThrowAsync<ArgumentNullException>(async () => await transaction.Abort(null!));
         await Should.ThrowAsync<ArgumentNullException>(async () => await transaction.Close(null!));
         transaction.State.ShouldBe(TransactionState.Active);
+    }
+    private static void CheckDiagnostic(DatabaseException failure, string code)
+    {
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
     }
 }

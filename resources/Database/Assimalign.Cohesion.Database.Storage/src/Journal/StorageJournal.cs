@@ -88,7 +88,7 @@ using Assimalign.Cohesion.FileSystem;
 /// <c>src/backend/access/transam/xlog.c:2514-2532</c>).
 /// </para>
 /// <para>
-/// A frame whose checksum verifies but whose version byte is not <see cref="CurrentVersion"/>
+/// A frame whose checksum verifies but whose version byte is not <see cref="currentVersion"/>
 /// is not a torn tail: it was written whole, in a format this engine does not read, and
 /// stopping the scan there would silently drop it and every record after it. The read
 /// refuses it with <see cref="StorageFormatException"/> instead (storage format 2, #1251).
@@ -145,7 +145,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <summary>
     /// The largest payload a frame can carry: what keeps the frame length an <see cref="int"/>.
     /// </summary>
-    internal const int MaximumPayloadLength = int.MaxValue - FramePrefixSize - BodyHeaderSize - sizeof(uint);
+    internal const int MaximumPayloadLength = int.MaxValue - framePrefixSize - bodyHeaderSize - sizeof(uint);
 
     // Lock order: transaction -> header -> pool -> medium -> append (_syncRoot).
     // Never acquire _mediumLock while holding _syncRoot. The medium owner may briefly take
@@ -397,7 +397,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         get => _maximumBufferSize;
         set
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(value, FramePrefixSize + BodyHeaderSize + sizeof(uint));
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, framePrefixSize + bodyHeaderSize + sizeof(uint));
             lock (_syncRoot)
             {
                 _maximumBufferSize = value;
@@ -634,20 +634,20 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 }
             }
 
-            int bodyLength = location.Length - FramePrefixSize - sizeof(uint);
-            var body = bytes.Slice(FramePrefixSize, bodyLength);
-            if (bodyLength < BodyHeaderSize
+            int bodyLength = location.Length - framePrefixSize - sizeof(uint);
+            var body = bytes.Slice(framePrefixSize, bodyLength);
+            if (bodyLength < bodyHeaderSize
                 || BinaryPrimitives.ReadInt32LittleEndian(bytes) != bodyLength
-                || BinaryPrimitives.ReadInt32LittleEndian(bytes[sizeof(int)..]) != Magic
-                || Crc32C.Compute(body) != BinaryPrimitives.ReadUInt32LittleEndian(bytes[(FramePrefixSize + bodyLength)..])
-                || body[0] != CurrentVersion
+                || BinaryPrimitives.ReadInt32LittleEndian(bytes[sizeof(int)..]) != magicValue
+                || Crc32C.Compute(body) != BinaryPrimitives.ReadUInt32LittleEndian(bytes[(framePrefixSize + bodyLength)..])
+                || body[0] != currentVersion
                 || BinaryPrimitives.ReadInt64LittleEndian(body[1..]) != location.Lsn)
             {
                 throw new StorageCorruptionException(
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadPageRecordFailure, location.Lsn, location.Offset));
             }
 
-            var source = body[BodyHeaderSize..];
+            var source = body[bodyHeaderSize..];
             source.CopyTo(payload);
             return source.Length;
         }
@@ -723,7 +723,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     WriteOutMedium();
                     TruncateCore();
                     long lsn;
-                    bool direct = FramePrefixSize + BodyHeaderSize + activeTransactions.Length * sizeof(long) + sizeof(uint) > _maximumBufferSize;
+                    bool direct = framePrefixSize + bodyHeaderSize + activeTransactions.Length * sizeof(long) + sizeof(uint) > _maximumBufferSize;
                     lock (_syncRoot)
                     {
                         Volatile.Write(ref _length, 0);
@@ -1004,7 +1004,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                     foreach (var frame in ReadFrames(reuseVerifiedPrefix))
                     {
                         var record = DecodeRecord(frame, ++frameNumber);
-                        verifiedLength += FramePrefixSize + frame.Length + sizeof(uint);
+                        verifiedLength += framePrefixSize + frame.Length + sizeof(uint);
                         yield return borrowPayloads ? record : record with { Payload = record.Payload.ToArray() };
                     }
                     _scannedLength = verifiedLength;
@@ -1109,7 +1109,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
 
         long lsn;
         Action? checkpointNeeded = null;
-        int size = FramePrefixSize + BodyHeaderSize + payload.Length + sizeof(uint);
+        int size = framePrefixSize + bodyHeaderSize + payload.Length + sizeof(uint);
         try
         {
             while (true)
@@ -1352,7 +1352,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     {
         long lsn = _lastLsn + 1;
         offset = _length;
-        frameLength = FramePrefixSize + BodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
+        frameLength = framePrefixSize + bodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
         _inFlight = ArrayPool<byte>.Shared.Rent(frameLength);
         _inFlightPooled = true;
         EncodeFrame(_inFlight.AsSpan(0, frameLength), lsn, transactionSequence, type, pageId, payload, words);
@@ -1378,7 +1378,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         ReadOnlySpan<byte> payload, ReadOnlySpan<long> words, out long offset, out int frameLength)
     {
         long lsn = _lastLsn + 1;
-        frameLength = FramePrefixSize + BodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
+        frameLength = framePrefixSize + bodyHeaderSize + payload.Length + words.Length * sizeof(long) + sizeof(uint);
         offset = _length;
         if (_buffer.Length - _buffered < frameLength)
         {
@@ -1412,25 +1412,25 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         ReadOnlySpan<byte> payload,
         ReadOnlySpan<long> words)
     {
-        int bodyLength = frame.Length - FramePrefixSize - sizeof(uint);
+        int bodyLength = frame.Length - framePrefixSize - sizeof(uint);
         BinaryPrimitives.WriteInt32LittleEndian(frame, bodyLength);
-        BinaryPrimitives.WriteInt32LittleEndian(frame[4..], Magic);
+        BinaryPrimitives.WriteInt32LittleEndian(frame[4..], magicValue);
 
-        var body = frame.Slice(FramePrefixSize, bodyLength);
-        body[0] = CurrentVersion;
+        var body = frame.Slice(framePrefixSize, bodyLength);
+        body[0] = currentVersion;
         BinaryPrimitives.WriteInt64LittleEndian(body[1..], lsn);
         BinaryPrimitives.WriteInt64LittleEndian(body[9..], transactionSequence);
         body[17] = (byte)type;
         BinaryPrimitives.WriteInt64LittleEndian(body[18..], (long)pageId);
-        payload.CopyTo(body[BodyHeaderSize..]);
+        payload.CopyTo(body[bodyHeaderSize..]);
 
-        var tail = body[(BodyHeaderSize + payload.Length)..];
+        var tail = body[(bodyHeaderSize + payload.Length)..];
         for (int i = 0; i < words.Length; i++)
         {
             BinaryPrimitives.WriteInt64LittleEndian(tail[(i * sizeof(long))..], words[i]);
         }
 
-        BinaryPrimitives.WriteUInt32LittleEndian(frame[(FramePrefixSize + bodyLength)..], Crc32C.Compute(body));
+        BinaryPrimitives.WriteUInt32LittleEndian(frame[(framePrefixSize + bodyLength)..], Crc32C.Compute(body));
     }
 
     private IReadOnlyList<JournalRecord> ReadAllCore()
@@ -1450,7 +1450,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         foreach (var frame in ReadFrames(reuseVerifiedPrefix))
         {
             var record = DecodeRecord(frame, ++frameNumber);
-            verifiedLength += FramePrefixSize + frame.Length + sizeof(uint);
+            verifiedLength += framePrefixSize + frame.Length + sizeof(uint);
             yield return record;
         }
 
@@ -1463,16 +1463,16 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         var body = frame.Span;
         // ReadFrames already checked the body length and checksum. A verified frame of
         // another version is unsupported format, never a torn tail to stop quietly at.
-        if (body[0] != CurrentVersion)
+        if (body[0] != currentVersion)
         {
-            throw StorageFormatException.ForJournalFrame(frameNumber, body[0], CurrentVersion);
+            throw StorageFormatException.ForJournalFrame(frameNumber, body[0], currentVersion);
         }
 
         long lsn = BinaryPrimitives.ReadInt64LittleEndian(body[1..]);
         long transactionSequence = BinaryPrimitives.ReadInt64LittleEndian(body[9..]);
         var type = (JournalRecordType)body[17];
         long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
-        return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, frame[BodyHeaderSize..]);
+        return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, frame[bodyHeaderSize..]);
     }
 
     internal void EnsureInitialized(CancellationToken cancellationToken = default)
@@ -1717,7 +1717,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <returns>The frame bodies (excluding prefix and checksum).</returns>
     /// <remarks>
     /// The scan borrows a pooled buffer and yields slices valid until the next MoveNext or
-    /// disposal. It reads the medium in <see cref="ReadChunkSize"/> chunks, one positional read each,
+    /// disposal. It reads the medium in <see cref="readChunkSize"/> chunks, one positional read each,
     /// and cuts the frames out of the chunk; a frame larger than a chunk is read whole. It used to
     /// make three reads per frame (prefix, body, checksum), which cost nothing beside two 8 KiB
     /// page images per touched page but dominated recovery once a commit journals a few dozen
@@ -1735,14 +1735,14 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             // Trust is single-use and confined to recovery immediately after its analysis on
             // this instance. Public readers and every later borrowed scan verify every CRC.
             long verifiedPrefix = reuseVerifiedPrefix ? _scannedLength : 0;
-            chunk = ArrayPool<byte>.Shared.Rent((int)Math.Min(ReadChunkSize, Math.Max(length, FramePrefixSize)));
+            chunk = ArrayPool<byte>.Shared.Rent((int)Math.Min(readChunkSize, Math.Max(length, framePrefixSize)));
             long chunkOffset = 0;
             int chunkCount = 0;
             long position = 0;
 
-            while (position + FramePrefixSize <= length)
+            while (position + framePrefixSize <= length)
             {
-                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, FramePrefixSize, length))
+                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, framePrefixSize, length))
                 {
                     break;
                 }
@@ -1750,21 +1750,21 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
                 int start = (int)(position - chunkOffset);
                 int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start));
                 int magic = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start + sizeof(int)));
-                if (magic != Magic || bodyLength < BodyHeaderSize || bodyLength > int.MaxValue - FramePrefixSize - sizeof(uint)
-                    || (long)FramePrefixSize + bodyLength + sizeof(uint) > length - position)
+                if (magic != magicValue || bodyLength < bodyHeaderSize || bodyLength > int.MaxValue - framePrefixSize - sizeof(uint)
+                    || (long)framePrefixSize + bodyLength + sizeof(uint) > length - position)
                 {
                     break;
                 }
 
-                int frameLength = FramePrefixSize + bodyLength + sizeof(uint);
+                int frameLength = framePrefixSize + bodyLength + sizeof(uint);
                 if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, frameLength, length))
                 {
                     break;
                 }
 
                 start = (int)(position - chunkOffset);
-                var body = chunk.AsMemory(start + FramePrefixSize, bodyLength);
-                uint expected = BinaryPrimitives.ReadUInt32LittleEndian(chunk.AsSpan(start + FramePrefixSize + bodyLength));
+                var body = chunk.AsMemory(start + framePrefixSize, bodyLength);
+                uint expected = BinaryPrimitives.ReadUInt32LittleEndian(chunk.AsSpan(start + framePrefixSize + bodyLength));
                 if (position + frameLength > verifiedPrefix && Crc32C.Compute(body.Span) != expected)
                 {
                     break;
@@ -1792,7 +1792,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <summary>
     /// The size of the chunks a read scan reads the medium in.
     /// </summary>
-    private const int ReadChunkSize = 256 * 1024;
+    private const int readChunkSize = 256 * 1024;
 
     /// <summary>
     /// Makes the <paramref name="count"/> bytes at <paramref name="position"/> available in the
@@ -1901,12 +1901,12 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// <summary>
     /// Size of the frame prefix: length + magic.
     /// </summary>
-    private const int FramePrefixSize = sizeof(int) + sizeof(int);
+    private const int framePrefixSize = sizeof(int) + sizeof(int);
 
     /// <summary>
     /// Size of the fixed body header: version + lsn + transaction sequence + type + page id.
     /// </summary>
-    private const int BodyHeaderSize = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
+    private const int bodyHeaderSize = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
 
     /// <summary>
     /// Journal frame format version: 4 since storage format 3 (#1253), whose page records are
@@ -1914,10 +1914,10 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     /// storage format 2's (CRC-32C frames carrying full before- and after-images, #1251). A
     /// verified frame of any other version is refused with <see cref="StorageFormatException"/>.
     /// </summary>
-    private const byte CurrentVersion = 4;
+    private const byte currentVersion = 4;
 
     /// <summary>
     /// Journal frame magic value ('WAL2').
     /// </summary>
-    private const int Magic = 0x324C4157;
+    private const int magicValue = 0x324C4157;
 }

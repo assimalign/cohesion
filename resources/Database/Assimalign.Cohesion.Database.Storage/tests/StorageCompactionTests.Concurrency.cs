@@ -27,8 +27,8 @@ public sealed partial class StorageCompactionTests
         (PageId PageId, int SlotIndex) target, kept;
         using (var bracket = storage.BeginTransaction())
         {
-            target = storage.Insert(bracket, Owner, small);
-            kept = storage.Insert(bracket, Owner, neighbour);
+            target = storage.Insert(bracket, ownerValue, small);
+            kept = storage.Insert(bracket, ownerValue, neighbour);
             bracket.Commit();
         }
         if (insert)
@@ -57,10 +57,10 @@ public sealed partial class StorageCompactionTests
                     if (readKind == "direct") { return storage.Read(wanted.PageId, wanted.SlotIndex).ToArray(); }
                     if (readKind == "try")
                     {
-                        storage.TryReadRecord(wanted.PageId, wanted.SlotIndex, Owner, out var bytes).ShouldBeTrue();
+                        storage.TryReadRecord(wanted.PageId, wanted.SlotIndex, ownerValue, out var bytes).ShouldBeTrue();
                         return bytes.ToArray();
                     }
-                    using var scan = storage.GetUnitIterator(Owner);
+                    using var scan = storage.GetUnitIterator(ownerValue);
                     scan.MoveNext().ShouldBeTrue();
                     scan.Current.SlotIndex.ShouldBe(wanted.SlotIndex);
                     return scan.Current.Data.ToArray();
@@ -75,7 +75,7 @@ public sealed partial class StorageCompactionTests
             // Act: the update callback is between retiring the old target and publishing the new one.
             using (var bracket = storage.BeginTransaction())
             {
-                if (insert) { storage.Insert(bracket, Owner, changed).PageId.ShouldBe(target.PageId); }
+                if (insert) { storage.Insert(bracket, ownerValue, changed).PageId.ShouldBe(target.PageId); }
                 else { storage.Update(bracket, target.PageId, target.SlotIndex, changed); }
                 bracket.Commit();
             }

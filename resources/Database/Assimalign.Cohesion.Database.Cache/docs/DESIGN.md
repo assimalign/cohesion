@@ -41,3 +41,7 @@ format. The existing placeholder `Class1` is sealed to follow the Database publi
 its implicit public parameterless constructor remains. This introduces no Cache implementation.
 Future errors use generated resources and explicit category/condition allocations rather than
 adding a second code vocabulary. The Client and Language projects remain empty scaffolds.
+
+## Placeholder documentation
+
+The existing sealed `Class1` placeholder has an XML summary. It remains the same deferred public surface with implicit parameterless construction; this maintenance adds no Cache behavior.

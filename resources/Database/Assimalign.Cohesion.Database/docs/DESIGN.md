@@ -1414,3 +1414,37 @@ The existing portable-name policy was rechecked against RavenDB src/Raven.Client
 
 The [convention audit](CONVENTIONS.md) records the reusable-throw migration, retained local
 guards and shared-source resource ownership.
+
+## Structured lifecycle refusals (rules audit)
+
+Root-owned session and transaction refusals carry unlocated Error diagnostics while retaining
+exact exception kinds, explanatory messages and state transitions. CK04004 identifies an already
+active transaction; CK04005 an ended transaction; CK04006 an end in progress; CK04007 an operation
+that prevents commit; CK07003 overlapping session operations; and CK07004 a closed session.
+A model's coded abort, original cause and disposal abort-reason instance remain unchanged. The
+normal session-teardown reason reuses a cached resource string. Successful operations gain no
+allocation, counter or process-wide atomic.
+
+The precise absence exception adds
+`DatabaseNotFoundException(string message, IEnumerable<Diagnostic> diagnostics, Exception? innerException)`.
+The third argument is required, so the existing `(message, null)` call remains unambiguous.
+Both legacy constructors keep their contracts. The new overload copies and orders diagnostics
+through DatabaseException and preserves the actual cause, including null; no artificial wrapper
+is introduced. Shared Engine extensions are internal to each model assembly and operate on
+foreign root-owned exception types. The root does not compile that module itself.
+
+All models attach CK03001 to duplicate logical database/storage creation and CK03002 to ordinary
+logical absence. SQL and KeyValuePair attach CK06004 to orphan-directory creation refusal and
+CK06005 to a missing physical data/catalog set. Existing coded interrupted-creation paths in
+Documents, Graph and Blob remain model-specific. Messages and pre-I/O/file-preservation behavior
+are unchanged. Code identities belong to the carrier, never a second message prefix. Protocol
+message kinds and layouts, SQLSTATEs, public interface count and on-disk formats do not change.
+Existing statement writers may now deliver these previously missing codes through their existing
+structured diagnostic and single-prefix paths; absence handshakes retain their existing mapping.
+
+Lower child roots retain their typed exception contracts: ProtocolException maps to the existing
+ProtocolViolation category at the model/client boundary; storage and transaction types map to
+existing coded model failures. Public arbitrary-message constructors and BCL invariant guards
+remain unchanged. Execution's parameterless InvalidOperationException/Convert row failures retain
+their BCL kinds; adding a root carrier there would create a dependency cycle and expand the
+deferred #1264 P8 result contract. This audit introduces no such result API change.

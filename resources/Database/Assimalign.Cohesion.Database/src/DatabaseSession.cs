@@ -69,6 +69,7 @@ public abstract class DatabaseSession : IAsyncDisposable
 
     // The last number the root event source gave a session, process-wide.
     private static long _lastSessionNumber;
+    private static readonly string _transactionClosureMessage = ErrorMessages.DatabaseSessionDisposeAsyncDatabase;
 
     private readonly DatabaseInstance _database;
     private readonly object _sync = new();
@@ -187,12 +188,12 @@ public abstract class DatabaseSession : IAsyncDisposable
             ThrowIfClosedLocked();
             if (OpenTransactionLocked is { } open)
             {
-                throw open.IsUsable ? new DatabaseException(AlreadyActiveMessage) : open.CreateRefusal();
+                throw open.IsUsable ? DatabaseException.CreateRootFailure("CK04004", AlreadyActiveMessage) : open.CreateRefusal();
             }
 
             if (_beginning || _operating)
             {
-                throw new DatabaseException(AlreadyActiveMessage);
+                throw DatabaseException.CreateRootFailure("CK07003", AlreadyActiveMessage);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -276,7 +277,7 @@ public abstract class DatabaseSession : IAsyncDisposable
             {
                 // The transaction object stays with its caller: a later rollback is a no-op, and a
                 // later commit fails with the model's coded error naming the closure.
-                await transaction.CloseAsync(new DatabaseException(ErrorMessages.DatabaseSessionDisposeAsyncDatabase)).ConfigureAwait(false);
+                await transaction.CloseAsync(new DatabaseException(_transactionClosureMessage)).ConfigureAwait(false);
             }
             catch (Exception failure) when (failure is not OutOfMemoryException)
             {
@@ -435,5 +436,5 @@ public abstract class DatabaseSession : IAsyncDisposable
         }
     }
 
-    private static DatabaseException CreateClosedException() => new(ErrorMessages.SessionCreateClosedExceptionDatabase);
+    private static DatabaseException CreateClosedException() => DatabaseException.CreateRootFailure("CK07004", ErrorMessages.SessionCreateClosedExceptionDatabase);
 }

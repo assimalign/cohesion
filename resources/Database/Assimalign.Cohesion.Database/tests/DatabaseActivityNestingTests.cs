@@ -139,10 +139,10 @@ public sealed class DatabaseActivityNestingTests
         public const string Root = "Assimalign.Cohesion.Database";
         public const string Transactions = "Assimalign.Cohesion.Database.Transactions";
         public const string Storage = "Assimalign.Cohesion.Database.Storage";
-        private const string TaskSource = "System.Threading.Tasks.TplEventSource";
+        private const string taskSource = "System.Threading.Tasks.TplEventSource";
 
         // TplEventSource's TasksFlowActivityIds keyword: it turns on EventSource's activity tracking.
-        private const EventKeywords TasksFlowActivityIds = (EventKeywords)0x80;
+        private const EventKeywords tasksFlowActivityIds = (EventKeywords)0x80;
 
         // Initialized before the base constructor calls OnEventSourceCreated for existing sources.
         private readonly ConcurrentQueue<EventWrittenEventArgs> _events = new();
@@ -153,9 +153,9 @@ public sealed class DatabaseActivityNestingTests
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == TaskSource)
+            if (eventSource.Name == taskSource)
             {
-                EnableEvents(eventSource, EventLevel.Informational, TasksFlowActivityIds);
+                EnableEvents(eventSource, EventLevel.Informational, tasksFlowActivityIds);
             }
             else if (eventSource.Name is Root or Transactions or Storage)
             {

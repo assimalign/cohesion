@@ -35,8 +35,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection(nameof(TransactionEventSourceCollection))]
 public sealed class TransactionEventSourceTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-    private static readonly LockResource Row = LockResource.Entry(7, 7);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly LockResource _row = LockResource.Entry(7, 7);
 
     private readonly ITestOutputHelper _output;
 
@@ -304,7 +304,7 @@ public sealed class TransactionEventSourceTests
         var waiting = locks.AcquireAsync(waiter.Sequence, second, LockMode.Exclusive).AsTask();
         await Should.ThrowAsync<TransactionDeadlockException>(async () => await locks.AcquireAsync(victim.Sequence, first, LockMode.Exclusive));
         await coordinator.RollbackAsync(victim);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await coordinator.CommitAsync(waiter);
 
         // Assert
@@ -347,7 +347,7 @@ public sealed class TransactionEventSourceTests
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var canceled = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var granted = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await locks.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
+        await locks.AcquireAsync(holder.Sequence, _row, LockMode.Exclusive);
         double thresholdWhileEnabled;
         double thresholdAfterAnotherEnable;
 
@@ -360,14 +360,14 @@ public sealed class TransactionEventSourceTests
             // Act
             using (var cancellation = new CancellationTokenSource())
             {
-                var waiting = locks.AcquireAsync(canceled.Sequence, Row, LockMode.Exclusive, cancellation.Token).AsTask();
+                var waiting = locks.AcquireAsync(canceled.Sequence, _row, LockMode.Exclusive, cancellation.Token).AsTask();
                 await cancellation.CancelAsync();
-                await Should.ThrowAsync<OperationCanceledException>(async () => await waiting.WaitAsync(Timeout));
+                await Should.ThrowAsync<OperationCanceledException>(async () => await waiting.WaitAsync(_timeout));
             }
 
-            var grantedWait = locks.AcquireAsync(granted.Sequence, Row, LockMode.Exclusive).AsTask();
+            var grantedWait = locks.AcquireAsync(granted.Sequence, _row, LockMode.Exclusive).AsTask();
             await coordinator.CommitAsync(holder);
-            await grantedWait.WaitAsync(Timeout);
+            await grantedWait.WaitAsync(_timeout);
             await coordinator.CommitAsync(granted);
             await coordinator.RollbackAsync(canceled);
 
@@ -416,8 +416,8 @@ public sealed class TransactionEventSourceTests
             new Dictionary<string, string?> { [TransactionEventSource.SlowLockWaitThresholdArgument] = "0" });
 
         // Act
-        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: false, Stopwatch.GetTimestamp());
-        TransactionEventSource.Log.LockWaitStop(name, owner, Row, LockMode.Exclusive, "Granted", startWritten: true, Stopwatch.GetTimestamp());
+        TransactionEventSource.Log.LockWaitStop(name, owner, _row, LockMode.Exclusive, "Granted", startWritten: false, Stopwatch.GetTimestamp());
+        TransactionEventSource.Log.LockWaitStop(name, owner, _row, LockMode.Exclusive, "Granted", startWritten: true, Stopwatch.GetTimestamp());
 
         // Assert: the slow wait is reported either way, so a late listener still learns how long a
         // wait lasted; the stop only closes a start that was written.
@@ -487,7 +487,7 @@ public sealed class TransactionEventSourceTests
         // Act
         var waiting = locks.AcquireAsync(waiter.Sequence, keyLock, LockMode.Exclusive).AsTask();
         await coordinator.CommitAsync(holder);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await coordinator.CommitAsync(waiter);
 
         // Assert
@@ -510,7 +510,7 @@ public sealed class TransactionEventSourceTests
         var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
         using var lockTimeout = coordinator.LockManager.EnterLockTimeout(TimeSpan.FromSeconds(5));
-        var waiting = coordinator.LockManager.AcquireAsync(waiter.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(waiter.Sequence, _row, LockMode.Exclusive).AsTask();
         storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;
         var offline = Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
@@ -518,7 +518,7 @@ public sealed class TransactionEventSourceTests
         // Act: the engine's offline hook abandons the waits, and a second call changes nothing.
         coordinator.AbandonLockWaits(offline);
         coordinator.AbandonLockWaits(offline);
-        await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(Timeout));
+        await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(_timeout));
 
         // Assert
         recorder.ShouldHaveNoInstrumentationError();
@@ -545,13 +545,13 @@ public sealed class TransactionEventSourceTests
         var locks = coordinator.LockManager;
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var waiter = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await locks.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
+        await locks.AcquireAsync(holder.Sequence, _row, LockMode.Exclusive);
         using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
-        var waiting = locks.AcquireAsync(waiter.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = locks.AcquireAsync(waiter.Sequence, _row, LockMode.Exclusive).AsTask();
 
         // Act: the waiter's own transaction ends, which fails its queued request.
         await coordinator.RollbackAsync(waiter);
-        await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(Timeout));
+        await Should.ThrowAsync<TransactionAbortedException>(async () => await waiting.WaitAsync(_timeout));
         await coordinator.CommitAsync(holder);
 
         // Assert
@@ -593,11 +593,11 @@ public sealed class TransactionEventSourceTests
         // Act: both waits pass the 0 ms threshold while queued.
         var middleWaits = locks.AcquireAsync(middle.Sequence, lastRow, LockMode.Exclusive).AsTask();
         var firstWaits = locks.AcquireAsync(first.Sequence, middleRow, LockMode.Shared).AsTask();
-        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, Timeout);
+        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, _timeout);
         await coordinator.CommitAsync(last);
-        await middleWaits.WaitAsync(Timeout);
+        await middleWaits.WaitAsync(_timeout);
         await coordinator.CommitAsync(middle);
-        await firstWaits.WaitAsync(Timeout);
+        await firstWaits.WaitAsync(_timeout);
         await coordinator.CommitAsync(first);
 
         // Assert: one report per wait, written while it waited.
@@ -650,16 +650,16 @@ public sealed class TransactionEventSourceTests
         // Act: the writer waits for the readers, and a late reader queues behind the writer.
         var writerWaits = locks.AcquireAsync(writer.Sequence, row, LockMode.Exclusive).AsTask();
         var lateWaits = locks.AcquireAsync(late.Sequence, row, LockMode.Shared).AsTask();
-        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, Timeout);
+        await recorder.WaitForAsync(events => events.Count(e => e.EventName == "LockWaitBlocked" && Equals(e.Payload?[0], name)) == 2, _timeout);
         foreach (var reader in readers)
         {
             await coordinator.CommitAsync(reader);
         }
 
-        await writerWaits.WaitAsync(Timeout);
+        await writerWaits.WaitAsync(_timeout);
         bool lateWaitedForTheWriter = !lateWaits.IsCompleted;
         await coordinator.CommitAsync(writer);
-        await lateWaits.WaitAsync(Timeout);
+        await lateWaits.WaitAsync(_timeout);
         await coordinator.CommitAsync(late);
 
         // Assert: sixteen of the writer's twenty blockers, and four of them below the late reader's
@@ -780,7 +780,7 @@ public sealed class TransactionEventSourceTests
         using var storage = EventStorage.Create(name);
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage);
-        coordinator.BeforeAbortRecord = _ => throw new IOException(AbortRecordFailure);
+        coordinator.BeforeAbortRecord = _ => throw new IOException(abortRecordFailure);
         using var recorder = new TransactionEventRecorder(EventLevel.Warning);
 
         // Act
@@ -793,7 +793,7 @@ public sealed class TransactionEventSourceTests
         lost.EventId.ShouldBe(13);
         lost.Level.ShouldBe(EventLevel.Warning);
         lost.PayloadNames.ShouldBe(["database", "transactionSequence", "exceptionType", "exceptionMessage"]);
-        lost.Payload.ShouldBe([name, Sequence(writer), typeof(IOException).FullName, AbortRecordFailure]);
+        lost.Payload.ShouldBe([name, Sequence(writer), typeof(IOException).FullName, abortRecordFailure]);
         writer.State.ShouldBe(TransactionState.RolledBack);
     }
 
@@ -842,12 +842,12 @@ public sealed class TransactionEventSourceTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var statement = await HoldApplyGateAsync(coordinator, holder, release.Task);
         using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
-        coordinator.BeforeCheckpoint = _ => throw new InvalidOperationException(CheckpointFailure);
+        coordinator.BeforeCheckpoint = _ => throw new InvalidOperationException(checkpointFailure);
 
         // Act
         bool ran = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
         release.TrySetResult();
-        await statement.WaitAsync(Timeout);
+        await statement.WaitAsync(_timeout);
         coordinator.BeforeCheckpoint = null;
         var held = Should.Throw<InvalidOperationException>(() => coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None));
         await coordinator.CommitAsync(holder);
@@ -855,7 +855,7 @@ public sealed class TransactionEventSourceTests
         // Assert
         recorder.ShouldHaveNoInstrumentationError();
         ran.ShouldBeFalse();
-        held.Message.ShouldBe(CheckpointFailure);
+        held.Message.ShouldBe(checkpointFailure);
         var events = recorder.For(name).Where(e => e.EventName is "CheckpointDeferred" or "DeferredCheckpointSkipped" or "DeferredCheckpointFailed").ToArray();
         events.Select(e => e.EventName).ShouldBe(["CheckpointDeferred", "DeferredCheckpointFailed"]);
 
@@ -868,7 +868,7 @@ public sealed class TransactionEventSourceTests
         events[1].EventId.ShouldBe(17);
         events[1].Level.ShouldBe(EventLevel.Warning);
         events[1].PayloadNames.ShouldBe(["database", "exceptionType", "exceptionMessage"]);
-        events[1].Payload.ShouldBe([name, typeof(InvalidOperationException).FullName, CheckpointFailure]);
+        events[1].Payload.ShouldBe([name, typeof(InvalidOperationException).FullName, checkpointFailure]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - TransactionEventSource: Should report a deferred checkpoint a storage bracket outside the gate kept from running, once")]
@@ -887,7 +887,7 @@ public sealed class TransactionEventSourceTests
         // Act
         bool ran = coordinator.TryCheckpoint(TimeSpan.Zero, CancellationToken.None);
         release.TrySetResult();
-        await statement.WaitAsync(Timeout);
+        await statement.WaitAsync(_timeout);
         outside.Rollback();
         await coordinator.CommitAsync(holder);
 
@@ -922,7 +922,7 @@ public sealed class TransactionEventSourceTests
         storage.Log.Flush();
         storage.JournalStream.FailWrites = 1;
         release.TrySetResult();
-        await statement.WaitAsync(Timeout);
+        await statement.WaitAsync(_timeout);
 
         // Assert: a skip, not a failure held for the next TryCheckpoint to throw.
         recorder.ShouldHaveNoInstrumentationError();
@@ -1125,8 +1125,8 @@ public sealed class TransactionEventSourceTests
 
     private static long Sequence(TransactionContext context) => (long)context.Sequence.Value;
 
-    private const string AbortRecordFailure = "Injected abort-record failure.";
-    private const string CheckpointFailure = "Injected checkpoint failure.";
+    private const string abortRecordFailure = "Injected abort-record failure.";
+    private const string checkpointFailure = "Injected checkpoint failure.";
 
     /// <summary>Starts a statement of <paramref name="holder"/> that holds the apply gate until <paramref name="release"/> completes.</summary>
     private static async Task<Task> HoldApplyGateAsync(TransactionCoordinator coordinator, TransactionContext holder, Task release)
@@ -1138,7 +1138,7 @@ public sealed class TransactionEventSourceTests
             await release.ConfigureAwait(false);
             return 0;
         }).AsTask();
-        await gateHeld.Task.WaitAsync(Timeout);
+        await gateHeld.Task.WaitAsync(_timeout);
         return statement;
     }
 
@@ -1157,7 +1157,7 @@ public sealed class TransactionEventSourceTests
             coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, index, new byte[] { 1 }, storage.PackLocation(pageId, slotIndex));
         }
 
-        await coordinator.LockManager.AcquireAsync(writer.Sequence, Row, LockMode.Exclusive);
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, _row, LockMode.Exclusive);
         return writer;
     }
 

@@ -645,10 +645,10 @@ public class BTreeIndexTests
     // count at 4, directory at 32; an internal entry is [u16 keyLen | tiebreaker << 14]
     // [key][tiebreaker attributes][i64 child]). The corruption test below writes a
     // node directly, which needs exactly these.
-    private const int NodeKindOffset = 3;
-    private const int NodeCountOffset = 4;
-    private const int NodeDirectoryOffset = 32;
-    private const byte InternalNodeKind = 2;
+    private const int nodeKindOffset = 3;
+    private const int nodeCountOffset = 4;
+    private const int nodeDirectoryOffset = 32;
+    private const byte internalNodeKind = 2;
 
     /// <summary>
     /// Overwrites the key bytes of the only separator of the internal node on
@@ -663,10 +663,10 @@ public class BTreeIndexTests
         using (var handle = storage.OpenPageForWrite(bracket, pageId))
         {
             var body = handle.Page.AsBodySpan();
-            body[NodeKindOffset].ShouldBe(InternalNodeKind);
-            BinaryPrimitives.ReadUInt16LittleEndian(body[NodeCountOffset..]).ShouldBe((ushort)1);
+            body[nodeKindOffset].ShouldBe(internalNodeKind);
+            BinaryPrimitives.ReadUInt16LittleEndian(body[nodeCountOffset..]).ShouldBe((ushort)1);
 
-            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[NodeDirectoryOffset..]);
+            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[nodeDirectoryOffset..]);
             int field = BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]);
             (field >> 14).ShouldBe(0, "the separator keeps no tiebreaker");
             int length = field & 0x3FFF;
@@ -681,7 +681,7 @@ public class BTreeIndexTests
     private static int NodeEntryCount(Storage.Storage storage, long pageId)
     {
         using var handle = storage.PageManager.GetPage(pageId);
-        return BinaryPrimitives.ReadUInt16LittleEndian(handle.Page.AsBodySpan()[NodeCountOffset..]);
+        return BinaryPrimitives.ReadUInt16LittleEndian(handle.Page.AsBodySpan()[nodeCountOffset..]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Splits: a separator that would misorder its parent fails the insert, and rollback discards the half-done split")]

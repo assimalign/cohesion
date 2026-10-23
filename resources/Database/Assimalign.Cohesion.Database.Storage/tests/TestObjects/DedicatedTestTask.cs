@@ -9,13 +9,13 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// <summary>Runs test actors independently of the pool, including their ordinary await continuations.</summary>
 internal static class DedicatedTestTask
 {
-    private const TaskCreationOptions Options = TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach;
+    private const TaskCreationOptions options = TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach;
 
     internal static Task Run(Action action, CancellationToken cancellationToken = default)
-        => Task.Factory.StartNew(action, cancellationToken, Options, TaskScheduler.Default);
+        => Task.Factory.StartNew(action, cancellationToken, options, TaskScheduler.Default);
 
     internal static Task<T> Run<T>(Func<T> action, CancellationToken cancellationToken = default)
-        => Task.Factory.StartNew(action, cancellationToken, Options, TaskScheduler.Default);
+        => Task.Factory.StartNew(action, cancellationToken, options, TaskScheduler.Default);
 
     internal static Task Run(Func<Task> action, CancellationToken cancellationToken = default)
         => Run(async () => { await action(); return true; }, cancellationToken);
@@ -28,7 +28,7 @@ internal static class DedicatedTestTask
                 TaskCreationOptions.DenyChildAttach, scheduler).Unwrap();
             scheduler.Complete(result);
             return result.GetAwaiter().GetResult();
-        }, cancellationToken, Options, TaskScheduler.Default).ConfigureAwait(false);
+        }, cancellationToken, options, TaskScheduler.Default).ConfigureAwait(false);
 
     // A LongRunning async delegate alone returns its thread at the first incomplete await.
     // Keep driver continuations on the actor's thread without installing a synchronization context.

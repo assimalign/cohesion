@@ -23,8 +23,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public class TransactionCoordinatorRollbackTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-    private static readonly LockResource Row = LockResource.Entry(7, 7);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly LockResource _row = LockResource.Entry(7, 7);
 
     /// <summary>The awaits inside the record-space undo a caller's token used to reach.</summary>
     public enum UndoAwait
@@ -45,7 +45,7 @@ public class TransactionCoordinatorRollbackTests
         var abortRecords = new AbortRecordProbe(coordinator);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         abortRecords.FailRollbackRecords = true;
 
         // Act
@@ -58,7 +58,7 @@ public class TransactionCoordinatorRollbackTests
         coordinator.Manager.OldestActive.ShouldBe(next.Sequence);
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         RecordCount(storage).ShouldBe(0);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
 
         // The undo completed, so later checkpoints stop carrying the writer; the next
         // transaction has applied nothing yet, and a reader is never listed (#1242).
@@ -82,7 +82,7 @@ public class TransactionCoordinatorRollbackTests
         var index = new BlockingIndex();
         var writer = await BeginWriterAsync(coordinator, storage, step == UndoAwait.IndexUndo ? index : null);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var releaseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task? heldStatement = null;
@@ -96,7 +96,7 @@ public class TransactionCoordinatorRollbackTests
                 await releaseGate.Task.ConfigureAwait(false);
                 return 0;
             }).AsTask();
-            await gateHeld.Task.WaitAsync(Timeout);
+            await gateHeld.Task.WaitAsync(_timeout);
         }
 
         using var canceled = new CancellationTokenSource();
@@ -107,7 +107,7 @@ public class TransactionCoordinatorRollbackTests
         {
             if (step == UndoAwait.IndexUndo)
             {
-                await index.Entered.WaitAsync(Timeout);
+                await index.Entered.WaitAsync(_timeout);
             }
 
             canceled.Cancel();
@@ -118,10 +118,10 @@ public class TransactionCoordinatorRollbackTests
             index.Release();
         }
 
-        await rollback.WaitAsync(Timeout);
+        await rollback.WaitAsync(_timeout);
         if (heldStatement is not null)
         {
-            await heldStatement.WaitAsync(Timeout);
+            await heldStatement.WaitAsync(_timeout);
         }
 
         // Assert
@@ -130,7 +130,7 @@ public class TransactionCoordinatorRollbackTests
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         coordinator.GetOpenContexts().ShouldNotContain(writer);
         RecordCount(storage).ShouldBe(0);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await InsertAsync(coordinator, storage, next);
         await coordinator.CommitAsync(next);
         await coordinator.CommitAsync(holder);
@@ -148,7 +148,7 @@ public class TransactionCoordinatorRollbackTests
         var writer = await BeginWriterAsync(coordinator, storage, index);
         var location = storage.PackLocation(storage.LastInserted.PageId, storage.LastInserted.SlotIndex);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
 
         // Act
         await coordinator.RollbackAsync(writer);
@@ -180,7 +180,7 @@ public class TransactionCoordinatorRollbackTests
         RecordCount(storage).ShouldBe(0);
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         abortRecords.AppendedRollbacks.ShouldContain((long)writer.Sequence.Value);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         coordinator.Manager.OldestActive.ShouldBe(next.Sequence);
         Checkpoint(coordinator).ShouldNotContain((long)writer.Sequence.Value);
         coordinator.RunVersionPurgePass(CancellationToken.None).ShouldBe(0);
@@ -282,25 +282,25 @@ public class TransactionCoordinatorRollbackTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         await coordinator.RollbackAsync(writer);
         writer.State.ShouldBe(TransactionState.RolledBack);
 
         // Act: an operation of the rolled-back transaction cleans up a grant it received after
         // the end, as the engines' writer-lock helpers do.
-        await coordinator.LockManager.AcquireAsync(writer.Sequence, Row, LockMode.Exclusive);
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, _row, LockMode.Exclusive);
         coordinator.LockManager.ReleaseAll(writer.Sequence);
 
         // Assert: the writer still holds the row, so the next writer cannot build on its
         // versions before the undo removes them.
-        coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        coordinator.LockManager.TryAcquire(next.Sequence, _row, LockMode.Exclusive).ShouldBeFalse();
         RecordCount(storage).ShouldBe(1);
 
         // Act: the purge pass completes the undo, and the manager releases the writer.
         coordinator.RunVersionPurgePass(CancellationToken.None);
 
         // Assert
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         RecordCount(storage).ShouldBe(0);
 
         // A transaction the manager no longer tracks releases through the same lock manager.
@@ -313,9 +313,9 @@ public class TransactionCoordinatorRollbackTests
         // An active transaction keeps its locks until it ends.
         var probe = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         coordinator.LockManager.ReleaseAll(next.Sequence);
-        coordinator.LockManager.TryAcquire(probe.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        coordinator.LockManager.TryAcquire(probe.Sequence, _row, LockMode.Exclusive).ShouldBeFalse();
         await coordinator.CommitAsync(next);
-        coordinator.LockManager.TryAcquire(probe.Sequence, Row, LockMode.Exclusive).ShouldBeTrue();
+        coordinator.LockManager.TryAcquire(probe.Sequence, _row, LockMode.Exclusive).ShouldBeTrue();
         await coordinator.CommitAsync(probe);
     }
 
@@ -354,7 +354,7 @@ public class TransactionCoordinatorRollbackTests
         coordinator.IsStorageOffline.ShouldBeTrue();
         coordinator.VersionStore.PendingAbortedPurges.ShouldBe([writer.Sequence.Value]);
         RecordCount(storage).ShouldBe(2);
-        coordinator.LockManager.TryAcquire(next.Sequence, Row, LockMode.Exclusive).ShouldBeFalse();
+        coordinator.LockManager.TryAcquire(next.Sequence, _row, LockMode.Exclusive).ShouldBeFalse();
         Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint());
         Should.Throw<StorageOfflineException>(() => coordinator.RunVersionPurgePass(CancellationToken.None));
         RecordCount(storage).ShouldBe(2);
@@ -393,7 +393,7 @@ public class TransactionCoordinatorRollbackTests
         var journal = storage.Log;
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         storage.Log.Flush();
         long written = journal.WrittenLsn;
 
@@ -412,7 +412,7 @@ public class TransactionCoordinatorRollbackTests
         writer.State.ShouldBe(TransactionState.RolledBack);
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
         RecordCount(storage).ShouldBe(0);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         coordinator.IsStorageOffline.ShouldBeTrue();
 
         // Act: close, as an engine does, and reopen.
@@ -479,27 +479,27 @@ public class TransactionCoordinatorRollbackTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var running = Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
         {
             entered.Set();
-            release.Wait(Timeout).ShouldBeTrue();
+            release.Wait(_timeout).ShouldBeTrue();
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
             RecordVersionStamp.WriteWriter(record, writer.Sequence);
             var (pageId, slotIndex) = storage.Insert(bracket, record);
             coordinator.VersionStore.RecordCreated(writer.Sequence, pageId, slotIndex);
             return 0;
         }).AsTask().GetAwaiter().GetResult(), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-        entered.Wait(Timeout).ShouldBeTrue();
+        entered.Wait(_timeout).ShouldBeTrue();
 
         // Act
         var rollingBack = coordinator.RollbackAsync(writer).AsTask();
         bool waitedForStatement = !rollingBack.IsCompleted;
         release.Set();
-        await running.WaitAsync(Timeout);
-        await rollingBack.WaitAsync(Timeout);
+        await running.WaitAsync(_timeout);
+        await rollingBack.WaitAsync(_timeout);
         int recordsWhileDeferred = RecordCount(storage);
         var pendingWhileDeferred = coordinator.VersionStore.PendingAbortedPurges;
         var refused = await Should.ThrowAsync<TransactionAbortedException>(async () => await InsertAsync(coordinator, storage, writer));
@@ -515,7 +515,7 @@ public class TransactionCoordinatorRollbackTests
         rowReleasedWhileDeferred.ShouldBeFalse();
         RecordCount(storage).ShouldBe(0);
         coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await coordinator.CommitAsync(next);
     }
 
@@ -537,13 +537,13 @@ public class TransactionCoordinatorRollbackTests
         await coordinator.LockManager.AcquireAsync(blocker.Sequence, otherRow, LockMode.Exclusive);
         var parked = coordinator.LockManager.AcquireAsync(writer.Sequence, otherRow, LockMode.Exclusive).AsTask();
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         bool parkedBeforeTheEnd = !parked.IsCompleted;
 
         // Act: the rollback ends the writer with its undo deferred; an engine then cleans up after
         // the writer through the view, which leaves the release to the manager.
         await coordinator.RollbackAsync(writer);
-        var abandoned = await Should.ThrowAsync<TransactionAbortedException>(async () => await parked.WaitAsync(Timeout));
+        var abandoned = await Should.ThrowAsync<TransactionAbortedException>(async () => await parked.WaitAsync(_timeout));
         coordinator.LockManager.ReleaseAll(writer.Sequence);
         bool rowReleasedBeforeTheUndo = waiting.IsCompleted;
         await coordinator.CommitAsync(blocker);
@@ -556,7 +556,7 @@ public class TransactionCoordinatorRollbackTests
         abandoned.Message.ShouldStartWith($"Transaction {writer.Sequence} ended while it waited", Case.Sensitive);
         rowReleasedBeforeTheUndo.ShouldBeFalse();
         otherRowFreeAfterTheBlocker.ShouldBeTrue();
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         RecordCount(storage).ShouldBe(0);
         await coordinator.CommitAsync(next);
     }
@@ -574,11 +574,11 @@ public class TransactionCoordinatorRollbackTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await BeginWriterAsync(coordinator, storage);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
         var running = StartHeldInsert(coordinator, storage, writer, entered, release);
-        entered.Wait(Timeout).ShouldBeTrue();
+        entered.Wait(_timeout).ShouldBeTrue();
         using var canceled = new CancellationTokenSource();
 
         // Act: the rollback starts, waits for the statement, and its token is canceled meanwhile.
@@ -586,13 +586,13 @@ public class TransactionCoordinatorRollbackTests
         canceled.Cancel();
         bool waitedForStatement = !rollingBack.IsCompleted;
         release.Set();
-        await running.WaitAsync(Timeout);
-        await rollingBack.WaitAsync(Timeout);
+        await running.WaitAsync(_timeout);
+        await rollingBack.WaitAsync(_timeout);
 
         // Assert: the rollback ran to completion and undid both statements.
         waitedForStatement.ShouldBeTrue();
         writer.State.ShouldBe(TransactionState.RolledBack);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         RecordCount(storage).ShouldBe(0);
         await coordinator.CommitAsync(next);
     }
@@ -766,7 +766,7 @@ public class TransactionCoordinatorRollbackTests
         var other = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await InsertAsync(coordinator, storage, other);
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
 
         // Act: the commit record is appended, and its durable flush fails.
         storage.JournalStream.FailFlushes = 1;
@@ -778,7 +778,7 @@ public class TransactionCoordinatorRollbackTests
             await Should.ThrowAsync<StorageOfflineException>(async () => await InsertAsync(coordinator, storage, next)),
             Should.Throw<StorageOfflineException>(() => coordinator.Checkpoint()),
         };
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await coordinator.DisposeAsync();
         storage.Dispose();
         var images = storage.CaptureClosedImages();
@@ -877,10 +877,10 @@ public class TransactionCoordinatorRollbackTests
         var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         storage.OnOffline = coordinator.AbandonLockWaits;
         var holder = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        await coordinator.LockManager.AcquireAsync(holder.Sequence, Row, LockMode.Exclusive);
+        await coordinator.LockManager.AcquireAsync(holder.Sequence, _row, LockMode.Exclusive);
         var queued = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var late = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(queued.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(queued.Sequence, _row, LockMode.Exclusive).AsTask();
         bool queuedWhileOnline = !waiting.IsCompleted;
 
         // Act: a commit's drain of the append buffer, or its durable flush after the drain, fails,
@@ -898,13 +898,13 @@ public class TransactionCoordinatorRollbackTests
 
         await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await coordinator.CommitAsync(writer));
         var offline = storage.OfflineError.ShouldNotBeNull();
-        var queuedFailure = await Should.ThrowAsync<TransactionAbortedException>(() => waiting.WaitAsync(Timeout));
-        var lateWait = coordinator.LockManager.AcquireAsync(late.Sequence, Row, LockMode.Exclusive);
+        var queuedFailure = await Should.ThrowAsync<TransactionAbortedException>(() => waiting.WaitAsync(_timeout));
+        var lateWait = coordinator.LockManager.AcquireAsync(late.Sequence, _row, LockMode.Exclusive);
         bool lateFailedAtOnce = lateWait.IsCompleted;
         var lateFailure = await Should.ThrowAsync<TransactionAbortedException>(async () => await lateWait);
         var granted = coordinator.LockManager.AcquireAsync(late.Sequence, LockResource.Entry(8, 8), LockMode.Exclusive);
         bool grantedAtOnce = granted.IsCompletedSuccessfully;
-        bool holderStillHolds = !coordinator.LockManager.TryAcquire(late.Sequence, Row, LockMode.Shared);
+        bool holderStillHolds = !coordinator.LockManager.TryAcquire(late.Sequence, _row, LockMode.Shared);
         await coordinator.DisposeAsync();
         storage.Dispose();
 
@@ -942,7 +942,7 @@ public class TransactionCoordinatorRollbackTests
         coordinator.OnUndoDeferred = () => Interlocked.Increment(ref signals);
         var writer = await BeginWriterAsync(coordinator, storage, new FailingIndex(failures: 1));
         var next = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = coordinator.LockManager.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
 
         // Act
         await coordinator.RollbackAsync(writer);
@@ -952,7 +952,7 @@ public class TransactionCoordinatorRollbackTests
         bool waitingAfterTheEarlyCall = !waiting.IsCompleted;
         time.Advance(TimeSpan.FromMilliseconds(40));
         long undone = coordinator.RetryDeferredUndo(CancellationToken.None);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
 
         // Assert
         signals.ShouldBe(1);
@@ -1054,7 +1054,7 @@ public class TransactionCoordinatorRollbackTests
         }
 
         stop.Cancel();
-        await Task.WhenAll(load).WaitAsync(Timeout);
+        await Task.WhenAll(load).WaitAsync(_timeout);
 
         // Assert
         busy.ShouldBe(0);
@@ -1151,7 +1151,7 @@ public class TransactionCoordinatorRollbackTests
         => Task.Factory.StartNew(() => coordinator.ApplyStatementAsync(writer, bracket =>
         {
             entered.Set();
-            release.Wait(Timeout).ShouldBeTrue();
+            release.Wait(_timeout).ShouldBeTrue();
             byte[] record = new byte[RecordVersionStamp.HeaderSize + 1];
             RecordVersionStamp.WriteWriter(record, writer.Sequence);
             var (pageId, slotIndex) = storage.Insert(bracket, record);
@@ -1195,7 +1195,7 @@ public class TransactionCoordinatorRollbackTests
             coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, index, new byte[] { 1 }, storage.PackLocation(pageId, slotIndex));
         }
 
-        await coordinator.LockManager.AcquireAsync(writer.Sequence, Row, LockMode.Exclusive);
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, _row, LockMode.Exclusive);
         return writer;
     }
 

@@ -45,3 +45,5 @@ placeholders and punctuation used to compose an existing structured diagnostic a
 protocol overflow notices are wire warning descriptions, rather than exception-message templates;
 their invariant wording and transport limits remain unchanged. Exception prose and its explanatory
 format fragments live in generated resources. No storage or wire version changes are required.
+
+The post-main rules audit also checks private field/constant naming, explicit constructors, partial extension containers, internal helper placement and build item-group structure. The debugger-view rule excludes Database. Pure naming and constructor-syntax changes preserve message text, diagnostic identities, work accounting, ownership and all statement budgets. Deferred P8/D9 surfaces and the documented hosting ownership exception are retained.

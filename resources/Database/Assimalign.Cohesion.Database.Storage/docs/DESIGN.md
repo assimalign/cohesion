@@ -77,11 +77,16 @@ and phase 2 replaced the remaining six with sealed types.
   through them in other assemblies, so they cannot be internal, and every call on the per-page
   and per-record paths is now direct. The page manager is not disposable: the storage owns
   it, and its former `Dispose` did nothing.
-- **`StoragePageLatch` is sealed with a private constructor and `Create()`** (rule 1). Indexing
+- **`StoragePageLatch` is sealed with a public parameterless constructor** (owner decision 61). Indexing
   creates one per tree and passes it to the latched page-write overloads, so it is public; its
   creation order, its owner check and its waiter count are internal (#1371, "No reader sees a
   rollback's restore half done"). The restore sequence a record read confirms against lives on
   the internal buffer-pool frame, so the fix adds no other public surface.
+- **`StorageStream` is a sealed public adapter.** Its existing stream and handle constructors,
+  file factories and public operations retain their ownership, positional-I/O and durability
+  contracts. No shipped or test type derives from it; subclasses would bypass the concrete
+  storage boundary. The free-byte map's private heap entry uses an explicit constructor and
+  retains the same fields and one entry per registered page.
 - **The buffer pool is internal.** `Storage.BufferPool` returns the internal
   `StorageBufferPool`; only the storage and its own tests read it.
 - **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were

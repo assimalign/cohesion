@@ -846,14 +846,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             // A storage bracket outside the apply gate is open; the next statement to end, or
             // the worker's next look, retries.
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointBracketOpen);
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointBracketOpen);
         }
         catch (StorageOfflineException)
         {
             // A durable flush failed and took the storage offline (#1243): nothing more is
             // written, and every later operation on the database is refused.
             Volatile.Write(ref _checkpointDeferred, 0);
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointStorageOffline);
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointStorageOffline);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -864,8 +864,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     // The reasons a deferred checkpoint did not run, as the DeferredCheckpointSkipped event names them.
-    private const string DeferredCheckpointBracketOpen = "BracketOpen";
-    private const string DeferredCheckpointStorageOffline = "StorageOffline";
+    private const string deferredCheckpointBracketOpen = "BracketOpen";
+    private const string deferredCheckpointStorageOffline = "StorageOffline";
 
     /// <summary>
     /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:

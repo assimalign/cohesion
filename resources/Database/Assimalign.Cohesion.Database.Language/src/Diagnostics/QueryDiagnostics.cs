@@ -27,7 +27,7 @@ public static class QueryDiagnostics
         };
     }
 
-    private const string UnsupportedClauseCode = "CK00001";
+    private const string unsupportedClauseCode = "CK00001";
 
     /// <summary>
     /// Creates a <c>CK00001</c> diagnostic whose message is
@@ -46,7 +46,7 @@ public static class QueryDiagnostics
         ArgumentNullException.ThrowIfNull(location);
 
         return new Diagnostic(
-            UnsupportedClauseCode,
+            unsupportedClauseCode,
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnsupportedClauseDiagnostic, clause, language),
             location.Start,
             location.End,

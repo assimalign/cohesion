@@ -30,14 +30,14 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// </remarks>
 public sealed class StoragePageLatch
 {
-    private static long s_created;
+    private static long _created;
 
     private readonly ReaderWriterLockSlim _latch = new(LockRecursionPolicy.NoRecursion);
 
     /// <summary>Initializes a page latch with a unique rollback acquisition order.</summary>
     public StoragePageLatch()
     {
-        Order = Interlocked.Increment(ref s_created);
+        Order = Interlocked.Increment(ref _created);
     }
 
     /// <summary>
@@ -59,7 +59,7 @@ public sealed class StoragePageLatch
     /// <summary>Gets the current shared-acquisition waiters (diagnostics and tests).</summary>
     internal int WaitingReaders => _latch.WaitingReadCount;
 
-/// <summary>
+    /// <summary>
     /// Holds the latch shared, waiting while a writer or a rollback holds it.
     /// </summary>
     public void EnterRead() => _latch.EnterReadLock();

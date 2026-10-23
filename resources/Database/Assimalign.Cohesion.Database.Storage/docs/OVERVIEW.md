@@ -66,7 +66,8 @@ representation — model-specific layouts live in the Storage components of each
   any other format is refused with `StorageFormatException` (`CK06001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
-  (`.log`), and backup (`.bak`), wrapped by `StorageStream`.
+  (`.log`), and backup (`.bak`), wrapped by the sealed `StorageStream` adapter. Its existing
+  public constructors and file factories retain their signatures and ownership contracts.
 
 ## Dependencies
 

@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 public sealed partial class StorageFreeBytesTests
 {
-    private const ulong Owner = 7;
+    private const ulong owner = 7;
     private readonly ITestOutputHelper _output;
     public StorageFreeBytesTests(ITestOutputHelper output) => _output = output;
 
@@ -56,7 +56,7 @@ public sealed partial class StorageFreeBytesTests
         next.SlotIndex.ShouldBe(2);
         storage.FreeSpaceMap.TotalPageCount.ShouldBe(pages);
         storage.ReadBytes(kept.PageId, kept.SlotIndex).ShouldBe(Filled(3000, 0x33));
-        storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, Owner, out _).ShouldBeFalse();
+        storage.TryReadRecord(deleted.PageId, deleted.SlotIndex, owner, out _).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Storage] - Free bytes: fixed live data with overwrite and purge stops extending the file (#1288)")]
@@ -71,7 +71,7 @@ public sealed partial class StorageFreeBytesTests
             for (int i = 0; i < locations.Length; i++)
             {
                 values[i] = (byte)(i % 251);
-                locations[i] = storage.Insert(seed, Owner, Filled(500, values[i]));
+                locations[i] = storage.Insert(seed, owner, Filled(500, values[i]));
             }
             seed.Commit();
         }
@@ -85,7 +85,7 @@ public sealed partial class StorageFreeBytesTests
             using var bracket = storage.BeginTransaction();
             var old = locations[index];
             values[index] = (byte)((cycle % 251) + 1);
-            locations[index] = storage.Insert(bracket, Owner, Filled(500, values[index]));
+            locations[index] = storage.Insert(bracket, owner, Filled(500, values[index]));
             storage.Delete(bracket, old.PageId, old.SlotIndex);
             bracket.Commit();
             if ((cycle + 1) % 32 == 0) { counts.Add(storage.FreeSpaceMap.TotalPageCount); }
@@ -105,7 +105,7 @@ public sealed partial class StorageFreeBytesTests
     private static (PageId PageId, int SlotIndex) Insert(TornStorage storage, byte[] bytes)
     {
         using var bracket = storage.BeginTransaction();
-        var result = storage.Insert(bracket, Owner, bytes);
+        var result = storage.Insert(bracket, owner, bytes);
         bracket.Commit();
         return result;
     }

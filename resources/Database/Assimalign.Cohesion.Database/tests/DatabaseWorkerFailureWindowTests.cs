@@ -29,10 +29,10 @@ namespace Assimalign.Cohesion.Database.Tests;
 [Collection(nameof(DatabaseWorkerFailureWindowCollection))]
 public sealed class DatabaseWorkerFailureWindowTests
 {
-    private const string EngineName = "test-engine";
-    private const string WorkerName = EngineName + "/checkpoint";
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan Window = TimeSpan.FromSeconds(100);
+    private const string engineName = "test-engine";
+    private const string workerName = engineName + "/checkpoint";
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _window = TimeSpan.FromSeconds(100);
 
     [Theory(DisplayName = "Cohesion Test [Database] - Worker failure window: a failure lasting the window across the minimum of passes takes only that database offline, with the worker's cause")]
     [InlineData(DatabaseEngineWorkerKind.Checkpoint, StorageOfflineCause.CheckpointFailures)]
@@ -45,7 +45,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: a fails every pass, b never does; a window of 100 s and a minimum of three
         // failed passes, on a clock the test moves.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         await engine.CreateDatabaseAsync("b");
         var failure = new InvalidOperationException("the worker's work failed");
@@ -58,18 +58,18 @@ public sealed class DatabaseWorkerFailureWindowTests
             }
 
             self.Begin("b").ShouldBeTrue();
-        }, name: EngineName + "/" + kind, kind: kind);
+        }, name: engineName + "/" + kind, kind: kind);
         engine.Attach(worker);
 
         // Act: three failed passes 50 s apart, the third 100 s after the first.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var beforeTheWindow = engine.GiveUps;
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: b is never touched; a goes offline on the third failed pass.
         beforeTheWindow.ShouldBeEmpty();
@@ -104,7 +104,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, pass) =>
         {
@@ -112,7 +112,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException($"pass {pass} failed"), TimeSpan.Zero);
             }
-        }, name: EngineName + "/" + kind, kind: kind);
+        }, name: engineName + "/" + kind, kind: kind);
         engine.Attach(worker);
 
         // Act: fifty failed passes two seconds apart, the last 98 s after the first.
@@ -126,14 +126,14 @@ public sealed class DatabaseWorkerFailureWindowTests
             worker.RunIteration(CancellationToken.None);
         }
 
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var underTheWindow = engine.GiveUps;
         int consecutive = worker.ConsecutiveFailures;
 
         // The fifty-first, 100 s after the first, reaches the window.
         clock.Advance(TimeSpan.FromSeconds(2));
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         underTheWindow.ShouldBeEmpty();
@@ -151,7 +151,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, pass) =>
         {
@@ -159,19 +159,19 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException($"pass {pass} failed"), TimeSpan.Zero);
             }
-        }, name: EngineName + "/" + kind, kind: kind);
+        }, name: engineName + "/" + kind, kind: kind);
         engine.Attach(worker);
 
         // Act: two failed passes 200 s apart: twice the window, one pass short of the minimum.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window * 2);
+        clock.Advance(_window * 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var underTheMinimum = engine.GiveUps;
 
         // The third reaches the minimum.
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         underTheMinimum.ShouldBeEmpty();
@@ -197,7 +197,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange: the defaults, a window of 100 s and a minimum of three passes.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, time: clock);
+        await using var engine = new TestEngine(engineName, time: clock);
         await engine.CreateDatabaseAsync("a");
         var kind = pace == "checkpoint" ? DatabaseEngineWorkerKind.Checkpoint : DatabaseEngineWorkerKind.VersionPurge;
         var worker = new ScriptedWorker((self, pass) =>
@@ -206,7 +206,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException($"pass {pass} failed"), TimeSpan.Zero);
             }
-        }, name: EngineName + "/" + pace, kind: kind);
+        }, name: engineName + "/" + pace, kind: kind);
         engine.Attach(worker);
         var delay = pace switch
         {
@@ -218,7 +218,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Act: the pace's failed passes until half a window past the window; a second streak
         // cannot reach the window in that time.
         worker.RunIteration(CancellationToken.None);
-        while (clock.Elapsed < Window * 1.5)
+        while (clock.Elapsed < _window * 1.5)
         {
             if (pace == "deferred-undo")
             {
@@ -227,16 +227,16 @@ public sealed class DatabaseWorkerFailureWindowTests
             }
 
             clock.Advance(delay);
-            if (clock.Elapsed < Window * 1.5)
+            if (clock.Elapsed < _window * 1.5)
             {
                 worker.RunIteration(CancellationToken.None);
             }
         }
 
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
-        DatabaseEngine.DefaultWorkerFailureWindow.ShouldBe(Window);
+        DatabaseEngine.DefaultWorkerFailureWindow.ShouldBe(_window);
         engine.TakenOffline.ShouldBe(["a"]);
         engine.GiveUps.ShouldHaveSingleItem().Reason.ShouldContain($"{passes} passes in a row over {seconds} s", Case.Sensitive);
     }
@@ -258,7 +258,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: the version-purge worker retries a's deferred undo, which keeps failing; b's
         // purge succeeds.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: minimumPasses, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: minimumPasses, time: clock);
         await engine.CreateDatabaseAsync("a");
         await engine.CreateDatabaseAsync("b");
         var worker = new ScriptedWorker((self, pass) =>
@@ -269,7 +269,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             }
 
             self.Begin("b").ShouldBeTrue();
-        }, name: EngineName + "/version-purge", kind: DatabaseEngineWorkerKind.VersionPurge);
+        }, name: engineName + "/version-purge", kind: DatabaseEngineWorkerKind.VersionPurge);
         engine.Attach(worker);
 
         // Act: the retries before the one that gives up, on the coordinator's schedule.
@@ -283,10 +283,10 @@ public sealed class DatabaseWorkerFailureWindowTests
             clock.Advance(delay);
         }
 
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var beforeTheGivingUpRetry = engine.GiveUps;
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         afterEachRetry.ShouldAllBe(count => count == 0);
@@ -303,7 +303,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange: a fails on every pass but the fourth.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, pass) =>
         {
@@ -312,7 +312,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException($"pass {pass} failed"), TimeSpan.Zero);
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: passes at 0, 45 and 90 s fail; the one at 95 s finishes a's work; the ones at 110,
@@ -324,13 +324,13 @@ public sealed class DatabaseWorkerFailureWindowTests
             worker.RunIteration(CancellationToken.None);
         }
 
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var underTheWindow = engine.GiveUps;
 
         // At 210 s the new streak has lasted the window.
         clock.Advance(TimeSpan.FromSeconds(5));
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         underTheWindow.ShouldBeEmpty();
@@ -352,7 +352,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: a fails on the first pass and the last two; every pass between leaves its work
         // unfinished.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         bool fail = true;
         var worker = new ScriptedWorker((self, _) =>
@@ -366,7 +366,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Unfinished("a");
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: one failed pass, two hundred unfinished passes a second apart, then two failed passes.
@@ -382,11 +382,11 @@ public sealed class DatabaseWorkerFailureWindowTests
         fail = true;
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var underTheMinimum = engine.GiveUps;
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: the busy stretch kept the streak and its clock; the third failure gives up.
         busy.ShouldBe((true, 1));
@@ -405,13 +405,13 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task HasFailingWorker_IndexMaintenanceFails_ShouldNotNameTheDatabase()
     {
         // Arrange
-        await using var engine = new TestEngine(EngineName);
+        await using var engine = new TestEngine(engineName);
         await engine.CreateDatabaseAsync("a");
         var maintenance = new ScriptedWorker((self, _) =>
         {
             self.Begin("a").ShouldBeTrue();
             self.Fail("a", new InvalidOperationException("index maintenance failed"), TimeSpan.Zero);
-        }, name: EngineName + "/index-maintenance", kind: DatabaseEngineWorkerKind.IndexMaintenance);
+        }, name: engineName + "/index-maintenance", kind: DatabaseEngineWorkerKind.IndexMaintenance);
         engine.Attach(maintenance);
 
         // Act
@@ -430,7 +430,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: each pass fails a twice, as a write-back of a database with two file sets does;
         // the minimum is two passes.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 2, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 2, time: clock);
         await engine.CreateDatabaseAsync("a");
         var counts = new List<int>();
         var worker = new ScriptedWorker((self, _) =>
@@ -438,16 +438,16 @@ public sealed class DatabaseWorkerFailureWindowTests
             self.Begin("a").ShouldBeTrue();
             counts.Add(self.Fail("a", new InvalidOperationException("data file set"), TimeSpan.Zero));
             counts.Add(self.Fail("a", new InvalidOperationException("catalog file set"), TimeSpan.Zero));
-        }, name: EngineName + "/page-writeback", kind: DatabaseEngineWorkerKind.PageWriteBack);
+        }, name: engineName + "/page-writeback", kind: DatabaseEngineWorkerKind.PageWriteBack);
         engine.Attach(worker);
 
         // Act: one pass, the window, a second pass.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        clock.Advance(_window);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var afterOne = engine.GiveUps;
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: two passes, not four reports, reach the minimum. (The second pass's second report
         // may already find the record the give-up ended, so it is not asserted.)
@@ -487,12 +487,12 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: the worker fails on a name the engine has no open database for; a window of a
         // second and a minimum of one pass.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock);
         var worker = new ScriptedWorker((self, _) =>
         {
             self.Begin("missing");
             self.Fail("missing", new InvalidOperationException("failed"), TimeSpan.Zero);
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: past the window, a failed pass asks once no earlier ask of the database is still
@@ -500,10 +500,10 @@ public sealed class DatabaseWorkerFailureWindowTests
         var results = new List<bool> { worker.RunIteration(CancellationToken.None) };
         clock.Advance(TimeSpan.FromSeconds(1));
         results.Add(worker.RunIteration(CancellationToken.None));
-        await engine.WaitForGiveUpAsync("missing").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("missing").WaitAsync(_timeout);
         int askedOnce = engine.GiveUps.Count;
         results.Add(worker.RunIteration(CancellationToken.None));
-        await engine.WaitForGiveUpAsync("missing").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("missing").WaitAsync(_timeout);
 
         // Assert: asked again, refused each time; the failed passes are the worker's own, and the
         // record the leaf's refusal left keeps counting.
@@ -521,13 +521,13 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        var engine = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock);
+        var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, _) =>
         {
             self.Begin("a");
             self.Fail("a", new InvalidOperationException("failed"), TimeSpan.Zero);
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
         await engine.DisposeAsync();
 
@@ -535,7 +535,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         worker.RunIteration(CancellationToken.None);
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         engine.GiveUps.ShouldBeEmpty();
@@ -546,9 +546,9 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task TakeDatabaseOffline_ShouldTakeOnlyAnEngineCause()
     {
         // Arrange
-        await using var engine = new TestEngine(EngineName);
+        await using var engine = new TestEngine(engineName);
         await engine.CreateDatabaseAsync("a");
-        var worker = new ScriptedWorker((_, _) => { }, name: WorkerName);
+        var worker = new ScriptedWorker((_, _) => { }, name: workerName);
         engine.Attach(worker);
         var failure = new InvalidOperationException("checkpoint failed");
 
@@ -557,11 +557,11 @@ public sealed class DatabaseWorkerFailureWindowTests
         Should.Throw<ArgumentException>(() => worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, " ", failure));
         Should.Throw<ArgumentNullException>(() => worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "the cap", null!));
         bool queued = worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "its journal passed the cap", failure);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Completion releases the request slot, so the next give-up can be queued at once.
         bool again = worker.GiveUp("a", StorageOfflineCause.JournalSizeLimit, "its journal passed the cap", failure);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: the leaf takes the database offline once and refuses it after.
         deviceCause.ParamName.ShouldBe("cause");
@@ -590,7 +590,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         // Arrange: a fails every pass and is retried at once; the leaf's core blocks until released.
         using var gate = new ManualResetEventSlim(false);
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
+        await using var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
         {
             TakeOfflineGate = gate,
         };
@@ -608,7 +608,7 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 Interlocked.Increment(ref bVisits);
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // The streak starts a window before the passes under test.
@@ -645,11 +645,11 @@ public sealed class DatabaseWorkerFailureWindowTests
         try
         {
             bool returned = passesDone.Wait(TimeSpan.FromSeconds(10));
-            await engine.TakeOfflineEntered.WaitAsync(Timeout);
+            await engine.TakeOfflineEntered.WaitAsync(_timeout);
             var takenWhileBlocked = engine.TakenOffline;
 
             gate.Set();
-            await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+            await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
             // Assert: the passes returned while the core was blocked, b was visited by every pass,
             // the second pass's failure of a queued nothing, and a went offline once, on another
@@ -670,7 +670,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         {
             gate.Set();
             releasePump.Set();
-            pump.Join(Timeout);
+            pump.Join(_timeout);
         }
     }
 
@@ -686,7 +686,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, _) =>
         {
@@ -694,26 +694,26 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException("checkpoint failed"), TimeSpan.Zero);
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: three failed passes over the window take a offline; then, with no pass in between,
         // the state.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window);
+        clock.Advance(_window);
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var state = engine.State;
         bool failing = engine.HasFailingWorker("a");
         int consecutive = worker.ConsecutiveFailures;
 
         // The database fails twice more (the double keeps it online), a window later: a new streak
         // of two passes.
-        clock.Advance(Window);
+        clock.Advance(_window);
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         engine.TakenOffline.ShouldBe(["a"]);
@@ -734,7 +734,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange: a fails every pass.
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         var database = await engine.CreateDatabaseAsync("a");
         var worker = new ScriptedWorker((self, _) =>
         {
@@ -742,13 +742,13 @@ public sealed class DatabaseWorkerFailureWindowTests
             {
                 self.Fail("a", new InvalidOperationException("checkpoint failed"), TimeSpan.Zero);
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: two failed passes a window apart, a holder closes the database, and it is opened
         // again and fails twice more.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window);
+        clock.Advance(_window);
         worker.RunIteration(CancellationToken.None);
         var faulted = engine.State;
         bool failing = engine.HasFailingWorker("a");
@@ -759,7 +759,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         await engine.OpenDatabaseAsync("a");
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: four failures over the window, never three in a row on one instance.
         faulted.ShouldBe(EngineState.Faulted);
@@ -787,7 +787,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         var leafFailure = new InvalidOperationException("the leaf could not take the database offline");
         using var gate = new ManualResetEventSlim(false);
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
+        await using var engine = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(1), workerFailureMinimumPasses: 1, time: clock)
         {
             TakeOfflineFailure = leafFailure,
             TakeOfflineGate = completeDuringPass ? null : gate,
@@ -808,10 +808,10 @@ public sealed class DatabaseWorkerFailureWindowTests
                 if (completeDuringPass)
                 {
                     // Force the pool's failure record to precede settlement of the queuing pass.
-                    completedDuringPass = completion.Wait(Timeout);
+                    completedDuringPass = completion.Wait(_timeout);
                 }
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
 
         // Act: past the window the first give-up fails in the leaf; the leaf then recovers, and a
@@ -820,14 +820,14 @@ public sealed class DatabaseWorkerFailureWindowTests
         clock.Advance(TimeSpan.FromSeconds(1));
         worker.RunIteration(CancellationToken.None);
         gate.Set();
-        await completion.WaitAsync(Timeout);
+        await completion.WaitAsync(_timeout);
         var fault = worker.Fault;
         var state = engine.State;
         bool engineWide = engine.HasEngineWideFailure;
         bool failing = engine.HasFailingWorker("a");
         engine.TakeOfflineFailure = null;
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         completedDuringPass.ShouldBe(completeDuringPass);
@@ -847,9 +847,9 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task Constructor_WorkerFailureWindow_ShouldBeTheConstructorsWithDefaults()
     {
         // Act
-        await using var defaulted = new TestEngine(EngineName);
-        await using var custom = new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromSeconds(30), workerFailureMinimumPasses: 5);
-        await using var longest = new TestEngine(EngineName, workerFailureWindow: DatabaseEngine.MaximumWorkerFailureWindow, workerFailureMinimumPasses: int.MaxValue);
+        await using var defaulted = new TestEngine(engineName);
+        await using var custom = new TestEngine(engineName, workerFailureWindow: TimeSpan.FromSeconds(30), workerFailureMinimumPasses: 5);
+        await using var longest = new TestEngine(engineName, workerFailureWindow: DatabaseEngine.MaximumWorkerFailureWindow, workerFailureMinimumPasses: int.MaxValue);
 
         // Assert: owner decision 42 of 2026-10-07, Neo4j's window of about a hundred seconds, over
         // at least three failed passes.
@@ -875,7 +875,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Act
         var error = Should.Throw<ArgumentOutOfRangeException>(
-            () => new TestEngine(EngineName, workerFailureWindow: TimeSpan.FromTicks(windowTicks), workerFailureMinimumPasses: minimumPasses));
+            () => new TestEngine(engineName, workerFailureWindow: TimeSpan.FromTicks(windowTicks), workerFailureMinimumPasses: minimumPasses));
 
         // Assert
         error.ParamName.ShouldBe(parameter);
@@ -891,7 +891,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task HasFailingWorker_OneDatabaseFails_ShouldNameItAloneUntilItsWorkFinishes()
     {
         // Arrange: a scripted pass that fails a, fails as a whole, or does every database's work.
-        await using var engine = new TestEngine(EngineName);
+        await using var engine = new TestEngine(engineName);
         await engine.CreateDatabaseAsync("a");
         await engine.CreateDatabaseAsync("b");
         string script = "fail a";
@@ -907,7 +907,7 @@ public sealed class DatabaseWorkerFailureWindowTests
                 case "throw":
                     throw new InvalidOperationException("the pass failed");
             }
-        }, name: WorkerName);
+        }, name: workerName);
         engine.Attach(worker);
         bool before = engine.HasFailingWorker("a");
 
@@ -938,7 +938,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task GetOfflineError_ShouldCheckThenForwardToTheCore()
     {
         // Arrange
-        var engine = new TestEngine(EngineName);
+        var engine = new TestEngine(engineName);
 
         // Act
         var online = engine.GetOfflineError("a");
@@ -957,32 +957,32 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a", CancellationToken.None);
         bool observation = true;
         var failure = new InvalidOperationException("Injected worker failure.");
         var worker = new ScriptedWorker((self, _) =>
         {
             if (self.Begin("a")) { self.Fail("a", failure, TimeSpan.Zero, countsTowardOffline: observation == false); }
-        }, name: WorkerName, kind: DatabaseEngineWorkerKind.VersionPurge);
+        }, name: workerName, kind: DatabaseEngineWorkerKind.VersionPurge);
         engine.Attach(worker);
 
         // Act: several report-only passes span the window; no successful pass clears the record.
         for (int pass = 0; pass < 4; pass++)
         {
             worker.RunIteration(CancellationToken.None);
-            clock.Advance(Window);
+            clock.Advance(_window);
         }
         observation = false;
         worker.RunIteration(CancellationToken.None);
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var beforeTheWindow = engine.GiveUps;
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert: both the operational minimum and its own elapsed window apply.
         beforeTheWindow.ShouldBeEmpty();
@@ -997,7 +997,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         using var cancellation = new CancellationTokenSource();
         var leafFailure = new System.IO.IOException("give-up failed");
         var observation = new InvalidOperationException("observation only");
-        await using var engine = new TestEngine(EngineName) { TakeOfflineFailure = leafFailure };
+        await using var engine = new TestEngine(engineName) { TakeOfflineFailure = leafFailure };
         await engine.CreateDatabaseAsync("a", CancellationToken.None);
         await engine.CreateDatabaseAsync("b", CancellationToken.None);
         var worker = new ScriptedWorker((self, pass) =>
@@ -1018,7 +1018,7 @@ public sealed class DatabaseWorkerFailureWindowTests
         }, kind: DatabaseEngineWorkerKind.VersionPurge);
         engine.Attach(worker);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         worker.Fault.ShouldBeSameAs(leafFailure);
 
         // Act
@@ -1033,7 +1033,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     public async Task ReportFailure_ObservationAfterOperationalFailure_ShouldKeepTheOperationalFault()
     {
         // Arrange
-        await using var engine = new TestEngine(EngineName);
+        await using var engine = new TestEngine(engineName);
         await engine.CreateDatabaseAsync("a", CancellationToken.None);
         await engine.CreateDatabaseAsync("b", CancellationToken.None);
         var operational = new System.IO.IOException("operational failure");
@@ -1060,7 +1060,7 @@ public sealed class DatabaseWorkerFailureWindowTests
     {
         // Arrange
         var clock = new ManualTimeProvider();
-        await using var engine = new TestEngine(EngineName, workerFailureWindow: Window, workerFailureMinimumPasses: 3, time: clock);
+        await using var engine = new TestEngine(engineName, workerFailureWindow: _window, workerFailureMinimumPasses: 3, time: clock);
         await engine.CreateDatabaseAsync("a", CancellationToken.None);
         var worker = new ScriptedWorker((self, pass) =>
         {
@@ -1071,18 +1071,18 @@ public sealed class DatabaseWorkerFailureWindowTests
 
         // Act: operational at 0; observation at 100; new operational failures at 200, 250 and 300.
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window);
+        clock.Advance(_window);
         worker.RunIteration(CancellationToken.None);
         bool failingAfterObservation = engine.HasFailingWorker("a");
-        clock.Advance(Window);
+        clock.Advance(_window);
         worker.RunIteration(CancellationToken.None);
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
         var beforeTheWindow = engine.GiveUps;
-        clock.Advance(Window / 2);
+        clock.Advance(_window / 2);
         worker.RunIteration(CancellationToken.None);
-        await engine.WaitForGiveUpAsync("a").WaitAsync(Timeout);
+        await engine.WaitForGiveUpAsync("a").WaitAsync(_timeout);
 
         // Assert
         failingAfterObservation.ShouldBeFalse();

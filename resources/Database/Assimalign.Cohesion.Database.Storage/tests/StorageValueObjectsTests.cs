@@ -1,4 +1,5 @@
 using System;
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
@@ -12,10 +13,10 @@ public class StorageValueObjectsTests
         Name b = "users";
         Name c = "Users";
 
-        Assert.True(a == b);
-        Assert.True(a.Equals(b));
-        Assert.True(a != c);
-        Assert.False(a.Equals(c));
+        (a == b).ShouldBeTrue();
+        a.Equals(b).ShouldBeTrue();
+        (a != c).ShouldBeTrue();
+        a.Equals(c).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [PageId] - Conversion: Should roundtrip long conversions")]
@@ -24,9 +25,9 @@ public class StorageValueObjectsTests
         PageId pageId = 42L;
         long value = pageId;
 
-        Assert.Equal(42L, value);
-        Assert.Equal("42", pageId.ToString());
-        Assert.True(pageId.CompareTo((PageId)43L) < 0);
+        value.ShouldBe(42L);
+        pageId.ToString().ShouldBe("42");
+        pageId.CompareTo((PageId)43L).ShouldBeLessThan(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [StorageId] - NewId: Should produce unique values")]
@@ -35,9 +36,9 @@ public class StorageValueObjectsTests
         StorageId id1 = StorageId.NewId();
         StorageId id2 = StorageId.NewId();
 
-        Assert.True(id1 != id2);
-        Assert.NotEqual(Guid.Empty, (Guid)id1);
-        Assert.NotEqual(Guid.Empty, (Guid)id2);
+        (id1 != id2).ShouldBeTrue();
+        ((Guid)id1).ShouldNotBe(Guid.Empty);
+        ((Guid)id2).ShouldNotBe(Guid.Empty);
     }
 
     [Fact(DisplayName = "Cohesion Test [Address] - Append: Should grow path and compute offset")]
@@ -45,11 +46,11 @@ public class StorageValueObjectsTests
     {
         var address = Address.Root(100).Append(20).Append(5);
 
-        Assert.Equal(3, address.Depth);
-        Assert.Equal(100, address.GetOffset(0));
-        Assert.Equal(20, address.GetOffset(1));
-        Assert.Equal(5, address.GetOffset(2));
-        Assert.Equal(125, address.ToAbsoluteOffset());
+        address.Depth.ShouldBe(3);
+        address.GetOffset(0).ShouldBe(100);
+        address.GetOffset(1).ShouldBe(20);
+        address.GetOffset(2).ShouldBe(5);
+        address.ToAbsoluteOffset().ShouldBe(125);
     }
 
     [Fact(DisplayName = "Cohesion Test [Address] - GetOffset: Should throw for invalid depth")]
@@ -57,6 +58,6 @@ public class StorageValueObjectsTests
     {
         var address = Address.Root(1);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => address.GetOffset(1));
+        Should.Throw<ArgumentOutOfRangeException>(() => address.GetOffset(1)).GetType().ShouldBe(typeof(ArgumentOutOfRangeException));
     }
 }
