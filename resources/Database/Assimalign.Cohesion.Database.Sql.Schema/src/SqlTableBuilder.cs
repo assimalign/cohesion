@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// implementation. The <c>Sdk.Database</c> extractor recognizes its calls by its metadata name
 /// (<c>SqlTableBuilder`1</c>).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlTableBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<>.DebugView))]
 public sealed class SqlTableBuilder<TRow>
 {
     private readonly List<string> _columns = [];
@@ -268,5 +270,13 @@ public sealed class SqlTableBuilder<TRow>
         }
 
         return member;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlTableBuilder<TRow> value)
+        {
+            _ = value;
+        }
     }
 }

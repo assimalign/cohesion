@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A left-deep N-relation join. Physical slots retain FROM-then-JOIN order even
 /// when the selected index reverses which relation drives the nested loop.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlJoinPlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinPlan.DebugView))]
 internal sealed record SqlJoinPlan(
     IReadOnlyList<SqlRelationBinding> Bindings,
     IReadOnlyList<SqlCatalogColumn> Columns,
@@ -32,4 +34,25 @@ internal sealed record SqlJoinPlan(
     internal override IReadOnlyList<SqlProjection> OutputProjections => Projections;
     internal override IReadOnlyList<SqlCatalogColumn> OutputColumns => Columns;
     internal override IReadOnlyList<SqlRelationBinding>? OutputBindings => Bindings;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinPlan _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinPlan value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Internal.SqlRelationBinding> Bindings => _target.Bindings;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogColumn> Columns => _target.Columns;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinStep> Steps => _target.Steps;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Internal.SqlProjection> Projections => _target.Projections;
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundExpression? Where => _target.Where;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundOrdering> OrderBy => _target.OrderBy;
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCount? Limit => _target.Limit;
+        public global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCount? Offset => _target.Offset;
+        public bool IsDistinct => _target.IsDistinct;
+        public global::System.Collections.Generic.IReadOnlyDictionary<global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression, int>? OrderByProjections => _target.OrderByProjections;
+    }
 }

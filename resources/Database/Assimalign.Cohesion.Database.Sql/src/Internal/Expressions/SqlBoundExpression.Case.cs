@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// compared with the input under the collation resolved for that pair when the expression was
 /// bound). Only the chosen result is evaluated.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundCase")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCase.DebugView))]
 internal sealed class SqlBoundCase : SqlBoundExpression
 {
     /// <summary>Initializes a bound <c>CASE</c>.</summary>
@@ -32,4 +34,12 @@ internal sealed class SqlBoundCase : SqlBoundExpression
 
     /// <summary>Gets the bound <c>ELSE</c> result, or null when there is none.</summary>
     internal SqlBoundExpression? ElseResult { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCase value)
+        {
+            _ = value;
+        }
+    }
 }

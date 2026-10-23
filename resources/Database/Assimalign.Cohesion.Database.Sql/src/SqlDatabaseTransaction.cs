@@ -44,6 +44,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// an internal constructor; the session that began it is the only way to create one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseTransaction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction.DebugView))]
 public sealed class SqlDatabaseTransaction : DatabaseTransaction
 {
     /// <summary>
@@ -217,4 +219,17 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
+    }
 }

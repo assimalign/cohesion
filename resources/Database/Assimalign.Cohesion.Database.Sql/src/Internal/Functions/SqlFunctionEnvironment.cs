@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// database the statement runs in, which a bound call hands to its function's context. One instance
 /// per open database, held by its <see cref="SqlBoundTableCache"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionEnvironment")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlFunctionEnvironment.DebugView))]
 internal sealed class SqlFunctionEnvironment
 {
     private SqlFunctionEnvironment? _clockEnvironment;
@@ -64,4 +66,12 @@ internal sealed class SqlFunctionEnvironment
     /// application's cast, whose cancellation is the statement's only when the token says so.
     /// </summary>
     internal bool RunsApplicationCode => Catalog.HasApplicationFunctions || Types.HasDomainChecks || Types.HasApplicationCasts;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlFunctionEnvironment value)
+        {
+            _ = value;
+        }
+    }
 }

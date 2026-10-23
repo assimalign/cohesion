@@ -489,6 +489,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// it typed with what each resolved to and its result type. The calls are forgotten when the
     /// planner adds a subquery slot, the one input of a static type that changes while a scope plans.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("SqlTypingMemory")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.SqlTypingMemory.DebugView))]
     private sealed class SqlTypingMemory
     {
         private int _subquerySlots;
@@ -536,6 +538,14 @@ internal sealed partial class SqlExpressionEvaluator
             }
 
             Calls[call] = typed;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.SqlTypingMemory value)
+            {
+                _ = value;
+            }
         }
     }
 

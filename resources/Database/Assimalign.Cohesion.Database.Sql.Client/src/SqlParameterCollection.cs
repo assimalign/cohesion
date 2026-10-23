@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// Add and the indexer replace an existing bare name. The server rejects collisions in
 /// raw request maps and unbound references before any data row is read or written.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlParameterCollection, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlParameterCollection.DebugView))]
 public sealed class SqlParameterCollection
 {
     private readonly Dictionary<string, object?> _parameters = new(StringComparer.Ordinal);
@@ -67,5 +69,17 @@ public sealed class SqlParameterCollection
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         return name[0] is '@' or '$' ? name[1..] : name;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Client.SqlParameterCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlParameterCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

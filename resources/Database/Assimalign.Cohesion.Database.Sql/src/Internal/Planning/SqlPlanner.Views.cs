@@ -277,11 +277,23 @@ internal sealed partial class SqlPlanner
     private static SqlPlanningException ViewError(string message) => new("CS03033", message);
     private sealed record ParsedView(SqlQueryBodyExpression Query);
     internal sealed record ViewPlan(SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, IReadOnlyList<SqlTableReference> SystemRelations);
+    [global::System.Diagnostics.DebuggerDisplay("ViewPlans")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewPlans.DebugView))]
     internal sealed class ViewPlans
     {
         internal object Sync { get; } = new();
         internal Dictionary<SqlCatalogView, SqlBindingEntry<ViewPlan>> Entries { get; } = new(ReferenceEqualityComparer.Instance);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewPlans value)
+            {
+                _ = value;
+            }
+        }
     }
+    [global::System.Diagnostics.DebuggerDisplay("ViewBinding")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewBinding.DebugView))]
     internal sealed class ViewBinding
     {
         internal SqlCatalogView? Owner { get; init; }
@@ -290,5 +302,13 @@ internal sealed partial class SqlPlanner
         internal SqlViewCallCapture Calls { get; } = new();
         internal Dictionary<int, (int Length, string Text)> Edits { get; } = new();
         internal List<SqlTableReference> SystemRelations { get; } = new();
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewBinding value)
+            {
+                _ = value;
+            }
+        }
     }
 }

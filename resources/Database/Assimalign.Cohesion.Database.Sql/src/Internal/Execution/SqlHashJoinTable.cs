@@ -5,6 +5,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A statement-owned chained hash table with explicit allocation reservations and no spill.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlHashJoinTable")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlHashJoinTable.DebugView))]
 internal sealed class SqlHashJoinTable : IDisposable
 {
     private readonly SqlHashJoinPath _keys;
@@ -116,4 +118,12 @@ internal sealed class SqlHashJoinTable : IDisposable
     }
 
     private readonly record struct Entry(int Hash, int Next, object?[] Row);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlHashJoinTable value)
+        {
+            _ = value;
+        }
+    }
 }

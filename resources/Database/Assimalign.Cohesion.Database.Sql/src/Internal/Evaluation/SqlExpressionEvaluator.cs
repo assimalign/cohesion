@@ -37,6 +37,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// parameter's supplied value.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlExpressionEvaluator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator.DebugView))]
 internal sealed partial class SqlExpressionEvaluator
 {
     /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
@@ -1429,4 +1431,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>Matches LIKE using the PostgreSQL default backslash escape.</summary>
     internal static bool LikeMatches(string input, string pattern, Collation? collation = null)
         => SqlLikePattern.Compile(pattern, "\\", default).Match(input, collation ?? Collation.Binary, default);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionEvaluator value)
+        {
+            _ = value;
+        }
+    }
 }

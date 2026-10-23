@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// which the handshake records once each through the base's one-shot setters; the engine session
 /// is re-exposed typed by a covariant override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseServerSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession.DebugView))]
 internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
@@ -802,5 +804,19 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
+        public string? Principal => _target.Principal;
     }
 }

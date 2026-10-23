@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// or <see cref="SqlDatabaseEngine.Create(string, SqlDatabaseEngineOptions)"/> (owner decision 52 of
 /// 2026-10-09).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseEngineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions.DebugView))]
 public sealed class SqlDatabaseEngineOptions
 {
     /// <summary>
@@ -258,4 +260,30 @@ public sealed class SqlDatabaseEngineOptions
         RootPath = RootPath,
         StorageStrategy = StorageStrategy,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
+        public global::System.TimeSpan StatementTimeout => _target.StatementTimeout;
+        public global::System.TimeSpan LockTimeout => _target.LockTimeout;
+        public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
+        public long CheckpointJournalSize => _target.CheckpointJournalSize;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public long JournalSizeLimit => _target.JournalSizeLimit;
+        public global::System.TimeSpan PageWriteBackInterval => _target.PageWriteBackInterval;
+        public int PageWriteBackBatchSize => _target.PageWriteBackBatchSize;
+        public global::System.TimeSpan MaintenanceInterval => _target.MaintenanceInterval;
+        public int ExpressionNestingLimit => _target.ExpressionNestingLimit;
+        public global::System.IO.FileSystemPath? RootPath => _target.RootPath;
+    }
 }

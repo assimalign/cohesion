@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Sql.Protocol;
 
 namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SqlExecuteExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.Internal.SqlExecuteExchange.DebugView))]
 internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClientResult>
 {
     private readonly ProtocolExecuteMessage _request;
@@ -105,6 +107,14 @@ internal sealed class SqlExecuteExchange : DatabaseProtocolExchange<DatabaseClie
             values.Add(DatabaseValueCodec.Read(ref reader));
         }
         return [.. values];
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.Internal.SqlExecuteExchange value)
+        {
+            _ = value;
+        }
     }
 }
 

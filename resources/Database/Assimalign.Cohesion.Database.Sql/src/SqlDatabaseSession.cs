@@ -63,6 +63,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
 public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
     private readonly SqlDatabase _database;
@@ -877,4 +879,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private static DatabaseResult TransactionDiagnostic(string code, string message)
         => new SqlQueryResult(DatabaseResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabase Database => _target.Database;
+        public global::System.TimeSpan? StatementTimeout => _target.StatementTimeout;
+        public global::System.TimeSpan? LockTimeout => _target.LockTimeout;
+    }
 }

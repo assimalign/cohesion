@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// internal constructor (<c>database-area.md</c>, rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder.DebugView))]
 public sealed class SqlDatabaseBuilder
 {
     private readonly SqlDatabaseEngineBuilder _engine;
@@ -188,5 +190,20 @@ public sealed class SqlDatabaseBuilder
         {
             throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderThrowIfSchemaDeclaredFailure, _name));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseBuilder value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
+        public bool RunMigrationsInline => _target.RunMigrationsInline;
+        public global::Assimalign.Cohesion.Database.Types.Collation? DefaultCollation => _target.DefaultCollation;
+        public global::Assimalign.Cohesion.Database.Sql.SqlProvisioningMode Provisioning => _target.Provisioning;
     }
 }

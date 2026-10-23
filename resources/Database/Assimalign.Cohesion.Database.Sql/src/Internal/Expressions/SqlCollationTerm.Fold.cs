@@ -1,6 +1,8 @@
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>An expression whose operands include a deferred candidate: the fold runs at run time.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCollationFoldTerm")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationFoldTerm.DebugView))]
 internal sealed class SqlCollationFoldTerm : SqlCollationTerm
 {
     private readonly SqlCollationCandidate[] _candidates;
@@ -26,5 +28,13 @@ internal sealed class SqlCollationFoldTerm : SqlCollationTerm
         }
 
         return best;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationFoldTerm value)
+        {
+            _ = value;
+        }
     }
 }

@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// every row, the BIGINT minimum a negated literal spells, or a persisted DEFAULT converted to its
 /// column's type once per table version.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundConstant")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundConstant.DebugView))]
 internal sealed class SqlBoundConstant : SqlBoundExpression
 {
     /// <summary>The bound SQL <c>NULL</c>.</summary>
@@ -20,4 +22,12 @@ internal sealed class SqlBoundConstant : SqlBoundExpression
 
     /// <summary>Gets the value every evaluation returns.</summary>
     internal object? Value { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundConstant value)
+        {
+            _ = value;
+        }
+    }
 }

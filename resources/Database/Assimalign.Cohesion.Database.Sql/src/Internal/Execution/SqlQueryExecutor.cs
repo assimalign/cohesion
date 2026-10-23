@@ -20,6 +20,8 @@ using Assimalign.Cohesion.Database.Types;
 /// and the plan executor runs it against shared storage inside the session's
 /// storage transaction (which owns write-ahead logging and durability).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryExecutor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlQueryExecutor.DebugView))]
 internal sealed class SqlQueryExecutor
 {
     private readonly SqlStorage _storage;
@@ -69,5 +71,13 @@ internal sealed class SqlQueryExecutor
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         plan = executor.Cost(plan, statement, cancellationToken);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlQueryExecutor value)
+        {
+            _ = value;
+        }
     }
 }

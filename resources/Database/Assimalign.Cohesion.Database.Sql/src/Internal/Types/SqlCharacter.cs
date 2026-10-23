@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Keeps CHAR identity inside evaluated rows. Public results and tuple payloads remain strings;
 /// erasing this identity before comparison would make CHAR indistinguishable from VARCHAR.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCharacter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCharacter.DebugView))]
 internal sealed class SqlCharacter
 {
     internal SqlCharacter(string value)
@@ -23,4 +25,12 @@ internal sealed class SqlCharacter
     internal static object? Output(object? value) => value is SqlCharacter character ? character.Value : value;
     internal static object? Input(object? value, Types.DatabaseType type)
         => value is string text && type == Types.DatabaseType.Character ? new SqlCharacter(text) : value;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCharacter value)
+        {
+            _ = value;
+        }
+    }
 }

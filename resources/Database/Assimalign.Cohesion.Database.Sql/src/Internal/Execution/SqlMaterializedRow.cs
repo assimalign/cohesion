@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// A row over evaluated values with converting typed accessors.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlMaterializedRow")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlMaterializedRow.DebugView))]
 internal sealed class SqlMaterializedRow : DatabaseRow
 {
     private readonly object?[] _values;
@@ -57,4 +59,12 @@ internal sealed class SqlMaterializedRow : DatabaseRow
 
     private object RequireValue(int ordinal)
         => SqlCharacter.Output(_values[ordinal]) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlMaterializedRow value)
+        {
+            _ = value;
+        }
+    }
 }

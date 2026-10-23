@@ -22,6 +22,8 @@ using Assimalign.Cohesion.Database.Types;
 /// normalized collisions and unbound references before data rows are read or written,
 /// and ignores unused keys. Numeric names bind their exact digits; null is a bound value.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlQueryRequest.DebugView))]
 public sealed class SqlQueryRequest : DatabaseRequest
 {
     private readonly SqlQueryStatement _statement;
@@ -158,4 +160,12 @@ public sealed class SqlQueryRequest : DatabaseRequest
     {
         ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit,
     };
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlQueryRequest value)
+        {
+            _ = value;
+        }
+    }
 }

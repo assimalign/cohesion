@@ -279,6 +279,8 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Structural equality is used for binding only, without expression hashing.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("GroupExpressionComparer")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.GroupExpressionComparer.DebugView))]
     private sealed class GroupExpressionComparer : IEqualityComparer<SqlExpression>
     {
         private readonly SqlPlanner _planner;
@@ -296,6 +298,14 @@ internal sealed partial class SqlPlanner
         public bool Equals(SqlExpression? left, SqlExpression? right)
             => left is not null && right is not null && _planner.SameGroupExpression(left, right, _evaluator);
         public int GetHashCode(SqlExpression expression) => 0;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.GroupExpressionComparer value)
+            {
+                _ = value;
+            }
+        }
     }
 
     /// <summary>Declares aggregate result types even when no source rows exist.</summary>

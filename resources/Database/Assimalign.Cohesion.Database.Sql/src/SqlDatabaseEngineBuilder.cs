@@ -67,6 +67,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseEngineBuilder {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder.DebugView))]
 public sealed class SqlDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<SqlDatabaseEngine> _state;
@@ -378,4 +380,19 @@ public sealed class SqlDatabaseEngineBuilder
     /// </summary>
     /// <param name="failure">The failure that abandoned the engine.</param>
     internal void Abort(Exception failure) => _state.Abort(failure);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineBuilder value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngineOptions Options => _target.Options;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection Functions => _target.Functions;
+        public global::Assimalign.Cohesion.Database.Sql.SqlTypeCollection Types => _target.Types;
+    }
 }

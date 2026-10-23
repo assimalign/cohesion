@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <typeparam name="TState">The state's CLR type.</typeparam>
 /// <typeparam name="T1">The argument's CLR type.</typeparam>
 /// <typeparam name="TResult">The result's CLR type.</typeparam>
+[global::System.Diagnostics.DebuggerDisplay("SqlTypedAggregateFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedAggregateFunction<,,>.DebugView))]
 internal sealed class SqlTypedAggregateFunction<TState, T1, TResult> : SqlAggregateFunction
 {
     private readonly Func<TState> _seed;
@@ -48,6 +50,8 @@ internal sealed class SqlTypedAggregateFunction<TState, T1, TResult> : SqlAggreg
         => new Accumulator(this, _seed());
 
     /// <summary>One group's state.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedAggregateFunction<,,>.Accumulator.DebugView))]
     private sealed class Accumulator : SqlAggregateAccumulator
     {
         private readonly SqlTypedAggregateFunction<TState, T1, TResult> _function;
@@ -70,5 +74,31 @@ internal sealed class SqlTypedAggregateFunction<TState, T1, TResult> : SqlAggreg
         /// <inheritdoc />
         protected override SqlValue FinishCore()
             => _seen ? SqlValueConverter<TResult>.ToValue(_function._finish(_state)) : SqlValue.Null;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedAggregateFunction<TState, T1, TResult>.Accumulator value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedAggregateFunction<TState, T1, TResult> _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedAggregateFunction<TState, T1, TResult> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

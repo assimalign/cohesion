@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// allocates nothing; the planner resolves each call against it once per statement, never per row.
 /// There is no run-time registration: NativeAOT could not load a function at run time anyway.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionCatalog, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCatalog.DebugView))]
 public sealed class SqlFunctionCatalog : IReadOnlyCollection<SqlFunction>
 {
     private readonly SqlFunction[] _functions;
@@ -80,4 +82,16 @@ public sealed class SqlFunctionCatalog : IReadOnlyCollection<SqlFunction>
     /// <returns><see langword="true"/> for an aggregate.</returns>
     internal bool IsAggregate(string name)
         => _overloads.TryGetValue(name, out var overloads) && overloads[0].Kind == SqlFunctionKind.Aggregate;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlFunctionCatalog _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCatalog value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

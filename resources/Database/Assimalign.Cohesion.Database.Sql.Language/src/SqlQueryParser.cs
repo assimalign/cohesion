@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Types;
 /// Uses recursive-descent parsing dispatched by the leading keyword.
 /// The parser is split into partial class files for maintainability.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryParser.DebugView))]
 public sealed partial class SqlQueryParser : QueryParser
 {
     /// <summary>
@@ -1320,5 +1322,13 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         return lexeme;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryParser value)
+        {
+            _ = value;
+        }
     }
 }

@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <c>ISqlCatalogSnapshot</c> interface and its internal implementation collapsed into this
 /// sealed type, whose constructor is internal.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalogSnapshot")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogSnapshot.DebugView))]
 public sealed class SqlCatalogSnapshot
 {
     /// <summary>Gets the SQL functions present at capture time.</summary>
@@ -78,5 +80,22 @@ public sealed class SqlCatalogSnapshot
 
         table = null!;
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogSnapshot _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogSnapshot value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogFunction> Functions => _target.Functions;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogDomain> Domains => _target.Domains;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogNamespace> Namespaces => _target.Namespaces;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogView> Views => _target.Views;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable> Tables => _target.Tables;
+        public global::Assimalign.Cohesion.Database.Types.Collation DefaultCollation => _target.DefaultCollation;
     }
 }

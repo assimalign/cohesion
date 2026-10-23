@@ -21,6 +21,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// database created as <c>sales</c> and opened as <c>SALES</c> on Linux was not found, and the
 /// engine's open-or-create made a second, empty database.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemSqlStorageStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.FileSystemSqlStorageStrategy.DebugView))]
 internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 {
     private readonly string _rootPath;
@@ -203,4 +205,12 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
 
     private string CreationPath(string databaseName)
         => Path.Combine(DatabaseFileNames.GetDirectory(_rootPath, databaseName), CreationFileName);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.FileSystemSqlStorageStrategy value)
+        {
+            _ = value;
+        }
+    }
 }

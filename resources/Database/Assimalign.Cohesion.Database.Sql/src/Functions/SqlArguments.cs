@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// function over a pseudo-type reads <see cref="SqlValue.Type"/> first.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlArguments, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlArguments.DebugView))]
 public readonly ref struct SqlArguments
 {
     private readonly ReadOnlySpan<SqlValue> _values;
@@ -194,5 +196,17 @@ public readonly ref struct SqlArguments
 
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly int _value0;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlArguments value)
+        {
+            _value0 = value.Count;
+        }
+
+        public int Count => _value0;
     }
 }

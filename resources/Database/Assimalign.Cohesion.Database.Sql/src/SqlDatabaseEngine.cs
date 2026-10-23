@@ -74,6 +74,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseEngine {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine.DebugView))]
 public sealed class SqlDatabaseEngine : DatabaseEngine
 {
     // Instance-local barrier used by this assembly's real-engine crash/race tests.
@@ -1246,5 +1248,23 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionCatalog Functions => _target.Functions;
+        public global::Assimalign.Cohesion.Database.Sql.SqlTypeCatalog Types => _target.Types;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public bool IsDisposed => _target.IsDisposed;
     }
 }

@@ -47,6 +47,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <c>engineBuilder.AddServer(factory)</c> builder verb.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer.DebugView))]
 public sealed class SqlDatabaseServer : DatabaseServer
 {
     private readonly SqlDatabaseEngine _engine;
@@ -321,5 +323,18 @@ public sealed class SqlDatabaseServer : DatabaseServer
         {
             SqlDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine Engine => _target.Engine;
+        public bool IsRunning => _target.IsRunning;
     }
 }

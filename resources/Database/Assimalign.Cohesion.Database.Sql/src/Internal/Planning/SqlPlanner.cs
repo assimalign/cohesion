@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Unsupported dialect features fail here with precise messages rather than
 /// misexecuting.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlPlanner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.DebugView))]
 internal sealed partial class SqlPlanner
 {
     /// <summary>
@@ -1963,6 +1965,14 @@ internal sealed partial class SqlPlanner
             case SqlCastExpression cast:
                 yield return cast.Operand;
                 break;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner value)
+        {
+            _ = value;
         }
     }
 }

@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// value or typed NULL, an <c>EXISTS</c>'s Boolean with its negation applied). The value is read from
 /// the statement's <see cref="SqlSubqueryValues"/>, never by running a query from the evaluator.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundSubquery")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundSubquery.DebugView))]
 internal sealed class SqlBoundSubquery : SqlBoundExpression
 {
     /// <summary>Initializes a bound subquery value.</summary>
@@ -18,4 +20,12 @@ internal sealed class SqlBoundSubquery : SqlBoundExpression
 
     /// <summary>Gets the subquery's slot in the statement.</summary>
     internal int Slot { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundSubquery value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// the imperative <see cref="SqlDatabase.ApplySchemaAsync"/> path and phase 6 of the engine
 /// builder's build (<see cref="SqlDeclaredDatabase"/>) share it.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlSchemaProvisioner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSchemaProvisioner.DebugView))]
 internal sealed partial class SqlSchemaProvisioner
 {
     private static readonly string _errorSqlSchemaProvisionerApplyAsyncFailure4 = ErrorMessages.SqlSchemaProvisionerApplyAsyncFailure4;
@@ -1077,4 +1079,12 @@ internal sealed partial class SqlSchemaProvisioner
     }
 
     private sealed record CompensationResult(bool IsComplete, IReadOnlyList<Exception> Failures);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSchemaProvisioner value)
+        {
+            _ = value;
+        }
+    }
 }

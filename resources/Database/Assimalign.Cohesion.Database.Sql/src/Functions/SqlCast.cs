@@ -51,6 +51,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// session, so the conversion must be thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCast")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlCast.DebugView))]
 public sealed class SqlCast
 {
     private readonly Func<object, object?> _convert;
@@ -148,5 +150,19 @@ public sealed class SqlCast
             throw new ArgumentException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCastRequireStorageArgument, parameter, mapped.Name, type.Name, (type.IsDomain ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DomainStorageSuffix, type.BaseType!.Name) : string.Empty), SqlType.NameOf(type.Storage.Type)), argument);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlCast _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlCast value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlType Source => _target.Source;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType Target => _target.Target;
+        public global::Assimalign.Cohesion.Database.Sql.SqlCastContext Context => _target.Context;
     }
 }

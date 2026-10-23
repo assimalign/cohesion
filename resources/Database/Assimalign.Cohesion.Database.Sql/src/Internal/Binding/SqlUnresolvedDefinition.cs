@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// a function's implementation is missing at use, not when it loads its catalog
 /// (<c>src/backend/utils/fmgr/fmgr.c</c>, "is not in internal lookup table").
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlUnresolvedDefinition")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlUnresolvedDefinition.DebugView))]
 internal sealed class SqlUnresolvedDefinition
 {
     /// <summary>Initializes an unresolved definition.</summary>
@@ -39,4 +41,12 @@ internal sealed class SqlUnresolvedDefinition
     /// <summary>Describes the definition and its call: <c>CHECK constraint 'ck' on table 'dbo.t' calls function 'f(TEXT)', which ...</c>.</summary>
     /// <returns>The description.</returns>
     internal string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnresolvedFunctionDescription, Subject, Signature, Reason);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlUnresolvedDefinition value)
+        {
+            _ = value;
+        }
+    }
 }

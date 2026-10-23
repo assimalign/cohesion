@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// ignored here instead of reaching that caller's rental.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlConnection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection.DebugView))]
 public sealed class SqlConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
@@ -302,5 +304,17 @@ public sealed class SqlConnection : IAsyncDisposable
             // A telemetry observer must never mask the original failure.
             SqlClientEventSource.Log.ObserverFailed(this, nameof(SqlClientObserver.OnFailed), observerException);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

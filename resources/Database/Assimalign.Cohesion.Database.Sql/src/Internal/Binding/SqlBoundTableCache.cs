@@ -31,6 +31,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// catalog directly, is bound on first use.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundTableCache")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.DebugView))]
 internal sealed class SqlBoundTableCache
 {
     internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
@@ -598,6 +600,8 @@ internal sealed class SqlBoundTableCache
 
     // A refresh replaces the whole state. A slow binding retains its original environment and
     // table map and cannot publish an old result into the replacement generation.
+    [global::System.Diagnostics.DebuggerDisplay("CacheState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.CacheState.DebugView))]
     private sealed class CacheState
     {
         private readonly SqlBoundTableCache _owner;
@@ -620,5 +624,21 @@ internal sealed class SqlBoundTableCache
 
         private SqlBindingEntry<SqlBoundTable> CreateEntry(SqlCatalogTable table)
             => new(token => _owner.Bind(table, Functions, token));
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache.CacheState value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundTableCache value)
+        {
+            _ = value;
+        }
     }
 }

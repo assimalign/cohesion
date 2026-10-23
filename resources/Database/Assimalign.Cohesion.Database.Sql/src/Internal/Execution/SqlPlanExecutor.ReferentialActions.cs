@@ -52,6 +52,8 @@ internal sealed partial class SqlPlanExecutor
 
     // Built after all SET assignments are collected. Each table/key projection is indexed once,
     // using the same numeric, binary and collation equality as constraint probes.
+    [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdates")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates.DebugView))]
     private sealed class SqlConstraintUpdates
     {
         private readonly Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> _rows;
@@ -84,6 +86,14 @@ internal sealed partial class SqlPlanExecutor
                 _indexes.Add(projection, index);
             }
             return index.TryGetValue(keys, out var found) ? found : [];
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates value)
+            {
+                _ = value;
+            }
         }
     }
 

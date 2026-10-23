@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// SELECT filters, projects and selects bounded windows during execution, but
 /// completes before delivery so statement resources never escape into enumeration.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlMaterializedResultSet")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlMaterializedResultSet.DebugView))]
 internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 {
     private readonly IReadOnlyList<DatabaseColumn> _columns;
@@ -52,4 +54,12 @@ internal sealed class SqlMaterializedResultSet : DatabaseResultSet
 
     /// <inheritdoc />
     public override ValueTask DisposeAsync() => default;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlMaterializedResultSet value)
+        {
+            _ = value;
+        }
+    }
 }

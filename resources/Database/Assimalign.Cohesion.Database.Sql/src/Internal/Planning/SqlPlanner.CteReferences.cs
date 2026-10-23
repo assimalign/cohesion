@@ -102,6 +102,8 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("CommonTableScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableScope.DebugView))]
     private sealed class CommonTableScope
     {
         private readonly CommonTableScope? _parent;
@@ -135,6 +137,14 @@ internal sealed partial class SqlPlanner
             owner = null!;
             index = -1;
             return false;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.CommonTableScope value)
+            {
+                _ = value;
+            }
         }
     }
 }

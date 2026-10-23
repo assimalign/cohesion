@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// ordinally, binary by content, and a <see cref="System.DateTimeOffset"/> by instant and offset.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlValue {Type}, IsNull = {IsNull}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlValue.DebugView))]
 [StructLayout(LayoutKind.Auto)]
 public readonly struct SqlValue : IEquatable<SqlValue>
 {
@@ -520,4 +522,17 @@ public readonly struct SqlValue : IEquatable<SqlValue>
     private InvalidCastException Mismatch(DatabaseType requested) => _type == DatabaseType.Null
         ? new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast, SqlType.NameOf(requested)))
         : new InvalidCastException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlValueMismatchInvalidCast2, SqlType.NameOf(_type), SqlType.NameOf(requested)));
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlValue _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlValue value)
+        {
+            _target = value;
+        }
+
+        public bool IsNull => _target.IsNull;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseType Type => _target.Type;
+    }
 }

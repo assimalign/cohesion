@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// framing, and the wire handshake to the core. Disposing the client closes every pooled
 /// connection.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlClient.DebugView))]
 public sealed class SqlClient : IAsyncDisposable
 {
     private readonly DatabaseClient _client;
@@ -96,4 +98,12 @@ public sealed class SqlClient : IAsyncDisposable
     /// </summary>
     /// <returns>A task that completes when the idle connections are closed.</returns>
     public ValueTask DisposeAsync() => _client.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlClient value)
+        {
+            _ = value;
+        }
+    }
 }

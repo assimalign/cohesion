@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A tokenized LIKE pattern. Escapes and wildcards are read before literal normalization.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlLikePattern")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlLikePattern.DebugView))]
 internal sealed class SqlLikePattern
 {
     // A null literal is %, an empty literal is _, and a nonempty literal is a literal run.
@@ -635,4 +637,12 @@ internal sealed class SqlLikePattern
 
     private static int ScalarLength(string text, int position)
         => char.IsHighSurrogate(text[position]) && position + 1 < text.Length && char.IsLowSurrogate(text[position + 1]) ? 2 : 1;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlLikePattern value)
+        {
+            _ = value;
+        }
+    }
 }

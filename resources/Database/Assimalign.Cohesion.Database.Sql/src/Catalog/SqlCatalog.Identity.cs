@@ -145,10 +145,20 @@ public sealed partial class SqlCatalog
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("IdentityCounter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.IdentityCounter.DebugView))]
     private sealed class IdentityCounter
     {
         internal Int128 Next { get; set; }
         internal int Remaining { get; set; }
         internal (PageId PageId, int SlotIndex)? Location { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.IdentityCounter value)
+            {
+                _ = value;
+            }
+        }
     }
 }

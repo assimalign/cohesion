@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 // Storage's recovery reader requires writable stream semantics. Writes and truncation
 // belong to this private overlay; the original sidecar is held through a read-only handle.
+[global::System.Diagnostics.DebuggerDisplay("SqlProbeStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlProbeStream.DebugView))]
 internal sealed class SqlProbeStream : Stream
 {
     private const int blockSize = 4096;
@@ -142,5 +144,20 @@ internal sealed class SqlProbeStream : Stream
             _source.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlProbeStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlProbeStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Position => _target.Position;
     }
 }

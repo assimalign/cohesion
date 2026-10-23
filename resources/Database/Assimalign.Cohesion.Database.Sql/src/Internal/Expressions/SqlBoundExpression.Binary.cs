@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A binary operator over two bound operands, with the collation a comparison of them uses resolved
 /// when the expression was bound rather than searched for in both operand trees on every row.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundBinary")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundBinary.DebugView))]
 internal sealed class SqlBoundBinary : SqlBoundExpression
 {
     /// <summary>Initializes a bound binary operator.</summary>
@@ -39,4 +41,12 @@ internal sealed class SqlBoundBinary : SqlBoundExpression
 
     /// <summary>Gets the source expression span.</summary>
     internal Location? Location { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundBinary value)
+        {
+            _ = value;
+        }
+    }
 }

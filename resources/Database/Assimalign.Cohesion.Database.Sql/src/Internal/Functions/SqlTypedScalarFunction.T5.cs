@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <typeparam name="T3">The third argument's CLR type.</typeparam>
 /// <typeparam name="T4">The fourth argument's CLR type.</typeparam>
 /// <typeparam name="TResult">The result's CLR type.</typeparam>
+[global::System.Diagnostics.DebuggerDisplay("SqlTypedScalarFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedScalarFunction<,,,,>.DebugView))]
 internal sealed class SqlTypedScalarFunction<T1, T2, T3, T4, TResult> : SqlScalarFunction
 {
     private readonly Func<T1, T2, T3, T4, TResult> _body;
@@ -42,4 +44,22 @@ internal sealed class SqlTypedScalarFunction<T1, T2, T3, T4, TResult> : SqlScala
             SqlValueConverter<T2>.FromValue(arguments[1]),
             SqlValueConverter<T3>.FromValue(arguments[2]),
             SqlValueConverter<T4>.FromValue(arguments[3])));
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedScalarFunction<T1, T2, T3, T4, TResult> _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTypedScalarFunction<T1, T2, T3, T4, TResult> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
+    }
 }

@@ -108,3 +108,21 @@ Private test constants use repository casing. The transaction-outcome guidance i
 connection loss after COMMIT can remain uncertain, and the client supplies no automatic replay
 or reconciliation operation. The removed mapper package is no longer a documentation dependency.
 Wire bytes, diagnostics, pooling and public APIs are unchanged.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+Connection inspection reads its existing database name without checking connection health,
+taking the shared exchange lock, dialing, or returning a lease. Result views read already
+materialized columns/diagnostics and row counts; row and parameter views do not enumerate values
+or call typed conversions. Client exchange behavior and wire framing remain unchanged.

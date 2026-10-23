@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// and a new column takes <c>relnatts + 1</c> (<c>src/backend/commands/tablecmds.c:7445-7446</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalogTable {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable.DebugView))]
 public sealed class SqlCatalogTable
 {
     private readonly int[] _physicalOrdinals;
@@ -207,5 +209,26 @@ public sealed class SqlCatalogTable
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable value)
+        {
+            _target = value;
+        }
+
+        public ulong ObjectId => _target.ObjectId;
+        public string Schema => _target.Schema;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseObjectOwner Owner => _target.Owner;
+        public string? OwningSchema => _target.OwningSchema;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogColumn> Columns => _target.Columns;
+        public int PhysicalColumnCount => _target.PhysicalColumnCount;
+        public global::System.Collections.Generic.IReadOnlyList<int> DroppedColumnOrdinals => _target.DroppedColumnOrdinals;
+        public global::System.Collections.Generic.IReadOnlyList<string> PrimaryKeyColumns => _target.PrimaryKeyColumns;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogConstraint> Constraints => _target.Constraints;
     }
 }

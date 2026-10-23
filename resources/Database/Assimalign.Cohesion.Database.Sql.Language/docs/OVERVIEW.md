@@ -104,3 +104,22 @@ on that path. Canonical SQL, recognized construct names and token spellings rema
 The dialect records CS06059/XX001 for malformed persisted SQL catalog metadata and CS06060/0A000
 for unsupported metadata formats. These engine-side carrier corrections do not change grammar,
 accepted storage formats or the no-upgrade policy.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+The concrete SqlQueryExpression base supplies the inherited view for its derived query
+expressions. Its projection uses nonvirtual CommandType; Text is omitted because an application
+subclass can override that getter. Scalar-expression views expose existing syntax data without
+walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
+a language profile through its protected getter.

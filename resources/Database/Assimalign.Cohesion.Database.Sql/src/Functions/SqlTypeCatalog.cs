@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// not a built-in type name here, once per statement, never per row; a <c>CAST</c> binds the casts it
 /// may apply when its statement is planned. There is no run-time registration.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlTypeCatalog, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlTypeCatalog.DebugView))]
 public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
 {
     // One slot per storage type, indexed by its value: the casts a bound CAST may apply.
@@ -214,4 +216,16 @@ public sealed class SqlTypeCatalog : IReadOnlyCollection<SqlType>
         => _castsByKey.TryGetValue(new SqlCastKey(source, sourceDomain, target.Storage.Type,
             target.IsDomain && !targetBase ? target.Name : null), out var cast) ? cast : null;
 
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlTypeCatalog _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlTypeCatalog value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

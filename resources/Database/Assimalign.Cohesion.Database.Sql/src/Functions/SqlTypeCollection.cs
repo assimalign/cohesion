@@ -39,6 +39,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// Like the builder, the collection is not thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlTypeCollection, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlTypeCollection.DebugView))]
 public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
 {
     private readonly List<SqlType> _types = new(SqlType.BuiltIn);
@@ -189,5 +191,17 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlTypeCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlTypeCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// sorted with a stable ORDER BY; without ORDER BY their order is unspecified
 /// and may change with the chosen access path.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlPlanExecutor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.DebugView))]
 internal sealed partial class SqlPlanExecutor
 {
     private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
@@ -1911,4 +1913,12 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor value)
+        {
+            _ = value;
+        }
+    }
 }

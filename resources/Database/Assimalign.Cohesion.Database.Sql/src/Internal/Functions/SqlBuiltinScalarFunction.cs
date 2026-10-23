@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>Stateless, reflection-free leaves of the standard scalar library.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBuiltinScalarFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBuiltinScalarFunction.DebugView))]
 internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
 {
     // Bound both result strings and Unicode work buffers before allocating.
@@ -358,5 +360,23 @@ internal sealed class SqlBuiltinScalarFunction : SqlScalarFunction
             if (source.AsSpan(index, search.Length).SequenceEqual(search)) { return (long)index + 1; }
         }
         return 0;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlBuiltinScalarFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBuiltinScalarFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

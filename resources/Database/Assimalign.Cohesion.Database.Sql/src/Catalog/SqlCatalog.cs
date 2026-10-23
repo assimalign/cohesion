@@ -58,6 +58,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// <see cref="Open(SqlStorage, Collation)"/>, are the only ways to create it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog.DebugView))]
 public sealed partial class SqlCatalog
 {
     private const int tableRecordKind = 1;
@@ -2726,5 +2728,13 @@ public sealed partial class SqlCatalog
             => HashCode.Combine(
                 StringComparer.OrdinalIgnoreCase.GetHashCode(value.Schema),
                 StringComparer.OrdinalIgnoreCase.GetHashCode(value.Name));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalog value)
+        {
+            _ = value;
+        }
     }
 }

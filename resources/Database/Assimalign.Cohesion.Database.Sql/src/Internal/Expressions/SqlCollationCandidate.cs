@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// default, 0 when the expression has none. A deferred candidate carries the term that decides it
 /// when the comparison runs (<see cref="SqlBoundCollation"/>).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCollationCandidate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationCandidate.DebugView))]
 internal readonly struct SqlCollationCandidate
 {
     /// <summary>Initializes a fixed candidate.</summary>
@@ -96,4 +98,12 @@ internal readonly struct SqlCollationCandidate
         => !first.IsDeferred && !second.IsDeferred
             ? (second.Priority > first.Priority ? second : first.Priority > 0 ? first : default)
             : Fold([first, second]);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationCandidate value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -71,3 +71,20 @@ Assembly-local Defaults/Types resource bindings live under Internal while preser
 linked owning namespaces. SqlSchemaMigrationResult lives in ValueObjects with the same public
 namespace, positional properties and construction. Canonical documents, hashes and format
 cohesion/database-schema/v8 are unchanged.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+Compiled-schema views expose already constructed declaration metadata. CanonicalDocument
+and Hash are omitted: those getters serialize/hash lazily and update computation counters.
+Inspection does not call Compile, evaluate a schema callback, or expose private builder records.

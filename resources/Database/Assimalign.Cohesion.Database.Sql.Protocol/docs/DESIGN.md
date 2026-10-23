@@ -46,3 +46,20 @@ standard .NET argument guards retain their own contracts.
 
 The model protocol extension container is partial. Its public Family and message extensions,
 identifiers, capabilities and encoded payloads are unchanged.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+Protocol data carriers whose only storage is public/protected data or compiler-generated
+auto-property backing keep the normal debugger member view. No new protocol projection or wire
+member is introduced.

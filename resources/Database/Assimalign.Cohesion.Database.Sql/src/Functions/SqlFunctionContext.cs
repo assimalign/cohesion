@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <see langword="default"/> context, which a test calling a function directly can pass, has no
 /// database, the binary collation, a token that is never canceled, and no transaction timestamp.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlFunctionContext.DebugView))]
 public readonly ref struct SqlFunctionContext
 {
     private readonly Collation? _collation;
@@ -77,4 +79,16 @@ public readonly ref struct SqlFunctionContext
     /// engine also checks it between rows.
     /// </summary>
     public CancellationToken CancellationToken { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::System.DateTimeOffset? _value0;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlFunctionContext value)
+        {
+            _value0 = value.TransactionTimestamp;
+        }
+
+        public global::System.DateTimeOffset? TransactionTimestamp => _value0;
+    }
 }

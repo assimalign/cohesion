@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// exception: a bound CHECK predicate is shared by every session, and one exception instance must
 /// never be thrown on two threads.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundFailure")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundFailure.DebugView))]
 internal sealed class SqlBoundFailure : SqlBoundExpression
 {
     private readonly Func<object?> _raise;
@@ -32,4 +34,12 @@ internal sealed class SqlBoundFailure : SqlBoundExpression
     /// <summary>Throws the node's failure.</summary>
     /// <returns>Never returns.</returns>
     internal object? Raise() => _raise();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundFailure value)
+        {
+            _ = value;
+        }
+    }
 }

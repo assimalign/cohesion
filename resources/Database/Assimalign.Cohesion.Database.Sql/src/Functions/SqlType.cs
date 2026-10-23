@@ -45,6 +45,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// (PostgreSQL's <c>anyelement</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlType {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlType.DebugView))]
 public sealed class SqlType : IEquatable<SqlType>
 {
     private SqlType(string name, DatabaseTypeInfo storage, bool isPseudo, SqlType? baseType = null, SqlScalarFunction? check = null)
@@ -402,4 +404,21 @@ public sealed class SqlType : IEquatable<SqlType>
     }
 
     private static SqlType Create(string name, DatabaseType type) => new(name, new DatabaseTypeInfo(type), isPseudo: false);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlType _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlType value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseTypeInfo Storage => _target.Storage;
+        public bool IsPseudo => _target.IsPseudo;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? BaseType => _target.BaseType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlScalarFunction? Check => _target.Check;
+        public bool IsDomain => _target.IsDomain;
+    }
 }

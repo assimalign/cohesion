@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// pseudo-type, so a call over text fails while planning (<c>CS01006</c>); a non-number that only
 /// a row reveals fails when it is added.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlSumFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSumFunction.DebugView))]
 internal sealed class SqlSumFunction : SqlAggregateFunction
 {
     private readonly bool _average;
@@ -29,6 +31,8 @@ internal sealed class SqlSumFunction : SqlAggregateFunction
         => new Accumulator(Name, _average);
 
     /// <summary>One group's count and decimal sum.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSumFunction.Accumulator.DebugView))]
     private sealed class Accumulator : SqlAggregateAccumulator
     {
         private readonly string _name;
@@ -75,5 +79,31 @@ internal sealed class SqlSumFunction : SqlAggregateFunction
         /// <returns>The sum or the mean; NULL for a group without a non-NULL value.</returns>
         protected override SqlValue FinishCore()
             => _count == 0 ? SqlValue.Null : SqlValue.FromDecimal(_average ? _sum / _count : _sum);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSumFunction.Accumulator value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlSumFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlSumFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

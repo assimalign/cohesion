@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a parsed SQL expression payload.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryExpression.DebugView))]
 public class SqlQueryExpression : QueryExpression
 {
     private string? _statementText;
@@ -64,4 +66,16 @@ public class SqlQueryExpression : QueryExpression
 
     /// <summary>Stamps the nesting the parser measured over the whole statement.</summary>
     internal void SetNestingDepth(int depth) => _measuredNesting = depth;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlQueryCommandType CommandType => _target.CommandType;
+    }
 }

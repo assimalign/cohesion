@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// it refuses to drop one (owner decision 56 of 2026-10-09), and each records the outcome of its
 /// provisioning for this assembly's tests.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDeclaredDatabase")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredDatabase.DebugView))]
 internal sealed partial class SqlDeclaredDatabase
 {
     private SqlSchemaMigrationResult? _result;
@@ -245,5 +247,13 @@ internal sealed partial class SqlDeclaredDatabase
     {
         string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDeclaredDatabaseRefuseFailure, SqlProvisioningCodes.DeclarationRefused, engineName, databaseName, reason);
         return inner is null ? new SqlSchemaMigrationException(message) : new SqlSchemaMigrationException(message, inner);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredDatabase value)
+        {
+            _ = value;
+        }
     }
 }

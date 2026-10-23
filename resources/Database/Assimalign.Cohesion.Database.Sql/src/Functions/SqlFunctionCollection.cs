@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionCollection, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection.DebugView))]
 public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
 {
     private readonly List<SqlFunction> _functions = [];
@@ -150,4 +152,16 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
     }
 
     private static string Article(SqlFunctionKind kind) => kind == SqlFunctionKind.Scalar ? ErrorMessages.ScalarFunctionKindLabel : ErrorMessages.AggregateKindLabel;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

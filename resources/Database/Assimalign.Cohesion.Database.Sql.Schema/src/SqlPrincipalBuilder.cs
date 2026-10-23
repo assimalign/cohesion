@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// constructor; it replaced the <c>ISqlPrincipalBuilder</c> interface and its internal
 /// implementation. The <c>Sdk.Database</c> extractor recognizes its calls by its metadata name.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlPrincipalBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder.DebugView))]
 public sealed class SqlPrincipalBuilder
 {
     private readonly List<SqlSchemaGrant> _grants = [];
@@ -55,4 +57,12 @@ public sealed class SqlPrincipalBuilder
     /// <returns>The principal declaration; later grants on this builder do not change it.</returns>
     internal SqlSchemaPrincipal Build()
         => new(_name, Array.AsReadOnly(_grants.ToArray()));
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Schema.SqlPrincipalBuilder value)
+        {
+            _ = value;
+        }
+    }
 }

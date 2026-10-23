@@ -22,11 +22,29 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
 
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate.DebugView))]
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
         object?[] OldValues, object?[] NewValues, HashSet<int> Assigned)
     {
         // Referential actions fill this only after every assignment to the final row is known.
         internal byte[] NewVersion { get; set; } = [];
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable Table => _target.Table;
+            public (global::Assimalign.Cohesion.Database.Storage.PageId PageId, int SlotIndex) Location => _target.Location;
+            public object?[] OldValues => _target.OldValues;
+            public object?[] NewValues => _target.NewValues;
+            public global::System.Collections.Generic.HashSet<int> Assigned => _target.Assigned;
+        }
     }
 
     /// <summary>
@@ -1210,6 +1228,8 @@ internal sealed partial class SqlPlanExecutor
     /// (owner decision 64); a stored predicate is not held to it again, so a function whose
     /// registration changed does not stop its database from opening.
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("SqlCheckSyntax")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax.DebugView))]
     private sealed class SqlCheckSyntax
     {
         private readonly SqlCatalogTable _table;
@@ -1478,6 +1498,14 @@ internal sealed partial class SqlPlanExecutor
             }
 
             return function;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax value)
+            {
+                _ = value;
+            }
         }
     }
 }

@@ -7694,3 +7694,21 @@ strategies share the same condition identities. The orphan-directory format text
 through this assembly's existing Engine binding; no new public helper or reference is required.
 
 Identical SQL error text shares one canonical resource entry; internal accessor aliases are deduplicated without changing the text or culture.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+The function argument view snapshots only Count; the function context view snapshots only
+TransactionTimestamp. Neither view retains a ref struct, span, context, or cancellation token.
+The SQL value view reads Type and IsNull without decoding its payload. Internal-only plan or
+metrics state stays hidden rather than being promoted to a public debugger projection.

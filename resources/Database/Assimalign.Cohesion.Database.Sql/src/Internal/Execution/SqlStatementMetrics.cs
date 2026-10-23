@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// It also records the catalog changes a self-committing statement (DDL) committed by itself,
 /// which decide how the session reports the statement's failure on an offline storage (#1272).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlStatementMetrics")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.DebugView))]
 internal sealed class SqlStatementMetrics
 {
     private bool _capturedCatalogSnapshot;
@@ -171,6 +173,8 @@ internal sealed class SqlStatementMetrics
 
     // Join-only telemetry shares the existing path slot. Scalar statements keep
     // exactly their previous instance layout and allocate no new telemetry object.
+    [global::System.Diagnostics.DebuggerDisplay("JoinWork")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork.DebugView))]
     private sealed class JoinWork
     {
         internal JoinWork(IReadOnlyList<string> paths)
@@ -184,12 +188,30 @@ internal sealed class SqlStatementMetrics
         internal long MemoryBytes;
         internal long PeakMemoryBytes;
         internal AnalysisState? Operators;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.AnalysisState.DebugView))]
     private sealed class AnalysisState
     {
         internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
         internal SqlAnalysisFrame? Active;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.AnalysisState value)
+            {
+                _ = value;
+            }
+        }
     }
 
     /// <summary>
@@ -207,4 +229,12 @@ internal sealed class SqlStatementMetrics
     /// Records one catalog change the statement committed by itself (<see cref="SelfCommits"/>).
     /// </summary>
     internal void RecordSelfCommit() => SelfCommits++;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics value)
+        {
+            _ = value;
+        }
+    }
 }
