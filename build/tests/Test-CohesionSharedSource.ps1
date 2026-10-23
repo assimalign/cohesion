@@ -64,3 +64,8 @@ try {
         [IO.Path]::GetFileName($taskResolvedFixture) -notlike 'cohesion-shared-source-*') { throw 'Refusing cleanup outside the temporary fixture directory.' }
     if (Test-Path -LiteralPath $taskResolvedFixture) { Remove-Item -LiteralPath $taskResolvedFixture -Recurse -Force }
 }
+
+# Expected-error cases leave the native MSBuild exit code nonzero. GitHub Actions'
+# PowerShell wrapper forwards LASTEXITCODE, so report success only after all cases
+# and fixture cleanup have completed; exceptions still fail the script.
+exit 0

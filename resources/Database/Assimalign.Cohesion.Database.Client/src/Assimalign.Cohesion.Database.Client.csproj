@@ -4,8 +4,10 @@
 	</PropertyGroup>
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
-        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
+	<ItemGroup>
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database.Client" Module="Diagnostics" />
 	</ItemGroup>
 </Project>

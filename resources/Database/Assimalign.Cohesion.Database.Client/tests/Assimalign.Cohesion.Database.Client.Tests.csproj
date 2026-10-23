@@ -9,6 +9,8 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />

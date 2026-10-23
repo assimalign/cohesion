@@ -20,6 +20,8 @@
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Transactions" />
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Database.Types" />
+	</ItemGroup>
+	<ItemGroup>
 		<!--
 			Web is an internal implementation detail of the database server piece.
 			PrivateAssets='all' (via CohesionPrivateProjectReference) keeps Web from

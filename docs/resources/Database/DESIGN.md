@@ -1,5 +1,23 @@
 # Cohesion Data Platform — Area Design
 
+## Shared-source modules
+
+Each `CohesionSharedSource` declaration selects one named subfolder of its owner's
+`shared/` directory with required `Module` metadata. Database uses these compilation units:
+
+| Owner | Module | Internal source compiled by consumers |
+| --- | --- | --- |
+| `Database` | `Engine` | Engine construction, declarations, file naming and worker machinery |
+| `Database.Client` | `Diagnostics` | Client diagnostic snapshots |
+| `Database.Execution` | `Parameters` | Parameter name and binding normalization |
+| `Database.Graph.Protocol` | `Encoding` | Graph value encoding and local message contracts |
+| `Database.Sql.Language` | `Types` | SQL type modifiers, namespace names and temporal readers |
+| `Database.Sql.Schema` | `Defaults` | SQL default literal rendering |
+
+Owners use their full `Assimalign.Cohesion.` project names in declarations. The Database SDK
+also selects the `Types` and `Defaults` modules. Moving these files preserves their namespaces
+and source contents; the existing client/engine dependency guards still apply to module sources.
+
 ## Remote client and model wire ownership
 
 The five independently consumable Database.Sql.Protocol, Graph.Protocol, Documents.Protocol,

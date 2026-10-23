@@ -6,6 +6,8 @@
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    </ItemGroup>
+    <ItemGroup>
         <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
         <CohesionPackageReference Include="xunit" />
         <CohesionPackageReference Include="xunit.runner.visualstudio" />

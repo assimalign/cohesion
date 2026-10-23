@@ -10,6 +10,8 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
 		<CohesionPackageReference Include="Shouldly" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
 	</ItemGroup>
 </Project>

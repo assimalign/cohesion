@@ -8,6 +8,8 @@
 	<ItemGroup>
 		<Compile Include="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\Program.cs" />
 		<Compile Include="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\TestResourceControlPlaneRegistration.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
