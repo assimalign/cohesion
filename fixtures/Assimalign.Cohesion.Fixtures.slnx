@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/IntegrationCheck/">
+    <Project Path="IntegrationCheck/Assimalign.Cohesion.IntegrationCheck.csproj" />
+  </Folder>
+  <Folder Name="/ResourceGenerationCheck/">
+    <Project Path="ResourceGenerationCheck/Assimalign.Cohesion.ResourceGenerationCheck.csproj" />
+  </Folder>
+</Solution>

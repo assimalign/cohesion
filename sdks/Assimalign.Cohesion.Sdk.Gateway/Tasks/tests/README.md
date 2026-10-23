@@ -2,7 +2,7 @@
 
 These tests consume packed SDKs and libraries from `_out/packages` in isolated NuGet caches.
 They default to the canonical version in `build/Targets/Build.Version.props`. Prepare the SDKs
-with `installer/scripts/Install-Local.ps1 -UseCanonicalVersion -SkipLibraries -SkipFramework`
+with `scripts/Install-Local.ps1 -UseCanonicalVersion -SkipLibraries -SkipFramework`
 and the canonical gateway library dependency closure described in the `gateway-packages` job
 of `.github/workflows/sdk-smoke.yml`. A libraries-only local install prunes the canonical
 library archives; prepare the canonical closure after that install.

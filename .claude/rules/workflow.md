@@ -34,10 +34,13 @@ A consumer checked into the repository that produces the packages can quietly st
 something the packages do not carry, which is the one thing a package-only consumer exists to
 disprove. So:
 
-- **Consumer-facing examples** and **package-only smoke consumers** belong in `cohesion-examples`.
+- **Consumer-facing examples** and companion smoke consumers belong in `cohesion-examples`.
+  The repository's existing package-validation inputs live in `fixtures/SdkSmoke`; the harness
+  copies them outside the source tree before building so they cannot inherit repository imports.
 - **Executable acceptance fixtures** — a real `Program.cs` a test project launches, compiled from
   source against the current tree — stay in `cohesion`, in a `fixtures/` folder inside the project
   whose tests drive them. They are test inputs, not examples. See `resource-areas.md`.
+- **Repository-wide checks** without a single owning project live in root `fixtures/`.
 - **AOT guard projects** stay beside the library they guard, in that library's `samples/` folder,
   because the guard is only worth anything on the pull request that breaks AOT.
 

@@ -110,6 +110,6 @@ application gets that behaviour back by registering every role:
 ## Documentation
 
 - [Design](DESIGN.md)
-- [API reference](Assembly/Assimalign.Cohesion.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 - [SecretStore area](../../README.md)
 - [SecretStore client](../../Assimalign.Cohesion.SecretStore.Client/docs/OVERVIEW.md)

@@ -37,7 +37,7 @@ internal static partial class TemplateRepository
 
     internal static string[] SdkIds()
     {
-        string module = File.ReadAllText(Path.Combine(Root, "installer", "scripts", "modules", "CohesionPackaging.psm1"));
+        string module = File.ReadAllText(Path.Combine(Root, "scripts", "modules", "CohesionPackaging.psm1"));
         string block = InventoryBlock().Match(module).Groups[1].Value;
         return QuotedId().Matches(block)
             .Select(match => match.Groups[1].Value)

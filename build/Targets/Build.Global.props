@@ -5,11 +5,7 @@
 		<CohesionRepositoryDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)\..\..'))\</CohesionRepositoryDirectory>
 		<CohesionOutputPath>$(CohesionRepositoryDirectory)_out</CohesionOutputPath>
 		<CohesionOutputPathForSdk>$(CohesionOutputPath)\dotnet\sdk</CohesionOutputPathForSdk>
-		<CohesionOutputPathForCli>$(CohesionOutputPath)\dotnet</CohesionOutputPathForCli>
-		<CohesionOutputPathForFramework>$(CohesionOutputPath)\dotnet\shared</CohesionOutputPathForFramework>
-		<CohesionOutputPathForPacks>$(CohesionOutputPath)\dotnet\packs</CohesionOutputPathForPacks>
 		<CohesionOutputPathForLibraries>$(CohesionOutputPath)\packages</CohesionOutputPathForLibraries>
-		<CohesionOutputPathForDevScripts>$(CohesionRepositoryDirectory)scripts\modules</CohesionOutputPathForDevScripts>
 	</PropertyGroup>
 
 	<!-- TODO: Need to verify if this is the correct way for generating the Intermediate path  -->

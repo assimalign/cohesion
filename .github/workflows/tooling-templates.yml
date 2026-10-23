@@ -20,7 +20,7 @@ on:
       - "!resources/Database/**/docs/**"
       - "libraries/Connections/**"
       - "build/**"
-      - "installer/scripts/**"
+      - "scripts/**"
       - ".github/workflows/tooling-templates.yml"
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"
@@ -44,7 +44,7 @@ on:
       - "!resources/Database/**/docs/**"
       - "libraries/Connections/**"
       - "build/**"
-      - "installer/scripts/**"
+      - "scripts/**"
       - ".github/workflows/tooling-templates.yml"
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"
@@ -101,12 +101,12 @@ jobs:
           $prefix = switch ($env:HOST_OS) { 'Windows' { 'win' } 'Linux' { 'linux' } 'macOS' { 'osx' } default { throw "Unsupported OS $env:HOST_OS" } }
           $rid = "$prefix-$($env:HOST_ARCH.ToLowerInvariant())"
           "rid=$rid" >> $env:GITHUB_OUTPUT
-          $version = ./installer/scripts/Get-CohesionVersion.ps1
+          $version = ./scripts/Get-CohesionVersion.ps1
           "COHESION_TEMPLATES_TEST_PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
       - name: Pack template library closure
         shell: pwsh
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
           $repository = (Get-Location).Path
           $packageDirectory = Join-Path $repository '_out/packages'
           dotnet build build/Tasks --configuration Release --nologo

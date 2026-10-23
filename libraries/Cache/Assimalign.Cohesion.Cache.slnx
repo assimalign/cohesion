@@ -15,29 +15,6 @@
 		<File Path="Assimalign.Cohesion.Caching/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Caching/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/" />
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/" />
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEntryPriority/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEntryPriority/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEvictionReason/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheEvictionReason/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheException/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheException/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheExtensions/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/CacheExtensions/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICache/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICache/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICacheEntry/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/ICacheEntry/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/PostEvictionCallbackRegistration/">
-		<File Path="Assimalign.Cohesion.Caching/docs/Assembly/Assimalign.Cohesion.Caching/PostEvictionCallbackRegistration/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/Cache/Assimalign.Cohesion.Caching/src/">
 		<Project Path="Assimalign.Cohesion.Caching/src/Assimalign.Cohesion.Caching.csproj" />
 	</Folder>
@@ -50,14 +27,6 @@
 	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/">
 		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/" />
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/" />
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCache/">
-		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCache/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCacheOptions/">
-		<File Path="Assimalign.Cohesion.Caching.InMemory/docs/Assembly/Assimalign.Cohesion.Caching.InMemory/MemoryCacheOptions/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Cache/Assimalign.Cohesion.Caching.InMemory/src/">
 		<Project Path="Assimalign.Cohesion.Caching.InMemory/src/Assimalign.Cohesion.Caching.InMemory.csproj" />

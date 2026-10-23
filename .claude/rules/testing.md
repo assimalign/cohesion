@@ -106,7 +106,7 @@ consecutive verification passes on a single branch.
 **A suite with a setup prerequisite states it in the project's `README.md`.** If tests need a
 packed local feed, a generated build task, or anything else a plain `dotnet test` does not do, say
 so where someone editing that project will read it, and name the existing repo command that does
-it (`installer/scripts/Install-Local.ps1` for the local package feed). Do not write a new bootstrap
+it (`scripts/Install-Local.ps1` for the local package feed). Do not write a new bootstrap
 script for what the dev loop already does.
 
 ## Coverage expectations

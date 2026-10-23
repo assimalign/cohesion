@@ -8,13 +8,13 @@ paths:
   - "build/**"
   - "libraries/App/**"
   - "sdks/**"
-  - "installer/**"
+  - "scripts/**"
   - ".github/workflows/**"
 ---
 
 # Build System
 
-Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `libraries/App/`, a framework producer (`resources/<Area>/Assimalign.Cohesion.<Area>.Refs` / `.Runtime`), `installer/scripts/`, `.github/workflows/sdk-smoke.yml`, `.github/workflows/release.yml`, or any `*.props` / `*.targets` file in `build/`.
+Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `libraries/App/`, a framework producer (`resources/<Area>/Assimalign.Cohesion.<Area>.Refs` / `.Runtime`), `scripts/`, `.github/workflows/sdk-smoke.yml`, `.github/workflows/release.yml`, or any `*.props` / `*.targets` file in `build/`.
 
 ## Centralized MSBuild logic — the most drift-prone area
 
@@ -157,7 +157,7 @@ What follows from it:
 - **An area's producers carry a `Directory.Build.props` each.** The Runtime producer's holds the `App.<Area>` member list; the Refs producer's only imports it (*Framework membership*).
 - **`Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` are reserved project names** in every area. No library may use them.
 - **The resource guards skip an area's two producers by exact identity**: the conventional name for that area and kind, declaring that area's framework. The Runtime producer references the whole framework, the hosting module and the `Hosting.*` closure included, so COHRES001, COHRES002, and COHRES004 do not apply to it. COHRES003 still does, because no shared framework may carry a Gateway assembly. A project that matches only part of that identity is guarded like any library (`resource-areas.md`).
-- **One function resolves producer paths:** `Get-CohesionFrameworkProjectPath` in `installer/scripts/modules/CohesionPackaging.psm1`, used by `Install-Local.ps1`, the release pack plan, and `Assert-CohesionReleaseInventory`. The inventory check fails for any csproj that declares a `CohesionFrameworkName` but sits off its conventional path, declares a different `AssemblyName`, or belongs to a family the release does not ship. That includes a producer recreated under the retired top-level `frameworks/` folder.
+- **One function resolves producer paths:** `Get-CohesionFrameworkProjectPath` in `scripts/modules/CohesionPackaging.psm1`, used by `Install-Local.ps1`, the release pack plan, and `Assert-CohesionReleaseInventory`. The inventory check fails for any csproj that declares a `CohesionFrameworkName` but sits off its conventional path, declares a different `AssemblyName`, or belongs to a family the release does not ship. That includes a producer recreated under the retired top-level `frameworks/` folder.
 - **Producers stay out of the area workflows' `projects` matrices.** `sdk-smoke.yml` packs every framework (`Pack-Release.ps1 -SkipLibraries`) and consumer-tests App, App.Web, and App.Database; `release.yml` packs them for release. They have no source files, so the blind-spot census does not ask for a matrix entry either.
 
 ## Framework membership
@@ -374,7 +374,7 @@ The SDK injects nothing else by convention:
 #    .Runtime, named per "Framework producer projects" above, each with its
 #    Directory.Build.props; the area's own Directory.Build.props is written
 #    when missing:
-pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
+pwsh scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 
 # 3. Wire it up (currently manual; mirrors existing entries):
 #    a. Add a KnownFrameworkReference block to
@@ -384,7 +384,7 @@ pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 #       (see "Framework membership")
 #    c. Add the framework name to $script:CohesionReleaseFramework and the SDK
 #       name to $script:CohesionReleaseSdk in
-#       installer/scripts/modules/CohesionPackaging.psm1. Install-Local.ps1 and
+#       scripts/modules/CohesionPackaging.psm1. Install-Local.ps1 and
 #       the release pack plan both read those lists; without the entries the new
 #       family builds locally but never ships
 #    d. Add the producer pair and the new Directory.Build.props files to
@@ -393,7 +393,7 @@ pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 #       Assimalign.Cohesion.slnx
 
 # 4. Verify locally:
-pwsh installer/scripts/Install-Local.ps1
+pwsh scripts/Install-Local.ps1
 ```
 
 The scaffold script is idempotent: re-running skips anything already on disk.
@@ -551,7 +551,7 @@ There are two entry paths. A **published GitHub Release** whose tag is `v$(Cohes
 
 Both publish jobs re-verify `checksums.sha256` before pushing, so "what we published is what we validated" is checked, not assumed.
 
-**The release inventory is the contract.** `installer/scripts/modules/CohesionPackaging.psm1` is the single source of what ships: the curated library/resource list, the SDK families, the framework families, and the RIDs. The release validation matrix, the pack plan, and `Install-Local.ps1`'s local feed all read it, so none of them can disagree about what exists.
+**The release inventory is the contract.** `scripts/modules/CohesionPackaging.psm1` is the single source of what ships: the curated library/resource list, the SDK families, the framework families, and the RIDs. The release validation matrix, the pack plan, and `Install-Local.ps1`'s local feed all read it, so none of them can disagree about what exists.
 
 A package ships only if **(1)** a per-area CI workflow builds it, **(2)** it is not `IsPackable=false`, and **(3)** it has at least one source file. `Assert-CohesionReleaseInventory` enforces all three in both directions — a package CI never built cannot ship, and a packable project CI does build cannot be silently omitted — plus three guards that the build itself cannot provide:
 
@@ -565,7 +565,7 @@ Well over a third of the `src` csprojs under `libraries/` and `resources/` are s
 
 **Packing is batched.** `Pack-Release.ps1` and `Install-Local.ps1` pack through `Invoke-CohesionPackBatch` in `CohesionPackaging.psm1`: one `dotnet restore` of a transient `.slnx`, then one `dotnet pack` of a transient traversal project that packs its projects in parallel. One `dotnet pack` per package re-evaluated and re-checked the shared closure for each of them: the SDK smoke's strict pack ran 59 at a median 10.5 s, for 11 to 27 minutes. `dotnet pack` runs on the traversal itself, so every project gets the global properties `dotnet pack <project>` passes. Packing does not go through the solution, because a solution build would build references outside it as Debug. A batch holds each project under one set of global properties, so runtime packs get one batch per RID. `Pack-Release.ps1` keeps the plan's kind order: libraries and targeting packs, then each RID's runtime packs, then the SDKs, which are cleaned first because their packages glob `$(OutDir)`. `Install-Local.ps1 -ContinueOnLibraryError` keeps one pack per library so a failure names its project.
 
-`.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, an installer script, the repository `Directory.Build.props`, or anything under a scanned project root, so a new project or its first source file is checked by the change that creates the drift rather than by a later release. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
+`.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, a repository script, the repository `Directory.Build.props`, or anything under a scanned project root, so a new project or its first source file is checked by the change that creates the drift rather than by a later release. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
 
 Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, `credential-guard.yml`, `ci-packages.yml`, and `ci-packages-prune.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
 
@@ -573,7 +573,7 @@ Every external `uses:` in `release.yml`, `ci-packages.yml`, `ci-packages-prune.y
 
 ### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
-On pull requests and relevant pushes, a matrix (Linux, plus Windows and macOS on `main` or a manual `all-os` run) runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework closure tests, which check each area's member list against its project-graph closure.
+On pull requests and relevant pushes, a matrix (Linux, plus Windows and macOS on `main` or a manual `all-os` run) runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `scripts/sdks/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework closure tests, which check each area's member list against its project-graph closure.
 
 The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
@@ -581,7 +581,7 @@ The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, Nat
 
 ### CI packages — `.github/workflows/ci-packages.yml`
 
-Every push to `main` and every commit to an open same-repository pull request strictly packs the full release set with `Pack-Release.ps1` at the version `Get-CohesionCiPackageVersion` derives (`<predecessor>.ci.<run>` on `main`, `<predecessor>.pr.<pr>.<run>` for a pull request). The same package-only consumer harness then runs against that artifact on Linux, and the set is pushed to GitHub Packages only, SDKs last. It exists so downstream repositories (benchmarks, `cohesion-platforms`, `cohesion-examples`) can pin an exact build ahead of a release. It is not a release: there is no per-package validation matrix, no Windows or macOS consumer leg, no nuget.org path, and no canonical version. Fork pull requests and Dependabot-triggered runs publish nothing, and the workflow must never run on `pull_request_target`. A first attempt fails on an existing version rather than skipping it; only a re-run attempt passes `--skip-duplicate`. A newer pull request commit cancels a pack in progress, never a publish. `installer/scripts/modules/tests/CohesionReleasePolicy.Tests.ps1` pins this wiring and the version ordering. Version shape, consumer setup, and feed growth: [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md), "CI packages".
+Every push to `main` and every commit to an open same-repository pull request strictly packs the full release set with `Pack-Release.ps1` at the version `Get-CohesionCiPackageVersion` derives (`<predecessor>.ci.<run>` on `main`, `<predecessor>.pr.<pr>.<run>` for a pull request). The same package-only consumer harness then runs against that artifact on Linux, and the set is pushed to GitHub Packages only, SDKs last. It exists so downstream repositories (benchmarks, `cohesion-platforms`, `cohesion-examples`) can pin an exact build ahead of a release. It is not a release: there is no per-package validation matrix, no Windows or macOS consumer leg, no nuget.org path, and no canonical version. Fork pull requests and Dependabot-triggered runs publish nothing, and the workflow must never run on `pull_request_target`. A first attempt fails on an existing version rather than skipping it; only a re-run attempt passes `--skip-duplicate`. A newer pull request commit cancels a pack in progress, never a publish. `scripts/tests/CohesionReleasePolicy.Tests.ps1` pins this wiring and the version ordering. Version shape, consumer setup, and feed growth: [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md), "CI packages".
 
 `.github/workflows/ci-packages-prune.yml` is the only thing that deletes from the feed, and it deletes CI versions only: every build of a pull request the API reports closed, and every `main` build outside the newest 20 of its base. Selection is `Select-CohesionCiPackageVersionToPrune` in `CohesionPackaging.psm1`, which recognizes only the exact shapes `Get-CohesionCiPackageVersion` produces, so a release version is never selected; `CohesionPackageFeed.psm1` lists the release inventory's package ids (`GITHUB_TOKEN` cannot list an organization's packages) and deletes within the token's 1,000-requests-an-hour budget, deferring the rest to the next run. It runs on `pull_request_target` (closed), hourly, and as a default-dry-run dispatch. `pull_request_target` is deliberate there: it runs the default branch's copy, so the deletion logic is never the closing pull request's code, and no step checks out pull request code. That does not relax the rule for `ci-packages.yml`, which builds the code under review. Retention numbers, permissions (the repository's Admin role on each package), and rate-limit sizing are in the policy document, "Feed growth".
 
@@ -633,19 +633,22 @@ sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Targets/
 ├── Sdk.Resource.targets                  ← manifest and resource surface generation
 └── ...Sdk.ApplicationModel.Build.targets
 
-installer/scripts/
+scripts/
+├── build/
+│   └── Test-CohesionSharedSource.ps1       ← shared-source module selection checks
 ├── modules/
 │   ├── CohesionPackaging.psm1             ← THE release inventory + its drift guards
 │   └── CohesionPackageFeed.psm1           ← GitHub Packages pruning for ci-packages-prune.yml
+├── resources/
+│   ├── Database/                         ← collation generation, SQL instrumentation, Database roadmap
+│   └── Web/                              ← output-cache counter experiment
+├── sdks/
+│   └── Invoke-SdkConsumerSmoke.ps1        ← package-only build/publish/run harness
 ├── Pack-Release.ps1                       ← strict full or -SkipLibraries pack
 ├── Get-ReleaseMatrix.ps1                  ← release validation matrix (JSON) for release.yml
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
 ├── Get-CohesionVersion.ps1                ← resolves $(CohesionVersion) for scripts + CI
-├── New-CohesionDomainScaffold.ps1         ← scaffold a new SDK + Framework pair
-└── Cleanup-PriorRegistrations.ps1         ← one-shot cleanup for old MSI-based registrations
-
-.github/scripts/
-└── Invoke-SdkConsumerSmoke.ps1            ← package-only build/publish/run harness
+└── New-CohesionDomainScaffold.ps1         ← scaffold a new SDK + Framework pair
 
 .github/workflows/
 ├── sdk-smoke.yml                          ← publish-less three-OS SDK validation

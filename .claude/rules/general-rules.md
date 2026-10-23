@@ -66,7 +66,7 @@ These are also centrally managed. Don't duplicate per project unless the project
 - ✅ `README.md`, `CONTRIBUTING.md`, `LICENSE`
 - ❌ `readme.md`, `contributing.md`
 - Exception: files whose names are fixed by external tooling keep their conventional casing (e.g., `.github/pull_request_template.md`, files under `.claude/**`).
-- API reference needs no exception: **folders** under `docs/Assembly/` mirror CLR namespace/type names, and each type's page is `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md`.
+- Public API reference pages belong in `cohesion-docs`; public XML documentation stays in source.
 
 ### Direct throws or exception-type members, not `ThrowHelper`
 - Use direct `throw` statements or framework guard APIs (e.g., `ArgumentNullException.ThrowIfNull`) when the logic is local.

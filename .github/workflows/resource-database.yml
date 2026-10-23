@@ -16,7 +16,7 @@ on:
       - 'sdks/Assimalign.Cohesion.Sdk/**'
       - 'sdks/Assimalign.Cohesion.Sdk.ApplicationModel/**'
       - 'sdks/Assimalign.Cohesion.Sdk.Database/**'
-      - 'installer/scripts/**'
+      - 'scripts/**'
       # The framework-closure job reads App.Database's member list against the project graph.
       - 'libraries/App/Assimalign.Cohesion.App.Runtime/tests/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
@@ -270,7 +270,7 @@ jobs:
         env:
           COHESION_RIDS: ${{ (github.ref == 'refs/heads/main' || inputs.all-os) && 'linux-x64,win-x64,osx-arm64' || 'linux-x64' }}
         run: |
-          ./installer/scripts/Install-Local.ps1 `
+          ./scripts/Install-Local.ps1 `
               -Configuration Release `
               -Rids ($env:COHESION_RIDS -split ',') `
               -SkipLibraries

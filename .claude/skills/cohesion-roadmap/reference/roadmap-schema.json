@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/assimalign/cohesion/.claude/skills/cohesion-roadmap/reference/roadmap-schema.json#cohesion.database.roadmap/2",
   "title": "cohesion.database.roadmap/2",
-  "description": "roadmap-data.json written by scripts/Get-CohesionRoadmapData.ps1. Field-by-field prose, with sources, in data-model.md.",
+  "description": "roadmap-data.json written by scripts/resources/Database/Get-CohesionRoadmapData.ps1. Field-by-field prose, with sources, in data-model.md.",
   "type": "object",
   "required": [
     "schema", "generated", "generatedBy", "asOf", "sources", "legend", "placement", "stages", "lanes", "categories", "nodes", "edges", "programs", "milestones",

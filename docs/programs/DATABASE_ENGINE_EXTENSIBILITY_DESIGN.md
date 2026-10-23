@@ -1184,7 +1184,7 @@ need the complete snapshot). B3 follows B1, and the re-scoped P7 follows B3.
 - Every `resources/Database` project builds and tests; COHRES001 to 004 and COHAM001 pass.
 - `rg "public interface" resources/Database --glob '**/src/**'` lists exactly the five kept
   interfaces.
-- `pwsh build/scripts/Update-CohesionDependencyGraph.ps1 -Check` passes.
+- `pwsh scripts/Update-CohesionDependencyGraph.ps1 -Check` passes.
 - Each touched project's DESIGN.md (and OVERVIEW.md where its surface changes) moves in the same
   commit; each new public abstract base carries the deviation marker; the PR summary carries
   `Deviates from interface-first (database-area.md)`.

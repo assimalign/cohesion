@@ -1,6 +1,6 @@
 # Guards the release inventory on every change that could invalidate it.
 #
-# installer/scripts/modules/CohesionPackaging.psm1 is the single definition of what a Cohesion
+# scripts/modules/CohesionPackaging.psm1 is the single definition of what a Cohesion
 # release ships, and Assert-CohesionReleaseInventory checks it against the repository and against
 # the per-area CI matrices. That check already runs inside .github/workflows/release.yml - but a
 # release is exactly the wrong moment to discover that someone added a project to an area workflow
@@ -19,7 +19,7 @@ on:
     paths:
       - '.github/actions/**'
       - '.github/workflows/*.yml'
-      - 'installer/scripts/**'
+      - 'scripts/**'
       - 'Directory.Build.props'
       - 'libraries/**'
       - 'resources/**'
@@ -27,14 +27,14 @@ on:
       - 'analyzers/**'
       - 'tooling/**'
       - 'extensions/**'
-      - 'build/scripts/**'
-      - 'samples/**'
+      - 'build/**'
+      - 'fixtures/**'
       - 'docs/DEPENDENCIES.md'
   pull_request:
     paths:
       - '.github/actions/**'
       - '.github/workflows/*.yml'
-      - 'installer/scripts/**'
+      - 'scripts/**'
       - 'Directory.Build.props'
       - 'libraries/**'
       - 'resources/**'
@@ -42,8 +42,8 @@ on:
       - 'analyzers/**'
       - 'tooling/**'
       - 'extensions/**'
-      - 'build/scripts/**'
-      - 'samples/**'
+      - 'build/**'
+      - 'fixtures/**'
       - 'docs/DEPENDENCIES.md'
   workflow_dispatch:
 
@@ -62,7 +62,7 @@ jobs:
 
       - name: Test release packaging policy
         shell: pwsh
-        run: Invoke-Pester ./installer/scripts/modules/tests -CI
+        run: Invoke-Pester ./scripts/tests -CI
 
       - name: Assert the dependency graph matches the project files
         shell: pwsh
@@ -71,12 +71,12 @@ jobs:
           # fails when the committed copy disagrees, so a reference added or removed without
           # rerunning the generator is a red pull request rather than a silently stale document.
           # Rule: .claude/rules/documentation.md, "The dependency graph is generated".
-          ./build/scripts/Update-CohesionDependencyGraph.ps1 -Check
+          ./scripts/Update-CohesionDependencyGraph.ps1 -Check
 
       - name: Assert the inventory matches the repository and CI
         shell: pwsh
         run: |
-          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
           Assert-CohesionReleaseInventory
 
       - name: Assert the release matrix still builds
@@ -84,7 +84,7 @@ jobs:
         run: |
           # The same call release.yml's prepare job makes. Emitting it here means a malformed
           # matrix is a red pull request rather than a release that dies after the tag is public.
-          $matrix = (& ./installer/scripts/Get-ReleaseMatrix.ps1)
+          $matrix = (& ./scripts/Get-ReleaseMatrix.ps1)
           $include = ($matrix | ConvertFrom-Json).include
           if ($include.Count -lt 1) {
             throw 'The release validation matrix is empty.'

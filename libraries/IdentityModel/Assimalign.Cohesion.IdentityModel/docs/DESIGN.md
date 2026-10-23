@@ -127,7 +127,7 @@ A new identity protocol (say, WS-Federation or a future protocol) is a new
    live in each owner's `shared/` folder beside `src/`; never grant another shipped
    assembly internal visibility or copy a helper body into the branch.
 3. Add the project to `$script:CohesionReleaseLibrary` in
-   `installer/scripts/modules/CohesionPackaging.psm1`; protocol packages ship as
+   `scripts/modules/CohesionPackaging.psm1`; protocol packages ship as
    ordinary NuGet packages. Only when an area framework should carry it, add a
    `CohesionFrameworkAssembly` line to that area's
    `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (the
@@ -1053,7 +1053,7 @@ a decision recorded here:
 | `[L01.01.12.06]` #604 | Token normalization alignment with the root model. |
 | `[L01.01.12.07]` #608 | JWT package to OIDC grade. |
 | `[L01.01.12.08]` #612 | SAML token package to assertion grade. |
-| `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence, and the family's `docs/Assembly/` API reference pages (deferred from earlier features so the reference is written once against the settled surface). |
+| `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence, and the family's API reference pages in `cohesion-docs` (deferred from earlier features so the reference is written once against the settled surface). |
 | `[L01.01.12.16]` #970 | Design item 25b: compact ES256 `JsonWebTokenWriter` and reusable RSA/ECDSA verifier moved below Web into the JWT package. |
 
 ## NativeAOT sample factory migration (#1465)

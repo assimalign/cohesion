@@ -118,7 +118,7 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 - In-repo projects that call a projected verb opt into the generator with
   `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`
   (tests, the AOT guard); `Sdk.Web` applications receive it through the App framework analyzer.
-  `build/IntegrationCheck` exercises every verb and overload. Analyzer placement and naming follow [analyzers.md](analyzers.md).
+  `fixtures/IntegrationCheck` exercises every verb and overload. Analyzer placement and naming follow [analyzers.md](analyzers.md).
 - **Composition model (2026-07-10 direction):** the Web area is middleware-first — fluent
   `.Use(...)` and `IWebApplicationMiddleware` over a return-value result model. The IResult
   abstraction was withdrawn before merge; request/response formatting and error handling are
@@ -135,7 +135,7 @@ hosting-family package:
 
 1. **csproj** — references per the dependency rule above; `CohesionProjectReference` only. A
    package that registers an `IHttpFeature` declares its `builder.Services.Add<Feature>` verb as a
-   component integration (above), adds itself to `build/IntegrationCheck` (reference plus a call to
+   component integration (above), adds itself to `fixtures/IntegrationCheck` (reference plus a call to
    every overload), and adds its `src/**` path to the `.github/workflows/analyzers.yml` push filter
    so a signature change rebuilds the canary.
 2. **Framework membership** — add a framework-delivered feature assembly to the
@@ -158,11 +158,10 @@ hosting-family package:
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root `Assimalign.Cohesion.slnx`
    (src, tests, docs files).
 4. **CI and inventory** — add the project to the matrix in `.github/workflows/resource-web.yml`
-   and to `installer/scripts/modules/CohesionPackaging.psm1`. Keep new entries sorted within
+   and to `scripts/modules/CohesionPackaging.psm1`. Keep new entries sorted within
    the Web block without reordering unrelated existing entries; the inventory guard is two-way.
-5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` per
-   `documentation.md`'s layout as the public API stabilizes), and a row in the project map in
-   `resources/Web/README.md`.
+5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` and a row in the project map in
+   `resources/Web/README.md`. Public API reference belongs in `cohesion-docs`.
 
 Background-work registration (`AddService`) lives on the concrete `WebApplicationBuilder`
 in `Web.Hosting`; the root builder supplies Web verbs and `Build()` without hosting types.

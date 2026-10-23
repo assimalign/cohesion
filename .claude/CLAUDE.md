@@ -14,20 +14,21 @@ The rules in `.claude/rules/` are the canonical coding standard for this repo. T
 - `sdks/` — Cohesion SDK projects; `Sdk` is the base and `Sdk.<Domain>` chain to it
 - `analyzers/` — Roslyn analyzers/codefixes/generators; target `netstandard2.0` with `IsAotCompatible=false` — the one sanctioned exception to the repo-wide TFM/AOT defaults; placement and naming follow [analyzers.md](rules/analyzers.md)
 - `assets/` — shared repo assets: the `cohesion.config` JSON schemas and `branding/` (NuGet package icon, imported from the branding repo)
-- `installer/` — WiX MSI source plus dev and release scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`, `Pack-Release.ps1`, `Get-ReleaseMatrix.ps1`, and `modules/CohesionPackaging.psm1` — the authoritative release inventory)
+- `scripts/` — all repository PowerShell entry points. Area scripts mirror their owner (`resources/Database/`, `resources/Web/`, `build/`, `sdks/`); cross-repository commands stay at the scripts root. Reusable modules live in `modules/`, Pester tests in `tests/`. `modules/CohesionPackaging.psm1` is the authoritative release inventory. See `scripts/README.md`
 - `extensions/` and `tooling/` — developer tooling and integration surfaces
-- `samples/` — the package-only SDK-consumer smoke tree, moving to the `cohesion-examples` companion repo. Executable acceptance fixtures are **not** here: each lives in a `fixtures/` folder inside the project whose tests drive it. AOT guard projects stay in their library's own `samples/`. See `.claude/rules/workflow.md` and `resource-areas.md`
+- `fixtures/` — repository-wide IntegrationCheck, ResourceGenerationCheck, and the isolated SDK-consumer smoke tree. Project-owned acceptance hosts stay in their project's `fixtures/`; AOT guards stay in their library's `samples/`. See `fixtures/README.md`
 - `docs/` — all repository-, program-, and **area**-level documentation. `docs/programs/` holds dated plans and roadmaps; `docs/resources/<Area>/` and `docs/libraries/<Area>/` mirror the repo root and hold each area's architecture record; `docs/DEPENDENCIES.md` is the generated reference graph. Area `README.md` files stay in the area; per-project `docs/` stay beside `src/`. Layout and rationale: `.claude/rules/documentation.md`
+- Public API reference pages belong in the `cohesion-docs` companion repository. Keep XML documentation in source and project `OVERVIEW.md` / `DESIGN.md` here.
 
 ## Build & test
 
 ```powershell
 dotnet build [path-to-csproj]                          # build repo or a single project
 dotnet test <project>/tests/                           # run a project's tests
-pwsh installer/scripts/Install-Local.ps1               # dev loop: pack all SDKs + frameworks into _out/packages/
-pwsh installer/scripts/Pack-Release.ps1 -Version <v>   # strict release pack into _out/release/packages/
+pwsh scripts/Install-Local.ps1               # dev loop: pack all SDKs + frameworks into _out/packages/
+pwsh scripts/Pack-Release.ps1 -Version <v>   # strict release pack into _out/release/packages/
 ```
 
 Outputs land in `_out/packages/`, `_out/release/packages/`, and `_out/dotnet/sdk/`. In a **fresh worktree**, build `build/Tasks` first — per-project builds fail with MSB4062 until the build tasks exist.
 
-Release versions publish **only** from `.github/workflows/release.yml`, triggered by a published GitHub Release tagged `v$(CohesionVersion)`. The only other publisher, `.github/workflows/ci-packages.yml`, stages a uniquely versioned CI build of every `main` push and same-repository pull request commit in GitHub Packages, never nuget.org. What ships is defined once, in `installer/scripts/modules/CohesionPackaging.psm1`; a package ships only if a per-area CI workflow already builds and tests it, enforced both ways by `Assert-CohesionReleaseInventory`. See `.claude/rules/build-system.md`.
+Release versions publish **only** from `.github/workflows/release.yml`, triggered by a published GitHub Release tagged `v$(CohesionVersion)`. The only other publisher, `.github/workflows/ci-packages.yml`, stages a uniquely versioned CI build of every `main` push and same-repository pull request commit in GitHub Packages, never nuget.org. What ships is defined once, in `scripts/modules/CohesionPackaging.psm1`; a package ships only if a per-area CI workflow already builds and tests it, enforced both ways by `Assert-CohesionReleaseInventory`. See `.claude/rules/build-system.md`.

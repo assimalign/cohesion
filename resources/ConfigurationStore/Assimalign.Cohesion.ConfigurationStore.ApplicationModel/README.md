@@ -52,4 +52,4 @@ contains no Docker or Kubernetes objects.
 
 - [Overview](docs/OVERVIEW.md)
 - [Design](docs/DESIGN.md)
-- [Public API](docs/Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)

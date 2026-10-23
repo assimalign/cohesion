@@ -14,12 +14,6 @@
 		<File Path="Assimalign.Cohesion.ApiManager/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.ApiManager/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/docs/Assembly/Assimalign.Cohesion.ApiManager/IApiManagerApplication/">
-		<File Path="Assimalign.Cohesion.ApiManager/docs/Assembly/Assimalign.Cohesion.ApiManager/IApiManagerApplication/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/docs/Assembly/Assimalign.Cohesion.ApiManager/IApiManagerApplicationBuilder/">
-		<File Path="Assimalign.Cohesion.ApiManager/docs/Assembly/Assimalign.Cohesion.ApiManager/IApiManagerApplicationBuilder/OVERVIEW.md" />
-	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager/src/">
 		<Project Path="Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
 	</Folder>
@@ -29,9 +23,6 @@
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.ApiManager.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.ApiManager.Hosting/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/Assembly/Assimalign.Cohesion.ApiManager.Hosting/ApiManagerApplication/">
-		<File Path="Assimalign.Cohesion.ApiManager.Hosting/docs/Assembly/Assimalign.Cohesion.ApiManager.Hosting/ApiManagerApplication/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.ApiManager.Hosting/src/Assimalign.Cohesion.ApiManager.Hosting.csproj" />
@@ -55,9 +46,6 @@
 	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/tests/">
 		<Project Path="Assimalign.Cohesion.ApiManager.ApplicationModel/tests/Assimalign.Cohesion.ApiManager.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Refs/">
 		<File Path="Assimalign.Cohesion.ApiManager.Refs/Directory.Build.props" />

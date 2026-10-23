@@ -12,7 +12,7 @@ eventual PR closes *every* item it resolved, not just the one you started with.
 
 Full schema, field options, the bug mechanics and the manual recipes live in
 [reference/project-schema.md](reference/project-schema.md). The reliable end-to-end path is the script
-[scripts/New-CohesionWorkItem.ps1](scripts/New-CohesionWorkItem.ps1). The Data Platform realignment that
+[scripts/New-CohesionWorkItem.ps1](../../../scripts/New-CohesionWorkItem.ps1). The Data Platform realignment that
 added categories, the Category / Tier / Program fields and the bug policy is recorded in
 [docs/programs/DATABASE_BOARD_REALIGNMENT.md](../../../docs/programs/DATABASE_BOARD_REALIGNMENT.md).
 
@@ -119,7 +119,7 @@ and name the other item `Relates to #N`. `-Parent` must be an issue **number** f
 ### Search before creating
 
 ```pwsh
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -Search "websocket bootstrap http3"
+scripts/New-CohesionWorkItem.ps1 -Search "websocket bootstrap http3"
 ```
 
 If a strong match exists, add the work to it instead. The create path also runs the check and **blocks on
@@ -133,26 +133,26 @@ prints each field with its source, and stops.
 
 ```pwsh
 # Scope-creep task under the branch's item:
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 `
+scripts/New-CohesionWorkItem.ps1 `
   -Title "Validate CONNECT authority form against RFC 9110 origin rules" `
   -Summary "Hardening discovered while wiring extended CONNECT; outside the original feature scope." `
   -Acceptance "Reject malformed authority components.","Add targeted unit tests.","NativeAOT-safe." `
   -Status "In progress"
 
 # Out-of-scope sibling, under the branch item's actual parent:
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -As feature `
+scripts/New-CohesionWorkItem.ps1 -As feature `
   -Title "Implement HTTP/1.1 informational (1xx) response support" -Wave W02 -Priority P003
 
 # Data Platform: under a category, untiered, so Wave or Priority is required:
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -Parent L03.02.02.C04 `
+scripts/New-CohesionWorkItem.ps1 -Parent L03.02.02.C04 `
   -Title "Rebuild an index online" -Priority P003
 
 # Data Platform: T2 language work names its plan family:
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -Parent L03.02.02.C01 `
+scripts/New-CohesionWorkItem.ps1 -Parent L03.02.02.C01 `
   -Title "Accept MERGE statements" -Tier T2 -Family sql-upsert
 
 # Defect in behaviour a CLOSED item delivered (-Parent is a NUMBER):
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -As bug -Parent 912 `
+scripts/New-CohesionWorkItem.ps1 -As bug -Parent 912 `
   -Title "TIMESTAMP index keys disagree with SQL equality" -Priority P002 -Category L03.02.02.C04
 ```
 
@@ -207,7 +207,7 @@ it created on this branch in a per-worktree manifest under `.git/cohesion/`; emi
 worktree**:
 
 ```pwsh
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -EmitClosesBlock
+scripts/New-CohesionWorkItem.ps1 -EmitClosesBlock
 ```
 
 ```
@@ -230,7 +230,7 @@ its sub-issues or vice versa, so list each item the PR resolves.
 ## Audit: is the board decaying?
 
 ```pwsh
-.claude/skills/cohesion-work-items/scripts/New-CohesionWorkItem.ps1 -Audit            # default -Root 1067
+scripts/New-CohesionWorkItem.ps1 -Audit            # default -Root 1067
 ```
 
 Read-only. Lists open work items directly under an epic that has categories, items under such epics missing

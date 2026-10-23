@@ -30,7 +30,7 @@ resource compiled to an `inProcessHost` unit. It is offline: member entry points
 runtime inputs are not resolved, and the state directory is not created.
 
 See [DESIGN.md](DESIGN.md) for lifecycle, restart, remapping, and NativeAOT decisions and
-[Assembly](Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/OVERVIEW.md) for the
+[API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs) for the
 public API map.
 
 Declared resource commands use the adopted host's registered control plane directly after

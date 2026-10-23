@@ -25,7 +25,7 @@ minor version and the patch plus optional prerelease suffix. The current line is
 That resolves to `10.0.0-preview.1`. Verify it without restoring or building:
 
 ```powershell
-pwsh installer/scripts/Get-CohesionVersion.ps1
+pwsh scripts/Get-CohesionVersion.ps1
 ```
 
 Do not add per-project version overrides. Release packaging may pass the resolved version as global
@@ -91,7 +91,7 @@ nuget.org, never publishes a canonical version, and never replaces a published v
 ### Version shape
 
 `Get-CohesionCiPackageVersion` in
-[`CohesionPackaging.psm1`](../installer/scripts/modules/CohesionPackaging.psm1) derives the version
+[`CohesionPackaging.psm1`](../scripts/modules/CohesionPackaging.psm1) derives the version
 from the canonical one. Appending to the canonical prerelease, as the local channel does, would be
 wrong here: `10.0.0-preview.1.ci.57` sorts **above** `10.0.0-preview.1`, so every CI build on the
 feed would outrank the release it precedes. The CI version instead extends the canonical version's
@@ -177,7 +177,7 @@ two kinds of CI version, and nothing else ever deletes from the feed:
 - **Old `main` builds.** For each base, every `main` build outside the newest **20**.
 
 **A release version is never deleted.** Selection is `Select-CohesionCiPackageVersionToPrune` in
-[`CohesionPackaging.psm1`](../installer/scripts/modules/CohesionPackaging.psm1), which considers
+[`CohesionPackaging.psm1`](../scripts/modules/CohesionPackaging.psm1), which considers
 only versions `ConvertFrom-CohesionCiPackageVersion` recognizes: the exact shapes
 `Get-CohesionCiPackageVersion` produces. A release (`10.0.0-preview.1`), stable, or local version,
 or a near miss such as `10.0.0-ci.5`, is ignored whatever else the run is asked to do, and the

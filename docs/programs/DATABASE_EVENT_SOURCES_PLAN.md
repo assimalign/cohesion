@@ -94,7 +94,7 @@ reads `BTreeIndexManagerOptions.Storage.Name` (`BTreeIndexManagerOptions.cs:17`)
 ## 3. Inventory and decision per project
 
 39 shipped projects: the 38 `resources/Database` entries of the release inventory
-(`installer/scripts/modules/CohesionPackaging.psm1:195-232`) and `Sdk.Database.Tasks`. **17 get
+(`scripts/modules/CohesionPackaging.psm1:195-232`) and `Sdk.Database.Tasks`. **17 get
 a source** (2 exist, 15 are new). The 14 non-shipped folders (12 empty placeholders: the five
 `Cache*`, `Memory`, `Documents.Client` and the five `<Model>.Security`; and the `Refs`/`Runtime`
 framework producers) compile no code of their own and get none.
@@ -538,7 +538,7 @@ cases; counts below are per configuration, with SQL tiered compilation disabled:
 | Database.Embedded | 4 | 4 |
 
 Build tasks were built in both configurations. After the last source change,
-`pwsh installer/scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` succeeded,
+`pwsh scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` succeeded,
 then Database.Testing passed against the fresh local packages. Both SQL NativeAOT harnesses
 (AotSample and Benchmarks) published in Release for win-arm64 with no IL2xxx/IL3xxx warnings;
 the native sample passed 18/18 checks. The broader managed builds still report existing
@@ -594,7 +594,7 @@ allocation probes are excluded from these totals:
 | Database.Testing | 5 / 0 / 0 | 5 / 0 / 0 |
 
 Build.Tasks passed in Debug and Release. After the last source change,
-`pwsh installer/scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` completed,
+`pwsh scripts/Install-Local.ps1 -Configuration Release -SkipLibraries` completed,
 then Database.Testing passed against those fresh packages in both configurations. Both SQL
 NativeAOT harnesses (AotSample and Benchmarks) published for `win-arm64` in Release with no
 IL2xxx/IL3xxx warnings; the native sample passed all 18 checks in process and over the wire.

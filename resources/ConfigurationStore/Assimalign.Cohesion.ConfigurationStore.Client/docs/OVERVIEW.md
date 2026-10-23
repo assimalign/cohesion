@@ -31,7 +31,7 @@ to HTTP or HTTPS before creating the internal transport client.
 
 - [Package README](../README.md)
 - [Design](./DESIGN.md)
-- [Assembly reference](./Assembly/Assimalign.Cohesion.ConfigurationStore.Client/OVERVIEW.md)
+- [API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs)
 
 
 ## Declarative commands

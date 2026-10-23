@@ -236,7 +236,7 @@ feed at `_out/packages/`. The full chain (SDK resolution → framework reference
 → targeting pack → runtime pack) is exercised end-to-end with a single command:
 
 ```powershell
-pwsh installer\scripts\Install-Local.ps1
+pwsh scripts\Install-Local.ps1
 ```
 
 What that runs:

@@ -10,6 +10,25 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 
 public sealed class SdkPinValidationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sdk] - consumer SDK pins do not require repository Cohesion pins")]
+    public void CreateMatchingSdkPins_WithRepositorySdkFamilies_ShouldPinPublicSdks()
+    {
+        // Act
+        Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
+
+        // Assert
+        pins.Count.ShouldBe(20);
+        pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk");
+        pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Web");
+        pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Database");
+        pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Gateway");
+        pins.Keys.ShouldNotContain("Assimalign.Cohesion.Sdk.ApplicationModel");
+        foreach (string version in pins.Values)
+        {
+            version.ShouldBe(ConsumerWorkspace.SdkPackageVersion);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk] - disagreeing Cohesion SDK pins report COHSDK002 and corrected pins pass")]
     public async Task Restore_WithDisagreeingThenCorrectedPins_ReportsCOHSDK002ThenBuildSucceeds()
     {
