@@ -142,7 +142,7 @@ internal sealed partial class SqlPlanExecutor
     // A failed try releases only new grants, waits, and rebuilds the live graph. Prior
     // transaction/row grants remain protected and use ordinary deadlock detection.
     private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true)
+        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false)
     {
         var references = statement.References;
         incoming &= !references.IncomingLocks.Contains(table.ObjectId);
@@ -192,6 +192,7 @@ internal sealed partial class SqlPlanExecutor
             if (acquired) { acquired = locks.TryAcquire(owner, LockResource.Object(table.ObjectId), LockMode.IntentExclusive); }
             if (!acquired)
             {
+                if (cascade) { throw new SqlCascadeLockRetry(LockResource.Object(blocked), mode); }
                 locks.ReleaseSince(mark);
                 // Waiting owns no new table grants; completion is only a rendezvous.
                 // Reacquire the entire graph because publication can precede the wakeup.
@@ -246,7 +247,7 @@ internal sealed partial class SqlPlanExecutor
     /// </param>
     /// <exception cref="TransactionAbortedException">A matched parent version was removed by a concurrently committed transaction.</exception>
     private async ValueTask AcquireParentRowLocksAsync(List<SqlParentReference> references, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool validate = true)
+        CancellationToken cancellationToken, bool validate = true, bool cascade = false)
     {
         if (references.Count == 0)
         {
@@ -266,8 +267,8 @@ internal sealed partial class SqlPlanExecutor
             }
 
             previous = (reference.Parent.ObjectId, reference.EntryId);
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+            await AcquirePreparationLockAsync(statement,
+                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cascade, cancellationToken).ConfigureAwait(false);
 
             if (validate)
             {
@@ -780,7 +781,7 @@ internal sealed partial class SqlPlanExecutor
             return null;
         }
 
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
         // transaction's begin; a target of the statement itself was found through that snapshot.
@@ -792,7 +793,7 @@ internal sealed partial class SqlPlanExecutor
         if (scannedTables.Add(table.ObjectId))
         {
             EnsureCurrentDefinition(table);
-            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
         // Deleting the row releases every reference it holds. The edge it was
@@ -1019,7 +1020,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var group in deletions.GroupBy(deletion => deletion.Table.ObjectId).OrderBy(group => group.Key))
         {
-            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken).ConfigureAwait(false);
+            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken, cascade: true).ConfigureAwait(false);
             var hashes = new List<ulong>();
             var indexes = GetLiveIndexes(group.First().Table, statement);
             foreach (var row in group)
@@ -1027,7 +1028,7 @@ internal sealed partial class SqlPlanExecutor
                 CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
             }
 
-            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken).ConfigureAwait(false);
+            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }
     }
 

@@ -332,3 +332,12 @@ copies report the existing corruption code with page and slot. Direct catalog AP
 their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
 16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
 adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Cascading DELETE preparation (#1420)
+
+A cascade and its SET NULL/DEFAULT actions try all pre-apply locks. Contention releases new
+attempt grants, waits normally, retains the waited grant and rebuilds the entire unapplied
+closure. Prior transaction grants/upgrades survive. An unapplied failure releases all new
+statement grants; offline and started-apply ownership remain protected. Fixed snapshots keep
+first-updater-wins checks. The shared manager repairs avoidable queue cycles before choosing
+a hard-deadlock victim. Public APIs and wire messages are unchanged.

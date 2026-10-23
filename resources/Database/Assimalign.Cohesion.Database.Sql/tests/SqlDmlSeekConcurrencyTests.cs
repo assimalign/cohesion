@@ -66,7 +66,9 @@ public sealed class SqlDmlSeekConcurrencyTests
                     (await pending).AffectedCount.ShouldBe(1);
                     var metrics = contender.LastStatementMetrics.ShouldNotBeNull();
                     metrics.AccessPath.ShouldStartWith("seek:");
-                    metrics.RecordsExamined.ShouldBe(1);
+                    // DELETE restarts its unapplied seek after the one refused row lock (#1420).
+                    // UPDATE keeps its original materialized target; both counts stay exact.
+                    metrics.RecordsExamined.ShouldBe(delete ? 2 : 1);
                     if (outcome == 2) { await transaction.RollbackAsync(timeout.Token); }
                     else { await contender.DisposeAsync(); }
                 }

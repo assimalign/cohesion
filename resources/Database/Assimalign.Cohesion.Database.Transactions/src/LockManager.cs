@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <summary>
 /// Grants and releases hierarchical locks for write-write conflict control: a lock table keyed
 /// by <see cref="LockResource"/> with a mode-compatibility matrix, a FIFO queue per resource,
-/// and wait-for-graph deadlock detection that aborts the requester whose wait would close a cycle.
+/// and wait-for-graph detection that repairs soft queue cycles before choosing a hard-cycle victim.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// transaction sequences and are released as a set at commit or rollback. Before applying any
 /// writes, a statement may use <see cref="MarkStatement"/> and <see cref="ReleaseSince"/> to
 /// release only its new resources and retry arbitration. A request whose wait
-/// would close a cycle is chosen as the deadlock victim and fails with
+/// would close an unavoidable held-lock cycle is chosen as the victim and fails with
 /// <see cref="TransactionDeadlockException"/>.
 /// </para>
 /// <para>
@@ -40,8 +40,8 @@ namespace Assimalign.Cohesion.Database.Transactions;
 /// <b>Deadlock detection (#1390).</b> The wait-for graph is read from the table each time a
 /// request queues: the requester waits for every owner holding a mode its request conflicts
 /// with, and for the owner of every conflicting request queued ahead of it; the search follows
-/// each of those owners' own queued requests the same way. A cycle back to the requester makes
-/// it the victim. A grant can add an edge too, from a request queued on the resource to the
+/// each of those owners' own queued requests the same way. A cycle first tries queue
+/// reordering; a hard held-lock cycle makes the requester the victim. A grant can add an edge too, from a request queued on the resource to the
 /// owner granted it, but with the queue's places that request already waits for the owner, so
 /// no grant closes a cycle; a grant to an owner with a request queued still searches from it,
 /// and a request found on a cycle would fail as the victim. Every wait-for edge between
@@ -388,8 +388,8 @@ public sealed class LockManager
             else
             {
                 // Queue the request at its place, then look for a cycle through it in the table as
-                // it stands: one means granting can never happen without an abort, and the
-                // requester is the victim. Every edge the request added starts or ends at its
+                // it stands. First repair reversible queue edges; only an unavoidable
+                // held-lock cycle needs a victim. Every new edge starts or ends at its
                 // owner, so the search from the owner sees every cycle it closed. Taking it off
                 // again restores the queue as it was, so it unblocks nobody.
                 waiter = new Waiter(this, owner.Value, mode, entry, cancellationToken);
@@ -397,9 +397,16 @@ public sealed class LockManager
 
                 if (ClosesCycleLocked(owner.Value))
                 {
-                    DequeueLocked(waiter);
-                    RemoveIfUnusedLocked(entry);
-                    deadlocked = true;
+                    if (TryReorderQueuesLocked())
+                    {
+                        WakeScheduledLocked(ref granted, ref victims);
+                    }
+                    else
+                    {
+                        DequeueLocked(waiter);
+                        RemoveIfUnusedLocked(entry);
+                        deadlocked = true;
+                    }
                 }
             }
         }
@@ -418,6 +425,11 @@ public sealed class LockManager
             TransactionEventSource.Log.DeadlockDetected(_database, owner, resource, mode);
             throw Deadlock(owner, resource, mode);
         }
+
+        // A soft-cycle repair may have granted existing waiters, including this one.
+        // Notify outside _sync, as in every other grant path.
+        CompleteGranted(granted);
+        FailDeadlocked(victims);
 
         // A wait already costs a queued waiter and a registration, so its start is timed
         // whether or not anyone listens (plan D5 (b)): a listener that attaches during a long
@@ -1110,8 +1122,10 @@ public sealed class LockManager
             if (CanGrantQueuedLocked(entry, waiter, ahead))
             {
                 // Takes the request off the queue, so the next one is at the same index.
+                int orderVersion = entry.OrderVersion;
                 GrantLocked(entry, waiter.Owner, waiter.Mode, waiter, ref victims);
                 (granted ??= new()).Add(waiter);
+                if (entry.OrderVersion != orderVersion) { i = 0; ahead = 0; }
             }
             else
             {
@@ -1154,6 +1168,7 @@ public sealed class LockManager
 
             if (ReachesLocked(owner))
             {
+                if (TryReorderQueuesLocked()) { return; }
                 DequeueLocked(waiter);
                 LeftLocked(waiter.Entry);
                 (victims ??= new()).Add(waiter);
@@ -1172,8 +1187,8 @@ public sealed class LockManager
     /// (<see cref="CanGrantQueuedLocked"/>). PostgreSQL calls the second kind a soft edge and, before it
     /// aborts anyone, tries to rearrange the queue so that no cycle is left
     /// (<c>src/backend/storage/lmgr/deadlock.c:624-768</c>, <c>TopoSort</c>). This lock manager
-    /// follows it like any other edge: under its grant rule the request does wait for that owner,
-    /// and a cycle through it aborts the requester, as every cycle does.
+    /// first tries consistent queue repair when a cycle is found; a hard held-lock
+    /// cycle still aborts the requester. Ordinary acyclic queues preserve FIFO.
     /// </remarks>
     private bool ClosesCycleLocked(ulong owner)
     {
@@ -1227,6 +1242,119 @@ public sealed class LockManager
             frontier.Clear();
             visited.Clear();
         }
+    }
+
+    // Called only after finding a cycle. Held-lock edges cannot be changed; queued
+    // edges can. Build an owner DAG from hard edges, then retain FIFO edges greedily
+    // whenever they do not close a cycle. A stable topological owner order supplies
+    // consistent queue orders across every resource (one owner may wait on several).
+    // No live queue changes until hard-edge acyclicity has been proved.
+    private bool TryReorderQueuesLocked()
+    {
+        var blockers = new Dictionary<ulong, HashSet<ulong>>();
+        foreach (var requests in _waiting.Values)
+        {
+            foreach (var waiter in requests)
+            {
+                if (!blockers.TryGetValue(waiter.Owner, out var dependencies))
+                {
+                    dependencies = new();
+                    blockers.Add(waiter.Owner, dependencies);
+                }
+                foreach (var (holder, held) in waiter.Entry.Granted)
+                {
+                    if (holder != waiter.Owner && Conflicts(held.Modes, waiter.Mode))
+                    {
+                        dependencies.Add(holder);
+                        if (!blockers.ContainsKey(holder)) { blockers.Add(holder, new()); }
+                    }
+                }
+            }
+        }
+        if (OrderOwners(blockers) is null) { return false; }
+
+        foreach (var entry in _table.Values)
+        {
+            var queue = entry.Waiters;
+            for (int later = 1; later < queue.Count; later++)
+            {
+                var waiting = queue[later];
+                var dependencies = blockers[waiting.Owner];
+                for (int earlier = 0; earlier < later; earlier++)
+                {
+                    var ahead = queue[earlier];
+                    if (ahead.Owner == waiting.Owner || !Conflicts(ahead.Mode, waiting.Mode) ||
+                        dependencies.Contains(ahead.Owner)) { continue; }
+                    if (!GraphReaches(blockers, ahead.Owner, waiting.Owner))
+                    {
+                        dependencies.Add(ahead.Owner);
+                    }
+                }
+            }
+        }
+        var order = OrderOwners(blockers)!;
+        foreach (var entry in _table.Values)
+        {
+            var queue = entry.Waiters;
+            bool changed = false;
+            // Stable insertion sort keeps each owner's own requests in original order.
+            for (int index = 1; index < queue.Count; index++)
+            {
+                var waiter = queue[index];
+                int place = index;
+                while (place > 0 && order[queue[place - 1].Owner] > order[waiter.Owner])
+                {
+                    queue[place] = queue[place - 1];
+                    place--;
+                }
+                if (place != index) { queue[place] = waiter; changed = true; }
+            }
+            if (changed) { entry.OrderVersion++; ScheduleWakeLocked(entry); }
+        }
+        return true;
+    }
+
+    private static Dictionary<ulong, int>? OrderOwners(Dictionary<ulong, HashSet<ulong>> blockers)
+    {
+        var remaining = new Dictionary<ulong, int>(blockers.Count);
+        var ready = new Queue<ulong>();
+        foreach (var (owner, dependencies) in blockers)
+        {
+            remaining.Add(owner, dependencies.Count);
+            if (dependencies.Count == 0) { ready.Enqueue(owner); }
+        }
+        var order = new Dictionary<ulong, int>(blockers.Count);
+        while (ready.TryDequeue(out ulong resolved))
+        {
+            order.Add(resolved, order.Count);
+            foreach (var (owner, dependencies) in blockers)
+            {
+                if (dependencies.Contains(resolved) && --remaining[owner] == 0)
+                {
+                    ready.Enqueue(owner);
+                }
+            }
+        }
+        return order.Count == blockers.Count ? order : null;
+    }
+
+    private bool GraphReaches(Dictionary<ulong, HashSet<ulong>> blockers, ulong start, ulong target)
+    {
+        var frontier = _searchFrontier;
+        var visited = _searchVisited;
+        frontier.Clear(); visited.Clear();
+        frontier.Push(start);
+        try
+        {
+            while (frontier.TryPop(out ulong owner))
+            {
+                if (owner == target) { return true; }
+                if (!visited.Add(owner)) { continue; }
+                foreach (ulong dependency in blockers[owner]) { frontier.Push(dependency); }
+            }
+            return false;
+        }
+        finally { frontier.Clear(); visited.Clear(); }
     }
 
     // Pushes the owners a queued request waits for, its edges: those whose grants conflict with
@@ -1463,6 +1591,8 @@ public sealed class LockManager
 
         // The queued requests, in the order they queued.
         public List<Waiter> Waiters { get; } = new();
+
+        public int OrderVersion { get; set; }
 
         // Whether the entry is on the wake list (WakeScheduledLocked).
         public bool WakeScheduled { get; set; }

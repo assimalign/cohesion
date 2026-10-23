@@ -3802,8 +3802,8 @@ description + exported registrations), the engine binds them.
   collision only over-locks, and the class ordering keeps acquisition globally
   consistent. **The first deliberate exception is the cascade walk**, which locks
   rows in discovery order because the closure it is discovering is what
-  determines the lock set; see "Referential enforcement locks parent rows" under
-  constraints for why that trade was taken and what it costs. The second is ON CONFLICT: proposal unique keys precede nonblocking row arbitration, and a contended row releases new grants before waiting and restarting; see INSERT ... ON CONFLICT execution above.
+  determines the lock set. D2 / #1420 makes that whole unapplied preparation release new
+  grants before waiting and restart afterward; see "Cascade lock retries" below. The second is ON CONFLICT: proposal unique keys precede nonblocking row arbitration, and a contended row releases new grants before waiting and restarting; see INSERT ... ON CONFLICT execution above.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model
@@ -7340,3 +7340,89 @@ its location-bearing corruption cause. The existing marker probe still distingui
 older/newer format refusals from a damaged marker-free/current-format catalog. Format tests
 require this common corruption classification, retained causes and unchanged files; the
 six superseded exception-type assertions are strengthened to this contract, not bypassed.
+
+## Cascade lock retries (#1420, D2)
+
+DELETE prepares its complete cascade and SET NULL/DEFAULT work before the coordinator's
+physical apply. Every preparation lock participates: table/adjacent intents, directly targeted
+and discovered rows, released-reference parent rows, and unique keys for deletions and
+replacement versions. Each is tried without waiting. A refusal releases every resource first
+granted after the current retry mark, waits through the normal lock manager, then takes a new
+mark retaining the waited grant. All completed wait grants remain retained across later
+back-offs, preventing two contenders from handing the same grant back and forth (#1668).
+The complete closure is reconstructed, including its targets, reference graph, cached live
+indexes and lock-coverage claims. No deletion, version, index mutation or RETURNING projection
+from the abandoned attempt has been applied. The private retry signal never becomes a user
+diagnostic. Normal physical helpers only re-grant already owned locks and cannot use that signal.
+
+The initial delete-preparation mark is immutable, as in #1668 arbitration. Resources already held
+before preparation, and their upgrades, survive that mark along with earlier transaction work. Any preparation failure releases every grant newer than the initial mark,
+including completed wait grants, while prior statements and their upgrades remain protected.
+Caller cancellation retains its exception/token; it now gives back new unapplied cascade grants,
+as upsert preparation already does. An offline owner retains all locks, and a started physical
+apply keeps its existing rollback/ownership contract. Statement timeouts span every retry;
+individual lock waits retain their existing lock-timeout budgets. No key-share mode is added.
+Locks retained from earlier statements or completed waits can still form real hard deadlocks,
+which the shared manager resolves; soft queue cycles first attempt reordering.
+
+This is the existing #1668 SQL pattern (OnConflict.WaitForUpsertRowAsync) applied to the D2
+pre-apply cascade walk. PostgreSQL first repairs soft queue edges
+(`src/backend/storage/lmgr/deadlock.c:310–370,860–996`), while its referential enforcement uses
+FOR KEY SHARE (`src/backend/utils/adt/ri_triggers.c:563–583`, RI_FKey_check). Cohesion keeps its current
+modes and adopts the approved retry alternative. No reference code copied.
+
+After a wait the fixed statement snapshot is unchanged. A newer committed child still fails
+first-updater-wins. If a child candidate was physically undone while waiting, the restart
+finds the current closure instead of reading its freed slot; an old direct parent can then
+report its own committed-replacement conflict. The #1390 rollback race now pre-holds its child
+lock before the first failing statement, because an unwritten failure no longer retains a new
+child grant. It requires the actual second wait and retains the conflict and data assertions.
+
+No field is added to SqlStatementContext or SqlStatementMetrics. The SELECT allocation contract,
+public APIs, diagnostics, format, statement spans and wire messages are unchanged. The retry
+suite exercises CASCADE/SET NULL/SET DEFAULT at row and unique-key refusal, shared-parent and
+adjacent-table refusals, retained grants across two waits, cancellation cleanup, and actual
+IX ownership during result preparation after a restart. Existing snapshot, depth, fan-out,
+constraint and concurrent-DDL suites remain required.
+
+## #1420 measurements
+
+Release Windows ARM64 / .NET 10.0.13, tiering and background GC disabled in the standalone
+measurement host, shared machine. The committed #1390 probe runs one warm-up and twelve
+interleaved five-second samples per shape on each version. Precise active durations normalize
+commits/victims; setup-only reflection invokes the existing test helper outside its worker hot
+loops. These are development-scale measurements, not rankings or per-sample timing assertions.
+The before DLLs are frozen, and loaded SQL/Transactions/Storage hashes are checked on the fixed
+operation probe. No unexpected failure or wait of ten seconds was recorded in either phase.
+
+| Shape | Median commits/s before -> after | Median victims/s before -> after | Median victims / 1,000 commits before -> after | After samples above before commit-rate median |
+| --- | --- | --- | --- | --- |
+| 6 parents, 3 deleters, 5 writers | 899.412 -> 1440.178 | 17.825 -> 23.169 | 20.234 -> 16.419 | 12/12 |
+| 1 parent, 1 deleter, 14 explicit writers | 246.993 -> 355.118 | 28.369 -> 27.155 | 115.068 -> 77.325 | 12/12 |
+
+Absolute default-shape victims increase from 1,095 to 1,401 while more work commits; its parent
+deletes increase from 8,261 to 12,693. Hot-shape victims decrease from 1,752 to 1,613 and parent
+deletes increase from zero to 24, but only four of twelve samples make parent-delete progress.
+Its median parent-delete rate remains zero. D2 therefore improves this measured shape without
+guaranteeing uniform cascade progress. Earlier grants and retained wait grants can still form
+hard cycles; this result does not authorize key-share modes or a different victim policy.
+
+A separate fixed operation deletes one parent with 32 children and rolls back outside the
+measured interval. After one warm-up, twelve batches of 100 deletes measure median
+80,958.5 -> 81,858.5 ns/delete and 108,032 -> 108,056 B/delete. Four of twelve final duration
+samples are at or below the old median. Allocation is the precise process-wide GC counter,
+including engine workers; periodic worker samples are visible in the raw data. Every batch
+validates the restored child ids/parent values outside timing. Digest FBF326266BA187D1 is
+unchanged. The additional 24 median bytes are on DELETE; no context/metrics field was added
+to the SELECT path. Stored-query allocation remains a required Release guard.
+
+Raw measurements/hashes/harness: temporary wave11-1420-probe-before/after.jsonl,
+wave11-1420-delete-before-v2/after.csv, wave11-1420-delete-final-hashes.json and
+Wave11CascadeProbe/Wave11DeleteProbe. The initial delete baseline without the final payload
+verification is retained separately; the figures above use the final matching harness on both
+versions. The local Windows results do not replace official quiet-host profiling.
+
+The single-row seek/lock-race guard counts exactly two examined rows for DELETE after one
+refused row lock (the original seek and retry), and exactly one for UPDATE. Uncontended seek
+counts remain unchanged; no scan bound is widened (#1420).
+

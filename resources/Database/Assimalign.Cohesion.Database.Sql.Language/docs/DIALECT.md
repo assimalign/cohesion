@@ -3551,3 +3551,16 @@ diagnostic code, wire contract or on-disk format.
 A malformed confirmed stored record fails execution with the existing corruption diagnostic
 and physical page/slot context. It is not a missing row, document or graph element. D1 confirms
 the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid data retains the same language results.
+
+## Cascading DELETE lock retries (#1420)
+
+DELETE's cascade, SET NULL and SET DEFAULT actions are prepared before physical mutation.
+A refused row, table-intent, parent-reference or unique-key lock releases new attempt grants,
+waits, keeps that waited grant and restarts preparation. Earlier transaction grants and their
+upgrades remain held. A failed unapplied preparation, including caller cancellation, releases
+its new statement grants; an offline owner or started physical apply keeps its existing lock
+ownership. The statement deadline spans all retries. Fixed snapshots and first-updater-wins
+remain enforced, so rebuilding an undone child candidate can instead expose the direct parent's
+committed-replacement conflict. Soft queue cycles may be reordered without a victim; genuine
+held-lock cycles remain retryable deadlocks. No new SQL syntax, key-share mode or wire error is
+introduced. Results are returned only after the complete statement succeeds.

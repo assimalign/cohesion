@@ -614,16 +614,38 @@ engine (298,671 commits, 5,294 deadlock victims).
 Now the lock manager keeps only each owner's queued requests, and the search reads the edges from
 the table as it stands. The requester waits for every owner that holds, in a conflicting mode,
 a resource one of its queued requests is for, and for the owner of every conflicting request
-queued ahead of it ("Grants respect the queue" below). The search follows those owners' queued requests the
-same way and makes the requester the victim if it comes back to it. PostgreSQL's detector also
-reads its graph from the lock table each time it runs (`CheckDeadLock` takes every partition
-lock, `src/backend/storage/lmgr/proc.c:1880-1891`): hard edges to holders (`deadlock.c:561-583`)
-and soft edges to requests queued ahead with a conflicting mode (`deadlock.c:624-768`). This
-detector follows a soft edge like a hard one. PostgreSQL first tries to rearrange the queue so
-that no cycle is left (`TopoSort`) and aborts only when it cannot; here a cycle through a queued
-request aborts the requester as every cycle does, a retryable failure where PostgreSQL might
-have reordered the queue instead (`LockManagerTests`, "A cycle through a request queued behind
-another owner's request").
+queued ahead of it ("Grants respect the queue" below). The search follows every queued
+request of each owner. A cycle first tries queue repair (#1420); an unavoidable held-lock
+cycle still chooses the requester as victim. PostgreSQL likewise reads its current lock table
+(`src/backend/storage/lmgr/proc.c:1880–1891`), distinguishes hard holder edges from soft queue
+edges (`deadlock.c:561–583,624–768`), and tries queue reorderings before aborting.
+
+**Soft-cycle repair (#1420).** Under `_sync`, construct a dependency graph containing every
+conflicting held-lock edge of every queued request. A cycle in those hard edges cannot be
+repaired by queue movement: return without changing any live queue. Otherwise retain existing
+conflicting FIFO edges greedily, adding one only when it cannot close a cycle in this graph.
+Stable topological owner ranks then give consistent orders to all affected resource queues,
+including owners waiting on multiple resources. An omitted edge already has the reverse path,
+so the resulting order reverses the dependency that could not coexist with retained edges.
+Every final hard or queue edge follows the same acyclic rank order. Queues without a detected
+cycle retain their ordinary FIFO/holder placement rules.
+
+This follows PostgreSQL's queue-reordering behaviour (`src/backend/storage/lmgr/deadlock.c:310–370,860–996`)
+without copying its backtracking search. The polynomial graph construction preserves a maximal
+consistent set of FIFO edges, rather than searching for a minimum number of moved waiters.
+No new grant is permitted against an incompatible holder. Queue moves keep the original waiter,
+completion, cancellation and timeout registrations; notification remains outside `_sync`.
+A queue's private order version restarts a wake scan if grant-time repair reordered it.
+A hard-cycle failure leaves all queue orders intact. Temporary graph storage is allocated only
+after a detected cycle; no hot-path process-wide atomic or public API is added.
+
+`LockQueueReorderTests` checks repair across the five modes, multiple queued requests per owner,
+hard-cycle refusal without partial movement, and cancellation after dequeue/before notification.
+The prior #1390 test that required a soft-cycle victim now requires repaired completion while
+retaining actual held-lock blockers. Hard-deadlock tests remain. Neo4j verifies actual held-lock
+cycles before selecting a victim (`community/lock/src/main/java/org/neo4j/kernel/impl/locking/forseti/ForsetiClient.java:829–860`);
+RavenDB instead queues writes on a merger thread (`src/Raven.Server/Documents/TransactionMerger/AbstractTransactionOperationsMerger.cs:101–134`).
+Those ownership models were consulted; neither is copied into this shared lock manager.
 
 A grant can add edges as well, from each request queued on the resource whose mode conflicts
 with the one granted and with nothing the grantee held before, to the grantee. A queued request
@@ -727,7 +749,7 @@ index range updates; KeyValuePair writers on six hot keys), 90 s each with the q
 wait reach 1 s (the longest 523 ms) and no error but the conflicts each workload provokes; the
 coordinator's refusal of a wait inside a statement apply never fired.
 
-With one hot parent row the cascade starved on `a60f850c` by waiting, and starves with the queue
+Before #1420, with one hot parent row the cascade starved on `a60f850c` by waiting, and starved with the queue
 as the deadlock victim, with no long wait. The cascade's queued exclusive request now holds back
 the child writers' shared requests on the parent row, and the writers queued behind it hold
 child rows from their earlier statements. When the cascade is granted the parent row and asks
@@ -743,7 +765,9 @@ update or delete has reached the row, so it passes a deleter that is still waiti
 kept because it bounds every wait (the #1390 gate) and is the rule of PostgreSQL's,
 SQL Server's and InnoDB's lock managers; letting a parent row's shared requests pass a queued
 exclusive one again, a victim rule that spares the cascade, or a cascade lock order without the
-cycle is an owner decision, and the shapes above are how to measure it.
+cycle required an owner decision. D2 chooses the unwritten cascade release/wait/retain/restart
+protocol, using #1668 statement marks, while preserving queue fairness outside soft-cycle repair.
+The shapes above remain the before/after measurement workloads.
 
 **A wait still queued at the threshold is reported (#1390).** `SlowLockWait` is written as a wait
 ends, so a wait that never ended was never reported. A request that queues while a listener takes
@@ -1496,3 +1520,40 @@ physical transaction. The existing storage read confirms both bytes and absence 
 all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
 timeout and existing storage exception identities are not caught by decoder-only wrappers.
 No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+## #1420 measurements
+
+Release Windows ARM64 / .NET 10.0.13, tiering and background GC disabled in the standalone
+measurement host, shared machine. The committed #1390 probe runs one warm-up and twelve
+interleaved five-second samples per shape on each version. Precise active durations normalize
+commits/victims; setup-only reflection invokes the existing test helper outside its worker hot
+loops. These are development-scale measurements, not rankings or per-sample timing assertions.
+The before DLLs are frozen, and loaded SQL/Transactions/Storage hashes are checked on the fixed
+operation probe. No unexpected failure or wait of ten seconds was recorded in either phase.
+
+| Shape | Median commits/s before -> after | Median victims/s before -> after | Median victims / 1,000 commits before -> after | After samples above before commit-rate median |
+| --- | --- | --- | --- | --- |
+| 6 parents, 3 deleters, 5 writers | 899.412 -> 1440.178 | 17.825 -> 23.169 | 20.234 -> 16.419 | 12/12 |
+| 1 parent, 1 deleter, 14 explicit writers | 246.993 -> 355.118 | 28.369 -> 27.155 | 115.068 -> 77.325 | 12/12 |
+
+Absolute default-shape victims increase from 1,095 to 1,401 while more work commits; its parent
+deletes increase from 8,261 to 12,693. Hot-shape victims decrease from 1,752 to 1,613 and parent
+deletes increase from zero to 24, but only four of twelve samples make parent-delete progress.
+Its median parent-delete rate remains zero. D2 therefore improves this measured shape without
+guaranteeing uniform cascade progress. Earlier grants and retained wait grants can still form
+hard cycles; this result does not authorize key-share modes or a different victim policy.
+
+A separate fixed operation deletes one parent with 32 children and rolls back outside the
+measured interval. After one warm-up, twelve batches of 100 deletes measure median
+80,958.5 -> 81,858.5 ns/delete and 108,032 -> 108,056 B/delete. Four of twelve final duration
+samples are at or below the old median. Allocation is the precise process-wide GC counter,
+including engine workers; periodic worker samples are visible in the raw data. Every batch
+validates the restored child ids/parent values outside timing. Digest FBF326266BA187D1 is
+unchanged. The additional 24 median bytes are on DELETE; no context/metrics field was added
+to the SELECT path. Stored-query allocation remains a required Release guard.
+
+Raw measurements/hashes/harness: temporary wave11-1420-probe-before/after.jsonl,
+wave11-1420-delete-before-v2/after.csv, wave11-1420-delete-final-hashes.json and
+Wave11CascadeProbe/Wave11DeleteProbe. The initial delete baseline without the final payload
+verification is retained separately; the figures above use the final matching harness on both
+versions. The local Windows results do not replace official quiet-host profiling.

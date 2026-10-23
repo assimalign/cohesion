@@ -11,7 +11,7 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `LockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
   (sealed; `LockManager.Create` for a standalone table); `LockStatementMark` preserves earlier
-  grants while an unwritten statement releases its new locks and retries arbitration
+  grants while unwritten upserts and cascades release new locks and retry preparation
 - the transaction log — the WAL binding, an internal seam since #1257 (storage owns the physical journal)
 - `VersionStore` — the version-chain base; its two leaves, `RecordSpaceVersionStore` and the
   in-memory store (`VersionStore.CreateInMemory`), both live here
@@ -89,3 +89,11 @@ copies report the existing corruption code with page and slot. Direct catalog AP
 their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
 16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
 adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Soft deadlocks (#1420)
+
+Detected cycles first try consistent resource-queue reordering. The repair preserves actual
+holder conflicts and original waiter cancellation/timeout ownership; a hard held-lock cycle
+still chooses a victim. Ordinary queues retain FIFO/holder placement. The SQL cascade uses the
+existing statement marks to release new grants before a wait, retain the waited grant and
+restart its unapplied closure. No key-share mode or public locking signature is added.

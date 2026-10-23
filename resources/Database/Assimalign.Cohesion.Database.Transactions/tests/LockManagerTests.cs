@@ -519,17 +519,13 @@ public class LockManagerTests
     }
 
     /// <summary>
-    /// A cycle through a request queued behind another owner's request (#1390 review): the request
-    /// waits for the owner of the one ahead, which is a wait-for edge like a conflicting grant, so
-    /// the detector follows it. PostgreSQL calls it a soft edge and first tries to rearrange the
-    /// queue to break the cycle (<c>src/backend/storage/lmgr/deadlock.c:624-768</c>, <c>TopoSort</c>);
-    /// this lock manager aborts the requester, as for every other cycle.
+    /// A cycle with a queued edge can be resolved without a victim (#1420): queue the
+    /// compatible shared request ahead of the exclusive request, then retain every
+    /// real held-lock dependency until its owner releases.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A cycle through a request queued behind another owner's request aborts the requester (#1390)")]
-    public async Task AcquireAsync_CycleThroughARequestQueuedBehindAnother_ShouldAbortTheRequester()
+    [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Locks: A soft cycle reorders the queue while held-lock blockers remain (#1420)")]
+    public async Task AcquireAsync_CycleThroughARequestQueuedBehindAnother_ShouldReorderTheCompatibleWaiter()
     {
-        // Arrange: T1 holds R shared; T2 holds P and waits for R exclusively; T3 holds Q and queues
-        // for R shared behind T2's request.
         var locks = LockManager.Create();
         var resourceR = LockResource.Entry(14, 1);
         var resourceP = LockResource.Entry(14, 2);
@@ -540,21 +536,26 @@ public class LockManagerTests
         var secondWaits = locks.AcquireAsync(_t2, resourceR, LockMode.Exclusive).AsTask();
         var thirdWaits = locks.AcquireAsync(_t3, resourceR, LockMode.Shared).AsTask();
         bool thirdQueued = !thirdWaits.IsCompleted;
-
-        // Act: T1 requesting Q closes T1 -> T3 -> T2 -> T1, whose edge from T3 is the queue's.
-        var closing = locks.AcquireAsync(_t1, resourceQ, LockMode.Exclusive).AsTask();
-        var victim = await Should.ThrowAsync<TransactionDeadlockException>(async () => await closing.WaitAsync(TimeSpan.FromSeconds(5)));
-        locks.ReleaseAll(_t1);
-        await secondWaits.WaitAsync(TimeSpan.FromSeconds(5));
-        bool thirdStillWaiting = !thirdWaits.IsCompleted;
-        locks.ReleaseAll(_t2);
-        await thirdWaits.WaitAsync(TimeSpan.FromSeconds(5));
-        locks.ReleaseAll(_t3);
-
-        // Assert
-        thirdQueued.ShouldBeTrue();
-        victim.Message.ShouldStartWith($"Transaction {_t1} was chosen as the deadlock victim requesting {LockMode.Exclusive} on {resourceQ}", Case.Sensitive);
-        thirdStillWaiting.ShouldBeTrue();
+        Task? closing = null;
+        try
+        {
+            closing = locks.AcquireAsync(_t1, resourceQ, LockMode.Exclusive).AsTask();
+            // Thirty seconds is only a hang guard; grants decide each assertion.
+            await thirdWaits.WaitAsync(TimeSpan.FromSeconds(30));
+            thirdQueued.ShouldBeTrue();
+            closing.IsCompleted.ShouldBeFalse();
+            secondWaits.IsCompleted.ShouldBeFalse();
+            locks.ReleaseAll(_t3);
+            await closing.WaitAsync(TimeSpan.FromSeconds(30));
+            secondWaits.IsCompleted.ShouldBeFalse();
+            locks.ReleaseAll(_t1);
+            await secondWaits.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally
+        {
+            locks.ReleaseAll(_t1); locks.ReleaseAll(_t2); locks.ReleaseAll(_t3);
+            await Task.WhenAll(closing is null ? [secondWaits, thirdWaits] : [secondWaits, thirdWaits, closing]).WaitAsync(TimeSpan.FromSeconds(30));
+        }
     }
 
     /// <summary>

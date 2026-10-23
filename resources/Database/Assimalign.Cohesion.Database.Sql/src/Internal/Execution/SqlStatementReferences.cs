@@ -15,4 +15,12 @@ internal sealed class SqlStatementReferences
     internal Dictionary<SqlCatalogTable, List<SqlLiveIndex>> LiveIndexes { get; } = [];
     internal HashSet<ulong> IncomingLocks { get; } = [];
     internal HashSet<ulong> OutgoingLocks { get; } = [];
+
+    // Every definition/lock-coverage claim was made while grants that may have just
+    // been released were held. Rebuild all attempt-local caches after a wait.
+    internal void ClearAfterCascadeRetry()
+    {
+        Incoming.Clear(); Parents.Clear(); Bindings.Clear(); Lookups.Clear();
+        LiveIndexes.Clear(); IncomingLocks.Clear(); OutgoingLocks.Clear();
+    }
 }
