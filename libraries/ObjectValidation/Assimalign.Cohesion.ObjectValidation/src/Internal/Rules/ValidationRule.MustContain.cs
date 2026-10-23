@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("MustContainValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MustContainValidationRule<,>.DebugView))]
 internal sealed class MustContainValidationRule<TValue, TContains> : ValidationRuleBase<TValue>
     where TValue : IEnumerable, IEnumerable<TContains>
     where TContains : notnull, IEquatable<TContains>
@@ -58,6 +60,21 @@ internal sealed class MustContainValidationRule<TValue, TContains> : ValidationR
             context = null;
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MustContainValidationRule<TValue, TContains> _target;
+
+        public DebugView(MustContainValidationRule<TValue, TContains> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }
 

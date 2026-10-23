@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ApiManager.Hosting;
 /// <summary>
 /// Hosts an ApiManager application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApiManagerApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>, IApiManagerApplication
 {
     private readonly ApiManagerApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>, 
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new ApiManagerApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApiManagerApplication _target;
+
+        public DebugView(ApiManagerApplication value)
+        {
+            _target = value;
+        }
+
+        public ApiManagerApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

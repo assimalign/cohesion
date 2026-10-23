@@ -1213,6 +1213,8 @@ public static class ConfigurationBinder
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("BindingNode")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private readonly struct BindingNode
     {
         private readonly IConfiguration? _configuration;
@@ -1318,6 +1320,20 @@ public static class ConfigurationBinder
 
             child = default;
             return false;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly BindingNode _target;
+
+            public DebugView(BindingNode value)
+            {
+                _target = value;
+            }
+
+            public bool IsDefined => _target.IsDefined;
+            public Path Path => _target.Path;
+            public Key Key => _target.Key;
         }
     }
 

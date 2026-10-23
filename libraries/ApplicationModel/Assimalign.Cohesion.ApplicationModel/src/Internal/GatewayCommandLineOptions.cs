@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayCommandLineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayCommandLineOptions
 {
     private readonly List<string> _externalBindings = new();
@@ -274,4 +276,21 @@ internal sealed class GatewayCommandLineOptions
     }
 
     private static bool IsOption(string argument) => argument.StartsWith("--", StringComparison.Ordinal);
+
+    private sealed class DebugView
+    {
+        private readonly GatewayCommandLineOptions _target;
+
+        public DebugView(GatewayCommandLineOptions value)
+        {
+            _target = value;
+        }
+
+        public GatewayRunMode RunMode => _target.RunMode;
+        public string? Gateway => _target.Gateway;
+        public string? Environment => _target.Environment;
+        public bool Adopt => _target.Adopt;
+        public bool RestartOrphans => _target.RestartOrphans;
+        public GatewayCommand? Command => _target.Command;
+    }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationNamespaceCommandHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationNamespaceCommandHandler : IResourceCommandHandler
 {
     private readonly ConfigurationStoreRepository _repository;
@@ -57,5 +59,17 @@ internal sealed class ConfigurationNamespaceCommandHandler : IResourceCommandHan
     {
         await _repository.DeleteNamespaceAsync(command.Key, command.Owner, cancellationToken).ConfigureAwait(false);
         return ReadOnlyMemory<byte>.Empty;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationNamespaceCommandHandler _target;
+
+        public DebugView(ConfigurationNamespaceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ResiliencePipeline")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResiliencePipeline : IResiliencePipeline
 {
     private readonly ResilienceStrategy _strategy;
@@ -22,5 +24,12 @@ internal sealed class ResiliencePipeline : IResiliencePipeline
 
         // Bubble up exception
         outcome.ThrowIfException();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResiliencePipeline value)
+        {
+        }
     }
 }

@@ -4,6 +4,8 @@ using System.Buffers;
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
 // Every append checks before growth; scratch storage is returned even on malformed input.
+[global::System.Diagnostics.DebuggerDisplay("PdfBuffer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfBuffer : IDisposable
 {
     private byte[] _bytes;
@@ -38,4 +40,11 @@ internal sealed class PdfBuffer : IDisposable
     }
     internal byte[] ToArray() => _bytes.AsSpan(0, Count).ToArray();
     public void Dispose() => ArrayPool<byte>.Shared.Return(_bytes);
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfBuffer value)
+        {
+        }
+    }
 }

@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Http;
 /// (<see cref="ETag"/> / <see cref="LastModified"/>) is supplied — so setting a validator implies
 /// existence and the flag is only needed for the rare validator-less-but-present resource.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpConditionalRequestContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct HttpConditionalRequestContext
 {
     /// <summary>
@@ -68,4 +70,23 @@ public readonly struct HttpConditionalRequestContext
     /// from <see cref="HasCurrentRepresentation"/> or the presence of either validator.
     /// </summary>
     internal bool ResourceExists => HasCurrentRepresentation || ETag is not null || LastModified is not null;
+
+    private sealed class DebugView
+    {
+        private readonly HttpConditionalRequestContext _target;
+
+        public DebugView(HttpConditionalRequestContext value)
+        {
+            _target = value;
+        }
+
+        public HttpMethod Method => _target.Method;
+        public HttpEntityTag? ETag => _target.ETag;
+        public DateTimeOffset? LastModified => _target.LastModified;
+        public bool HasCurrentRepresentation => _target.HasCurrentRepresentation;
+        public HttpEntityTagCondition? IfMatch => _target.IfMatch;
+        public HttpEntityTagCondition? IfNoneMatch => _target.IfNoneMatch;
+        public DateTimeOffset? IfModifiedSince => _target.IfModifiedSince;
+        public DateTimeOffset? IfUnmodifiedSince => _target.IfUnmodifiedSince;
+    }
 }

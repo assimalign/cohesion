@@ -11,6 +11,8 @@ using System.Threading.Channels;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LogSegmentStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LogSegmentStore
 {
     private const long maxSegmentBytes = 16 * 1024 * 1024;
@@ -146,6 +148,13 @@ internal sealed class LogSegmentStore
                 }
             }
             return (body.ToString(), null);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LogSegmentStore value)
+        {
         }
     }
 }

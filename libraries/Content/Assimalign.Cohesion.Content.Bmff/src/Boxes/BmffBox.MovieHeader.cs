@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The MovieHeader box; ISO/IEC 14496-12 8.2.2.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MovieHeaderBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -113,5 +115,34 @@ public sealed class MovieHeaderBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" timescale={TimeScale} duration={Duration} next-track-id={NextTrackId}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MovieHeaderBox _target;
+
+        public DebugView(MovieHeaderBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public ulong CreationTime => _target.CreationTime;
+        public ulong ModificationTime => _target.ModificationTime;
+        public uint TimeScale => _target.TimeScale;
+        public ulong Duration => _target.Duration;
+        public FixedPoint16x16 Rate => _target.Rate;
+        public FixedPoint8x8 Volume => _target.Volume;
+        public byte[] Reserved => _target.Reserved;
+        public int[] Matrix => _target.Matrix;
+        public byte[] PreDefined => _target.PreDefined;
+        public uint NextTrackId => _target.NextTrackId;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

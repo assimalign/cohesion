@@ -25,7 +25,23 @@ internal static class JsonConsoleFormatter
 internal sealed record ConsoleRecord(string Timestamp, string Level, string Category, string Message,
     string? Exception, Dictionary<string, string> Attributes);
 
+[global::System.Diagnostics.DebuggerDisplay("TelemetryJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(ConsoleRecord))]
-internal sealed partial class TelemetryJsonContext : JsonSerializerContext;
+internal sealed partial class TelemetryJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly TelemetryJsonContext _target;
+
+        public DebugView(TelemetryJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}

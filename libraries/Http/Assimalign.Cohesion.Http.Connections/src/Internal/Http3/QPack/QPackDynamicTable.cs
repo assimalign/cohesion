@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// reflection, no runtime code generation.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QPackDynamicTable")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class QPackDynamicTable
 {
     private const int EntryOverhead = 32; // RFC 9204 §3.2.1.
@@ -235,5 +237,20 @@ internal sealed class QPackDynamicTable
         public string Value { get; }
 
         public long Size { get; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QPackDynamicTable _target;
+
+        public DebugView(QPackDynamicTable value)
+        {
+            _target = value;
+        }
+
+        public long MaxCapacity => _target.MaxCapacity;
+        public long Capacity => _target.Capacity;
+        public long Size => _target.Size;
+        public long InsertCount => _target.InsertCount;
     }
 }

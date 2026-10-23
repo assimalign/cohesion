@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents the ordered values of a parsed HTTP query or form key.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Value}")]
 public readonly struct HttpQueryValue : IReadOnlyList<string>, IEquatable<HttpQueryValue>
 {
@@ -142,4 +143,17 @@ public readonly struct HttpQueryValue : IReadOnlyList<string>, IEquatable<HttpQu
     /// <param name="right">The second list.</param>
     /// <returns>Whether the lists are different.</returns>
     public static bool operator !=(HttpQueryValue left, HttpQueryValue right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpQueryValue _target;
+
+        public DebugView(HttpQueryValue value)
+        {
+            _target = value;
+        }
+
+        public string Value => _target.Value;
+        public int Count => _target.Count;
+    }
 }

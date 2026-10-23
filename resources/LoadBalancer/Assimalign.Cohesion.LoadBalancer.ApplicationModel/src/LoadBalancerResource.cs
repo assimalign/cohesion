@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ApplicationModel.Internal;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed LoadBalancer workload in an application graph.</summary>
+[global::System.Diagnostics.DebuggerDisplay("LoadBalancerResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoadBalancerResource : PlannedResource
 {
     private const string LoadBalancerPlannerName = "LoadBalancer planner";
@@ -35,5 +37,24 @@ public sealed class LoadBalancerResource : PlannedResource
         }
 
         return LoadBalancerPlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LoadBalancerResource _target;
+
+        public DebugView(LoadBalancerResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

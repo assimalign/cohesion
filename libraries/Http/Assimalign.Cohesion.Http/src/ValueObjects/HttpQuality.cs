@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Http;
 /// The weight is stored as an integer number of thousandths (0&#8211;1000) so equality and
 /// ordering are exact and free of floating-point rounding error.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpQuality : IEquatable<HttpQuality>, IComparable<HttpQuality>
 {
@@ -147,4 +148,18 @@ public readonly struct HttpQuality : IEquatable<HttpQuality>, IComparable<HttpQu
 
     /// <summary>Determines whether the left weight is greater than or equal to the right.</summary>
     public static bool operator >=(HttpQuality left, HttpQuality right) => left._perMille >= right._perMille;
+
+    private sealed class DebugView
+    {
+        private readonly HttpQuality _target;
+
+        public DebugView(HttpQuality value)
+        {
+            _target = value;
+        }
+
+        public double Value => _target.Value;
+        public int PerMille => _target.PerMille;
+        public bool IsAcceptable => _target.IsAcceptable;
+    }
 }

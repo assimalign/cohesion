@@ -19,6 +19,8 @@ internal interface IInProcessMemberSupervisor
         CancellationToken cancellationToken);
 }
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessMemberSupervisor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessMemberSupervisor : IInProcessMemberSupervisor
 {
     private const int successExitCode = 0;
@@ -880,8 +882,17 @@ internal sealed class InProcessMemberSupervisor : IInProcessMemberSupervisor
             }
         }
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessMemberSupervisor value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessMember")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessMember : IDisposable
 {
     internal InProcessMember(
@@ -912,6 +923,13 @@ internal sealed class InProcessMember : IDisposable
     {
         Lifetime.Dispose();
         Gate.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessMember value)
+        {
+        }
     }
 }
 

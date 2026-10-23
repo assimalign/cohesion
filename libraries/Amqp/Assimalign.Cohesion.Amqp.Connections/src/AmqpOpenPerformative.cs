@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <summary>
 /// Represents the AMQP open performative.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AmqpOpenPerformative")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpOpenPerformative : AmqpPerformative
 {
     private uint? _maxFrameSize;
@@ -72,4 +74,25 @@ public sealed class AmqpOpenPerformative : AmqpPerformative
     /// Gets or sets the connection properties.
     /// </summary>
     public IReadOnlyDictionary<AmqpSymbol, object?>? Properties { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpOpenPerformative _target;
+
+        public DebugView(AmqpOpenPerformative value)
+        {
+            _target = value;
+        }
+
+        public string ContainerId => _target.ContainerId;
+        public string? HostName => _target.HostName;
+        public uint? MaxFrameSize => _target.MaxFrameSize;
+        public ushort? ChannelMax => _target.ChannelMax;
+        public uint? IdleTimeOut => _target.IdleTimeOut;
+        public IReadOnlyList<AmqpSymbol>? OutgoingLocales => _target.OutgoingLocales;
+        public IReadOnlyList<AmqpSymbol>? IncomingLocales => _target.IncomingLocales;
+        public IReadOnlyList<AmqpSymbol>? OfferedCapabilities => _target.OfferedCapabilities;
+        public IReadOnlyList<AmqpSymbol>? DesiredCapabilities => _target.DesiredCapabilities;
+        public IReadOnlyDictionary<AmqpSymbol, object?>? Properties => _target.Properties;
+    }
 }

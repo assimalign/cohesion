@@ -25,6 +25,7 @@ namespace Assimalign.Cohesion.Http;
 /// instance always serializes to a canonical form (RFC 9651 &#167; 4.1.3.1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Type}: {ToString(),nq}")]
 public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareItem>
 {
@@ -380,5 +381,17 @@ public readonly struct StructuredFieldBareItem : IEquatable<StructuredFieldBareI
         {
             return $"<{_type}>";
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldBareItem _target;
+
+        public DebugView(StructuredFieldBareItem value)
+        {
+            _target = value;
+        }
+
+        public StructuredFieldType Type => _target.Type;
     }
 }

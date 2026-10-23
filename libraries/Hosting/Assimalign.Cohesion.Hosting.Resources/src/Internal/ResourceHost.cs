@@ -66,6 +66,8 @@ internal static class ResourceHost
             : TerminatedExitCode;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("RunState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal sealed class RunState : IHostRunObserver
     {
         private readonly IHostRun _run;
@@ -183,6 +185,13 @@ internal static class ResourceHost
             {
                 Interlocked.CompareExchange(ref _protocolLineException, exception, comparand: null);
                 return false;
+            }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(RunState value)
+            {
             }
         }
     }

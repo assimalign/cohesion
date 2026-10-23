@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// by the composition root (a <c>*.Hosting</c> project) and never mutated afterward.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticationScheme {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthenticationScheme
 {
     private readonly Func<IAuthenticationHandler> _handlerFactory;
@@ -60,4 +62,17 @@ public sealed class AuthenticationScheme
     public IAuthenticationHandler CreateHandler()
         => _handlerFactory() ?? throw new InvalidOperationException(
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.AuthenticationHandlerFactoryResultNull, Name));
+
+    private sealed class DebugView
+    {
+        private readonly AuthenticationScheme _target;
+
+        public DebugView(AuthenticationScheme value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public string DisplayName => _target.DisplayName;
+    }
 }

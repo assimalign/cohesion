@@ -2,6 +2,8 @@ using System;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfLexer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfLexer
 {
     internal PdfInput Input { get; }
@@ -82,5 +84,12 @@ internal sealed class PdfLexer
         }
         if (high >= 0) { bytes.Add((byte)(high << 4)); }
         return new(PdfTokenKind.Hexadecimal, bytes.ToArray(), position);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfLexer value)
+        {
+        }
     }
 }

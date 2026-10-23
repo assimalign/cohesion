@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The colr leaf with nclx fields or an opaque lazy ICC profile.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ColourInformationBox : BmffBoxLazyLeaf
 {
     /// <summary>Creates an empty ColourInformationBox model.</summary>
@@ -90,5 +92,31 @@ public sealed class ColourInformationBox : BmffBoxLazyLeaf
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" colour-type={ColourType} icc-bytes={Profile.Length}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ColourInformationBox _target;
+
+        public DebugView(ColourInformationBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public FourCC ColourType => _target.ColourType;
+        public ushort ColourPrimaries => _target.ColourPrimaries;
+        public ushort TransferCharacteristics => _target.TransferCharacteristics;
+        public ushort MatrixCoefficients => _target.MatrixCoefficients;
+        public bool FullRange => _target.FullRange;
+        public byte Reserved => _target.Reserved;
+        public BinarySegment Profile => _target.Profile;
+        public BinarySegment TrailingData => _target.TrailingData;
+        public global::Assimalign.Cohesion.Content.Binary.BinarySegment Payload => _target.Payload;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

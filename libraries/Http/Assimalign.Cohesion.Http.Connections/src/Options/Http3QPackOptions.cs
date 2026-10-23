@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// encoder/decoder instruction streams, and blocked-stream bookkeeping.
 /// <see cref="MaxFieldSectionSize"/> applies on both profiles.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http3QPackOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Http3QPackOptions
 {
     /// <summary>
@@ -128,5 +130,19 @@ public sealed class Http3QPackOptions
             _maxBlockedStreams = _maxBlockedStreams,
             _maxFieldSectionSize = _maxFieldSectionSize,
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3QPackOptions _target;
+
+        public DebugView(Http3QPackOptions value)
+        {
+            _target = value;
+        }
+
+        public long MaxTableCapacity => _target.MaxTableCapacity;
+        public long MaxBlockedStreams => _target.MaxBlockedStreams;
+        public long MaxFieldSectionSize => _target.MaxFieldSectionSize;
     }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The pasp box in the HEIF item model.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PixelAspectRatioBox : BmffBox
 {
     /// <summary>Creates an empty PixelAspectRatioBox model.</summary>
@@ -54,5 +56,25 @@ public sealed class PixelAspectRatioBox : BmffBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" spacing={HorizontalSpacing}:{VerticalSpacing}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PixelAspectRatioBox _target;
+
+        public DebugView(PixelAspectRatioBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte[] TrailingData => _target.TrailingData;
+        public uint HorizontalSpacing => _target.HorizontalSpacing;
+        public uint VerticalSpacing => _target.VerticalSpacing;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

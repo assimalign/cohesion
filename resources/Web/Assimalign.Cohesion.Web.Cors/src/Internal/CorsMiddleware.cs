@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Web.Cors.Internal;
 /// the default policy.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CorsMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CorsMiddleware : IWebApplicationMiddleware
 {
     /// <summary>
@@ -187,5 +189,12 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CorsMiddleware value)
+        {
+        }
     }
 }

@@ -29,6 +29,7 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// <item><description><see cref="Watch"/> uses polling; native rename notifications are unavailable.</description></item>
 /// </list>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Name} - Size: {Size}, Used: {SpaceUsed}")]
 public sealed class IsolatedStorageFileSystem : IFileSystem
 {
@@ -665,5 +666,12 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     private void CheckIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IsolatedStorageFileSystem value)
+        {
+        }
     }
 }

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteJsonFormatterVisitor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteJsonFormatterVisitor : CallSiteVisitor<CallSiteJsonFormatterVisitor.CallSiteFormatterContext, object>
 {
     internal static CallSiteJsonFormatterVisitor Instance = new CallSiteJsonFormatterVisitor();
@@ -105,6 +107,8 @@ internal sealed class CallSiteJsonFormatterVisitor : CallSiteVisitor<CallSiteJso
         return null;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("CallSiteFormatterContext")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal struct CallSiteFormatterContext
     {
         private readonly HashSet<CallSiteService> _processedCallSites;
@@ -193,6 +197,26 @@ internal sealed class CallSiteJsonFormatterVisitor : CallSiteVisitor<CallSiteJso
         public void EndArray()
         {
             Builder.Append(']');
+        }
+
+        private sealed class DebugView
+        {
+            private readonly CallSiteFormatterContext _target;
+
+            public DebugView(CallSiteFormatterContext value)
+            {
+                _target = value;
+            }
+
+            public int Offset => _target.Offset;
+            public StringBuilder Builder => _target.Builder;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteJsonFormatterVisitor value)
+        {
         }
     }
 }

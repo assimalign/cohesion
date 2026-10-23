@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// <see cref="LifetimeTrackingHttpMessageHandler"/> has been GC'd &#8211; which means
 /// every <see cref="HttpClient"/> built on this handler has been collected.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ExpiredHandlerEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExpiredHandlerEntry
 {
     private readonly IReadOnlyList<WeakReference<LifetimeTrackingHttpMessageHandler>> _wrapperRefs;
@@ -41,5 +43,17 @@ internal sealed class ExpiredHandlerEntry
             }
         }
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ExpiredHandlerEntry _target;
+
+        public DebugView(ExpiredHandlerEntry value)
+        {
+            _target = value;
+        }
+
+        public HttpMessageHandler InnerHandler => _target.InnerHandler;
     }
 }

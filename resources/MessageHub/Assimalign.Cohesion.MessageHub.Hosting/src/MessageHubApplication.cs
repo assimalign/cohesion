@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.MessageHub.Hosting;
 /// <summary>
 /// Hosts a MessageHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MessageHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MessageHubApplication : Host<MessageHubApplicationContext>, IMessageHubApplication
 {
     private readonly MessageHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class MessageHubApplication : Host<MessageHubApplicationContext>, 
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new MessageHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MessageHubApplication _target;
+
+        public DebugView(MessageHubApplication value)
+        {
+            _target = value;
+        }
+
+        public MessageHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

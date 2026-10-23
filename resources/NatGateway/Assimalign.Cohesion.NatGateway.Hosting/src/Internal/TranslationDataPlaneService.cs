@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Hosting;
 // Implements IHostService directly per the execution menu: the data plane owns one thread
 // per core for its entire life, which neither the pooled base (work migrates to the pool)
 // nor the single dedicated-thread base (one thread, not N) models. See docs/DESIGN.md.
+[global::System.Diagnostics.DebuggerDisplay("TranslationDataPlaneService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TranslationDataPlaneService : IHostService
 {
     private CancellationTokenSource? _cancellationTokenSource;
@@ -107,5 +109,17 @@ internal sealed class TranslationDataPlaneService : IHostService
         // TODO: pin and run this core's loop to translate and forward packets. The placeholder blocks until the
         // host stops so the scaffolded application starts and drains cleanly.
         cancellationToken.WaitHandle.WaitOne();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TranslationDataPlaneService _target;
+
+        public DebugView(TranslationDataPlaneService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

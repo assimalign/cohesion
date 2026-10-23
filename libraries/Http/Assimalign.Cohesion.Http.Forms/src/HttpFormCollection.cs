@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Provides a mutable parsed form collection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpFormCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpFormCollection : IHttpFormCollection
 {
     private readonly Dictionary<string, HttpQueryValue> _values;
@@ -73,5 +75,18 @@ public sealed class HttpFormCollection : IHttpFormCollection
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpFormCollection _target;
+
+        public DebugView(HttpFormCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public HttpFormFileCollection Files => _target.Files;
     }
 }

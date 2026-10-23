@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// pattern Web.Compression (<c>RequestDecompressionHttpContext</c>) and Web.RequestTimeouts
 /// (<c>RequestTimeoutHttpContext</c>) established.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RewriteHttpContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RewriteHttpContext : IHttpContext
 {
     private readonly IHttpContext _inner;
@@ -48,4 +50,22 @@ internal sealed class RewriteHttpContext : IHttpContext
     public Task CancelAsync() => _inner.CancelAsync();
 
     public ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        private readonly RewriteHttpContext _target;
+
+        public DebugView(RewriteHttpContext value)
+        {
+            _target = value;
+        }
+
+        public HttpVersion Version => _target.Version;
+        public IHttpRequest Request => _target.Request;
+        public IHttpResponse Response => _target.Response;
+        public IHttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public IHttpFeatureCollection Features => _target.Features;
+        public IDictionary<string, object?> Items => _target.Items;
+        public CancellationToken RequestCancelled => _target.RequestCancelled;
+    }
 }

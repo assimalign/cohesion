@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Web.Authorization.Internal;
 /// <see cref="ClaimsPrincipal.HasClaim(string, string)"/>. This is the requirement behind
 /// <see cref="AuthorizationPolicyBuilder.RequireClaim(string)"/> and its overloads.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ClaimsRequirement")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ClaimsRequirement : IAuthorizationRequirement
 {
     private readonly string _claimType;
@@ -92,5 +94,18 @@ internal sealed class ClaimsRequirement : IAuthorizationRequirement
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ClaimsRequirement _target;
+
+        public DebugView(ClaimsRequirement value)
+        {
+            _target = value;
+        }
+
+        public string ClaimType => _target.ClaimType;
+        public IReadOnlyList<string>? AllowedValues => _target.AllowedValues;
     }
 }

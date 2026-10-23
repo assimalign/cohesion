@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Content.Text;
 /// fixed-length byte order mark. The underlying content is owned or borrowed per the creation-time
 /// <c>leaveOpen</c> flag; content-level metadata is forwarded unchanged.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TextContent {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TextContent : ITextContent
 {
     private static readonly Encoding _utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
@@ -184,5 +186,23 @@ public sealed class TextContent : ITextContent
 
         Span<byte> preamble = stackalloc byte[_preambleLength];
         stream.ReadAtLeast(preamble, _preambleLength, throwOnEndOfStream: false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TextContent _target;
+
+        public DebugView(TextContent value)
+        {
+            _target = value;
+        }
+
+        public Encoding Encoding => _target.Encoding;
+        public string? Name => _target.Name;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

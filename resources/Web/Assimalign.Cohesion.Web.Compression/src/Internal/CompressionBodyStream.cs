@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// transport reads the body.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CompressionBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CompressionBodyStream : Stream
 {
     private enum Mode
@@ -305,5 +307,23 @@ internal sealed class CompressionBodyStream : Stream
         }
 
         headers[HttpHeaderKey.Vary] = $"{current}, Accept-Encoding";
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CompressionBodyStream _target;
+
+        public DebugView(CompressionBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool Compressed => _target.Compressed;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

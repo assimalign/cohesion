@@ -22,6 +22,7 @@ using System.Security;
 /// the normalized path text that the disk APIs receive, and the operating system follows any link
 /// on that path (see the package's <c>docs/DESIGN.md</c>, "Root containment").
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("Size: {Size} | Used: {SpaceUsed}")]
 public class PhysicalFileSystem : IFileSystem
 {
@@ -597,5 +598,22 @@ public class PhysicalFileSystem : IFileSystem
         {
             FileSystemException.ThrowReadOnly(operation ?? string.Empty);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PhysicalFileSystem _target;
+
+        public DebugView(PhysicalFileSystem value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public Size Size => _target.Size;
+        public Size SpaceAvailable => _target.SpaceAvailable;
+        public Size SpaceUsed => _target.SpaceUsed;
+        public IFileSystemDirectory RootDirectory => _target.RootDirectory;
     }
 }

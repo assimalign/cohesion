@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 /// return URL), which the user agent resolves against the URL it actually requested, so they need no
 /// host or scheme and stay correct behind a proxy.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookieAuthenticationHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
 {
     private static readonly string _authenticationCookieEncodingInvalidMessage = ErrorMessages.AuthenticationCookieEncodingInvalid;
@@ -355,5 +357,12 @@ public sealed class CookieAuthenticationHandler : IAuthenticationSignInHandler
     {
         _cachedResult = result;
         return result;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CookieAuthenticationHandler value)
+        {
+        }
     }
 }

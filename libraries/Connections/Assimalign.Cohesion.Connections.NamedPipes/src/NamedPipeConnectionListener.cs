@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// stay live. Access control is applied at creation time via <see cref="NamedPipeConnectionListenerOptions.PipeSecurity"/>
 /// (Windows) or <see cref="NamedPipeConnectionListenerOptions.CurrentUserOnly"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("NamedPipeConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NamedPipeConnectionListener : DuplexConnectionListener
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
@@ -290,5 +292,20 @@ public sealed class NamedPipeConnectionListener : DuplexConnectionListener
             _options.InputBufferSize,
             _options.OutputBufferSize,
             _options.PipeSecurity);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NamedPipeConnectionListener _target;
+
+        public DebugView(NamedPipeConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IDuplexConnection> Connections => _target.Connections;
     }
 }

@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// reports <see langword="false"/> and <see cref="Remove"/> finds nothing.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookiePolicyCookieCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CookiePolicyCookieCollection : IHttpCookieCollection
 {
     private readonly IHttpContext _context;
@@ -140,4 +142,17 @@ internal sealed class CookiePolicyCookieCollection : IHttpCookieCollection
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly CookiePolicyCookieCollection _target;
+
+        public DebugView(CookiePolicyCookieCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
+    }
 }

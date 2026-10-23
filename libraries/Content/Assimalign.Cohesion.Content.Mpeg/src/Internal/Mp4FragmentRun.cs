@@ -2,6 +2,8 @@ using Assimalign.Cohesion.Content.Bmff;
 
 namespace Assimalign.Cohesion.Content.Mpeg.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Mp4FragmentRun")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal readonly struct Mp4FragmentRun
 {
     internal Mp4FragmentRun(TrackFragmentRunBox box, long index, long offset, long decodeTime,
@@ -34,5 +36,12 @@ internal readonly struct Mp4FragmentRun
         var flags = (Box.Flags & 0x400) != 0 ? Box.Entries[index].Flags :
             index == 0 && Box.FirstSampleFlags.HasValue ? Box.FirstSampleFlags.Value : Flags;
         return (flags & 0x10000) == 0 && ((flags >> 24) & 3) != 1;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(Mp4FragmentRun value)
+        {
+        }
     }
 }

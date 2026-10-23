@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Timer.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("TimerScheduleProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TimerScheduleProvider : IScheduleProvider
 {
     private readonly object _sync = new();
@@ -69,6 +71,13 @@ internal sealed class TimerScheduleProvider : IScheduleProvider
         {
             throw new KeyNotFoundException(
                 $"Job '{jobId}' is not registered under schedule '{scheduleId}'.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TimerScheduleProvider value)
+        {
         }
     }
 }

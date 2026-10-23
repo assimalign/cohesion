@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.MessageHub.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MessageHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuilder
 {
     private readonly MessageHubApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuilder
     }
 
     IMessageHubApplication IMessageHubApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly MessageHubApplicationBuilder _target;
+
+        public DebugView(MessageHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

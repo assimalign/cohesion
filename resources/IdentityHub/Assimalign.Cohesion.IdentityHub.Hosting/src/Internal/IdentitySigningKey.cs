@@ -13,6 +13,8 @@ using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IdentitySigningKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentitySigningKey : IDisposable
 {
     private const string KeyFileName = "identity-signing-key.pk8";
@@ -178,6 +180,13 @@ internal sealed class IdentitySigningKey : IDisposable
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IdentitySigningKey value)
+        {
         }
     }
 }

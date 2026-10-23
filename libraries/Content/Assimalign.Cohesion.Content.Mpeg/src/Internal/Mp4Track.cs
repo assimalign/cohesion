@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Content.Media;
 
 namespace Assimalign.Cohesion.Content.Mpeg.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Mp4Track {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class Mp4Track : IMediaTrack
 {
     private readonly TrackHeaderBox _header;
@@ -113,5 +115,25 @@ internal class Mp4Track : IMediaTrack
             }
         }
         return width == 0 || height == 0 ? null : (width, height);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Mp4Track _target;
+
+        public DebugView(Mp4Track value)
+        {
+            _target = value;
+        }
+
+        public ulong Id => _target.Id;
+        public MediaTrackKind Kind => _target.Kind;
+        public string CodecId => _target.CodecId;
+        public BinarySegment CodecPrivateData => _target.CodecPrivateData;
+        public string? Language => _target.Language;
+        public long Timescale => _target.Timescale;
+        public bool IsEnabled => _target.IsEnabled;
+        public bool? IsDefault => _target.IsDefault;
+        public IMediaSampleIndex Samples => _target.Samples;
     }
 }

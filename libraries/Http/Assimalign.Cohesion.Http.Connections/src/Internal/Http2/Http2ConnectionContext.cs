@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http2ConnectionContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed partial class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
 {
     private static readonly byte[] _clientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
@@ -3871,5 +3873,22 @@ internal sealed partial class Http2ConnectionContext : HttpStreamConnectionConte
         public Http2Frame Frame { get; }
 
         public byte[] Payload { get; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2ConnectionContext _target;
+
+        public DebugView(Http2ConnectionContext value)
+        {
+            _target = value;
+        }
+
+        public bool IsSecure => _target.IsSecure;
+        public global::Assimalign.Cohesion.Connections.IDuplexConnection Connection => _target.Connection;
+        public global::System.IO.Stream Stream => _target.Stream;
+        public global::Assimalign.Cohesion.Http.HttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public global::System.Net.EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public global::System.Net.EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
     }
 }

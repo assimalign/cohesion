@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// body-size feature before still finds it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpRequestLimitsFeature {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpRequestLimitsFeature : IHttpMaxRequestBodySizeFeature, IHttpMinRequestBodyDataRateFeature, IHttpMinResponseDataRateFeature
 {
     private readonly HttpExchangeInterceptorRequestContext _context;
@@ -77,5 +79,17 @@ internal sealed class HttpRequestLimitsFeature : IHttpMaxRequestBodySizeFeature,
         get => _context.MinResponseDataRate;
         // The context setter throws InvalidOperationException once the transport has frozen the value.
         set => _context.MinResponseDataRate = value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpRequestLimitsFeature _target;
+
+        public DebugView(HttpRequestLimitsFeature value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

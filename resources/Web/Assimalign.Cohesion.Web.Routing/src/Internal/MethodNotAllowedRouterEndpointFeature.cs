@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// (RFC 9110 §15.5.6). It is not an <see cref="IRouteMatchFeature"/>, because no route was selected,
 /// so endpoint-metadata consumers see no metadata for the exchange.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MethodNotAllowedRouterEndpointFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MethodNotAllowedRouterEndpointFeature : IRouterEndpointFeature
 {
     private readonly RouteMatch _match;
@@ -34,5 +36,17 @@ internal sealed class MethodNotAllowedRouterEndpointFeature : IRouterEndpointFea
     {
         Router.ApplyMethodNotAllowed(context, _match);
         return Task.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MethodNotAllowedRouterEndpointFeature _target;
+
+        public DebugView(MethodNotAllowedRouterEndpointFeature value)
+        {
+            _target = value;
+        }
+
+        public WebApplicationMiddleware Endpoint => _target.Endpoint;
     }
 }

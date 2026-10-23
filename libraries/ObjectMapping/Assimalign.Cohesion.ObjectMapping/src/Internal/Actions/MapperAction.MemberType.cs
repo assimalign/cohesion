@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * go through delegates that are either supplied directly (the AOT-safe path emitted by the source
  * generator) or compiled from expression trees (the run-time fallback).
  */
+[global::System.Diagnostics.DebuggerDisplay("MapperActionMemberType")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MapperActionMemberType<,,,>.DebugView))]
 internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
     where TTargetMember : class, new()
     where TSourceMember : class, new()
@@ -155,6 +157,13 @@ internal sealed class MapperActionMemberType<TTarget, TTargetMember, TSource, TS
         catch (NullReferenceException)
         {
             return new TTargetMember();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperActionMemberType<TTarget, TTargetMember, TSource, TSourceMember> value)
+        {
         }
     }
 }

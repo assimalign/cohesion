@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Content.Text.Internal;
 /// DecoderFallbackException.Index can be negative for a sequence buffered by a preceding call.
 /// Keeping the translation here covers every synchronous and asynchronous TextReader entry point.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TextDecodingStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TextDecodingStream : Stream
 {
     private readonly Stream _source;
@@ -68,6 +70,8 @@ internal sealed class TextDecodingStream : Stream
         base.Dispose(disposing);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("DecodingEncoding")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class DecodingEncoding : Encoding
     {
         private readonly Encoding _encoding;
@@ -90,8 +94,35 @@ internal sealed class TextDecodingStream : Stream
         public override int GetCharCount(byte[] bytes, int index, int count) => _encoding.GetCharCount(bytes, index, count);
         public override int GetChars(byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
             => _encoding.GetChars(bytes, byteIndex, byteCount, chars, charIndex);
+
+        private sealed class DebugView
+        {
+            private readonly DecodingEncoding _target;
+
+            public DebugView(DecodingEncoding value)
+            {
+                _target = value;
+            }
+
+            public string BodyName => _target.BodyName;
+            public int CodePage => _target.CodePage;
+            public global::System.Text.DecoderFallback DecoderFallback => _target.DecoderFallback;
+            public global::System.Text.EncoderFallback EncoderFallback => _target.EncoderFallback;
+            public string EncodingName => _target.EncodingName;
+            public string HeaderName => _target.HeaderName;
+            public bool IsBrowserDisplay => _target.IsBrowserDisplay;
+            public bool IsBrowserSave => _target.IsBrowserSave;
+            public bool IsMailNewsDisplay => _target.IsMailNewsDisplay;
+            public bool IsMailNewsSave => _target.IsMailNewsSave;
+            public bool IsReadOnly => _target.IsReadOnly;
+            public bool IsSingleByte => _target.IsSingleByte;
+            public string WebName => _target.WebName;
+            public int WindowsCodePage => _target.WindowsCodePage;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ContentDecoder")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ContentDecoder : Decoder
     {
         private readonly Decoder _decoder;
@@ -124,5 +155,35 @@ internal sealed class TextDecodingStream : Stream
                     position >= 0 ? position : null, exception);
             }
         }
+
+        private sealed class DebugView
+        {
+            private readonly ContentDecoder _target;
+
+            public DebugView(ContentDecoder value)
+            {
+                _target = value;
+            }
+
+            public global::System.Text.DecoderFallback? Fallback => _target.Fallback;
+            public global::System.Text.DecoderFallbackBuffer FallbackBuffer => _target.FallbackBuffer;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TextDecodingStream _target;
+
+        public DebugView(TextDecodingStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

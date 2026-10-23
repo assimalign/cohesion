@@ -3,6 +3,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 // ISO/IEC 14496-12 8.7.9. Uses the existing generic visitor fallback.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffAuxiliaryOffsetsBox : BmffFullBox
 {
     private byte[] _tail = Array.Empty<byte>();
@@ -34,5 +36,24 @@ internal sealed class BmffAuxiliaryOffsetsBox : BmffFullBox
     {
         BmffFields.Version(Version, Flags, 1, 1, Offset);
         foreach (var offset in Offsets) { BmffFields.Width(offset, Version == 0 ? 4 : 8, Offset); }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffAuxiliaryOffsetsBox _target;
+
+        public DebugView(BmffAuxiliaryOffsetsBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

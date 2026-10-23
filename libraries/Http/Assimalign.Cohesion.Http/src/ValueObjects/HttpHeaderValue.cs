@@ -19,6 +19,7 @@ namespace Assimalign.Cohesion.Http;
 /// belongs to the first value appended into it, and any other append from the same original copies, so
 /// two values appended to one original never see each other's.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{Value}")]
 public readonly partial struct HttpHeaderValue :
     IList<string?>,
@@ -924,6 +925,8 @@ public readonly partial struct HttpHeaderValue :
     /// <summary>
     /// Enumerates the string values of a <see cref="HttpHeaderValue" />.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     public struct Enumerator : IEnumerator<string?>
     {
         private readonly string?[]? _values;
@@ -999,6 +1002,18 @@ public readonly partial struct HttpHeaderValue :
         public void Dispose()
         {
         }
+
+        private sealed class DebugView
+        {
+            private readonly Enumerator _target;
+
+            public DebugView(Enumerator value)
+            {
+                _target = value;
+            }
+
+            public string? Current => _target.Current;
+        }
     }
 
     /// <summary>
@@ -1030,4 +1045,11 @@ public readonly partial struct HttpHeaderValue :
     }
 
     #endregion
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpHeaderValue value)
+        {
+        }
+    }
 }

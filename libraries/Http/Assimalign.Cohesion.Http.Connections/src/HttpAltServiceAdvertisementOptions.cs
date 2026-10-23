@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Http.Connections;
 /// applied at response-head commit time only when the header is absent.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpAltServiceAdvertisementOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpAltServiceAdvertisementOptions
 {
     private TimeSpan _maxAge = TimeSpan.FromDays(1);
@@ -86,5 +88,19 @@ public sealed class HttpAltServiceAdvertisementOptions
 
             _authority = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpAltServiceAdvertisementOptions _target;
+
+        public DebugView(HttpAltServiceAdvertisementOptions value)
+        {
+            _target = value;
+        }
+
+        public bool Enabled => _target.Enabled;
+        public TimeSpan MaxAge => _target.MaxAge;
+        public string? Authority => _target.Authority;
     }
 }

@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http2Context")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2Context : TransportHttpContext
 {
     public Http2Context(
@@ -67,5 +69,30 @@ internal sealed class Http2Context : TransportHttpContext
     {
         Connection?.EndExchange(Stream);
         return base.DisposeAsync();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2Context _target;
+
+        public DebugView(Http2Context value)
+        {
+            _target = value;
+        }
+
+        public Http2Stream Stream => _target.Stream;
+        public int StreamId => _target.StreamId;
+        public string? ExtendedConnectProtocol => _target.ExtendedConnectProtocol;
+        public Http2RequestBodyStream? RequestBody => _target.RequestBody;
+        public Http2ExtendedConnectStream? Tunnel => _target.Tunnel;
+        public Http2ConnectionContext? Connection => _target.Connection;
+        public global::Assimalign.Cohesion.Http.HttpVersion Version => _target.Version;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpRequest Request => _target.Request;
+        public global::Assimalign.Cohesion.Http.Connections.Internal.TransportHttpResponse Response => _target.Response;
+        public global::Assimalign.Cohesion.Http.HttpConnectionInfo ConnectionInfo => _target.ConnectionInfo;
+        public global::Assimalign.Cohesion.Http.HttpFeatureCollection Features => _target.Features;
+        public global::System.Collections.Generic.IDictionary<string, object?> Items => _target.Items;
+        public global::System.Threading.CancellationToken RequestCancelled => _target.RequestCancelled;
+        public bool CancelRequested => _target.CancelRequested;
     }
 }

@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// The resource contains only platform-neutral orchestration facts. Platform gateways
 /// compile its <see cref="ResourcePlan"/> without loading this assembly.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebResource : PlannedResource
 {
     private const string WebPlannerName = "Web planner";
@@ -47,5 +49,24 @@ public sealed class WebResource : PlannedResource
         }
 
         return WebPlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebResource _target;
+
+        public DebugView(WebResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

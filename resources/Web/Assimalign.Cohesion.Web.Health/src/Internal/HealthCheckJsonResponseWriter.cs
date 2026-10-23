@@ -35,6 +35,8 @@ using Assimalign.Cohesion.Http;
 /// output exactly (see <see cref="HealthEndpointOptions.IncludeDeveloperDetails"/>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HealthCheckJsonResponseWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
 {
     /// <summary>
@@ -209,4 +211,11 @@ internal sealed class HealthCheckJsonResponseWriter : IHealthResponseWriter
         HealthStatus.Unhealthy => "Unhealthy",
         _ => "Unhealthy",
     };
+
+    private sealed class DebugView
+    {
+        public DebugView(HealthCheckJsonResponseWriter value)
+        {
+        }
+    }
 }

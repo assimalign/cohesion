@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// (<c>QPACK_DECOMPRESSION_FAILED</c>, RFC 9204 §2.2).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QPackDecoderState")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class QPackDecoderState
 {
     private readonly QPackDynamicTable _table;
@@ -210,6 +212,13 @@ internal sealed class QPackDecoderState
                     _blockedStreams--;
                 }
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(QPackDecoderState value)
+        {
         }
     }
 }

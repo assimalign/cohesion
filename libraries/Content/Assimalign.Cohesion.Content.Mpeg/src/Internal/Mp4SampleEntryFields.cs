@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff;
 
 namespace Assimalign.Cohesion.Content.Mpeg.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Mp4SampleEntryFields")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Mp4SampleEntryFields
 {
     private byte[] _prefix;
@@ -113,4 +115,11 @@ internal sealed class Mp4SampleEntryFields
     internal void Write(BmffStream stream) => stream.Write(_prefix);
     private ushort Get16(int offset) => BinaryPrimitives.ReadUInt16BigEndian(_prefix.AsSpan(offset));
     private void Set16(int offset, ushort value) => BinaryPrimitives.WriteUInt16BigEndian(_prefix.AsSpan(offset), value);
+
+    private sealed class DebugView
+    {
+        public DebugView(Mp4SampleEntryFields value)
+        {
+        }
+    }
 }

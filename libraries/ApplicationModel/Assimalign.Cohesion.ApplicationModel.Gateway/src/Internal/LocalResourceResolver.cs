@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <remarks>
 /// A <c>dotnet run</c>-against-project development fallback is a planned follow-up.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LocalResourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalResourceResolver
 {
     private readonly string _baseDirectory;
@@ -45,5 +47,12 @@ internal sealed class LocalResourceResolver
         throw new FileNotFoundException(
             $"Could not resolve the local resource {description} '{path}'. Expected '{candidate}'.",
             candidate);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalResourceResolver value)
+        {
+        }
     }
 }

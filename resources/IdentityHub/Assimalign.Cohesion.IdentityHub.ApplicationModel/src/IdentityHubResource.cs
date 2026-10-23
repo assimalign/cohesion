@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// produced by an enabled identity-hub executable, and its realization plan contains
 /// no platform-specific objects or IdentityHub runtime dependencies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class IdentityHubResource : PlannedResource
 {
     private const string IdentityHubPlannerName = "IdentityHub planner";
@@ -47,5 +49,24 @@ public sealed class IdentityHubResource : PlannedResource
         }
 
         return IdentityHubPlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityHubResource _target;
+
+        public DebugView(IdentityHubResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

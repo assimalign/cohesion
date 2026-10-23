@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Http;
 /// then stamps <c>Content-Digest</c> with it. Deprecated and unregistered algorithms are preserved
 /// on parse but are never selected, because this library cannot compute them.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpWantDigestField")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct HttpWantDigestField
 {
     private readonly StructuredFieldDictionary _dictionary;
@@ -197,4 +199,11 @@ public readonly struct HttpWantDigestField
 
     /// <inheritdoc />
     public override string ToString() => Serialize();
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpWantDigestField value)
+        {
+        }
+    }
 }

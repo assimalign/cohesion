@@ -4,6 +4,8 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Http.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("KeyValueAccumulator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal struct KeyValueAccumulator
 {
     private Dictionary<string, List<string>> _accumulator;
@@ -98,5 +100,19 @@ internal struct KeyValueAccumulator
         }
 
         return _accumulator ?? new Dictionary<string, List<string>>(0, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly KeyValueAccumulator _target;
+
+        public DebugView(KeyValueAccumulator value)
+        {
+            _target = value;
+        }
+
+        public bool HasValues => _target.HasValues;
+        public int KeyCount => _target.KeyCount;
+        public int ValueCount => _target.ValueCount;
     }
 }

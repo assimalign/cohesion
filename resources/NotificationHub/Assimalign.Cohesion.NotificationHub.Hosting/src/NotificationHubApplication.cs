@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.NotificationHub.Hosting;
 /// <summary>
 /// Hosts a NotificationHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("NotificationHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NotificationHubApplication : Host<NotificationHubApplicationContext>, INotificationHubApplication
 {
     private readonly NotificationHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class NotificationHubApplication : Host<NotificationHubApplication
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new NotificationHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NotificationHubApplication _target;
+
+        public DebugView(NotificationHubApplication value)
+        {
+            _target = value;
+        }
+
+        public NotificationHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

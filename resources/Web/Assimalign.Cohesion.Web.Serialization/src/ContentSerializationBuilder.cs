@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.Serialization;
 /// surface without a service container registers <see cref="Build"/>'s result through
 /// <c>IWebApplicationBuilder.AddFeature</c>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ContentSerializationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ContentSerializationBuilder
 {
     private readonly List<IContentReader> _readers = new();
@@ -92,5 +94,12 @@ public sealed class ContentSerializationBuilder
     public IContentSerializationFeature Build()
     {
         return new ContentSerializationFeature(_readers.ToArray(), _writers.ToArray());
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ContentSerializationBuilder value)
+        {
+        }
     }
 }

@@ -34,6 +34,8 @@ public sealed class CancellationTokenSourcePool : DefaultObjectPool<Cancellation
         return cancellationTokenSource;
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PoolFactory")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private class PoolFactory : ObjectPoolFactory<CancellationTokenSource, TimeSpan>
     {
         private readonly TimeProvider _timeProvider;
@@ -51,6 +53,13 @@ public sealed class CancellationTokenSourcePool : DefaultObjectPool<Cancellation
         public sealed override CancellationTokenSource Create(TimeSpan delay)
         {
             return new CancellationTokenSource(Timeout.InfiniteTimeSpan, _timeProvider);
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(PoolFactory value)
+            {
+            }
         }
     }
     private class PoolPolicy : ObjectPoolPolicy<CancellationTokenSource>

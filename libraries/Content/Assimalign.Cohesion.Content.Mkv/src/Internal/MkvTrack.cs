@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Content.Media;
 
 namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MkvTrack {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class MkvTrack : IMediaTrack
 {
     internal MkvTrack(MkvDocument document, EbmlElement element)
@@ -38,4 +40,20 @@ internal class MkvTrack : IMediaTrack
     public bool IsEnabled => MkvElements.Number(Element, 0xB9, 1) != 0;
     public bool? IsDefault => MkvElements.Number(Element, 0x88, 1) != 0;
     public IMediaSampleIndex Samples { get; }
+
+    private sealed class DebugView
+    {
+        private readonly MkvTrack _target;
+
+        public DebugView(MkvTrack value)
+        {
+            _target = value;
+        }
+
+        public ulong Id => _target.Id;
+        public MediaTrackKind Kind => _target.Kind;
+        public long Timescale => _target.Timescale;
+        public MediaTimestamp? Duration => _target.Duration;
+        public IMediaSampleIndex Samples => _target.Samples;
+    }
 }

@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <see cref="IHttpContext.Cancel"/>, which the send path honors by resetting the single stream
 /// (<c>RST_STREAM(CANCEL)</c>), leaving the connection's other streams intact.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http2ExchangeControl")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2ExchangeControl : IHttpExchangeControl
 {
     private readonly Http2ConnectionContext _connection;
@@ -167,5 +169,21 @@ internal sealed class Http2ExchangeControl : IHttpExchangeControl
         tunnel.MarkHeadCommitted();
 
         return tunnel;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2ExchangeControl _target;
+
+        public DebugView(Http2ExchangeControl value)
+        {
+            _target = value;
+        }
+
+        public bool HasResponseStarted => _target.HasResponseStarted;
+        public HttpStatusCode? ClientFaultStatusCode => _target.ClientFaultStatusCode;
+        public bool ResponseAbortedByClient => _target.ResponseAbortedByClient;
+        public bool CanWriteInterimResponse => _target.CanWriteInterimResponse;
+        public bool CanTakeOver => _target.CanTakeOver;
     }
 }

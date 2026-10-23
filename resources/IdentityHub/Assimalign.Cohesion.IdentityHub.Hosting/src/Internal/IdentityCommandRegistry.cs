@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IdentityCommandRegistry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentityCommandRegistry
 {
     private readonly string _path;
@@ -219,14 +221,57 @@ internal sealed class IdentityCommandRegistry
         }
         return value.GetString()!;
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(IdentityCommandRegistry value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("StoredIdentityCommand {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed record StoredIdentityCommand(string Id, string Kind, string Owner, string Key, byte[] Payload, string[] Audiences, string? CredentialSource)
 {
     [JsonIgnore]
     internal ResourceCommand Command => new(Id, Kind, Owner, Key, Payload);
+
+    private sealed class DebugView
+    {
+        private readonly StoredIdentityCommand _target;
+
+        public DebugView(StoredIdentityCommand value)
+        {
+            _target = value;
+        }
+
+        public string Id => _target.Id;
+        public string Kind => _target.Kind;
+        public string Owner => _target.Owner;
+        public string Key => _target.Key;
+        public byte[] Payload => _target.Payload;
+        public string[] Audiences => _target.Audiences;
+        public string? CredentialSource => _target.CredentialSource;
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("IdentityRegistryJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(StoredIdentityCommand[]))]
-internal sealed partial class IdentityRegistryJsonContext : JsonSerializerContext;
+internal sealed partial class IdentityRegistryJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly IdentityRegistryJsonContext _target;
+
+        public DebugView(IdentityRegistryJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}

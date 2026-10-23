@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Content.Mpeg;
 /// <summary>The opaque dac3 payload; configuration bytes remain borrowed and are never codec-decoded.</summary>
 /// <remarks>Full-box prefixes, where present, are included in Data.</remarks>
 // Deviates from the repo interface-first rule per the Stage 4 brief's sealed box model.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Ac3SpecificBox : BmffBoxLazyLeaf, IMp4OpaqueBox
 {
     /// <summary>Creates an empty configuration box.</summary>
@@ -16,4 +18,23 @@ public sealed class Ac3SpecificBox : BmffBoxLazyLeaf, IMp4OpaqueBox
     public BinarySegment Data { get => Payload; set => Payload = value; }
     /// <inheritdoc/>
     public override BmffBoxType BoxType => (BmffBoxType)0x64616333;
+
+    private sealed class DebugView
+    {
+        private readonly Ac3SpecificBox _target;
+
+        public DebugView(Ac3SpecificBox value)
+        {
+            _target = value;
+        }
+
+        public BinarySegment Data => _target.Data;
+        public BmffBoxType BoxType => _target.BoxType;
+        public global::Assimalign.Cohesion.Content.Binary.BinarySegment Payload => _target.Payload;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
+    }
 }

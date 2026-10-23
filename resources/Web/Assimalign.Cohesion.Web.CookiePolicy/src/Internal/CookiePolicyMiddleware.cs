@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// <c>response.Cookies</c> when it appends rather than holding a collection it read before.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CookiePolicyMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CookiePolicyMiddleware : IWebApplicationMiddleware
 {
     private readonly CookiePolicyRules _rules;
@@ -63,5 +65,12 @@ internal sealed class CookiePolicyMiddleware : IWebApplicationMiddleware
         feature.AdoptQueuedCookies();
 
         return next.Invoke(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CookiePolicyMiddleware value)
+        {
+        }
     }
 }

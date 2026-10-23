@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiResponse"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiResponseBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiResponseBuilder
 {
     private readonly OpenApiResponse _response = new();
@@ -98,5 +100,12 @@ public sealed class OpenApiResponseBuilder
         ArgumentNullException.ThrowIfNull(reference);
         _response.Links[name] = new OpenApiLink { Reference = new OpenApiReference { Ref = reference } };
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiResponseBuilder value)
+        {
+        }
     }
 }

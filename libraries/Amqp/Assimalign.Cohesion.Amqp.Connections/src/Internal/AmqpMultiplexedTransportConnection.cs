@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 /// bidirectional stream of the <see cref="IMultiplexedConnection"/> — opened by the
 /// client side and accepted by the server side when the connection context is opened.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AmqpMultiplexedTransportConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class AmqpMultiplexedTransportConnection : AmqpTransportConnection
 {
     private readonly IMultiplexedConnection _connection;
@@ -52,5 +54,19 @@ internal sealed class AmqpMultiplexedTransportConnection : AmqpTransportConnecti
         }
 
         await _connection.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpMultiplexedTransportConnection _target;
+
+        public DebugView(AmqpMultiplexedTransportConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
     }
 }

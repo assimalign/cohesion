@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Content.Heif;
 
 /// <summary>The ipma full box, including 16/32-bit IDs and 7/15-bit property indices.</summary>
 // Deviates from the repo interface-first rule per the Stage 5 composite-box brief.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ItemPropertyAssociationBox : BmffFullBox
 {
     /// <summary>Creates an empty ItemPropertyAssociationBox model.</summary>
@@ -126,5 +128,26 @@ public sealed class ItemPropertyAssociationBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" entries={Entries.Length}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ItemPropertyAssociationBox _target;
+
+        public DebugView(ItemPropertyAssociationBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte[] TrailingData => _target.TrailingData;
+        public Entry[] Entries => _target.Entries;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

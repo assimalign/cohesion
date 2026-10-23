@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Configuration;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationOptions
 {
     private ConfigurationSetStrategy _setStrategy;
@@ -63,5 +65,19 @@ public sealed class ConfigurationOptions
         options.Providers.AddRange(providers);
 
         return options;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationOptions _target;
+
+        public DebugView(ConfigurationOptions value)
+        {
+            _target = value;
+        }
+
+        public ConfigurationSetStrategy SetStrategy => _target.SetStrategy;
+        public TimeSpan LoadTimeout => _target.LoadTimeout;
+        public List<IConfigurationProvider> Providers => _target.Providers;
     }
 }

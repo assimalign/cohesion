@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreRepository")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationStoreRepository
 {
     private readonly string _namespaceDirectory;
@@ -392,6 +394,13 @@ internal sealed class ConfigurationStoreRepository
         if (!_initialized)
         {
             throw new InvalidOperationException("The configuration repository has not been initialized.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationStoreRepository value)
+        {
         }
     }
 }

@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// produced by an enabled secret-store executable, and its realization plan contains
 /// no platform-specific objects or runtime secret-store dependencies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreResource : PlannedResource
 {
     private const string SecretStorePlannerName = "SecretStore planner";
@@ -50,5 +52,24 @@ public sealed class SecretStoreResource : PlannedResource
         }
 
         return SecretStorePlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreResource _target;
+
+        public DebugView(SecretStoreResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Http;
 /// build that response — the selected <see cref="Slices"/> for a <c>206</c>, or the
 /// <see cref="UnsatisfiedContentRange"/> for a <c>416</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpRangeSelection
 {
@@ -60,4 +61,19 @@ public readonly struct HttpRangeSelection
 
     internal static HttpRangeSelection Unsatisfiable(long completeLength)
         => new(HttpRangeSelectionStatus.Unsatisfiable, null, HttpContentRange.Unsatisfied(completeLength), completeLength);
+
+    private sealed class DebugView
+    {
+        private readonly HttpRangeSelection _target;
+
+        public DebugView(HttpRangeSelection value)
+        {
+            _target = value;
+        }
+
+        public HttpRangeSelectionStatus Status => _target.Status;
+        public long CompleteLength => _target.CompleteLength;
+        public HttpContentRange UnsatisfiedContentRange => _target.UnsatisfiedContentRange;
+        public bool IsSingleSlice => _target.IsSingleSlice;
+    }
 }

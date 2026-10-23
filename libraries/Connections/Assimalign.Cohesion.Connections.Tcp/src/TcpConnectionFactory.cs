@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// <see cref="DnsEndPoint"/> values use the socket constructor that selects IPv4 or dual-mode IPv6
 /// according to platform support so name resolution is not constrained by an unspecified address family.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TcpConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TcpConnectionFactory : DuplexConnectionFactory
 {
     private readonly TcpConnectionFactoryOptions _options;
@@ -127,5 +129,17 @@ public sealed class TcpConnectionFactory : DuplexConnectionFactory
         configure.Invoke(options);
 
         return new TcpConnectionFactory(options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TcpConnectionFactory _target;
+
+        public DebugView(TcpConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
     }
 }

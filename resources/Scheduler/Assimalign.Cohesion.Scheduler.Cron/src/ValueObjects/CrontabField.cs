@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Scheduler.Cron;
 /// <summary>
 /// Represents one parsed field of a five-field cron expression.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("CrontabField")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct CrontabField
 {
     private readonly int[] _occurrences;
@@ -231,5 +233,22 @@ public readonly struct CrontabField
         }
 
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CrontabField _target;
+
+        public DebugView(CrontabField value)
+        {
+            _target = value;
+        }
+
+        public bool IsWildcard => _target.IsWildcard;
+        public bool IsAll => _target.IsAll;
+        public CrontabFieldKind Kind => _target.Kind;
+        public string Expression => _target.Expression;
+        public int MaxBoundary => _target.MaxBoundary;
+        public int MinBoundary => _target.MinBoundary;
     }
 }

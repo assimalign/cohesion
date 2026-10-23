@@ -37,6 +37,8 @@ namespace Assimalign.Cohesion.Web.Caching;
 /// capacity, replacement, or explicit removal), so the index self-cleans and never serves an evicted key.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryOutputCacheStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
 {
     private readonly MemoryCache _cache;
@@ -181,5 +183,17 @@ public sealed class InMemoryOutputCacheStore : IOutputCacheStore, IDisposable
                 keys.TryRemove(keyText, out _);
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryOutputCacheStore _target;
+
+        public DebugView(InMemoryOutputCacheStore value)
+        {
+            _target = value;
+        }
+
+        public TimeProvider TimeProvider => _target.TimeProvider;
     }
 }

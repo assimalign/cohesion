@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Binary;
 /// <remarks>Each nonempty write requests its exact byte count and advances by that count. Empty writes do not touch the output.
 /// The writer never owns or disposes the output. UTF-8 encoding uses replacement fallback.</remarks>
 // Deviates from the repo interface-first rule per the Stage 1 brief: this is the stack-only counterpart of BinaryContentReader.
+[global::System.Diagnostics.DebuggerDisplay("BinaryContentWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public ref struct BinaryContentWriter
 {
     private readonly IBufferWriter<byte> _output;
@@ -307,5 +309,17 @@ public ref struct BinaryContentWriter
     {
         _output.Advance(count);
         _bytesWritten += count;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly long _member0;
+
+        public DebugView(BinaryContentWriter value)
+        {
+            _member0 = value.BytesWritten;
+        }
+
+        public long BytesWritten => _member0;
     }
 }

@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
 // Retain native identities for Matroska position repair. Generic measurement and original-byte
 // copying belong to EBML; this layer selects Matroska's explicit numeric widths and tracks edits.
+[global::System.Diagnostics.DebuggerDisplay("MkvLayout")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MkvLayout
 {
     private readonly Dictionary<EbmlElement, Snapshot> _original = new();
@@ -164,4 +166,11 @@ internal sealed class MkvLayout
     }
 
     private sealed record Snapshot(object? Value, EbmlElement[] Children, int SizeLength, bool UnknownSize, BinarySegment Bytes);
+
+    private sealed class DebugView
+    {
+        public DebugView(MkvLayout value)
+        {
+        }
+    }
 }

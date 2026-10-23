@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.MediaHub.Hosting;
 /// <summary>
 /// Hosts a MediaHub application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MediaHubApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MediaHubApplication : Host<MediaHubApplicationContext>, IMediaHubApplication
 {
     private readonly MediaHubApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class MediaHubApplication : Host<MediaHubApplicationContext>, IMed
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new MediaHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MediaHubApplication _target;
+
+        public DebugView(MediaHubApplication value)
+        {
+            _target = value;
+        }
+
+        public MediaHubApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

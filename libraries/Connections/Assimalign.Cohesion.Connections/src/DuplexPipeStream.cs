@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Connections;
 /// operate over a connection's duplex pipe. The adapter is allocation-light and lazy; prefer the
 /// pipe surface directly for parsing and writing where possible.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DuplexPipeStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DuplexPipeStream : Stream
 {
     private readonly PipeReader _input;
@@ -136,5 +138,22 @@ public sealed class DuplexPipeStream : Stream
 
             _input.AdvanceTo(buffer.Start, buffer.End);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DuplexPipeStream _target;
+
+        public DebugView(DuplexPipeStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

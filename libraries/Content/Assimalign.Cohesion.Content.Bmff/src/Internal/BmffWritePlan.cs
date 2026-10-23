@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BmffWritePlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffWritePlan
 {
     private readonly BmffBox _box;
@@ -202,6 +204,13 @@ internal sealed class BmffWritePlan
             case FreeSpaceBox free: segment = free.Payload; return true;
             case SkipBox skip: segment = skip.Payload; return true;
             default: segment = default; return false;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffWritePlan value)
+        {
         }
     }
 }

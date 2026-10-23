@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// Verifies HMAC-signed tokens (<c>HS256</c>/<c>HS384</c>/<c>HS512</c>) with a shared secret.
 /// The computed MAC is compared in fixed time to defeat timing side channels.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HmacJwtSignatureVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
 {
     private readonly byte[] _key;
@@ -67,5 +69,12 @@ public sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
         }
 
         return CryptographicOperations.FixedTimeEquals(computed[..written], signature);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HmacJwtSignatureVerifier value)
+        {
+        }
     }
 }

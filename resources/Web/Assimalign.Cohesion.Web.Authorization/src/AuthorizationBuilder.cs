@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// container, configuration binding, or request-time service location.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthorizationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthorizationBuilder
 {
     private readonly AuthorizationOptions _options = new();
@@ -59,5 +61,17 @@ public sealed class AuthorizationBuilder
         _options.MakeReadOnly();
 
         return new AuthorizationFeature(_options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuthorizationBuilder _target;
+
+        public DebugView(AuthorizationBuilder value)
+        {
+            _target = value;
+        }
+
+        public AuthorizationOptions Options => _target.Options;
     }
 }

@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// <see langword="true"/>: the default only runs when every registration passes.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ErrorHandlingBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ErrorHandlingBuilder
 {
     private readonly List<IErrorHandler> _handlers = new();
@@ -77,5 +79,12 @@ public sealed class ErrorHandlingBuilder
     public IErrorHandlingFeature Build()
     {
         return new ErrorHandlingFeature(_handlers.ToArray());
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ErrorHandlingBuilder value)
+        {
+        }
     }
 }

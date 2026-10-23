@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 /// provider once, and resolves the lifecycle services once, in registration order; the
 /// configuration endpoint is always the last of them.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "http://127.0.0.1:8080";
@@ -329,5 +331,17 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
         }
 
         return endpoint;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationStoreApplicationBuilder _target;
+
+        public DebugView(ConfigurationStoreApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
     }
 }

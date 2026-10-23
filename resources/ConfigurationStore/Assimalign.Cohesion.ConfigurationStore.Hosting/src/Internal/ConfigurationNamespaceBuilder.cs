@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ConfigurationStore;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationNamespaceBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationNamespaceBuilder : IConfigurationNamespaceBuilder
 {
     private readonly Dictionary<string, string?> _values = new(StringComparer.Ordinal);
@@ -28,5 +30,12 @@ internal sealed class ConfigurationNamespaceBuilder : IConfigurationNamespaceBui
     {
         return new ReadOnlyDictionary<string, string?>(
             new Dictionary<string, string?>(_values, StringComparer.Ordinal));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ConfigurationNamespaceBuilder value)
+        {
+        }
     }
 }

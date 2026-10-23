@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// argument selects nothing further — connections always reach the bound listener, whose endpoint the
 /// returned connection reports as its remote endpoint.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryConnectionFactory : DuplexConnectionFactory
 {
     private readonly InMemoryConnectionListener _listener;
@@ -45,5 +47,17 @@ public sealed class InMemoryConnectionFactory : DuplexConnectionFactory
         cancellationToken.ThrowIfCancellationRequested();
 
         return ValueTask.FromResult<IDuplexConnection>(_listener.Connect());
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryConnectionFactory _target;
+
+        public DebugView(InMemoryConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
     }
 }

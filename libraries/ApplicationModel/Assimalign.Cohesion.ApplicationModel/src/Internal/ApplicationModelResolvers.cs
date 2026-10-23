@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ExecutableApplicationModelResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ExecutableApplicationModelResolver : IApplicationModelResolver
 {
     private readonly string _path;
@@ -159,8 +161,17 @@ internal sealed class ExecutableApplicationModelResolver : IApplicationModelReso
             // The redirected reads use the caller's token and are expected to cancel here.
         }
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(ExecutableApplicationModelResolver value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("FileApplicationModelResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class FileApplicationModelResolver : IApplicationModelResolver
 {
     private readonly string _path;
@@ -184,8 +195,17 @@ internal sealed class FileApplicationModelResolver : IApplicationModelResolver
             context.Realize);
         return export.Model.ToModel(context.RunMode, context.GatewayIdentity);
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(FileApplicationModelResolver value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayApplicationModelResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayApplicationModelResolver : IApplicationModelResolver
 {
     private readonly Uri _address;
@@ -209,6 +229,13 @@ internal sealed class GatewayApplicationModelResolver : IApplicationModelResolve
             export.Model,
             context.Realize);
         return export.Model.ToModel(context.RunMode, context.GatewayIdentity);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayApplicationModelResolver value)
+        {
+        }
     }
 }
 
@@ -271,6 +298,8 @@ internal static class ApplicationModelResolverValidation
     }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("EnvironmentApplicationModelResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EnvironmentApplicationModelResolver : IApplicationModelResolver
 {
     private readonly IApplicationModelResolver _local;
@@ -292,5 +321,12 @@ internal sealed class EnvironmentApplicationModelResolver : IApplicationModelRes
         return (context.Environment.IsLocal ? _local : _deployed).ResolveAsync(
             context,
             cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EnvironmentApplicationModelResolver value)
+        {
+        }
     }
 }

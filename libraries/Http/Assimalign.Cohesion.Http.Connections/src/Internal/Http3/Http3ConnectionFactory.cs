@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// interceptors and per-exchange feature capacity, and enforcing the QUIC-capable platform
 /// guard at connection-creation time.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http3ConnectionFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3ConnectionFactory : HttpMultiplexedConnectionFactory
 {
     private readonly Http3ConnectionListenerOptions.Http3Limits _limits;
@@ -51,5 +53,17 @@ internal sealed class Http3ConnectionFactory : HttpMultiplexedConnectionFactory
         return OperatingSystem.IsWindows() ||
             OperatingSystem.IsLinux() ||
             OperatingSystem.IsMacOS();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3ConnectionFactory _target;
+
+        public DebugView(Http3ConnectionFactory value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Http.Connections.Internal.HttpResponseHeaderPolicy ResponseHeaderPolicy => _target.ResponseHeaderPolicy;
     }
 }

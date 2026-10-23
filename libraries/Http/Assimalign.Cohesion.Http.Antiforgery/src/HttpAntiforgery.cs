@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="Create(Action{HttpAntiforgeryOptions})"/>. Invoke it directly, use it through
 /// <see cref="IHttpAntiforgery"/>, or attach it through <see cref="HttpContextAntiforgeryExtensions"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpAntiforgery")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpAntiforgery : IHttpAntiforgery
 {
     private static readonly HttpHeaderKey _cacheControlHeader = "Cache-Control";
@@ -290,5 +292,12 @@ public sealed class HttpAntiforgery : IHttpAntiforgery
         public byte[] Secret { get; }
 
         public bool IsNew { get; }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpAntiforgery value)
+        {
+        }
     }
 }

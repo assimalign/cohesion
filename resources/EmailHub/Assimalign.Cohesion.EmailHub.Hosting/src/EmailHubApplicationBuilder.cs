@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.EmailHub.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("EmailHubApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EmailHubApplicationBuilder : IEmailHubApplicationBuilder
 {
     private readonly EmailHubApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class EmailHubApplicationBuilder : IEmailHubApplicationBuilder
     }
 
     IEmailHubApplication IEmailHubApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly EmailHubApplicationBuilder _target;
+
+        public DebugView(EmailHubApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

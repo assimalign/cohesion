@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// rejects keys a <c>&lt;source&gt;:&lt;key&gt;</c> mount source can never name and
 /// <see langword="null"/> providers.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ResourceSourceProviderDictionary {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceSourceProviderDictionary : IDictionary<string, IResourceSourceProvider>
 {
     private readonly Dictionary<string, IResourceSourceProvider> _providers = new(StringComparer.Ordinal);
@@ -83,5 +85,20 @@ internal sealed class ResourceSourceProviderDictionary : IDictionary<string, IRe
                 $"Mount source name '{key}' is reserved: the gateway resolves '{key}:' sources itself.",
                 nameof(key));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ResourceSourceProviderDictionary _target;
+
+        public DebugView(ResourceSourceProviderDictionary value)
+        {
+            _target = value;
+        }
+
+        public ICollection<string> Keys => _target.Keys;
+        public ICollection<IResourceSourceProvider> Values => _target.Values;
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

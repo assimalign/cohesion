@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <summary>
 /// The default <see cref="IResourceControlContext"/> passed to a controller for one resource.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ResourceControlContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceControlContext : IResourceControlContext
 {
     private readonly IResourceArtifact _artifact;
@@ -58,4 +60,22 @@ internal sealed class ResourceControlContext : IResourceControlContext
         => _artifact as T
            ?? throw new InvalidOperationException(
                $"The gathered artifact for resource '{Resource.Name}' is '{_artifact.GetType().Name}', not '{typeof(T).Name}'.");
+
+    private sealed class DebugView
+    {
+        private readonly ResourceControlContext _target;
+
+        public DebugView(ResourceControlContext value)
+        {
+            _target = value;
+        }
+
+        public IApplicationResourceDescriptor Descriptor => _target.Descriptor;
+        public IApplicationResource Resource => _target.Resource;
+        public IApplicationModel Model => _target.Model;
+        public IApplicationResourceStateManager State => _target.State;
+        public IReadOnlyList<IApplicationResource> Dependencies => _target.Dependencies;
+        public ResourceInputs Inputs => _target.Inputs;
+        public IReadOnlyList<ResourceDependencyObservation> ObservedDependencies => _target.ObservedDependencies;
+    }
 }

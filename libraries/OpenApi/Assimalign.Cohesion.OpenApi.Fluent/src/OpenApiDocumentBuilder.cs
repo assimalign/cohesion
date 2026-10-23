@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// </code>
 /// </example>
 // Deviates from AGENTS.md interface-first rule per design decision: OpenApi is a published standard, so the builders are concrete conveniences over the public model rather than an imposed interface contract.
+[global::System.Diagnostics.DebuggerDisplay("OpenApiDocumentBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiDocumentBuilder
 {
     private readonly OpenApiDocument _document;
@@ -192,4 +194,11 @@ public sealed class OpenApiDocumentBuilder
     /// <summary>Builds the document.</summary>
     /// <returns>The assembled <see cref="OpenApiDocument"/> with its <see cref="OpenApiDocument.SpecVersion"/> set to the target line.</returns>
     public OpenApiDocument Build() => _document;
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiDocumentBuilder value)
+        {
+        }
+    }
 }

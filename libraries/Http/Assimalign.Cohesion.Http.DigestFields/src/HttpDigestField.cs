@@ -30,6 +30,8 @@ namespace Assimalign.Cohesion.Http;
 /// a provider model.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpDigestField")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct HttpDigestField
 {
     private readonly StructuredFieldDictionary _dictionary;
@@ -343,4 +345,16 @@ public readonly struct HttpDigestField
 
     /// <inheritdoc />
     public override string ToString() => Serialize();
+
+    private sealed class DebugView
+    {
+        private readonly HttpDigestField _target;
+
+        public DebugView(HttpDigestField value)
+        {
+            _target = value;
+        }
+
+        public bool HasSupportedAlgorithm => _target.HasSupportedAlgorithm;
+    }
 }

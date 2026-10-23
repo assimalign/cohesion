@@ -27,6 +27,7 @@ namespace Assimalign.Cohesion.Http;
 /// here keeps the security decision — which hops to trust — entirely in the middleware.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("Count = {Count}")]
 public readonly struct HttpForwardedElementCollection : IReadOnlyList<HttpForwardedElement>, IEquatable<HttpForwardedElementCollection>
 {
@@ -233,4 +234,18 @@ public readonly struct HttpForwardedElementCollection : IReadOnlyList<HttpForwar
 
     /// <summary>Determines whether two collections are not equal.</summary>
     public static bool operator !=(HttpForwardedElementCollection left, HttpForwardedElementCollection right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly HttpForwardedElementCollection _target;
+
+        public DebugView(HttpForwardedElementCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsEmpty => _target.IsEmpty;
+        public HttpForwardedElement? Nearest => _target.Nearest;
+    }
 }

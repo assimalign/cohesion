@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Content;
 /// Reads returned by <see cref="OpenRead"/> are views over the single underlying stream, so concurrent
 /// readers are not supported for stream-backed content; use in-memory content when concurrency is needed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StreamContent {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class StreamContent : IContent
 {
     /// <summary>
@@ -133,6 +135,8 @@ public sealed class StreamContent : IContent
     /// A caller-owned, read-only pass-through view over the content's backing stream. Disposing the view
     /// does not dispose the backing stream — the content instance controls the source's lifetime.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("NonDisposingReadView {Length,nq}")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class NonDisposingReadView : Stream
     {
         private bool _closed;
@@ -215,5 +219,41 @@ public sealed class StreamContent : IContent
             _closed = true;
             base.Dispose(disposing);
         }
+
+        private sealed class DebugView
+        {
+            private readonly NonDisposingReadView _target;
+
+            public DebugView(NonDisposingReadView value)
+            {
+                _target = value;
+            }
+
+            public bool CanRead => _target.CanRead;
+            public bool CanSeek => _target.CanSeek;
+            public bool CanWrite => _target.CanWrite;
+            public long Length => _target.Length;
+            public long Position => _target.Position;
+            public bool CanTimeout => _target.CanTimeout;
+            public int ReadTimeout => _target.ReadTimeout;
+            public int WriteTimeout => _target.WriteTimeout;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly StreamContent _target;
+
+        public DebugView(StreamContent value)
+        {
+            _target = value;
+        }
+
+        public string? Name => _target.Name;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

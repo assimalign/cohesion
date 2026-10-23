@@ -18,6 +18,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// <see cref="FileSystemException"/> with code
 /// <see cref="FileSystemErrorCode.ReadOnly"/> to make the intent unambiguous.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[Synthetic] - {Path}")]
 internal sealed class AggregateSyntheticDirectory : IFileSystemDirectory
 {
@@ -183,4 +184,21 @@ internal sealed class AggregateSyntheticDirectory : IFileSystemDirectory
 
     private static void ThrowReadOnly(string op)
         => FileSystemException.ThrowReadOnly(op);
+
+    private sealed class DebugView
+    {
+        private readonly AggregateSyntheticDirectory _target;
+
+        public DebugView(AggregateSyntheticDirectory value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath Path => _target.Path;
+        public DateTime CreatedOn => _target.CreatedOn;
+        public DateTime UpdatedOn => _target.UpdatedOn;
+        public DateTime AccessedOn => _target.AccessedOn;
+        public FileAttributes Attributes => _target.Attributes;
+        public IFileSystem FileSystem => _target.FileSystem;
+    }
 }

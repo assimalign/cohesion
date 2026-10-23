@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// created are still resolved, caches per-request handlers on <see cref="IHttpContext.Items"/>,
 /// and records the default-scheme authenticate result on an <see cref="IAuthenticationResultFeature"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticationService")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthenticationService : IAuthenticationService
 {
     // Per-request handler cache key prefix. Handlers are cached on context.Items so an
@@ -166,5 +168,12 @@ public sealed class AuthenticationService : IAuthenticationService
         AuthenticationResultFeature feature = new();
         context.Features.Set<IAuthenticationResultFeature>(feature);
         return feature;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(AuthenticationService value)
+        {
+        }
     }
 }

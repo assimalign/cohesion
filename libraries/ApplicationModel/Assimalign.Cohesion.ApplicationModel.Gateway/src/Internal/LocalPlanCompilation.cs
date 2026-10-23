@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalPlanCompilation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalPlanCompilation
 {
     public LocalPlanCompilation(
@@ -32,4 +34,19 @@ internal sealed class LocalPlanCompilation
     internal ResourceTelemetryInjection? Telemetry { get; }
 
     public IReadOnlyDictionary<string, string> Environment { get; }
+
+    private sealed class DebugView
+    {
+        private readonly LocalPlanCompilation _target;
+
+        public DebugView(LocalPlanCompilation value)
+        {
+            _target = value;
+        }
+
+        public ResourcePlan Plan => _target.Plan;
+        public IExecutableArtifact Artifact => _target.Artifact;
+        public ResourceInputs Inputs => _target.Inputs;
+        public IReadOnlyDictionary<string, string> Environment => _target.Environment;
+    }
 }

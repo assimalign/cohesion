@@ -31,6 +31,8 @@ using Assimalign.Cohesion.Web.Diagnostics.Internal;
 /// disposal. The provider is thread-safe; lines from concurrent exchanges never interleave.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("W3CAccessLogProvider {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class W3CAccessLogProvider : LoggerProvider
 {
     private readonly W3CAccessLogWriter _writer;
@@ -120,6 +122,8 @@ public sealed class W3CAccessLogProvider : LoggerProvider
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("W3CAccessLogLogger")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class W3CAccessLogLogger : Logger
     {
         private readonly W3CAccessLogProvider _provider;
@@ -141,8 +145,22 @@ public sealed class W3CAccessLogProvider : LoggerProvider
             _provider.Write(entry);
             return new W3CAccessLogScopedLogger(Category, _provider, entry.Id);
         }
+
+        private sealed class DebugView
+        {
+            private readonly W3CAccessLogLogger _target;
+
+            public DebugView(W3CAccessLogLogger value)
+            {
+                _target = value;
+            }
+
+            public string Category => _target.Category;
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("W3CAccessLogScopedLogger")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class W3CAccessLogScopedLogger : ScopedLogger
     {
         private readonly W3CAccessLogProvider _provider;
@@ -162,5 +180,30 @@ public sealed class W3CAccessLogProvider : LoggerProvider
             _provider.Write(entry);
             return new W3CAccessLogScopedLogger(Category, _provider, entry.Id);
         }
+
+        private sealed class DebugView
+        {
+            private readonly W3CAccessLogScopedLogger _target;
+
+            public DebugView(W3CAccessLogScopedLogger value)
+            {
+                _target = value;
+            }
+
+            public LogId ParentId => _target.ParentId;
+            public string Category => _target.Category;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly W3CAccessLogProvider _target;
+
+        public DebugView(W3CAccessLogProvider value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
     }
 }

@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// router, and a read before that resolves it too, so a route never observes two different
 /// metadata sets. Adding metadata after resolution throws, because it would silently not apply.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DeferredRouteMetadata")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DeferredRouteMetadata : IRouterRouteMetadataCollection
 {
     private readonly RouterGroupBuilder? _group;
@@ -137,4 +139,11 @@ internal sealed class DeferredRouteMetadata : IRouterRouteMetadataCollection
     /// <returns>The exception to throw.</returns>
     public static InvalidOperationException RouteTableBuilt() => new(
         ErrorMessages.RouteTableAlreadyBuilt);
+
+    private sealed class DebugView
+    {
+        public DebugView(DeferredRouteMetadata value)
+        {
+        }
+    }
 }

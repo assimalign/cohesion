@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.Http;
 /// <see cref="StructuredFieldParameters"/>. An inner list can appear as a member of a
 /// <see cref="StructuredFieldList"/> or as a value in a <see cref="StructuredFieldDictionary"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString(),nq}")]
 public readonly struct StructuredFieldInnerList
     : IReadOnlyList<StructuredFieldItem>, IEquatable<StructuredFieldInnerList>
@@ -148,4 +149,17 @@ public readonly struct StructuredFieldInnerList
     /// <param name="right">The second inner list.</param>
     /// <returns><see langword="true"/> if the inner lists are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(StructuredFieldInnerList left, StructuredFieldInnerList right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldInnerList _target;
+
+        public DebugView(StructuredFieldInnerList value)
+        {
+            _target = value;
+        }
+
+        public StructuredFieldParameters Parameters => _target.Parameters;
+        public int Count => _target.Count;
+    }
 }

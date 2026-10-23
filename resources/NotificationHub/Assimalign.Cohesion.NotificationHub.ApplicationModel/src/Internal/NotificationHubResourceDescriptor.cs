@@ -5,6 +5,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("NotificationHubResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class NotificationHubResourceDescriptor : INotificationHubResourceDescriptor
 {
     private readonly IApplicationResourceDescriptor _inner;
@@ -36,5 +38,19 @@ internal sealed class NotificationHubResourceDescriptor : INotificationHubResour
     {
         _inner.DependsOn(resources);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NotificationHubResourceDescriptor _target;
+
+        public DebugView(NotificationHubResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public NotificationHubResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

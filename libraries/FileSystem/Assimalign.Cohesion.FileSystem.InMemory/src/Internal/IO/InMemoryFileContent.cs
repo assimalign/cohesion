@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileContent {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class InMemoryFileContent
 {
     private readonly InMemoryFileSystemFile _file;
@@ -180,5 +182,17 @@ internal class InMemoryFileContent
                 _file.Path,
                 _file.Name));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryFileContent _target;
+
+        public DebugView(InMemoryFileContent value)
+        {
+            _target = value;
+        }
+
+        public long Length => _target.Length;
     }
 }

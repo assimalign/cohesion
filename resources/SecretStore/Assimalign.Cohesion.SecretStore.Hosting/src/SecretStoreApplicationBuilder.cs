@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 /// endpoint is always the last of them. The application disposes every collaborator the provider
 /// created when it is disposed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
@@ -461,5 +463,17 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         }
 
         return new ReadOnlyMemory<byte>(value.Value.ToArray());
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreApplicationBuilder _target;
+
+        public DebugView(SecretStoreApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
     }
 }

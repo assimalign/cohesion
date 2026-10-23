@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Represents a mutable, case-insensitive collection of HTTP headers.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpHeaderCollection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 {
     private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> _emptyEnumerator = default(Enumerator);
@@ -190,6 +192,8 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Enumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private struct Enumerator : IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>>
     {
         private readonly HttpHeaderCollection? _source;
@@ -256,5 +260,29 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
                 throw new InvalidOperationException(ErrorMessages.CollectionModifiedDuringEnumeration);
             }
         }
+
+        private sealed class DebugView
+        {
+            private readonly Enumerator _target;
+
+            public DebugView(Enumerator value)
+            {
+                _target = value;
+            }
+
+            public KeyValuePair<HttpHeaderKey, HttpHeaderValue> Current => _target.Current;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpHeaderCollection _target;
+
+        public DebugView(HttpHeaderCollection value)
+        {
+            _target = value;
+        }
+
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

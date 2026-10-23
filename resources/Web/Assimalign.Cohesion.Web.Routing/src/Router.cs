@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// <see cref="RouteMatchStatus.MethodNotAllowed"/> (405) with the acceptable methods, and a <c>HEAD</c>
 /// request is served by a matching <c>GET</c> route when <c>HEAD</c> is not explicitly mapped.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Router")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Router : IRouter
 {
     private readonly IReadOnlyList<IRouterRoute> _routes;
@@ -404,5 +406,18 @@ public sealed class Router : IRouter
             result = HostRank.CompareTo(other.HostRank);
             return result != 0 ? result : Index.CompareTo(other.Index);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Router _target;
+
+        public DebugView(Router value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<IRouterRoute> Routes => _target.Routes;
+        public IRouterLinkGenerator LinkGenerator => _target.LinkGenerator;
     }
 }

@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Content.Text.Internal;
 /// and ordered longest-first within each group, plus the candidate-character set the tokenizer
 /// scans for. Compilation snapshots the options — later mutations do not affect this table.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TextTokenizerTable")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TextTokenizerTable
 {
     private readonly Dictionary<char, TextTokenDefinition[]> _groups;
@@ -135,4 +137,18 @@ internal sealed class TextTokenizerTable
 
     private static string Escape(string text)
         => text.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+
+    private sealed class DebugView
+    {
+        private readonly TextTokenizerTable _target;
+
+        public DebugView(TextTokenizerTable value)
+        {
+            _target = value;
+        }
+
+        public char[] Candidates => _target.Candidates;
+        public bool TokenizeWhitespace => _target.TokenizeWhitespace;
+        public bool WhitespaceOverlapsDefinitions => _target.WhitespaceOverlapsDefinitions;
+    }
 }

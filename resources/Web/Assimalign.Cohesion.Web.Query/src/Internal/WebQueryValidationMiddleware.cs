@@ -21,6 +21,8 @@ using Assimalign.Cohesion.Web;
 /// rejection sets the status imperatively and short-circuits without reading the request body
 /// (the transport is responsible for the unread remainder of the exchange).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebQueryValidationMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebQueryValidationMiddleware : IWebApplicationMiddleware
 {
     private readonly HttpAcceptQuery _acceptQuery;
@@ -122,5 +124,12 @@ internal sealed class WebQueryValidationMiddleware : IWebApplicationMiddleware
         // HTTP/2+ body still betrays its length through the seekable stream.
         Stream body = request.Body;
         return body.CanSeek && body.Length > 0;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebQueryValidationMiddleware value)
+        {
+        }
     }
 }

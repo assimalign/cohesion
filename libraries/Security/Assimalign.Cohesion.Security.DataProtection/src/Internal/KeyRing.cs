@@ -38,6 +38,8 @@ namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 /// reload throttle are unit-testable without real delays.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyRing")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class KeyRing
 {
     private readonly IKeyRepository _repository;
@@ -253,5 +255,12 @@ internal sealed class KeyRing
     private static long AddSaturating(long timestamp, long units)
     {
         return timestamp > long.MaxValue - units ? long.MaxValue : timestamp + units;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(KeyRing value)
+        {
+        }
     }
 }

@@ -3,6 +3,8 @@ using System.Diagnostics;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ValidationItem")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(ValidationItem<,>.DebugView))]
 internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 {
     public override void Evaluate(IValidationContext context)
@@ -54,5 +56,19 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
                 context.AddInvocation(new ValidationInvocation(rule.Name, false, Stopwatch.GetElapsedTime(started).Ticks));
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ValidationItem<T, TValue> _target;
+
+        public DebugView(ValidationItem<T, TValue> value)
+        {
+            _target = value;
+        }
+
+        public global::System.Linq.Expressions.Expression<global::System.Func<T, TValue>> ItemExpression => _target.ItemExpression;
+        public global::System.Func<T, bool> ValidationCondition => _target.ValidationCondition;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationRuleQueue ItemRuleStack => _target.ItemRuleStack;
     }
 }

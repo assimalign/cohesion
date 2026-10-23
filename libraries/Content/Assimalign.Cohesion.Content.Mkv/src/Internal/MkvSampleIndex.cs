@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Content.Media;
 
 namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MkvSampleIndex {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MkvSampleIndex : MediaSampleIndex
 {
     private readonly MkvDocument _document;
@@ -225,6 +227,8 @@ internal sealed class MkvSampleIndex : MediaSampleIndex
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ClusterSummary")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ClusterSummary
     {
         internal ClusterSummary(EbmlElement cluster, MediaSample first)
@@ -250,11 +254,51 @@ internal sealed class MkvSampleIndex : MediaSampleIndex
             HasReferences |= item.HasReferences;
             HasCodecState |= item.HasCodecState;
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(ClusterSummary value)
+            {
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("SampleLocation")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed record SampleLocation(MediaSample Sample, EbmlElement Cluster, EbmlElement? Group, long BlockTime)
     {
         internal bool HasReferences => MkvElements.Find(Group, 0xFB) is not null;
         internal bool HasCodecState => MkvElements.Find(Group, 0xA4) is not null;
+
+        private sealed class DebugView
+        {
+            private readonly SampleLocation _target;
+
+            public DebugView(SampleLocation value)
+            {
+                _target = value;
+            }
+
+            public MediaSample Sample => _target.Sample;
+            public EbmlElement Cluster => _target.Cluster;
+            public EbmlElement? Group => _target.Group;
+            public long BlockTime => _target.BlockTime;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MkvSampleIndex _target;
+
+        public DebugView(MkvSampleIndex value)
+        {
+            _target = value;
+        }
+
+        public ulong TrackId => _target.TrackId;
+        public long? Count => _target.Count;
+        public bool CanLookupByIndex => _target.CanLookupByIndex;
+        public bool CanLookupByTime => _target.CanLookupByTime;
+        public bool CanSeek => _target.CanSeek;
     }
 }

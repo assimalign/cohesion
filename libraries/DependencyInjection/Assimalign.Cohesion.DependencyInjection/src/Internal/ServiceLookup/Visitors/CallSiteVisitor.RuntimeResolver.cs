@@ -5,6 +5,8 @@ using System.Reflection;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteRuntimeResolverVisitor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteRuntimeResolverVisitor.CallSiteRuntimeResolverContext, object>
 {
     public static CallSiteRuntimeResolverVisitor Instance { get; } = new();
@@ -196,5 +198,12 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
     {
         public ServiceProviderEngineScope Scope { get; set; }
         public CallSiteRuntimeResolverLock AcquiredLocks { get; set; }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteRuntimeResolverVisitor value)
+        {
+        }
     }
 }

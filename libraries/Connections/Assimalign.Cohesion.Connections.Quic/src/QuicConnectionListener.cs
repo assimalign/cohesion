@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Connections.Quic;
 /// explicitly, or use <see cref="CreateAsync(QuicConnectionListenerOptions, CancellationToken)"/> as a
 /// compatibility convenience that constructs and binds in one operation.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("QuicConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
@@ -275,5 +277,20 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
         {
             throw new InvalidOperationException(ErrorMessages.ApplicationProtocolRequired);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly QuicConnectionListener _target;
+
+        public DebugView(QuicConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IMultiplexedConnection> Connections => _target.Connections;
     }
 }

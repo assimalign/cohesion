@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Http.Internal;
 /// factory-wide settings and produces an <see cref="IHttpClientFactory"/> when
 /// <see cref="Build"/> is called.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpClientFactoryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpClientFactoryBuilder
 {
     private readonly HttpClientFactoryOptions _options = new();
@@ -80,5 +82,12 @@ public sealed class HttpClientFactoryBuilder
                 ErrorMessages.NamedClientRequired);
         }
         return new HttpClientFactory(_options);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpClientFactoryBuilder value)
+        {
+        }
     }
 }

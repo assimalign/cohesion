@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Resilience;
 
 using Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ResiliencePipelineBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(ResiliencePipelineBuilder<>.DebugView))]
 public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuilder<TResult>
 {
     private readonly List<Func<ResilienceStrategy<TResult>, ResilienceStrategy<TResult>>> _strategies;
@@ -119,5 +121,12 @@ public sealed class ResiliencePipelineBuilder<TResult> : IResiliencePipelineBuil
         }
 
         return new ResiliencePipeline<TResult>(strategy);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResiliencePipelineBuilder<TResult> value)
+        {
+        }
     }
 }

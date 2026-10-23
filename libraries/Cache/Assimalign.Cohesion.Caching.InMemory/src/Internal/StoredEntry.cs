@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Caching.InMemory.Internal;
 /// subscriptions) is tracked here so the public <see cref="ICacheEntry"/> stays a configuration
 /// surface only.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoredEntry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class StoredEntry : IDisposable
 {
     private readonly PostEvictionCallbackRegistration[] _callbacks;
@@ -145,5 +147,23 @@ internal sealed class StoredEntry : IDisposable
                 }
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly StoredEntry _target;
+
+        public DebugView(StoredEntry value)
+        {
+            _target = value;
+        }
+
+        public object Key => _target.Key;
+        public object? Value => _target.Value;
+        public DateTimeOffset? AbsoluteExpiration => _target.AbsoluteExpiration;
+        public TimeSpan? SlidingExpiration => _target.SlidingExpiration;
+        public CacheEntryPriority Priority => _target.Priority;
+        public long? Size => _target.Size;
+        public DateTimeOffset CommittedAt => _target.CommittedAt;
     }
 }

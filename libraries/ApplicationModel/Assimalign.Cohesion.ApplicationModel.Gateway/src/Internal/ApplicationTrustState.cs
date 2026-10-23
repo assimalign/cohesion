@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// One application's trust state: its ES256 signing key, its trusted-issuer snapshot, and the
 /// gateway's default application-key credential issuer.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationTrustState")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationTrustState : IDisposable
 {
     private const string bearerScheme = "Bearer";
@@ -200,5 +202,18 @@ internal sealed class ApplicationTrustState : IDisposable
         {
             _key.Dispose();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApplicationTrustState _target;
+
+        public DebugView(ApplicationTrustState value)
+        {
+            _target = value;
+        }
+
+        public ApplicationName Application => _target.Application;
+        public ResourceName Gateway => _target.Gateway;
     }
 }

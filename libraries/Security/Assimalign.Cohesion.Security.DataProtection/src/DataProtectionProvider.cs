@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Security.DataProtection;
 /// The default <see cref="IDataProtectionProvider"/>: roots every protector's purpose chain at
 /// the application discriminator and shares one <see cref="KeyRing"/> across them.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DataProtectionProvider")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class DataProtectionProvider : IDataProtectionProvider
 {
     private readonly KeyRing _ring;
@@ -76,5 +78,12 @@ public sealed class DataProtectionProvider : IDataProtectionProvider
     {
         ArgumentNullException.ThrowIfNull(purpose);
         return new AesGcmDataProtector(_ring, new[] { _discriminator, purpose });
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(DataProtectionProvider value)
+        {
+        }
     }
 }

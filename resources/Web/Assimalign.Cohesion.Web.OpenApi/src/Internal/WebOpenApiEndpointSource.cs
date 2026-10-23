@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// the constructor; the properties only return the results.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebOpenApiEndpointSource")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
 {
     private const string formMediaType = "application/x-www-form-urlencoded";
@@ -653,5 +655,20 @@ internal sealed class WebOpenApiEndpointSource : IOpenApiEndpointSource
         public required IReadOnlyList<OpenApiResponseMetadata> Responses { get; init; }
 
         public required IReadOnlyList<OpenApiSecurityRequirementMetadata> Security { get; init; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebOpenApiEndpointSource _target;
+
+        public DebugView(WebOpenApiEndpointSource value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyList<OpenApiOperationMetadata> Operations => _target.Operations;
+        public IReadOnlyList<OpenApiSchemaMetadata> Schemas => _target.Schemas;
+        public IReadOnlyList<OpenApiTagMetadata> Tags => _target.Tags;
+        public IReadOnlyList<OpenApiSecuritySchemeMetadata> SecuritySchemes => _target.SecuritySchemes;
     }
 }

@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Http;
 /// The middleware snapshots these options when <c>UseQueryValidation</c> runs — mutations after
 /// registration have no effect, matching the builder-time composition model of the Web pipeline.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebQueryValidationOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebQueryValidationOptions
 {
     private HttpStatusCode _invalidContentTypeStatusCode = HttpStatusCode.BadRequest;
@@ -70,4 +72,19 @@ public sealed class WebQueryValidationOptions
     /// handler can still override it.
     /// </summary>
     public bool AdvertiseAcceptQuery { get; set; } = true;
+
+    private sealed class DebugView
+    {
+        private readonly WebQueryValidationOptions _target;
+
+        public DebugView(WebQueryValidationOptions value)
+        {
+            _target = value;
+        }
+
+        public IList<HttpMediaType> AcceptedMediaTypes => _target.AcceptedMediaTypes;
+        public IList<HttpMediaType> SupportedResponseMediaTypes => _target.SupportedResponseMediaTypes;
+        public HttpStatusCode InvalidContentTypeStatusCode => _target.InvalidContentTypeStatusCode;
+        public bool AdvertiseAcceptQuery => _target.AdvertiseAcceptQuery;
+    }
 }

@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Content.Binary;
 namespace Assimalign.Cohesion.Content.Pdf;
 
 /// <summary>A stream dictionary and lazy encoded bytes (§7.3.8); the source must remain open.</summary>
+[global::System.Diagnostics.DebuggerDisplay("PdfStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class PdfStream : IPdfObject
 {
     private BinarySegment _data;
@@ -54,5 +56,17 @@ public sealed partial class PdfStream : IPdfObject
             }
             return _data;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PdfStream _target;
+
+        public DebugView(PdfStream value)
+        {
+            _target = value;
+        }
+
+        public PdfDictionary Dictionary => _target.Dictionary;
     }
 }

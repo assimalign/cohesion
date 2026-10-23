@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("LocalResourcePreparer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class LocalResourcePreparer
 {
     internal const string ResourceReadyMarker = "cohesion-resource: ready";
@@ -232,5 +234,12 @@ internal sealed class LocalResourcePreparer
 
         throw new InvalidDataException(
             $"Resource '{resource}' declares unsupported restart policy '{value}'. Expected OnFailure, Always, or Never.");
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LocalResourcePreparer value)
+        {
+        }
     }
 }

@@ -5,6 +5,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteChain")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteChain
 {
     private readonly Dictionary<Type, ChainItemInfo> _callSiteChain;
@@ -69,6 +71,13 @@ internal sealed class CallSiteChain
         {
             Order = order;
             ImplementationType = implementationType;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteChain value)
+        {
         }
     }
 }

@@ -36,6 +36,8 @@ using HttpStatusCode = System.Net.HttpStatusCode;
 /// cannot ride an automatic redirect — the same constraint the BCL's built-in handling carries.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RedirectHttpMessageHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RedirectHttpMessageHandler : DelegatingHandler
 {
     private readonly int _maxAutomaticRedirections;
@@ -129,4 +131,16 @@ internal sealed class RedirectHttpMessageHandler : DelegatingHandler
 
             _ => false,
         };
+
+    private sealed class DebugView
+    {
+        private readonly RedirectHttpMessageHandler _target;
+
+        public DebugView(RedirectHttpMessageHandler value)
+        {
+            _target = value;
+        }
+
+        public global::System.Net.Http.HttpMessageHandler? InnerHandler => _target.InnerHandler;
+    }
 }

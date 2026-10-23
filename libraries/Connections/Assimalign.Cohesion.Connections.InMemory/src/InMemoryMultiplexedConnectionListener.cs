@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// Each dial creates a fresh cross-wired multiplexed connection pair: the client end is returned to the
 /// dialer and the server end is queued here for the next <see cref="AcceptAsync(CancellationToken)"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryMultiplexedConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectionListener
 {
     // Teardown and cancellation can be normal paths; resolve resource text once.
@@ -134,5 +136,20 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
         _ = server.DisposeAsync();
 
         throw new ConnectionAbortedException(ErrorMessages.MultiplexedListenerNotAccepting);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly InMemoryMultiplexedConnectionListener _target;
+
+        public DebugView(InMemoryMultiplexedConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IMultiplexedConnection> Connections => _target.Connections;
     }
 }

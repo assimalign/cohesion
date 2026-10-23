@@ -3,6 +3,8 @@
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("ConstantCallSite")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConstantCallSite : CallSiteService
 {
     private readonly Type _serviceType;
@@ -31,4 +33,19 @@ internal sealed class ConstantCallSite : CallSiteService
     public override Type ServiceType => _serviceType;
     public override Type ImplementationType => DefaultValue?.GetType() ?? _serviceType;
     public override CallSiteKind Kind { get; } = CallSiteKind.Constant;
+
+    private sealed class DebugView
+    {
+        private readonly ConstantCallSite _target;
+
+        public DebugView(ConstantCallSite value)
+        {
+            _target = value;
+        }
+
+        public Type ServiceType => _target.ServiceType;
+        public CallSiteKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.DependencyInjection.Internal.CallSiteResultCache Cache => _target.Cache;
+        public object Value => _target.Value;
+    }
 }

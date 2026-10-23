@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// middleware the effective scheme is the transport-derived one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ResponseCompressionMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
 {
     private readonly ResponseCompressionOptions _options;
@@ -122,5 +124,12 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
         throw new ArgumentException(
             ErrorMessages.ResponseCompressionCodingRequired,
             nameof(options));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResponseCompressionMiddleware value)
+        {
+        }
     }
 }

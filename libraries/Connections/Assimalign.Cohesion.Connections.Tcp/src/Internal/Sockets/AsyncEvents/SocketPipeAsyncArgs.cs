@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 /// thread, where the exception terminates the process.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SocketPipeAsyncArgs {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class SocketPipeAsyncArgs : SocketAsyncEventArgs, IValueTaskSource<SocketPipeResult>
 {
     private static readonly Action<object?> _continuationCompleted = _ => { };
@@ -99,5 +101,35 @@ internal class SocketPipeAsyncArgs : SocketAsyncEventArgs, IValueTaskSource<Sock
             _continuationState = null;
             ThreadPool.UnsafeQueueUserWorkItem(continuation, state, preferLocal: true);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SocketPipeAsyncArgs _target;
+
+        public DebugView(SocketPipeAsyncArgs value)
+        {
+            _target = value;
+        }
+
+        public global::System.Net.Sockets.Socket? AcceptSocket => _target.AcceptSocket;
+        public byte[]? Buffer => _target.Buffer;
+        public global::System.Collections.Generic.IList<global::System.ArraySegment<byte>>? BufferList => _target.BufferList;
+        public int BytesTransferred => _target.BytesTransferred;
+        public global::System.Exception? ConnectByNameError => _target.ConnectByNameError;
+        public global::System.Net.Sockets.Socket? ConnectSocket => _target.ConnectSocket;
+        public int Count => _target.Count;
+        public bool DisconnectReuseSocket => _target.DisconnectReuseSocket;
+        public global::System.Net.Sockets.SocketAsyncOperation LastOperation => _target.LastOperation;
+        public global::System.Memory<byte> MemoryBuffer => _target.MemoryBuffer;
+        public int Offset => _target.Offset;
+        public global::System.Net.Sockets.IPPacketInformation ReceiveMessageFromPacketInfo => _target.ReceiveMessageFromPacketInfo;
+        public global::System.Net.EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public global::System.Net.Sockets.SendPacketsElement[]? SendPacketsElements => _target.SendPacketsElements;
+        public global::System.Net.Sockets.TransmitFileOptions SendPacketsFlags => _target.SendPacketsFlags;
+        public int SendPacketsSendSize => _target.SendPacketsSendSize;
+        public global::System.Net.Sockets.SocketError SocketError => _target.SocketError;
+        public global::System.Net.Sockets.SocketFlags SocketFlags => _target.SocketFlags;
+        public object? UserToken => _target.UserToken;
     }
 }

@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// connection whose bidirectional carrier stream is opened when the connection context is opened.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AmqpClientTransport")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpClientTransport : IAsyncDisposable
 {
     private readonly IDuplexConnectionFactory? _factory;
@@ -133,5 +135,17 @@ public sealed class AmqpClientTransport : IAsyncDisposable
         }
 
         _connections.Clear();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpClientTransport _target;
+
+        public DebugView(AmqpClientTransport value)
+        {
+            _target = value;
+        }
+
+        public EndPoint EndPoint => _target.EndPoint;
     }
 }

@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Pdf.Internal;
 
 namespace Assimalign.Cohesion.Content.Pdf;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfDocument")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class PdfDocument
 {
     private PdfReaderOptions _options = new();
@@ -138,5 +140,21 @@ public sealed partial class PdfDocument
             value = Resolve(reference.Identifier);
         }
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PdfDocument _target;
+
+        public DebugView(PdfDocument value)
+        {
+            _target = value;
+        }
+
+        public global::System.Version Version => _target.Version;
+        public global::Assimalign.Cohesion.Content.Pdf.PdfDictionary Trailer => _target.Trailer;
+        public global::System.Collections.Generic.IReadOnlyDictionary<int, global::Assimalign.Cohesion.Content.Pdf.PdfCrossReferenceEntry> CrossReferences => _target.CrossReferences;
+        public long StartXref => _target.StartXref;
+        public long SourceOffset => _target.SourceOffset;
     }
 }

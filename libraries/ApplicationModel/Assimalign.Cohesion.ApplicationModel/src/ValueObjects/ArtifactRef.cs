@@ -21,6 +21,8 @@ public readonly record struct ArtifactRef(string Value)
     /// <inheritdoc />
     public override string ToString() => Value ?? string.Empty;
 
+    [global::System.Diagnostics.DebuggerDisplay("ArtifactRefJsonConverter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal sealed class ArtifactRefJsonConverter : JsonConverter<ArtifactRef>
     {
         public override ArtifactRef Read(
@@ -53,6 +55,19 @@ public readonly record struct ArtifactRef(string Value)
             }
 
             writer.WriteStringValue(value.Value);
+        }
+
+        private sealed class DebugView
+        {
+            private readonly ArtifactRefJsonConverter _target;
+
+            public DebugView(ArtifactRefJsonConverter value)
+            {
+                _target = value;
+            }
+
+            public bool HandleNull => _target.HandleNull;
+            public global::System.Type Type => _target.Type;
         }
     }
 }

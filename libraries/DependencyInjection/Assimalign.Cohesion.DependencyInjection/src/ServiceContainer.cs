@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.DependencyInjection;
 /// <summary>
 /// Default implementation of <see cref="IServiceContainer"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ServiceContainer {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ServiceContainer : IServiceContainer
 {
     private readonly List<ServiceDescriptor> _descriptors;
@@ -146,5 +148,18 @@ public sealed class ServiceContainer : IServiceContainer
     {
         CheckReadOnly();
         _descriptors.RemoveAt(index);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ServiceContainer _target;
+
+        public DebugView(ServiceContainer value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Resilience.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CircuitBreakerResilienceStrategy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(CircuitBreakerResilienceStrategy<>.DebugView))]
 internal sealed class CircuitBreakerResilienceStrategy<TResult> : CircuitBreakerResilienceStrategyBase, IResilienceStrategy<TResult>
 {
     public CircuitBreakerResilienceStrategy(CircuitBreakerStrategyOptions options)
@@ -31,5 +33,12 @@ internal sealed class CircuitBreakerResilienceStrategy<TResult> : CircuitBreaker
             static exception => exception,
             context,
             state);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CircuitBreakerResilienceStrategy<TResult> value)
+        {
+        }
     }
 }

@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.LogSpace.Hosting;
 /// <summary>
 /// Hosts a LogSpace application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LogSpaceApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LogSpaceApplication : Host<LogSpaceApplicationContext>, ILogSpaceApplication
 {
     private readonly LogSpaceApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class LogSpaceApplication : Host<LogSpaceApplicationContext>, ILog
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new LogSpaceApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LogSpaceApplication _target;
+
+        public DebugView(LogSpaceApplication value)
+        {
+            _target = value;
+        }
+
+        public LogSpaceApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

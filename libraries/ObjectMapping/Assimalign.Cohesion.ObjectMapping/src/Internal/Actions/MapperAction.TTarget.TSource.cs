@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.ObjectMapping.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MapperAction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MapperAction<,>.DebugView))]
 internal sealed class MapperAction<TTarget, TSource> : TypedMapperAction<TTarget, TSource>
 {
     private readonly Action<TTarget, TSource> _configure;
@@ -22,5 +24,12 @@ internal sealed class MapperAction<TTarget, TSource> : TypedMapperAction<TTarget
     public override void Invoke(TTarget target, TSource source, ref MapperExecution execution)
     {
         _configure.Invoke(target, source);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperAction<TTarget, TSource> value)
+        {
+        }
     }
 }

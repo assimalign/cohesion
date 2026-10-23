@@ -44,6 +44,8 @@ namespace Assimalign.Cohesion.Http;
 /// <c>Assimalign.Cohesion.Web.CookiePolicy</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpCookieCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpCookieCollection : IHttpCookieCollection
 {
     private static readonly char[] _attributeWhitespace = [' ', '\t'];
@@ -498,5 +500,18 @@ public sealed class HttpCookieCollection : IHttpCookieCollection
         {
             options.Extensions.Add(extension);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpCookieCollection _target;
+
+        public DebugView(HttpCookieCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

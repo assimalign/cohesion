@@ -36,6 +36,8 @@ public sealed record ResourceManifestCommand(string Kind)
     /// </remarks>
     public bool RequiresInputResolver { get; init; }
 
+    [global::System.Diagnostics.DebuggerDisplay("ResourceManifestCommandJsonConverter")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     internal sealed class ResourceManifestCommandJsonConverter : JsonConverter<ResourceManifestCommand>
     {
         public override ResourceManifestCommand Read(
@@ -129,6 +131,19 @@ public sealed record ResourceManifestCommand(string Kind)
             }
 
             return kind;
+        }
+
+        private sealed class DebugView
+        {
+            private readonly ResourceManifestCommandJsonConverter _target;
+
+            public DebugView(ResourceManifestCommandJsonConverter value)
+            {
+                _target = value;
+            }
+
+            public bool HandleNull => _target.HandleNull;
+            public global::System.Type Type => _target.Type;
         }
     }
 }

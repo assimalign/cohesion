@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessPlanController")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessPlanController : IApplicationResourceController
 {
     private readonly InProcessContextFactory _contexts;
@@ -200,5 +202,12 @@ internal sealed class InProcessPlanController : IApplicationResourceController
             observedDependencies,
             environment,
             telemetry);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessPlanController value)
+        {
+        }
     }
 }

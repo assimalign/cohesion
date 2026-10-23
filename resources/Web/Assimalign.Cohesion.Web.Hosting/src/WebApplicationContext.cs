@@ -26,6 +26,8 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 /// the default server captures the fully composed pipeline). Both snapshots are reused for every
 /// start, stop, and rollback pass.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
     private readonly Lock _lifetimeLock = new();
@@ -182,5 +184,21 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
             }
             throw new AggregateException(ErrorMessages.ApplicationResourceDisposalFailed, failures);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly WebApplicationContext _target;
+
+        public DebugView(WebApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public FileSystemPath? WebRootPath => _target.WebRootPath;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

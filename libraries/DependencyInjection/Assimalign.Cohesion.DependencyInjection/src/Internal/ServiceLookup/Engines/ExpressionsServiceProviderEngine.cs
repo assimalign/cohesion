@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ExpressionsServiceProviderEngine")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class ExpressionsServiceProviderEngine : ServiceProviderEngine
 {
     private readonly CallSiteExpressionResolverBuilderVisitor _visitor;
@@ -18,5 +20,12 @@ internal class ExpressionsServiceProviderEngine : ServiceProviderEngine
     public override Func<ServiceProviderEngineScope, object> RealizeService(CallSiteService callSite)
     {
         return _visitor.Build(callSite);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ExpressionsServiceProviderEngine value)
+        {
+        }
     }
 }

@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.ObjectMapping;
 /// The default <see cref="IMapper"/> implementation. Holds a fixed set of
 /// profiles and applies the matching ones each time <see cref="Map"/> is called.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Mapper {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Mapper : IMapper
 {
     private readonly MapperOptions _options;
@@ -91,5 +93,18 @@ public sealed class Mapper : IMapper
         }
 
         return target;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Mapper _target;
+
+        public DebugView(Mapper value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public IReadOnlyList<IMapperProfile> Profiles => _target.Profiles;
     }
 }

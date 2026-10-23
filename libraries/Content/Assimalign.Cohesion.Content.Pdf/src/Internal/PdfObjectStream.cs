@@ -4,6 +4,8 @@ using System.IO;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfObjectStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfObjectStream
 {
     private readonly ReadOnlyMemory<byte> _bytes;
@@ -67,5 +69,12 @@ internal sealed class PdfObjectStream
             throw new ContentFormatException(ErrorMessages.StructureInvalid, ContentFormatErrorCode.InvalidStructure, _position);
         }
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfObjectStream value)
+        {
+        }
     }
 }

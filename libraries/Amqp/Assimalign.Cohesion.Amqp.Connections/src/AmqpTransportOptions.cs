@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Amqp.Connections;
 /// <summary>
 /// Configures AMQP transport behavior layered on top of a lower-level carrier transport.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AmqpTransportOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AmqpTransportOptions
 {
     private uint _maxFrameSize = 262_144u;
@@ -32,5 +34,19 @@ public sealed class AmqpTransportOptions
 
             _maxFrameSize = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AmqpTransportOptions _target;
+
+        public DebugView(AmqpTransportOptions value)
+        {
+            _target = value;
+        }
+
+        public AmqpProtocolHeader InitialProtocolHeader => _target.InitialProtocolHeader;
+        public bool AutoNegotiateProtocolHeader => _target.AutoNegotiateProtocolHeader;
+        public uint MaxFrameSize => _target.MaxFrameSize;
     }
 }

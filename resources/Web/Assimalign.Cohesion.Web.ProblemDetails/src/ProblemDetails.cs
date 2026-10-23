@@ -26,6 +26,8 @@ using Assimalign.Cohesion.Web.Internal;
 /// AOT-safe set of JSON-shaped types &#8212; see <see cref="Extensions"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProblemDetails {Status,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ProblemDetails
 {
     private string? _type;
@@ -131,5 +133,22 @@ public sealed class ProblemDetails
             Status = statusCode.Value,
             Detail = detail
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ProblemDetails _target;
+
+        public DebugView(ProblemDetails value)
+        {
+            _target = value;
+        }
+
+        public string? Type => _target.Type;
+        public string? Title => _target.Title;
+        public int? Status => _target.Status;
+        public string? Detail => _target.Detail;
+        public string? Instance => _target.Instance;
+        public IDictionary<string, object?> Extensions => _target.Extensions;
     }
 }

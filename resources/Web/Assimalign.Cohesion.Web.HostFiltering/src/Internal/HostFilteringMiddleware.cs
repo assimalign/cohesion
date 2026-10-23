@@ -34,6 +34,8 @@ using Assimalign.Cohesion.Web;
 /// ordering interaction with forwarded-headers processing.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HostFilteringMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HostFilteringMiddleware : IWebApplicationMiddleware
 {
     private readonly HttpHostMatcher _matcher;
@@ -73,5 +75,12 @@ internal sealed class HostFilteringMiddleware : IWebApplicationMiddleware
         context.Response.StatusCode = HttpStatusCode.BadRequest;
         HostFilteringEventSource.Log.RequestRejected(context, host, emptyHost);
         return Task.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HostFilteringMiddleware value)
+        {
+        }
     }
 }

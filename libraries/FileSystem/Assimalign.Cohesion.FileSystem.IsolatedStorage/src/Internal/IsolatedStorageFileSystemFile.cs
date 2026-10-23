@@ -12,6 +12,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// stream is cached so the file can be opened many times concurrently subject to the supplied
 /// share mode.
 /// </summary>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[F] - {Path}")]
 internal sealed class IsolatedStorageFileSystemFile : IsolatedStorageFileSystemInfo, IFileSystemFile
 {
@@ -138,5 +139,19 @@ internal sealed class IsolatedStorageFileSystemFile : IsolatedStorageFileSystemI
         }
 
         return new IsolatedStorageFileSystemFileHandle((IsolatedStorageFileStream)Open(fileMode, fileAccess, fileShare));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IsolatedStorageFileSystemFile _target;
+
+        public DebugView(IsolatedStorageFileSystemFile value)
+        {
+            _target = value;
+        }
+
+        public global::System.IO.FileSystemPath Path => _target.Path;
+        public global::System.IO.IsolatedStorage.IsolatedStorageFile Storage => _target.Storage;
+        public global::Assimalign.Cohesion.FileSystem.IsolatedStorageFileSystem FileSystem => _target.FileSystem;
     }
 }

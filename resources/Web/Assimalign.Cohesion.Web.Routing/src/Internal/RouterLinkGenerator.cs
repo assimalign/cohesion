@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// culture and parameter policies are re-validated through the same policy objects the matcher
 /// uses (with no HTTP context, which the policy contract permits).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RouterLinkGenerator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RouterLinkGenerator : IRouterLinkGenerator
 {
     private readonly OutboundCandidate[] _candidates;
@@ -518,5 +520,12 @@ internal sealed class RouterLinkGenerator : IRouterLinkGenerator
         public RouteParameterPolicyMap PolicyMap { get; }
 
         public int Index { get; }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RouterLinkGenerator value)
+        {
+        }
     }
 }

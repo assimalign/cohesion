@@ -10,6 +10,8 @@ using Assimalign.Cohesion.ApplicationModel.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreResourceCommandHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandler
 {
     internal const string AddSecret = "secretstore.add-secret";
@@ -121,5 +123,17 @@ internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandle
             throw new JsonException($"A secret-store command requires a nonblank '{property}'.");
         }
         return value.GetString()!;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreResourceCommandHandler _target;
+
+        public DebugView(SecretStoreResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

@@ -22,6 +22,8 @@ internal enum ResourceHostRunMode
     InProcess,
 }
 
+[global::System.Diagnostics.DebuggerDisplay("ResourceHostOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResourceHostOptions
 {
     internal const int DefaultStopGraceSeconds = 30;
@@ -158,5 +160,12 @@ internal sealed class ResourceHostOptions
     private static void SetProcessExitCode(int exitCode)
     {
         System.Environment.ExitCode = exitCode;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResourceHostOptions value)
+        {
+        }
     }
 }

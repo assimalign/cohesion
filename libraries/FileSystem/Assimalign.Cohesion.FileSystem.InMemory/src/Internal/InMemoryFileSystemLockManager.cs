@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InMemoryFileSystemLockManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class InMemoryFileSystemLockManager : IDisposable
 {
     private readonly Stack<InMemoryFileSystemLockHandle> _handles;
@@ -24,6 +26,13 @@ internal class InMemoryFileSystemLockManager : IDisposable
         {
             var handle = _handles.Pop();
             handle.Unlock();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(InMemoryFileSystemLockManager value)
+        {
         }
     }
 }

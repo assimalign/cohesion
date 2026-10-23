@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ControlPlaneJsonContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Default,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
@@ -15,7 +17,21 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 [JsonSerializable(typeof(ControlPlaneCommandObservation[]))]
 [JsonSerializable(typeof(ControlPlaneMetadataDocument))]
 [JsonSerializable(typeof(ControlPlaneErrorDocument))]
-internal sealed partial class ControlPlaneJsonContext : JsonSerializerContext;
+internal sealed partial class ControlPlaneJsonContext : JsonSerializerContext
+{
+    private sealed class DebugView
+    {
+        private readonly ControlPlaneJsonContext _target;
+
+        public DebugView(ControlPlaneJsonContext value)
+        {
+            _target = value;
+        }
+
+        public global::System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions => _target.GeneratedSerializerOptions;
+        public global::System.Text.Json.JsonSerializerOptions Options => _target.Options;
+    }
+}
 
 internal sealed class ControlPlaneResourceDocument
 {

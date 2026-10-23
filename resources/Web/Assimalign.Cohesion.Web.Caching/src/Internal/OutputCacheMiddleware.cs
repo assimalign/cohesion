@@ -42,6 +42,8 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// computes a different key and never receives it.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OutputCacheMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
 {
     private static readonly HashSet<string> _nonCacheableHeaders = new(StringComparer.OrdinalIgnoreCase)
@@ -479,5 +481,12 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OutputCacheMiddleware value)
+        {
+        }
     }
 }

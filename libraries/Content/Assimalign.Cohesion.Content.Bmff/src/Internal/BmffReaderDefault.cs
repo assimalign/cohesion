@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("BmffReaderDefault")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffReaderDefault : BmffReader
 {
     private readonly BmffStream _stream;
@@ -236,6 +238,13 @@ internal sealed class BmffReaderDefault : BmffReader
             _child?.Dispose();
             _payload?.Dispose();
             _stream.Dispose();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffReaderDefault value)
+        {
         }
     }
 }

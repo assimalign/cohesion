@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Assimalign.Cohesion.Http;
 
+[global::System.Diagnostics.DebuggerDisplay("WebApplicationPipeline")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class WebApplicationPipeline : IWebApplicationPipeline
 {
     private readonly WebApplicationMiddleware _middleware;
@@ -26,5 +28,12 @@ internal class WebApplicationPipeline : IWebApplicationPipeline
         }
 
         return _middleware.Invoke(context);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebApplicationPipeline value)
+        {
+        }
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// <summary>
 /// A fluent builder for creating a <see cref="IValidatorFactory"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ValidatorFactoryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ValidatorFactoryBuilder
 {
     internal readonly ConcurrentDictionary<string, IValidator> validators;
@@ -87,5 +89,12 @@ public sealed class ValidatorFactoryBuilder
         configure.Invoke(builder);
 
         return builder.Build();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ValidatorFactoryBuilder value)
+        {
+        }
     }
 }

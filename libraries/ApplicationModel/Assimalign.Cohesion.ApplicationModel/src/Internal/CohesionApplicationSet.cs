@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CohesionApplicationSet")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CohesionApplicationSet : IApplicationSet
 {
     private readonly IMultiModelApplicationGateway _gateway;
@@ -323,4 +325,17 @@ internal sealed class CohesionApplicationSet : IApplicationSet
     private readonly record struct Member(
         ApplicationDeclaration Declaration,
         Action<IApplicationProviderBuilder>? Configure);
+
+    private sealed class DebugView
+    {
+        private readonly CohesionApplicationSet _target;
+
+        public DebugView(CohesionApplicationSet value)
+        {
+            _target = value;
+        }
+
+        public IApplicationEnvironment Environment => _target.Environment;
+        public GatewayRunMode RunMode => _target.RunMode;
+    }
 }

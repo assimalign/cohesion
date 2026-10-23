@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// from racing each other.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http2Stream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http2Stream
 {
     // These diagnostics also run during ordinary validation, cancellation or completion.
@@ -1527,5 +1529,34 @@ internal sealed class Http2Stream
         public HttpStatusCode StatusCode { get; }
 
         public IOException Failure { get; }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http2Stream _target;
+
+        public DebugView(Http2Stream value)
+        {
+            _target = value;
+        }
+
+        public Http2FlowControlWindow SendWindow => _target.SendWindow;
+        public Http2FlowControlWindow ReceiveWindow => _target.ReceiveWindow;
+        public long InitialReceiveWindow => _target.InitialReceiveWindow;
+        public bool ReceiveReclaimed => _target.ReceiveReclaimed;
+        public CancellationToken RequestAborted => _target.RequestAborted;
+        public int StreamId => _target.StreamId;
+        public HttpPriority EffectivePriority => _target.EffectivePriority;
+        public Http2StreamState State => _target.State;
+        public bool HeadersCompleted => _target.HeadersCompleted;
+        public bool InputCompleted => _target.InputCompleted;
+        public bool ContextDispatched => _target.ContextDispatched;
+        public bool IsHeadReady => _target.IsHeadReady;
+        public bool IsTrailerBlockReady => _target.IsTrailerBlockReady;
+        public bool IsReset => _target.IsReset;
+        public bool ResponseAbortedByClient => _target.ResponseAbortedByClient;
+        public bool IsDeclaredBodyOverLimit => _target.IsDeclaredBodyOverLimit;
+        public bool IsResponseCompleted => _target.IsResponseCompleted;
+        public bool IsClosed => _target.IsClosed;
     }
 }

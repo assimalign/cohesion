@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// defined once in <see cref="Http3SettingId"/>. Unknown identifiers are
 /// retained but ignored, per RFC 9114 §7.2.4.1.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Http3PeerSettings")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3PeerSettings
 {
     private readonly Dictionary<long, long> _values = new();
@@ -35,4 +37,11 @@ internal sealed class Http3PeerSettings
     /// </summary>
     public bool EnableConnectProtocolNegotiated
         => _values.TryGetValue(Http3SettingId.EnableConnectProtocol, out long value) && value == 1;
+
+    private sealed class DebugView
+    {
+        public DebugView(Http3PeerSettings value)
+        {
+        }
+    }
 }

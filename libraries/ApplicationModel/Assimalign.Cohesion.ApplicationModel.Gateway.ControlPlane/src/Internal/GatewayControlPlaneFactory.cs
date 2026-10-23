@@ -4,6 +4,8 @@ using System.IO;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayControlPlaneFactory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayControlPlaneFactory : IApplicationGatewayControlPlaneFactory
 {
     private readonly string? _metadataDirectory;
@@ -55,4 +57,11 @@ internal sealed class GatewayControlPlaneFactory : IApplicationGatewayControlPla
             _metadataDirectory,
             _timeProvider,
             _dispatchers);
+
+    private sealed class DebugView
+    {
+        public DebugView(GatewayControlPlaneFactory value)
+        {
+        }
+    }
 }

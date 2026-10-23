@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Connections;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("Http3Connection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http3Connection : HttpConnection
 {
     private readonly IMultiplexedConnection _connection;
@@ -116,5 +118,25 @@ internal sealed class Http3Connection : HttpConnection
         return OperatingSystem.IsWindows() ||
             OperatingSystem.IsLinux() ||
             OperatingSystem.IsMacOS();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http3Connection _target;
+
+        public DebugView(Http3Connection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public IConnectionFeatureCollection Features => _target.Features;
+        public HttpProtocol Protocol => _target.Protocol;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public bool IsSecure => _target.IsSecure;
     }
 }

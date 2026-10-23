@@ -4,6 +4,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>Builds immutable registries using explicit, AOT-safe factory delegates.</summary>
+[global::System.Diagnostics.DebuggerDisplay("BmffBoxRegistryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class BmffBoxRegistryBuilder
 {
     internal Dictionary<BmffBoxType, Func<BmffBoxHeader, BmffBox>> Factories { get; } = new();
@@ -53,4 +55,11 @@ public sealed class BmffBoxRegistryBuilder
     /// <summary>Freezes a snapshot; later builder mutations cannot alter it.</summary>
     /// <returns>The registry snapshot.</returns>
     public BmffBoxRegistry Build() => new BmffBoxRegistry(Factories, Unsupported, SampleEntries, Relocations);
+
+    private sealed class DebugView
+    {
+        public DebugView(BmffBoxRegistryBuilder value)
+        {
+        }
+    }
 }

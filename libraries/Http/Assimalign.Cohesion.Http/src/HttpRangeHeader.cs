@@ -20,6 +20,7 @@ namespace Assimalign.Cohesion.Http;
 /// spec in it. Whether the set produces a <c>206</c> or a <c>416</c> is a separate decision made by
 /// <see cref="HttpRangeSelector"/> against a known content length.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpRangeHeader
 {
@@ -153,5 +154,19 @@ public readonly struct HttpRangeHeader
             builder.Append(_ranges[i].ToString());
         }
         return builder.ToString();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpRangeHeader _target;
+
+        public DebugView(HttpRangeHeader value)
+        {
+            _target = value;
+        }
+
+        public string Unit => _target.Unit;
+        public int Count => _target.Count;
+        public bool IsEmpty => _target.IsEmpty;
     }
 }

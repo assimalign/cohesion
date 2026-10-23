@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http;
 /// such as a tenant segment or a forwarded host, is therefore refused instead of
 /// emitted.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpCookieOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpCookieOptions
 {
     private HttpCookieExtensionCollection? _extensions;
@@ -148,6 +150,25 @@ public sealed class HttpCookieOptions
     /// also refuses <see langword="default"/>, which holds no extension.
     /// </remarks>
     public IList<HttpCookieExtension> Extensions => _extensions ??= new HttpCookieExtensionCollection();
+
+    private sealed class DebugView
+    {
+        private readonly HttpCookieOptions _target;
+
+        public DebugView(HttpCookieOptions value)
+        {
+            _target = value;
+        }
+
+        public HttpCookieDomain? Domain => _target.Domain;
+        public HttpCookiePath? Path => _target.Path;
+        public DateTimeOffset? Expires => _target.Expires;
+        public bool Secure => _target.Secure;
+        public HttpCookieSameSiteMode SameSite => _target.SameSite;
+        public bool HttpOnly => _target.HttpOnly;
+        public TimeSpan? MaxAge => _target.MaxAge;
+        public bool IsEssential => _target.IsEssential;
+    }
 }
 
 /// <summary>

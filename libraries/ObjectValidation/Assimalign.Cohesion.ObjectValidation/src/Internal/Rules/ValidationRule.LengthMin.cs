@@ -6,6 +6,8 @@ using System.Linq.Expressions;
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("LengthMinValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(LengthMinValidationRule<>.DebugView))]
 internal sealed class LengthMinValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : IEnumerable
 {
@@ -69,6 +71,21 @@ internal sealed class LengthMinValidationRule<TValue> : ValidationRuleBase<TValu
             IEnumerable enumerable  when enumerable.Cast<object>().Count() < this._length => true,
             _ => false
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LengthMinValidationRule<TValue> _target;
+
+        public DebugView(LengthMinValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }
 

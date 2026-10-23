@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Internal;
 /// the recorded interval always belongs to the arm that expired. A queued callback from an older
 /// arm checks the current deadline. No diagnostic event is raised from this callback.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestTimeoutFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposable
 {
     private readonly CancellationTokenSource _timeoutSource;
@@ -159,5 +161,18 @@ internal sealed class RequestTimeoutFeature : IRequestTimeoutFeature, IDisposabl
 
         _linkedSource.Dispose();
         _timeoutSource.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RequestTimeoutFeature _target;
+
+        public DebugView(RequestTimeoutFeature value)
+        {
+            _target = value;
+        }
+
+        public CancellationToken Token => _target.Token;
+        public RequestTimeoutPolicy? EffectivePolicy => _target.EffectivePolicy;
     }
 }

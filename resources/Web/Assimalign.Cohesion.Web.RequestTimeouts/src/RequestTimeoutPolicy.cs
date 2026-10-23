@@ -26,6 +26,8 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 /// <see cref="WriteResponse"/> wins over both.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RequestTimeoutPolicy")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RequestTimeoutPolicy
 {
     private readonly TimeSpan? _timeout;
@@ -82,4 +84,19 @@ public sealed class RequestTimeoutPolicy
     /// on the supplied context. It is only invoked when the response has not started.
     /// </summary>
     public Func<IHttpContext, Task>? WriteResponse { get; init; }
+
+    private sealed class DebugView
+    {
+        private readonly RequestTimeoutPolicy _target;
+
+        public DebugView(RequestTimeoutPolicy value)
+        {
+            _target = value;
+        }
+
+        public TimeSpan? Timeout => _target.Timeout;
+        public HttpStatusCode StatusCode => _target.StatusCode;
+        public bool WriteProblemDetails => _target.WriteProblemDetails;
+        public Func<IHttpContext, Task>? WriteResponse => _target.WriteResponse;
+    }
 }

@@ -7,6 +7,8 @@ using System.Linq.Expressions;
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("LengthValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(LengthValidationRule<>.DebugView))]
 internal sealed class LengthValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : IEnumerable
 {
@@ -72,5 +74,20 @@ internal sealed class LengthValidationRule<TValue> : ValidationRuleBase<TValue>
             IEnumerable enumerable  when enumerable.Cast<object>().Count() == this._length => true,
             _ => false
         };
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LengthValidationRule<TValue> _target;
+
+        public DebugView(LengthValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }

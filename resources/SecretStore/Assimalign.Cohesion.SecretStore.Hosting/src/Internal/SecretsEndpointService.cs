@@ -24,6 +24,8 @@ using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SecretsEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecretsEndpointService : IHostService, IDisposable
 {
     internal const string TrustAddCommand = "cohesion.trust.add";
@@ -979,5 +981,17 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         Health,
         Readiness,
         Liveness,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretsEndpointService _target;
+
+        public DebugView(SecretsEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

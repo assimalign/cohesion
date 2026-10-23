@@ -43,6 +43,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// The store holds no state; one instance may serve any number of concurrent calls.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecretStoreTrustedIssuerStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SecretStoreTrustedIssuerStore : ITrustedIssuerStore
 {
     private readonly Func<RemoteCertificateValidationCallback?, HttpMessageInvoker> _transportFactory;
@@ -166,5 +168,17 @@ public sealed class SecretStoreTrustedIssuerStore : ITrustedIssuerStore
         await SecretStoreProtocol.CreateClient(connection, transport)
             .SendCommandAsync(command, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SecretStoreTrustedIssuerStore _target;
+
+        public DebugView(SecretStoreTrustedIssuerStore value)
+        {
+            _target = value;
+        }
+
+        public string? ResourceKind => _target.ResourceKind;
     }
 }

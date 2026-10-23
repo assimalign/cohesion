@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// another version) or comes from a disallowed origin (<c>403</c>); a valid one continues with
 /// <see cref="WebSocketPolicyFeature"/> installed, so the accept downstream takes the policy.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("WebSocketMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebSocketMiddleware : IWebApplicationMiddleware
 {
     private readonly WebSocketPolicy _policy;
@@ -64,6 +66,13 @@ internal sealed class WebSocketMiddleware : IWebApplicationMiddleware
         finally
         {
             feature.Release();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebSocketMiddleware value)
+        {
         }
     }
 }

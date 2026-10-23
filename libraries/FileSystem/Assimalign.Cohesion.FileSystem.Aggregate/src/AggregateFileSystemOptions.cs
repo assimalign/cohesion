@@ -10,6 +10,8 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// the display name, and the read-only flag. Constructed by <see cref="AggregateFileSystemBuilder"/>
 /// or supplied directly to the file system constructor.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AggregateFileSystemOptions {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AggregateFileSystemOptions
 {
     /// <summary>
@@ -31,4 +33,17 @@ public sealed class AggregateFileSystemOptions
     /// concrete <see cref="IFileSystem"/>. Resolution uses longest-prefix matching.
     /// </summary>
     internal List<AggregateMount> Mounts { get; } = new();
+
+    private sealed class DebugView
+    {
+        private readonly AggregateFileSystemOptions _target;
+
+        public DebugView(AggregateFileSystemOptions value)
+        {
+            _target = value;
+        }
+
+        public string? Name => _target.Name;
+        public bool IsReadOnly => _target.IsReadOnly;
+    }
 }

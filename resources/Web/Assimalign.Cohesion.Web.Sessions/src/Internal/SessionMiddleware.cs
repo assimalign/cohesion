@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.Sessions.Internal;
 /// no configuration binding — in keeping with the feature-package composition
 /// rules.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SessionMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SessionMiddleware : IWebApplicationMiddleware
 {
     private readonly IHttpSessionStore _store;
@@ -48,6 +50,13 @@ internal sealed class SessionMiddleware : IWebApplicationMiddleware
         if (feature.WasAccessed)
         {
             await feature.CommitAsync(context.RequestCancelled).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SessionMiddleware value)
+        {
         }
     }
 }

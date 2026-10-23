@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Content.Ebml;
 /// <summary>Writes typed EBML elements with precomputed, streaming, or back-patched master sizes.</summary>
 /// <remarks>Borrowed outputs are never closed by default. Known master sizes work without seeking.
 /// A failed write can leave partial output; use a separate destination when replacing a document.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("EbmlWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed partial class EbmlWriter : IDisposable
 {
     private readonly Stream _output;
@@ -476,6 +478,8 @@ public sealed partial class EbmlWriter : IDisposable
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("MasterFrame")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class MasterFrame
     {
         internal MasterFrame(long dataOffset, long? size, long sizePosition, int sizeLength, bool backPatch)
@@ -487,5 +491,24 @@ public sealed partial class EbmlWriter : IDisposable
         internal long SizePosition { get; }
         internal int SizeLength { get; }
         internal bool BackPatch { get; }
+
+        private sealed class DebugView
+        {
+            public DebugView(MasterFrame value)
+            {
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EbmlWriter _target;
+
+        public DebugView(EbmlWriter value)
+        {
+            _target = value;
+        }
+
+        public long Position => _target.Position;
     }
 }

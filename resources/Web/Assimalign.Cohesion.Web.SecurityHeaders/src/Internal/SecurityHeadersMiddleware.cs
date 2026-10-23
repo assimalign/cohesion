@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 /// callback remains registered if an outer exception boundary replaces the response after this
 /// middleware unwinds. Endpoint overrides and application-owned fields are resolved at that moment.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SecurityHeadersMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
 {
     private static readonly HttpHeaderKey[] _preservedHeaders =
@@ -130,5 +132,12 @@ internal sealed class SecurityHeadersMiddleware : IWebApplicationMiddleware
         SecurityHeadersFeature feature = new();
         context.Features.Set<ISecurityHeadersFeature>(feature);
         return feature;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SecurityHeadersMiddleware value)
+        {
+        }
     }
 }

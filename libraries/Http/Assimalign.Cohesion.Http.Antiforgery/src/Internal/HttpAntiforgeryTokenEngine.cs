@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// to "invalid".
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpAntiforgeryTokenEngine")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpAntiforgeryTokenEngine
 {
     private const int SecretBytes = 32;
@@ -133,6 +135,13 @@ internal sealed class HttpAntiforgeryTokenEngine
             // Untrusted input — a malformed token is a validation failure, not an exceptional
             // condition for the caller.
             return null;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpAntiforgeryTokenEngine value)
+        {
         }
     }
 }

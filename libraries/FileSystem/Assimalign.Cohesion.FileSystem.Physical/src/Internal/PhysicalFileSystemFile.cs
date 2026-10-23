@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("[F] - {Path}")]
 internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 {
@@ -77,5 +78,25 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
     public override void Dispose()
     {
 
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PhysicalFileSystemFile _target;
+
+        public DebugView(PhysicalFileSystemFile value)
+        {
+            _target = value;
+        }
+
+        public FileName Name => _target.Name;
+        public PhysicalFileSystemDirectory Directory => _target.Directory;
+        public global::System.IO.FileSystemPath Path => _target.Path;
+        public global::System.DateTime UpdatedOn => _target.UpdatedOn;
+        public global::System.DateTime CreatedOn => _target.CreatedOn;
+        public global::System.DateTime AccessedOn => _target.AccessedOn;
+        public global::Assimalign.Cohesion.FileSystem.PhysicalFileSystem FileSystem => _target.FileSystem;
+        public global::System.IO.FileAttributes Attributes => _target.Attributes;
+        public global::System.IO.FileAttributes IgnoreAttributes => _target.IgnoreAttributes;
     }
 }

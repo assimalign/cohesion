@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// so the application sees the rejection from <c>Response.Trailers.Add</c> or the indexer. Reads, removal
 /// and clearing are plain pass-throughs.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransportHttpTrailerFields {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TransportHttpTrailerFields : IHttpHeaderCollection
 {
     private readonly HttpHeaderCollection _fields = new();
@@ -57,4 +59,17 @@ internal sealed class TransportHttpTrailerFields : IHttpHeaderCollection
     public IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> GetEnumerator() => _fields.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly TransportHttpTrailerFields _target;
+
+        public DebugView(TransportHttpTrailerFields value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
+    }
 }

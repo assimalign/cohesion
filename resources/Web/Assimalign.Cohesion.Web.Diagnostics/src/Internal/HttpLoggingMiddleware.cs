@@ -42,6 +42,8 @@ using Assimalign.Cohesion.Web.Routing;
 /// stays at the configured level without an exception; cancellation alone adds no client-fault marker.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpLoggingMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 {
     private const HttpLoggingFields CaptureFields =
@@ -484,5 +486,12 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
         }
 
         return builder.ToString();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpLoggingMiddleware value)
+        {
+        }
     }
 }

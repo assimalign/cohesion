@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 /// <summary>
 /// Hosts a Rezolvr application and its ordered service lifecycle.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RezolvrApplication {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RezolvrApplication : Host<RezolvrApplicationContext>, IRezolvrApplication
 {
     private readonly RezolvrApplicationContext _context;
@@ -68,5 +70,18 @@ public sealed class RezolvrApplication : Host<RezolvrApplicationContext>, IRezol
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);
         return new RezolvrApplicationBuilder(args, resourceAssembly);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RezolvrApplication _target;
+
+        public DebugView(RezolvrApplication value)
+        {
+            _target = value;
+        }
+
+        public RezolvrApplicationContext Context => _target.Context;
+        public HostId Id => _target.Id;
     }
 }

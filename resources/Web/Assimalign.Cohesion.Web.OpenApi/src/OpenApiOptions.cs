@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Web.OpenApi;
 /// authenticate scheme.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiOptions
 {
     private readonly List<OpenApiSecuritySchemeMetadata> _securitySchemes = [];
@@ -267,5 +269,22 @@ public sealed class OpenApiOptions
         string name = AppDomain.CurrentDomain.FriendlyName;
 
         return string.IsNullOrWhiteSpace(name) ? "API" : name;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiOptions _target;
+
+        public DebugView(OpenApiOptions value)
+        {
+            _target = value;
+        }
+
+        public string Title => _target.Title;
+        public string ApiVersion => _target.ApiVersion;
+        public string? Description => _target.Description;
+        public OpenApiSpecVersion SpecVersion => _target.SpecVersion;
+        public IReadOnlyList<OpenApiSecuritySchemeMetadata> SecuritySchemes => _target.SecuritySchemes;
+        public IReadOnlyList<OpenApiTagMetadata> Tags => _target.Tags;
     }
 }

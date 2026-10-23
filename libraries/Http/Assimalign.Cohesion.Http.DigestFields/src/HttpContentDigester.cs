@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Http;
 /// resetting, so it may be called at the end of the body (the normal case) without preventing
 /// further appends. The instance owns its hashes and must be disposed.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HttpContentDigester")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpContentDigester : IDisposable
 {
     private readonly HttpDigestAlgorithm[] _algorithms;
@@ -103,6 +105,13 @@ public sealed class HttpContentDigester : IDisposable
         foreach (IncrementalHash hash in _hashes)
         {
             hash.Dispose();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpContentDigester value)
+        {
         }
     }
 }

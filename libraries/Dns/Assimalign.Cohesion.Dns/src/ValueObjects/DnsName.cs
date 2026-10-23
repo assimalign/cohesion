@@ -21,6 +21,8 @@ namespace Assimalign.Cohesion.Dns;
 /// (uninitialized) value represents the root name <c>"."</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsName")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct DnsName : IEquatable<DnsName>
 {
     private readonly string? _value;
@@ -159,5 +161,18 @@ public readonly struct DnsName : IEquatable<DnsName>
                 labelStart = i + 1;
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly DnsName _target;
+
+        public DebugView(DnsName value)
+        {
+            _target = value;
+        }
+
+        public string Value => _target.Value;
+        public bool IsRoot => _target.IsRoot;
     }
 }

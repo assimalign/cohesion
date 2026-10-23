@@ -23,6 +23,8 @@ namespace Assimalign.Cohesion.Http;
 ///   lifetime window.</description></item>
 /// </list>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("NamedHttpClientOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class NamedHttpClientOptions
 {
     private int _maxAutomaticRedirections = 50;
@@ -121,4 +123,23 @@ public sealed class NamedHttpClientOptions
     /// redirect following should disable one or the other so exactly one layer acts.
     /// </remarks>
     public Func<HttpMessageHandler>? HandlerFactory { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly NamedHttpClientOptions _target;
+
+        public DebugView(NamedHttpClientOptions value)
+        {
+            _target = value;
+        }
+
+        public Uri? BaseAddress => _target.BaseAddress;
+        public bool AllowAutoRedirect => _target.AllowAutoRedirect;
+        public int MaxAutomaticRedirections => _target.MaxAutomaticRedirections;
+        public TimeSpan? RequestTimeout => _target.RequestTimeout;
+        public TimeSpan? HandlerLifetime => _target.HandlerLifetime;
+        public Action<HttpRequestHeaders>? ConfigureDefaultHeaders => _target.ConfigureDefaultHeaders;
+        public Action<System.Net.Http.SocketsHttpHandler>? ConfigureHandler => _target.ConfigureHandler;
+        public Func<HttpMessageHandler>? HandlerFactory => _target.HandlerFactory;
+    }
 }

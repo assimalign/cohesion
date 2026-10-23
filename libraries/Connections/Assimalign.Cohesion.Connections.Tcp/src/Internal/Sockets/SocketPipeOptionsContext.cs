@@ -4,6 +4,8 @@ using System.Threading;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SocketPipeOptionsContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SocketPipeOptionsContext : IDisposable
 {
     private int _references = 1;
@@ -38,5 +40,22 @@ internal sealed class SocketPipeOptionsContext : IDisposable
         {
             PipeOptions.Dispose();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SocketPipeOptionsContext _target;
+
+        public DebugView(SocketPipeOptionsContext value)
+        {
+            _target = value;
+        }
+
+        public PipeOptionsContext PipeOptions => _target.PipeOptions;
+        public PipeOptions InputOptions => _target.InputOptions;
+        public PipeOptions OutputOptions => _target.OutputOptions;
+        public PipeScheduler ReceiverScheduler => _target.ReceiverScheduler;
+        public PipeScheduler SenderScheduler => _target.SenderScheduler;
+        public int BlockSize => _target.BlockSize;
     }
 }

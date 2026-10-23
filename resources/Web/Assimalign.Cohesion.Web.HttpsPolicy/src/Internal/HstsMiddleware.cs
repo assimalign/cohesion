@@ -38,6 +38,8 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 /// can carry no new field regardless of when it is set.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HstsMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HstsMiddleware : IWebApplicationMiddleware
 {
     private readonly string _headerValue;
@@ -75,6 +77,13 @@ internal sealed class HstsMiddleware : IWebApplicationMiddleware
         if (!headers.IsReadOnly)
         {
             headers[HttpHeaderKey.StrictTransportSecurity] = _headerValue;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HstsMiddleware value)
+        {
         }
     }
 }

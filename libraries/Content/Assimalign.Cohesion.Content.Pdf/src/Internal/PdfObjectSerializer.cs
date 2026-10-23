@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Content.Binary;
 
 namespace Assimalign.Cohesion.Content.Pdf.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PdfObjectSerializer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PdfObjectSerializer
 {
     private readonly PdfOutput _output;
@@ -200,5 +202,12 @@ internal sealed class PdfObjectSerializer
         // A decimal point preserves PdfReal even when its mathematical value is integral.
         if (!text.Contains('.', StringComparison.Ordinal)) { text += "."; }
         return text;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(PdfObjectSerializer value)
+        {
+        }
     }
 }

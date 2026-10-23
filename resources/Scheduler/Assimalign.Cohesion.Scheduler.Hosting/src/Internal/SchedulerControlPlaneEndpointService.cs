@@ -21,6 +21,8 @@ using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SchedulerControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -347,5 +349,17 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         Health,
         Readiness,
         Liveness,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly SchedulerControlPlaneEndpointService _target;
+
+        public DebugView(SchedulerControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

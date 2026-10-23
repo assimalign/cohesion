@@ -49,6 +49,8 @@ namespace Assimalign.Cohesion.Dns;
 /// retried elsewhere.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ForwardingDnsResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ForwardingDnsResolver : DnsResolver
 {
     private readonly TimeSpan _queryTimeout;
@@ -258,5 +260,18 @@ public sealed class ForwardingDnsResolver : DnsResolver
         }
         DnsException.ThrowServerFailure(question.ToString(), rcode);
         throw new InvalidOperationException(); // unreachable
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ForwardingDnsResolver _target;
+
+        public DebugView(ForwardingDnsResolver value)
+        {
+            _target = value;
+        }
+
+        public int CacheCount => _target.CacheCount;
+        public bool IsDisposed => _target.IsDisposed;
     }
 }

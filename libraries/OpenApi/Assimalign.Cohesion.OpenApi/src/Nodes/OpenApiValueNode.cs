@@ -30,6 +30,8 @@ public enum OpenApiValueKind
 /// The scalar kind is preserved (an integer is never silently widened to a floating-point value) so
 /// that round-trip serialization keeps the original numeric shape where the wire format allows it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiValueNode")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiValueNode : OpenApiNode
 {
     private readonly bool _boolean;
@@ -110,4 +112,17 @@ public sealed class OpenApiValueNode : OpenApiNode
     public string GetString() => Kind == OpenApiValueKind.String
         ? _string!
         : throw new InvalidOperationException($"Value node of kind '{Kind}' is not a string.");
+
+    private sealed class DebugView
+    {
+        private readonly OpenApiValueNode _target;
+
+        public DebugView(OpenApiValueNode value)
+        {
+            _target = value;
+        }
+
+        public OpenApiValueKind Kind => _target.Kind;
+        public bool IsNull => _target.IsNull;
+    }
 }

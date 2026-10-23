@@ -4,6 +4,8 @@ using System.Text;
 namespace Assimalign.Cohesion.Content.Pdf;
 
 /// <summary>A byte string retaining its literal or hexadecimal representation (§7.3.4).</summary>
+[global::System.Diagnostics.DebuggerDisplay("PdfString")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfString : IPdfObject
 {
     private readonly byte[] _bytes;
@@ -43,5 +45,17 @@ public sealed class PdfString : IPdfObject
     {
         ArgumentNullException.ThrowIfNull(encoding);
         return encoding.GetString(Bytes.Span);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly PdfString _target;
+
+        public DebugView(PdfString value)
+        {
+            _target = value;
+        }
+
+        public bool IsHexadecimal => _target.IsHexadecimal;
     }
 }

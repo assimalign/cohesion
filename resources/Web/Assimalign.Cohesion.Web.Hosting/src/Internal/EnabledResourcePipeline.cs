@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EnabledResourcePipeline")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class EnabledResourcePipeline : IWebApplicationPipeline, IDisposable
 {
     private readonly IResourceControlPlane _controlPlane;
@@ -59,6 +61,13 @@ internal sealed class EnabledResourcePipeline : IWebApplicationPipeline, IDispos
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             _lifetime?.Dispose();
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EnabledResourcePipeline value)
+        {
         }
     }
 }

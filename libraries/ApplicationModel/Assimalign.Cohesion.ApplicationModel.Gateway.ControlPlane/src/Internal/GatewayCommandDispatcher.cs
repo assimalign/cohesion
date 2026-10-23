@@ -8,6 +8,8 @@ using ResourceCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayCommandDispatcher")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayCommandDispatcher : IResourceCommandDispatcher
 {
     private readonly IGatewayResourceCommandClient _client;
@@ -46,5 +48,17 @@ internal sealed class GatewayCommandDispatcher : IResourceCommandDispatcher
         {
             throw new ResourceCommandRejectedException(result.Detail);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly GatewayCommandDispatcher _target;
+
+        public DebugView(GatewayCommandDispatcher value)
+        {
+            _target = value;
+        }
+
+        public string ResourceKind => _target.ResourceKind;
     }
 }

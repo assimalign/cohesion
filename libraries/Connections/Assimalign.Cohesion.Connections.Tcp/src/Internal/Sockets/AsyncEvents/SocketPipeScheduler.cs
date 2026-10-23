@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SocketPipeScheduler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal class SocketPipeScheduler : PipeScheduler, IThreadPoolWorkItem
 {
     private readonly ConcurrentQueue<Work> _queue;
@@ -77,6 +79,13 @@ internal class SocketPipeScheduler : PipeScheduler, IThreadPoolWorkItem
         {
             Callback = callback;
             State = state;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SocketPipeScheduler value)
+        {
         }
     }
 }

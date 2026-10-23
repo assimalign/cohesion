@@ -272,6 +272,8 @@ public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, IFo
         return first.AddMonths(1);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("CrontabEnumerator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class CrontabEnumerator : IEnumerator<DateTime>
     {
         private readonly Crontab _crontab;
@@ -299,6 +301,13 @@ public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, IFo
 
         public void Dispose()
         {
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(CrontabEnumerator value)
+            {
+            }
         }
     }
 }

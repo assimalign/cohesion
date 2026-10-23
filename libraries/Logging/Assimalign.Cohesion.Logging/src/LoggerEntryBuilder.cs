@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Logging;
 /// Fluent builder for <see cref="LoggerEntry"/>. Use through <see cref="LoggerExtensions"/> or
 /// directly when a caller needs more control than the typed log methods give.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LoggerEntryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoggerEntryBuilder
 {
     private readonly Dictionary<string, object?> _attributes = new(StringComparer.Ordinal);
@@ -128,5 +130,12 @@ public sealed class LoggerEntryBuilder
             parentId: _parentId,
             id: _id,
             timestamp: _timestamp);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(LoggerEntryBuilder value)
+        {
+        }
     }
 }

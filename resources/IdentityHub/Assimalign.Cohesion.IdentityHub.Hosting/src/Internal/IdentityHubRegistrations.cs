@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 /// The declared audiences and clients, resolved once from their registrations and validated
 /// against each other.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("IdentityHubRegistrations")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentityHubRegistrations
 {
     private IdentityHubRegistrations(
@@ -73,5 +75,12 @@ internal sealed class IdentityHubRegistrations
         }
 
         return new IdentityHubRegistrations(declaredAudiences, registeredClients);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(IdentityHubRegistrations value)
+        {
+        }
     }
 }

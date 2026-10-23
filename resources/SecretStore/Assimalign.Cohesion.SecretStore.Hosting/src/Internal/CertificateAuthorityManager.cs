@@ -20,6 +20,8 @@ using Assimalign.Cohesion.SecretStore.Client.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("CertificateAuthorityManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CertificateAuthorityManager : IDisposable
 {
     private const string CertificatePrefix = "certs/";
@@ -1115,6 +1117,13 @@ internal sealed class CertificateAuthorityManager : IDisposable
         {
             throw new InvalidOperationException(
                 "The certificate authority is awaiting gateway-mediated Platform enrollment.");
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CertificateAuthorityManager value)
+        {
         }
     }
 }

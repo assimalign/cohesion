@@ -11,6 +11,8 @@ using System.Runtime.CompilerServices;
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 
+[global::System.Diagnostics.DebuggerDisplay("CallSiteExpressionResolverBuilderVisitor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor<object?, Expression>
 {
     private static readonly ParameterExpression _scopeParameter = Expression.Parameter(typeof(ServiceProviderEngineScope));
@@ -275,5 +277,12 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
             throw new NotSupportedException(ErrorMessages.DisposableCaptureScopeInvalid);
         }
         return _captureDisposable;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CallSiteExpressionResolverBuilderVisitor value)
+        {
+        }
     }
 }

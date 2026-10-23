@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Bmff.Internal;
 namespace Assimalign.Cohesion.Content.Bmff;
 
 /// <summary>The TrackFragmentRun box; ISO/IEC 14496-12 8.8.8.</summary>
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TrackFragmentRunBox : BmffFullBox
 {
     private byte[] _trailing = Array.Empty<byte>();
@@ -137,5 +139,27 @@ public sealed class TrackFragmentRunBox : BmffFullBox
     {
         base.WriteDescription(writer);
         writer.Write(System.FormattableString.Invariant($" entries={Entries.Length} data-offset={DataOffset}"));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TrackFragmentRunBox _target;
+
+        public DebugView(TrackFragmentRunBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public int? DataOffset => _target.DataOffset;
+        public uint? FirstSampleFlags => _target.FirstSampleFlags;
+        public Entry[] Entries => _target.Entries;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

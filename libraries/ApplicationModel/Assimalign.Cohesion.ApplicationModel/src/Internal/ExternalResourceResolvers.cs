@@ -25,6 +25,8 @@ internal sealed class UnboundExternalResourceResolver : IExternalResourceResolve
     }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("StaticExternalResourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class StaticExternalResourceResolver : IExternalResourceResolver
 {
     private readonly IReadOnlyDictionary<string, Uri> _endpoints;
@@ -52,8 +54,17 @@ internal sealed class StaticExternalResourceResolver : IExternalResourceResolver
 
         return ValueTask.FromResult(new ExternalResourceResolution(true, endpoints));
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(StaticExternalResourceResolver value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("FileExternalResourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class FileExternalResourceResolver : IExternalResourceResolver
 {
     private readonly string _path;
@@ -88,8 +99,17 @@ internal sealed class FileExternalResourceResolver : IExternalResourceResolver
                 $"External '{context.Declaration.Name}' export directory for '{_path}' does not exist.");
         }
     }
+
+    private sealed class DebugView
+    {
+        public DebugView(FileExternalResourceResolver value)
+        {
+        }
+    }
 }
 
+[global::System.Diagnostics.DebuggerDisplay("GatewayExternalResourceResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayExternalResourceResolver : IControlPlaneExternalResourceResolver
 {
     private readonly Uri _address;
@@ -119,6 +139,18 @@ internal sealed class GatewayExternalResourceResolver : IControlPlaneExternalRes
             _address,
             cancellationToken).ConfigureAwait(false);
         return ExternalEndpointConverter.FromExport(export, context.Declaration);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly GatewayExternalResourceResolver _target;
+
+        public DebugView(GatewayExternalResourceResolver value)
+        {
+            _target = value;
+        }
+
+        public Uri? ControlPlaneAddress => _target.ControlPlaneAddress;
     }
 }
 

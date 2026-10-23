@@ -2,6 +2,8 @@
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("EqualToValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(EqualToValidationRule<>.DebugView))]
 internal sealed class EqualToValidationRule<TValue> : ValidationRuleBase<TValue>
 {
     private readonly TValue _argument;
@@ -65,6 +67,22 @@ internal sealed class EqualToValidationRule<TValue> : ValidationRuleBase<TValue>
             context = null;
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly EqualToValidationRule<TValue> _target;
+
+        public DebugView(EqualToValidationRule<TValue> value)
+        {
+            _target = value;
+        }
+
+        public Type ArgumentType => _target.ArgumentType;
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }
 

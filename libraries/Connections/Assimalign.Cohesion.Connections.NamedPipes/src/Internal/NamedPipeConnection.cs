@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Internal;
 /// receive pump, including while the application performs no reads or writes.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("NamedPipeConnection {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class NamedPipeConnection : DuplexConnection
 {
     private static readonly ConnectionCapabilities _namedPipeCapabilities = new(
@@ -272,5 +274,26 @@ internal sealed class NamedPipeConnection : DuplexConnection
         {
             // Observer failures cannot prevent transport teardown.
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly NamedPipeConnection _target;
+
+        public DebugView(NamedPipeConnection value)
+        {
+            _target = value;
+        }
+
+        public ConnectionId Id => _target.Id;
+        public EndPoint? LocalEndPoint => _target.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _target.RemoteEndPoint;
+        public PipeReader Input => _target.Input;
+        public PipeWriter Output => _target.Output;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public ConnectionState State => _target.State;
+        public CancellationToken ConnectionClosed => _target.ConnectionClosed;
+        public global::Assimalign.Cohesion.Connections.ConnectionDirection Direction => _target.Direction;
+        public global::Assimalign.Cohesion.Connections.IConnectionFeatureCollection? InnerFeatures => _target.InnerFeatures;
     }
 }

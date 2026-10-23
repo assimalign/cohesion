@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Caching.InMemory;
 /// still respect explicit removal, expiration, and token-driven invalidation.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("MemoryCache {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MemoryCache : ICache
 {
     private readonly ConcurrentDictionary<object, StoredEntry> _entries = new();
@@ -465,6 +467,8 @@ public sealed class MemoryCache : ICache
         }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("TokenBinding")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class TokenBinding
     {
         private StoredEntry? _entry;
@@ -479,5 +483,29 @@ public sealed class MemoryCache : ICache
         public StoredEntry? Entry => Volatile.Read(ref _entry);
 
         public void Attach(StoredEntry entry) => Volatile.Write(ref _entry, entry);
+
+        private sealed class DebugView
+        {
+            private readonly TokenBinding _target;
+
+            public DebugView(TokenBinding value)
+            {
+                _target = value;
+            }
+
+            public MemoryCache Cache => _target.Cache;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MemoryCache _target;
+
+        public DebugView(MemoryCache value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

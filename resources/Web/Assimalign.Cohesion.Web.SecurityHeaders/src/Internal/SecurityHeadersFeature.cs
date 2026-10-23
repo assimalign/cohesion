@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 /// The default <see cref="ISecurityHeadersFeature"/>: a nonce generated on first read from the
 /// operating system's cryptographically secure random number generator and fixed for the exchange.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SecurityHeadersFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SecurityHeadersFeature : ISecurityHeadersFeature
 {
     // CSP3 §7.1 ("Nonce Reuse"): a nonce SHOULD carry at least 128 bits of entropy.
@@ -39,5 +41,12 @@ internal sealed class SecurityHeadersFeature : ISecurityHeadersFeature
         Span<byte> bytes = stackalloc byte[nonceByteCount];
         RandomNumberGenerator.Fill(bytes);
         return Convert.ToBase64String(bytes);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(SecurityHeadersFeature value)
+        {
+        }
     }
 }

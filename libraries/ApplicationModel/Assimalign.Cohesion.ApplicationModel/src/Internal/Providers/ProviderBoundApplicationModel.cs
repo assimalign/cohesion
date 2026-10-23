@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 /// <see cref="ApplicationProviders.Empty"/>; wrapping it rather than rebuilding it keeps the
 /// resources the set binds externals on, and works for any <see cref="IApplicationModelResolver"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProviderBoundApplicationModel {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ProviderBoundApplicationModel : IApplicationModel
 {
     private readonly IApplicationModel _model;
@@ -57,4 +59,28 @@ internal sealed class ProviderBoundApplicationModel : IApplicationModel
     public IReadOnlyList<IResourceCommand> Commands => _model.Commands;
 
     public ApplicationProviders Providers { get; }
+
+    private sealed class DebugView
+    {
+        private readonly ProviderBoundApplicationModel _target;
+
+        public DebugView(ProviderBoundApplicationModel value)
+        {
+            _target = value;
+        }
+
+        public ApplicationName Name => _target.Name;
+        public IApplicationEnvironment Environment => _target.Environment;
+        public GatewayRunMode RunMode => _target.RunMode;
+        public ResourceName GatewayIdentity => _target.GatewayIdentity;
+        public string Owner => _target.Owner;
+        public bool Adopt => _target.Adopt;
+        public bool RestartOrphans => _target.RestartOrphans;
+        public IReadOnlyList<IApplicationResourceDescriptor> Descriptors => _target.Descriptors;
+        public IReadOnlyList<IApplicationResource> Resources => _target.Resources;
+        public IReadOnlyList<ResourceManifest> Manifests => _target.Manifests;
+        public IReadOnlyList<ResourcePlan> Plans => _target.Plans;
+        public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
+        public ApplicationProviders Providers => _target.Providers;
+    }
 }

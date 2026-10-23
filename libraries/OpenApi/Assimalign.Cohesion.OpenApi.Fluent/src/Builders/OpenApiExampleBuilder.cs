@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// A fluent builder for an <see cref="OpenApiExample"/>. The 3.2-only <c>dataValue</c> and
 /// <c>serializedValue</c> fields throw <see cref="OpenApiException"/> when the target line is earlier.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiExampleBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiExampleBuilder
 {
     private readonly OpenApiExample _example = new();
@@ -84,5 +86,12 @@ public sealed class OpenApiExampleBuilder
         ArgumentNullException.ThrowIfNull(uri);
         _example.ExternalValue = uri;
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiExampleBuilder value)
+        {
+        }
     }
 }

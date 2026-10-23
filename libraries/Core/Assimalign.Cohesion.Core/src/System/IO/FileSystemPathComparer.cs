@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Internal;
 /// <summary>
 /// 
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemPathComparer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileSystemPathComparer :
     IComparer<FileSystemPath>
     , IEqualityComparer<FileSystemPath>
@@ -58,5 +60,12 @@ public sealed class FileSystemPathComparer :
     public static FileSystemPathComparer Create(CultureInfo cultureInfo, bool ignoreCase = false)
     {
         return new FileSystemPathComparer(cultureInfo, ignoreCase);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(FileSystemPathComparer value)
+        {
+        }
     }
 }

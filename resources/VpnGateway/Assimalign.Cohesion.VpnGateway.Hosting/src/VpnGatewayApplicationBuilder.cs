@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.VpnGateway.Hosting;
 /// <see cref="Build"/> closes registration, creates the service provider once, and resolves the
 /// lifecycle services (<see cref="IHostService"/>) once, in registration order.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("VpnGatewayApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuilder
 {
     private readonly VpnGatewayApplicationContext _context;
@@ -174,4 +176,16 @@ public sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuilder
     }
 
     IVpnGatewayApplication IVpnGatewayApplicationBuilder.Build() => Build();
+
+    private sealed class DebugView
+    {
+        private readonly VpnGatewayApplicationBuilder _target;
+
+        public DebugView(VpnGatewayApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public ServiceProviderBuilder Services => _target.Services;
+    }
 }

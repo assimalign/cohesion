@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// <summary>
 /// 
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("Validator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class Validator : IValidator
 {
     private readonly ValidationOptions _options;
@@ -187,5 +189,17 @@ public sealed class Validator : IValidator
         configure.Invoke(builder);
 
         return new Validator(builder.Profiles, builder.Options);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Validator _target;
+
+        public DebugView(Validator value)
+        {
+            _target = value;
+        }
+
+        public IEnumerable<IValidationProfile> Profiles => _target.Profiles;
     }
 }

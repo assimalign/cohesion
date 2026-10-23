@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 /// Verifies the default application-key bootstrap credential: an ES256 token issued by the ambient
 /// application, for the ambient gateway, within the bootstrap lifetime ceiling.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("BootstrapTokenVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BootstrapTokenVerifier
 {
     private readonly string _application;
@@ -68,5 +70,12 @@ internal sealed class BootstrapTokenVerifier
                 ? key
                 : throw new InvalidOperationException(
                     $"The application trust key is not a valid EC P-256 JWK. {failure}".TrimEnd());
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BootstrapTokenVerifier value)
+        {
+        }
     }
 }

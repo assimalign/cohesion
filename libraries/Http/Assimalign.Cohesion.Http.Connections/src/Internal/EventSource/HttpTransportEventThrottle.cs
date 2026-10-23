@@ -4,6 +4,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>One process-wide emission per second for each repeatable operator event.</summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpTransportEventThrottle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpTransportEventThrottle
 {
     private readonly Lock _gate = new();
@@ -31,6 +33,13 @@ internal sealed class HttpTransportEventThrottle
             _lastTimestamp = now;
             _emitted = true;
             return true;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HttpTransportEventThrottle value)
+        {
         }
     }
 }

@@ -37,6 +37,8 @@ namespace Assimalign.Cohesion.Dns;
 /// semantics. Re-evaluate once Cohesion.Transports grows a request/response shape.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TcpDnsTransport")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TcpDnsTransport : DnsTransport
 {
     private readonly EndPoint _endPoint;
@@ -313,4 +315,16 @@ public sealed class TcpDnsTransport : DnsTransport
 
     private static bool TimedOut(CancellationTokenSource timeoutCts, CancellationToken externalToken)
         => timeoutCts.IsCancellationRequested && !externalToken.IsCancellationRequested;
+
+    private sealed class DebugView
+    {
+        private readonly TcpDnsTransport _target;
+
+        public DebugView(TcpDnsTransport value)
+        {
+            _target = value;
+        }
+
+        public bool IsDisposed => _target.IsDisposed;
+    }
 }

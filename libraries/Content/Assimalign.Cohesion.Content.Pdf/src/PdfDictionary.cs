@@ -7,6 +7,8 @@ using System.Text;
 namespace Assimalign.Cohesion.Content.Pdf;
 
 /// <summary>An editable dictionary preserving insertion order and decoded name equality (§7.3.7).</summary>
+[global::System.Diagnostics.DebuggerDisplay("PdfDictionary {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPdfObject>
 {
     private readonly OrderedDictionary<PdfName, IPdfObject> _items = new();
@@ -47,4 +49,18 @@ public sealed class PdfDictionary : IPdfObject, IReadOnlyDictionary<PdfName, IPd
     /// <inheritdoc/>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     internal IPdfObject? Get(string key) => _items.TryGetValue(PdfName.Create(Encoding.ASCII.GetBytes(key)), out var value) ? value : null;
+
+    private sealed class DebugView
+    {
+        private readonly PdfDictionary _target;
+
+        public DebugView(PdfDictionary value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+        public IEnumerable<PdfName> Keys => _target.Keys;
+        public IEnumerable<IPdfObject> Values => _target.Values;
+    }
 }

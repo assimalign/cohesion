@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// as the previous engine did. Restart-stable or multi-node deployments should replace this with
 /// a rotating-key-ring-backed protector via <see cref="HttpAntiforgeryOptions.Protector"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("HmacHttpAntiforgeryProtector")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HmacHttpAntiforgeryProtector : IHttpAntiforgeryProtector
 {
     private const int MacBytes = 32;
@@ -64,5 +66,12 @@ internal sealed class HmacHttpAntiforgeryProtector : IHttpAntiforgeryProtector
 
         plaintext = payload.ToArray();
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(HmacHttpAntiforgeryProtector value)
+        {
+        }
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// wildcard-subdomain suffixes stored as plain arrays, matched with span comparisons — no
 /// regular expressions, no per-request pattern parsing, no reflection.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpHostPatternMatcher")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpHostPatternMatcher : HttpHostMatcher
 {
     /// <summary>
@@ -73,5 +75,17 @@ internal sealed class HttpHostPatternMatcher : HttpHostMatcher
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpHostPatternMatcher _target;
+
+        public DebugView(HttpHostPatternMatcher value)
+        {
+            _target = value;
+        }
+
+        public bool IsMatchAny => _target.IsMatchAny;
     }
 }

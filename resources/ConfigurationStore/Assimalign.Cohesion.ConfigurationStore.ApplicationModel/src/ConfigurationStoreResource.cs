@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// produced by an enabled configuration-store executable, and its realization plan
 /// contains no platform-specific objects or runtime configuration-store dependencies.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreResource {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ConfigurationStoreResource : PlannedResource
 {
     private const string ConfigurationStorePlannerName = "ConfigurationStore planner";
@@ -50,5 +52,24 @@ public sealed class ConfigurationStoreResource : PlannedResource
         }
 
         return ConfigurationStorePlanner.CreatePlan(context);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationStoreResource _target;
+
+        public DebugView(ConfigurationStoreResource value)
+        {
+            _target = value;
+        }
+
+        public string PlannerName => _target.PlannerName;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceName Name => _target.Name;
+        public global::Assimalign.Cohesion.ApplicationModel.ResourceManifest Manifest => _target.Manifest;
+        public global::Assimalign.Cohesion.ApplicationModel.IResourceOptions Options => _target.Options;
+        public string Artifact => _target.Artifact;
+        public global::System.Collections.Generic.IReadOnlyDictionary<string, string> EnvironmentVariables => _target.EnvironmentVariables;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceEndpoint> Endpoints => _target.Endpoints;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.ApplicationModel.ResourceMount> Mounts => _target.Mounts;
     }
 }

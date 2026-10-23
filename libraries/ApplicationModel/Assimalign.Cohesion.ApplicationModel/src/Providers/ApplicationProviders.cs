@@ -39,6 +39,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// on mutation, and every property setter throws <see cref="InvalidOperationException"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationProviders")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApplicationProviders
 {
     private readonly bool _isFrozen;
@@ -228,5 +230,23 @@ public sealed class ApplicationProviders
         var copy = new T[source.Count];
         source.CopyTo(copy, 0);
         return copy;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ApplicationProviders _target;
+
+        public DebugView(ApplicationProviders value)
+        {
+            _target = value;
+        }
+
+        public IDictionary<string, IResourceSourceProvider> Sources => _target.Sources;
+        public ResourceProviderBinding<IResourceCertificateAuthority>? CertificateAuthority => _target.CertificateAuthority;
+        public ResourceProviderBinding<ITrustedIssuerStore>? TrustStore => _target.TrustStore;
+        public IList<IResourceCommandInputResolver> CommandInputs => _target.CommandInputs;
+        public ResourceTelemetrySink? Telemetry => _target.Telemetry;
+        public IApplicationCredentialIssuer? CredentialIssuer => _target.CredentialIssuer;
+        public IList<IApplicationCallerAuthenticator> Callers => _target.Callers;
     }
 }

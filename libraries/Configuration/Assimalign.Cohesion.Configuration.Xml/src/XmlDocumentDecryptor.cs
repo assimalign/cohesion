@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Configuration.Xml;
 /// <summary>
 /// Provides XML document decryption support for encrypted XML configuration files.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("XmlDocumentDecryptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public class XmlDocumentDecryptor
 {
     private readonly Func<XmlDocument, EncryptedXml>? _encryptedXmlFactory;
@@ -88,5 +90,12 @@ public class XmlDocumentDecryptor
         namespaceManager.AddNamespace("enc", "http://www.w3.org/2001/04/xmlenc#");
 
         return document.SelectSingleNode("//enc:EncryptedData", namespaceManager) is not null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(XmlDocumentDecryptor value)
+        {
+        }
     }
 }

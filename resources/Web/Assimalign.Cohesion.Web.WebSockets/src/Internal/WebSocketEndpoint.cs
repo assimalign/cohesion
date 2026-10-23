@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// sockets is never left without the cross-site hijacking defense.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("WebSocketEndpoint")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class WebSocketEndpoint
 {
     private static readonly WebSocketMiddleware _defaultPolicy = new(WebSocketPolicy.Create(new WebSocketOptions()));
@@ -76,5 +78,12 @@ internal sealed class WebSocketEndpoint
 
         using WebSocket socket = await webSockets.AcceptWebSocketAsync(options, context.RequestCancelled).ConfigureAwait(false);
         await _handler(context, socket).ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(WebSocketEndpoint value)
+        {
+        }
     }
 }

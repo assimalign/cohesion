@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Content.Mkv.Internal;
 
 // A filtered live view preserves unknown siblings and original node identity.
 // Reads never synthesize defaults or mutate the native tree.
+[global::System.Diagnostics.DebuggerDisplay("MkvChildList")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MkvChildList<>.DebugView))]
 internal sealed class MkvChildList<T> : IList<T>
 {
     private readonly Func<bool, EbmlElement?> _parent;
@@ -121,5 +123,17 @@ internal sealed class MkvChildList<T> : IList<T>
             }
         }
         throw new ArgumentOutOfRangeException(nameof(index));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MkvChildList<T> _target;
+
+        public DebugView(MkvChildList<T> value)
+        {
+            _target = value;
+        }
+
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

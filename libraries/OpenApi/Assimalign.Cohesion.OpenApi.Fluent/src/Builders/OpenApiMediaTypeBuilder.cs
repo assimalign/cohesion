@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for an <see cref="OpenApiMediaType"/> entry in a content map.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiMediaTypeBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiMediaTypeBuilder
 {
     private readonly OpenApiMediaType _media = new();
@@ -65,5 +67,12 @@ public sealed class OpenApiMediaTypeBuilder
         configure(builder);
         _media.Examples[name] = builder.Build();
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiMediaTypeBuilder value)
+        {
+        }
     }
 }

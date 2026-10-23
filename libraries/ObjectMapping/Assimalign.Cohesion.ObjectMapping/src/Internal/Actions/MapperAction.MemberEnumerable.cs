@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.ObjectMapping.Internal;
  * AOT-safe path emitted by the source generator, where the conversion is baked into the setter) or
  * compiled from expression trees with reflection-based conversion (the run-time fallback).
  */
+[global::System.Diagnostics.DebuggerDisplay("MapperActionMemberEnumerable")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MapperActionMemberEnumerable<,,,>.DebugView))]
 internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> : TypedMapperAction<TTarget, TSource>
     where TSourceMember : class, new()
     where TTargetMember : class, new()
@@ -252,6 +254,13 @@ internal sealed class MapperActionMemberEnumerable<TTarget, TTargetMember, TSour
         else if (member is FieldInfo field)
         {
             field.SetValue(instance, value);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(MapperActionMemberEnumerable<TTarget, TTargetMember, TSource, TSourceMember> value)
+        {
         }
     }
 }

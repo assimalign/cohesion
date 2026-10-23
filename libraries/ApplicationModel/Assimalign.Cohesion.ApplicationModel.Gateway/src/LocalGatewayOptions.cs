@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// Options controlling how the <see cref="LocalGateway"/> resolves, starts, probes, and stops
 /// child processes.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LocalGatewayOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LocalGatewayOptions : ApplicationGatewayOptions
 {
     private int _livenessFailureThreshold = 3;
@@ -115,5 +117,39 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
         {
             throw new ArgumentOutOfRangeException(nameof(StopGrace), ErrorMessages.StopGraceInvalid);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LocalGatewayOptions _target;
+
+        public DebugView(LocalGatewayOptions value)
+        {
+            _target = value;
+        }
+
+        public string? BaseDirectory => _target.BaseDirectory;
+        public string? StateDirectory => _target.StateDirectory;
+        public TimeSpan ProbeInterval => _target.ProbeInterval;
+        public TimeSpan ProbeTimeout => _target.ProbeTimeout;
+        public int LivenessFailureThreshold => _target.LivenessFailureThreshold;
+        public TimeSpan InitialRestartBackoff => _target.InitialRestartBackoff;
+        public TimeSpan MaximumRestartBackoff => _target.MaximumRestartBackoff;
+        public int MaximumRestartAttempts => _target.MaximumRestartAttempts;
+        public TimeSpan StopGrace => _target.StopGrace;
+        public bool RestartOrphans => _target.RestartOrphans;
+        public string? ExportDirectory => _target.ExportDirectory;
+        public string ApplicationVersion => _target.ApplicationVersion;
+        public string? ParameterFile => _target.ParameterFile;
+        public global::System.Collections.Generic.IList<global::Assimalign.Cohesion.ApplicationModel.Gateway.IGatewayResourceCommandClient> CommandClients => _target.CommandClients;
+        public global::System.TimeProvider TimeProvider => _target.TimeProvider;
+        public global::System.TimeSpan BootstrapCredentialLifetime => _target.BootstrapCredentialLifetime;
+        public global::System.TimeSpan DeveloperTokenLifetime => _target.DeveloperTokenLifetime;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.IGatewayTrustKeyRepository? TrustKeyRepository => _target.TrustKeyRepository;
+        public global::Assimalign.Cohesion.ApplicationModel.IControlPlaneClient? ControlPlaneClient => _target.ControlPlaneClient;
+        public global::Assimalign.Cohesion.ApplicationModel.Gateway.IApplicationGatewayControlPlaneFactory? ControlPlane => _target.ControlPlane;
+        public global::System.Collections.Generic.IList<global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceController> Controllers => _target.Controllers;
+        public global::System.Collections.Generic.IDictionary<string, string> Parameters => _target.Parameters;
+        public global::System.TimeSpan ReadinessBudget => _target.ReadinessBudget;
     }
 }

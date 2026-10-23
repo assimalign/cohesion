@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 /// <summary>
 /// Provides the LoadBalancer application environment and runtime composition.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("LoadBalancerApplicationContext {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoadBalancerApplicationContext : HostContext, ILoadBalancerApplicationContext, IHealthContributor
 {
     private IServiceProvider? _serviceProvider;
@@ -97,5 +99,23 @@ public sealed class LoadBalancerApplicationContext : HostContext, ILoadBalancerA
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LoadBalancerApplicationContext _target;
+
+        public DebugView(LoadBalancerApplicationContext value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public FileSystemPath? ContentRootPath => _target.ContentRootPath;
+        public IHostEnvironment Environment => _target.Environment;
+        public IEnumerable<IHostService> HostedServices => _target.HostedServices;
+        public HostId HostId => _target.HostId;
+        public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
+        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

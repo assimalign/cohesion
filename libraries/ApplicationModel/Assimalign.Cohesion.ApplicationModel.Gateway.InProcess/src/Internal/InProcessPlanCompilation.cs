@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("InProcessPlanCompilation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class InProcessPlanCompilation
 {
     internal InProcessPlanCompilation(
@@ -42,4 +44,11 @@ internal sealed class InProcessPlanCompilation
     internal IReadOnlyList<ResourceDependencyObservation> ObservedDependencies { get; }
 
     internal IReadOnlyDictionary<string, string> AmbientValues { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(InProcessPlanCompilation value)
+        {
+        }
+    }
 }

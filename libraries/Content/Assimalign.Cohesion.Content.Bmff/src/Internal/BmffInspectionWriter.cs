@@ -6,6 +6,8 @@ using System.Text;
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 // One physical line per node, even with hostile FourCCs or field values. Borrows its output.
+[global::System.Diagnostics.DebuggerDisplay("BmffInspectionWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffInspectionWriter : TextWriter
 {
     private readonly TextWriter _writer;
@@ -32,5 +34,20 @@ internal sealed class BmffInspectionWriter : TextWriter
     public override void Write(ReadOnlySpan<char> buffer)
     {
         foreach (var value in buffer) { Write(value); }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffInspectionWriter _target;
+
+        public DebugView(BmffInspectionWriter value)
+        {
+            _target = value;
+        }
+
+        public Encoding Encoding => _target.Encoding;
+        public IFormatProvider FormatProvider => _target.FormatProvider;
+        public char[] CoreNewLine => _target.CoreNewLine;
+        public string NewLine => _target.NewLine;
     }
 }

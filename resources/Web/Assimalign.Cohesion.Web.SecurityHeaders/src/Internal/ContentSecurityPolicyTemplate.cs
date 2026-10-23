@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 /// nonce source is a single constant string; a nonce-bearing policy is rendered per response by joining
 /// its segments with the exchange's nonce, so each <c>'nonce-…'</c> source carries the same value.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ContentSecurityPolicyTemplate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ContentSecurityPolicyTemplate
 {
     /// <summary>The text shown in place of the nonce by <see cref="ToString"/>.</summary>
@@ -110,4 +112,16 @@ internal sealed class ContentSecurityPolicyTemplate
 
     /// <summary>Returns the policy with each nonce shown as <c>'nonce-{nonce}'</c>.</summary>
     public override string ToString() => string.Join(NoncePlaceholder, _segments);
+
+    private sealed class DebugView
+    {
+        private readonly ContentSecurityPolicyTemplate _target;
+
+        public DebugView(ContentSecurityPolicyTemplate value)
+        {
+            _target = value;
+        }
+
+        public bool UsesNonce => _target.UsesNonce;
+    }
 }

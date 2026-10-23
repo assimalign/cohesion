@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.DependencyInjection;
 /// <summary>
 /// Default implementation of <see cref="IServiceProviderBuilder"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ServiceProviderBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposable
 {
     private readonly ServiceContainer _services = new();
@@ -75,5 +77,12 @@ public sealed class ServiceProviderBuilder : IServiceProviderBuilder, IDisposabl
         _isDisposed = true;
 
         _services.Clear();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ServiceProviderBuilder value)
+        {
+        }
     }
 }

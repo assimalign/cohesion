@@ -23,6 +23,8 @@ using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ConfigurationEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConfigurationEndpointService : IHostService, IDisposable
 {
     internal const string AddNamespaceCommand = "configurationstore.add-namespace";
@@ -700,5 +702,17 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         Health,
         Readiness,
         Liveness,
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConfigurationEndpointService _target;
+
+        public DebugView(ConfigurationEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
     }
 }

@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Connections.Security;
 /// <summary>
 /// Options that control a server-side TLS connection upgrade.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("TlsServerOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TlsServerOptions
 {
     // The validation callback RequireClientCertificate/AllowClientCertificate installed, so a later
@@ -172,5 +174,19 @@ public sealed class TlsServerOptions
 
         using X509Certificate2 copy = X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
         return validate(copy, chain, errors);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TlsServerOptions _target;
+
+        public DebugView(TlsServerOptions value)
+        {
+            _target = value;
+        }
+
+        public SslServerAuthenticationOptions AuthenticationOptions => _target.AuthenticationOptions;
+        public TimeSpan HandshakeTimeout => _target.HandshakeTimeout;
+        public int MaxConcurrentHandshakes => _target.MaxConcurrentHandshakes;
     }
 }

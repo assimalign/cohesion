@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("RezolvrResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
 {
     private readonly IResourceCommandDescriptor _inner;
@@ -43,4 +45,19 @@ internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
 
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(IApplicationResourceDescriptor resource) => DependsOn(resource);
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(params IApplicationResourceDescriptor[] resources) => DependsOn(resources);
+
+    private sealed class DebugView
+    {
+        private readonly RezolvrResourceDescriptor _target;
+
+        public DebugView(RezolvrResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public RezolvrResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
+        public IReadOnlyList<IResourceCommand> Commands => _target.Commands;
+    }
 }

@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Content;
 /// A pure composite assembled from existing items. It has no serialized representation of its own; the
 /// items carry the data. Children are owned (disposed with the composite) unless borrowed at creation.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("CompositeContent {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class CompositeContent : IComposableContent
 {
     /// <summary>
@@ -116,5 +118,22 @@ public sealed class CompositeContent : IComposableContent
                 await item.DisposeAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly CompositeContent _target;
+
+        public DebugView(CompositeContent value)
+        {
+            _target = value;
+        }
+
+        public string? Name => _target.Name;
+        public ContentFormat Format => _target.Format;
+        public string? MediaType => _target.MediaType;
+        public long? Length => _target.Length;
+        public bool IsReadOnly => _target.IsReadOnly;
+        public bool CanReopen => _target.CanReopen;
     }
 }

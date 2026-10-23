@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 /// (<c>text/*</c>), or the full wildcard (<c>*/*</c>). Matching is case-insensitive and ignores the
 /// <c>Content-Type</c> parameters (for example <c>; charset=utf-8</c>).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("CompressibleMimeMatcher")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class CompressibleMimeMatcher
 {
     private readonly HashSet<string> _exact;
@@ -115,5 +117,12 @@ internal sealed class CompressibleMimeMatcher
         }
 
         return false;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(CompressibleMimeMatcher value)
+        {
+        }
     }
 }

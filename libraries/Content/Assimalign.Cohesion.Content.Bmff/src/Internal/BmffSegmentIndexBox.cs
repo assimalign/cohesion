@@ -3,6 +3,8 @@ using System;
 namespace Assimalign.Cohesion.Content.Bmff.Internal;
 
 // ISO/IEC 14496-12 8.16.3. Internal until a public field model/typed visitor is authorized.
+[global::System.Diagnostics.DebuggerDisplay("{DebuggerDisplay,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BmffSegmentIndexBox : BmffFullBox
 {
     private byte[] _tail = Array.Empty<byte>();
@@ -60,5 +62,24 @@ internal sealed class BmffSegmentIndexBox : BmffFullBox
         {
             throw new ContentFormatException(ErrorMessages.FieldRange, ContentFormatErrorCode.InvalidValue, Offset);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly BmffSegmentIndexBox _target;
+
+        public DebugView(BmffSegmentIndexBox value)
+        {
+            _target = value;
+        }
+
+        public BmffBoxType BoxType => _target.BoxType;
+        public byte Version => _target.Version;
+        public uint Flags => _target.Flags;
+        public bool IsLeaf => _target.IsLeaf;
+        public bool IsComposite => _target.IsComposite;
+        public long Limit => _target.Limit;
+        public long Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Content.Bmff.BmffBoxHeader Header => _target.Header;
     }
 }

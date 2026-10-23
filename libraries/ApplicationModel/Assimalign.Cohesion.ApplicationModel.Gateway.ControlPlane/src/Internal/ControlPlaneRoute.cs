@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 /// must have exactly as many segments as the template. No optional, default, catch-all,
 /// complex-segment, or constrained parameters exist, so none are supported.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ControlPlaneRoute")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ControlPlaneRoute
 {
     private static readonly IReadOnlyDictionary<string, string> _noValues =
@@ -123,5 +125,19 @@ internal sealed class ControlPlaneRoute
         }
 
         return true;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ControlPlaneRoute _target;
+
+        public DebugView(ControlPlaneRoute value)
+        {
+            _target = value;
+        }
+
+        public HttpMethod Method => _target.Method;
+        public string Template => _target.Template;
+        public ControlPlaneRouteHandler Handler => _target.Handler;
     }
 }

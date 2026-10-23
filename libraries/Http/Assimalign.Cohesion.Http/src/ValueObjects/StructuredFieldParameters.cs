@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Http;
 /// (RFC 9651 &#167; 3.1.2). Keys are unique and their first-seen order is preserved; a
 /// repeated key keeps its position and takes the last value.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("StructuredFieldParameters {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct StructuredFieldParameters
     : IReadOnlyList<KeyValuePair<string, StructuredFieldBareItem>>, IEquatable<StructuredFieldParameters>
 {
@@ -202,4 +204,16 @@ public readonly struct StructuredFieldParameters
     /// <param name="right">The second map.</param>
     /// <returns><see langword="true"/> if the maps are unequal; otherwise <see langword="false"/>.</returns>
     public static bool operator !=(StructuredFieldParameters left, StructuredFieldParameters right) => !left.Equals(right);
+
+    private sealed class DebugView
+    {
+        private readonly StructuredFieldParameters _target;
+
+        public DebugView(StructuredFieldParameters value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

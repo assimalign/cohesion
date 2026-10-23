@@ -166,10 +166,14 @@ without triggering array decoding; ICC profiles and configuration records remain
 
 ## Debugger inspection
 
-One inherited DebuggerDisplay on BmffBox uses the raw FourCC, source offset and original header
+The common DebuggerDisplay on BmffBox uses the raw FourCC, source offset and original header
 size, with a child count for composites or a lazy marker for opaque payloads. Large totals are
 shown in GiB; other totals use invariant digit grouping. Unloaded and preserved models are marked.
 The composite debugger proxy exposes the existing Children list without copying or enumerating it.
+Concrete composite boxes inherit the existing base display and composite proxy instead of declaring
+their own debugger attributes or views. Other concrete box types that need to filter private/internal
+state use a private nested DebugView at the bottom of their declaration, projecting public/protected
+state without forcing lazy payloads. A type without nonpublic state to filter uses the normal view.
 Neither display evaluates field descriptions, writer size plans or payload accessors.
 
 ## Inspection examples and extension contract

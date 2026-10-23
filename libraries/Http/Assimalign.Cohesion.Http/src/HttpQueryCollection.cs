@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Http;
 /// <summary>
 /// Provides a mutable collection of parsed query-string values.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("HttpQueryCollection {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class HttpQueryCollection : IHttpQueryCollection
 {
     private readonly Dictionary<HttpQueryKey, HttpQueryValue> _store;
@@ -170,5 +172,20 @@ public sealed class HttpQueryCollection : IHttpQueryCollection
         {
             throw new InvalidOperationException(ErrorMessages.QueryCollectionReadOnly);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly HttpQueryCollection _target;
+
+        public DebugView(HttpQueryCollection value)
+        {
+            _target = value;
+        }
+
+        public ICollection<HttpQueryKey> Keys => _target.Keys;
+        public ICollection<HttpQueryValue> Values => _target.Values;
+        public int Count => _target.Count;
+        public bool IsReadOnly => _target.IsReadOnly;
     }
 }

@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 /// Verifies the default application-key credential against the store's trusted issuers: the ambient
 /// application's gateway and any peer issuer persisted in <c>trust/trusted-issuers.json</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("BootstrapTokenVerifier")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class BootstrapTokenVerifier
 {
     private readonly IReadOnlyList<ConfigurationTrustedIssuer> _trustedIssuers;
@@ -75,5 +77,12 @@ internal sealed class BootstrapTokenVerifier
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(BootstrapTokenVerifier value)
+        {
+        }
     }
 }

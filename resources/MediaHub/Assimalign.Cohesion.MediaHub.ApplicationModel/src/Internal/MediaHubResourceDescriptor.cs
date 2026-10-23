@@ -5,6 +5,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MediaHubResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class MediaHubResourceDescriptor : IMediaHubResourceDescriptor
 {
     private readonly IApplicationResourceDescriptor _inner;
@@ -36,5 +38,19 @@ internal sealed class MediaHubResourceDescriptor : IMediaHubResourceDescriptor
     {
         _inner.DependsOn(resources);
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MediaHubResourceDescriptor _target;
+
+        public DebugView(MediaHubResourceDescriptor value)
+        {
+            _target = value;
+        }
+
+        public MediaHubResource Resource => _target.Resource;
+        public ResourcePlan? Plan => _target.Plan;
+        public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _target.Dependencies;
     }
 }

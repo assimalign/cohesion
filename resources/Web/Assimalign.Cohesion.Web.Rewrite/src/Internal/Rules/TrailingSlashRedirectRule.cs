@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Web.Rewrite.Internal;
 /// The rule is idempotent: the target of its redirect is a path it leaves alone, so it cannot loop.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TrailingSlashRedirectRule")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class TrailingSlashRedirectRule : RewriteRule
 {
     private readonly bool _append;
@@ -66,5 +68,12 @@ internal sealed class TrailingSlashRedirectRule : RewriteRule
         context.Redirect(
             RewriteUrl.BuildLocation(null, null, context.PathBase, new HttpPath(target), context.SerializedQuery),
             _statusCode);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(TrailingSlashRedirectRule value)
+        {
+        }
     }
 }

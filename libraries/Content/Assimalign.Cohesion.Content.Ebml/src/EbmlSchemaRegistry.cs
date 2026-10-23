@@ -5,6 +5,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>An immutable, ordinal DocType-to-schema registry for derived EBML formats.</summary>
+[global::System.Diagnostics.DebuggerDisplay("EbmlSchemaRegistry")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class EbmlSchemaRegistry
 {
     private readonly FrozenDictionary<string, EbmlSchema> _schemas;
@@ -39,5 +41,12 @@ public sealed class EbmlSchemaRegistry
     {
         ArgumentNullException.ThrowIfNull(docType);
         return _schemas.TryGetValue(docType, out var schema) ? schema : null;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(EbmlSchemaRegistry value)
+        {
+        }
     }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// A fast access struct that wraps <see cref="IBufferWriter{T}"/>.
 /// </summary>
 /// <typeparam name="T">The type of element to be written.</typeparam>
+[global::System.Diagnostics.DebuggerDisplay("BufferWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(BufferWriter<>.DebugView))]
 internal ref struct BufferWriter<T> where T : IBufferWriter<byte>
 {
     /// <summary>
@@ -146,5 +148,17 @@ internal ref struct BufferWriter<T> where T : IBufferWriter<byte>
             source = source.Slice(writable);
             Advance(writable);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly long _member0;
+
+        public DebugView(BufferWriter<T> value)
+        {
+            _member0 = value.BytesCommitted;
+        }
+
+        public long BytesCommitted => _member0;
     }
 }

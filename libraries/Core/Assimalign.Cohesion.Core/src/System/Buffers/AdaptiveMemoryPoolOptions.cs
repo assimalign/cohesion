@@ -5,6 +5,8 @@ namespace System.Buffers;
 /// <summary>
 /// Defines configuration for an <see cref="AdaptiveMemoryPool"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("AdaptiveMemoryPoolOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AdaptiveMemoryPoolOptions
 {
     private int _blockSize = AdaptiveMemoryPool.DefaultBlockSize;
@@ -58,5 +60,20 @@ public sealed class AdaptiveMemoryPoolOptions
 
             _trimInterval = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AdaptiveMemoryPoolOptions _target;
+
+        public DebugView(AdaptiveMemoryPoolOptions value)
+        {
+            _target = value;
+        }
+
+        public int BlockSize => _target.BlockSize;
+        public IAdaptiveMemoryPoolPolicy Policy => _target.Policy;
+        public TimeProvider TimeProvider => _target.TimeProvider;
+        public TimeSpan TrimInterval => _target.TrimInterval;
     }
 }

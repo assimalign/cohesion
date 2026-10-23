@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Security.DataProtection;
 /// permissions are the confidentiality boundary. At-rest encryption of the documents is a
 /// tracked follow-up. The store is safe for concurrent readers; the ring serializes its writes.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("FileSystemKeyRepository")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class FileSystemKeyRepository : IKeyRepository
 {
     private const string Extension = ".key";
@@ -96,5 +98,12 @@ public sealed class FileSystemKeyRepository : IKeyRepository
 
         File.WriteAllBytes(tempPath, key.Content.ToArray());
         File.Move(tempPath, finalPath, overwrite: true);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(FileSystemKeyRepository value)
+        {
+        }
     }
 }

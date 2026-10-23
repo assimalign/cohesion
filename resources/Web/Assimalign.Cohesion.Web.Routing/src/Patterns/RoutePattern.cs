@@ -6,6 +6,7 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Web.Routing.Patterns;
 
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{DebuggerToString()}")]
 public sealed class RoutePattern
 {
@@ -183,5 +184,24 @@ public sealed class RoutePattern
     private sealed class RequiredValueAnySentinal
     {
         private static string DebuggerToString() => "*any*";
+    }
+
+    private sealed class DebugView
+    {
+        private readonly RoutePattern _target;
+
+        public DebugView(RoutePattern value)
+        {
+            _target = value;
+        }
+
+        public IReadOnlyDictionary<string, object?> Defaults => _target.Defaults;
+        public IReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>> ParameterPolicies => _target.ParameterPolicies;
+        public IReadOnlyDictionary<string, object?> RequiredValues => _target.RequiredValues;
+        public decimal InboundPrecedence => _target.InboundPrecedence;
+        public decimal OutboundPrecedence => _target.OutboundPrecedence;
+        public string? RawText => _target.RawText;
+        public IReadOnlyList<RoutePatternParameterSegment> Parameters => _target.Parameters;
+        public IReadOnlyList<RoutePatternPathSegment> PathSegments => _target.PathSegments;
     }
 }

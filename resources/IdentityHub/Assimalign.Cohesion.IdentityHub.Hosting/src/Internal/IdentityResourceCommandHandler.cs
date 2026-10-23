@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("IdentityResourceCommandHandler")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class IdentityResourceCommandHandler : IResourceCommandHandler
 {
     internal const string AddAudience = "identityhub.add-audience";
@@ -35,5 +37,17 @@ internal sealed class IdentityResourceCommandHandler : IResourceCommandHandler
     {
         await _registry.MutateAsync(command, delete: true, cancellationToken).ConfigureAwait(false);
         return ReadOnlyMemory<byte>.Empty;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly IdentityResourceCommandHandler _target;
+
+        public DebugView(IdentityResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

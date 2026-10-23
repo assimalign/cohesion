@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.OpenApi.Fluent;
 /// <summary>
 /// A fluent builder for the <see cref="OpenApiInfo"/> object.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OpenApiInfoBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class OpenApiInfoBuilder
 {
     private readonly OpenApiInfo _info;
@@ -87,5 +89,12 @@ public sealed class OpenApiInfoBuilder
         OpenApiBuildGuard.Require(_version, OpenApiFeature.LicenseIdentifier, "The License Object 'identifier' field");
         _info.License = new OpenApiLicense { Name = name, Identifier = identifier };
         return this;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(OpenApiInfoBuilder value)
+        {
+        }
     }
 }

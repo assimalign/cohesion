@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// HTTP/1.1's only reset, and the exchange is cancelled (<see cref="Http1ConnectionContext.FailSlowResponse"/>)
 /// instead of blocking the server indefinitely.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1ResponseBodyStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 {
     // RFC 9112 §7.1 — the terminating zero-length chunk plus the (empty) trailer section: "0" CRLF CRLF.
@@ -214,5 +216,23 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
         {
             linked?.Dispose();
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http1ResponseBodyStream _target;
+
+        public DebugView(Http1ResponseBodyStream value)
+        {
+            _target = value;
+        }
+
+        public bool HasStarted => _target.HasStarted;
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public bool CanTimeout => _target.CanTimeout;
+        public int ReadTimeout => _target.ReadTimeout;
+        public int WriteTimeout => _target.WriteTimeout;
     }
 }

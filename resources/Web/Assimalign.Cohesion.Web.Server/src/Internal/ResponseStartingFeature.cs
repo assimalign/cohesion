@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Internal;
 
 /// <summary>Callback registrations driven by the transport's existing head-commit hook.</summary>
+[global::System.Diagnostics.DebuggerDisplay("ResponseStartingFeature")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResponseStartingFeature : IWebResponseStartingFeature, IWebResponseClientFaultFeature
 {
     // These fields describe the refused message's body or framing, not policy that can
@@ -163,6 +165,13 @@ internal sealed class ResponseStartingFeature : IWebResponseStartingFeature, IWe
             {
                 _context.Headers[key] = value;
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ResponseStartingFeature value)
+        {
         }
     }
 }

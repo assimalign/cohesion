@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Content.Ebml.Internal;
 namespace Assimalign.Cohesion.Content.Ebml;
 
 /// <summary>An EBML variable-size integer retaining its encoded width.</summary>
+[global::System.Diagnostics.DebuggerDisplay("VInt {Length,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public readonly struct VInt
 {
     private readonly sbyte _length;
@@ -311,5 +313,21 @@ public readonly struct VInt
     public override string ToString()
     {
         return $"VInt, value = {Value}, length = {Length}, encoded = {EncodedValue:X}";
+    }
+
+    private sealed class DebugView
+    {
+        private readonly VInt _target;
+
+        public DebugView(VInt value)
+        {
+            _target = value;
+        }
+
+        public ulong Value => _target.Value;
+        public bool IsReserved => _target.IsReserved;
+        public bool IsValidIdentifier => _target.IsValidIdentifier;
+        public ulong EncodedValue => _target.EncodedValue;
+        public int Length => _target.Length;
     }
 }

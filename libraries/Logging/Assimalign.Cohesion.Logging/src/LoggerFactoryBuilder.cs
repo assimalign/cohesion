@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Logging;
 /// Builders are not thread-safe; treat them as scratch space scoped to a single setup routine.
 /// The resulting <see cref="ILoggerFactory"/> IS thread-safe.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("LoggerFactoryBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
 {
     private readonly LoggerFactoryOptions _options = new();
@@ -104,5 +106,17 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
             throw new InvalidOperationException(
                 "LoggerFactoryBuilder has already been used to build a factory; create a new builder.");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly LoggerFactoryBuilder _target;
+
+        public DebugView(LoggerFactoryBuilder value)
+        {
+            _target = value;
+        }
+
+        public bool HasForwarders => _target.HasForwarders;
     }
 }

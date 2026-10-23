@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ServiceProviderEngineScope")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvider, IServiceScopeFactory, IAsyncDisposable
 {
     // Up to this many captured disposables, BeginDispose removes duplicates with a reference scan
@@ -385,5 +387,18 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
                 }
             }
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ServiceProviderEngineScope _target;
+
+        public DebugView(ServiceProviderEngineScope value)
+        {
+            _target = value;
+        }
+
+        public bool IsRootScope => _target.IsRootScope;
+        public IServiceProvider ServiceProvider => _target.ServiceProvider;
     }
 }

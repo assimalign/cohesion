@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts;
 /// Builder-time options for the request-timeout middleware
 /// (<see cref="WebApplicationExtensions.UseRequestTimeouts(IWebApplicationPipelineBuilder, Action{RequestTimeoutOptions}?)"/>).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("RequestTimeoutOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class RequestTimeoutOptions
 {
     private TimeProvider _timeProvider = TimeProvider.System;
@@ -37,4 +39,18 @@ public sealed class RequestTimeoutOptions
     /// ASP.NET's request-timeouts middleware.
     /// </summary>
     public bool SuspendWhenDebuggerAttached { get; set; } = true;
+
+    private sealed class DebugView
+    {
+        private readonly RequestTimeoutOptions _target;
+
+        public DebugView(RequestTimeoutOptions value)
+        {
+            _target = value;
+        }
+
+        public RequestTimeoutPolicy? DefaultPolicy => _target.DefaultPolicy;
+        public TimeProvider TimeProvider => _target.TimeProvider;
+        public bool SuspendWhenDebuggerAttached => _target.SuspendWhenDebuggerAttached;
+    }
 }

@@ -16,6 +16,8 @@ using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.NatGateway.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("NatGatewayControlPlaneEndpointService {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class NatGatewayControlPlaneEndpointService : IHostService, IDisposable
 {
     private X509Certificate2? _serverCertificate;
@@ -90,4 +92,16 @@ internal sealed class NatGatewayControlPlaneEndpointService : IHostService, IDis
                 ? address
                 : throw new InvalidOperationException($"The NatGateway endpoint host '{host}' is not a bindable IP address.");
 
+
+    private sealed class DebugView
+    {
+        private readonly NatGatewayControlPlaneEndpointService _target;
+
+        public DebugView(NatGatewayControlPlaneEndpointService value)
+        {
+            _target = value;
+        }
+
+        public ServiceId Id => _target.Id;
+    }
 }

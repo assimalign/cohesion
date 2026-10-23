@@ -15,6 +15,7 @@ namespace System.IO;
 /// segments, and matching is case-sensitive unless the caller asks otherwise. Create one with
 /// <see cref="Parse(string)"/> or the implicit conversion from <see cref="string"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 [DebuggerDisplay("{ToString()}")]
 public sealed partial class Glob
 {
@@ -345,4 +346,16 @@ public sealed partial class Glob
     }
 
     #endregion
+
+    private sealed class DebugView
+    {
+        private readonly Glob _target;
+
+        public DebugView(Glob value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

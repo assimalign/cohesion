@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// are registered as values and no service container is involved.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("AuthenticationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class AuthenticationBuilder
 {
     private readonly AuthenticationOptions _options = new();
@@ -128,5 +130,17 @@ public sealed class AuthenticationBuilder
         // Fully qualified: the DataProtectionProvider property on this type shadows the static
         // factory class of the same name inside the type body.
         return Security.DataProtection.DataProtectionProvider.Create(FileSystemKeyRepository.Create(keysDirectory));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly AuthenticationBuilder _target;
+
+        public DebugView(AuthenticationBuilder value)
+        {
+            _target = value;
+        }
+
+        public AuthenticationOptions Options => _target.Options;
     }
 }

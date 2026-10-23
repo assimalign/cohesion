@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 /// <summary>
 /// Presents application-local resource identifiers over a shared gateway state manager.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ApplicationScopedResourceStateManager")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationScopedResourceStateManager :
     IApplicationResourceStateManager,
     IDisposable
@@ -131,5 +133,12 @@ internal sealed class ApplicationScopedResourceStateManager :
                 args.Previous,
                 args.Current,
                 args.Detail));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(ApplicationScopedResourceStateManager value)
+        {
+        }
     }
 }

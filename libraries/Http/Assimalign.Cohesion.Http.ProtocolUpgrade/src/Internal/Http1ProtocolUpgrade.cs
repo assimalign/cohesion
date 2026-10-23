@@ -44,6 +44,8 @@ namespace Assimalign.Cohesion.Http.Internal;
 /// reads its feature.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("Http1ProtocolUpgrade")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 {
     private static readonly HttpHeaderKey[] _forbiddenResponseHeaders =
@@ -278,5 +280,18 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
             throw new HttpInvalidResponseFieldException(
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResponseFieldValueInvalid, name, (int)value[invalid], invalid));
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly Http1ProtocolUpgrade _target;
+
+        public DebugView(Http1ProtocolUpgrade value)
+        {
+            _target = value;
+        }
+
+        public HttpProtocolUpgradeKind Kind => _target.Kind;
+        public string? Protocol => _target.Protocol;
     }
 }

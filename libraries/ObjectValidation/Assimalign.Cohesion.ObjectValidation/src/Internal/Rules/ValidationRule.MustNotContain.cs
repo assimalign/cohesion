@@ -5,6 +5,8 @@ using System.Linq;
 
 namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("MustNotContainValidationRule {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(MustNotContainValidationRule<,>.DebugView))]
 internal sealed class MustNotContainValidationRule<TValue, TContains> : ValidationRuleBase<TValue>
     where TValue : IEnumerable, IEnumerable<TContains>
     where TContains : notnull, IEquatable<TContains>
@@ -55,6 +57,21 @@ internal sealed class MustNotContainValidationRule<TValue, TContains> : Validati
             context = null;
             return false;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MustNotContainValidationRule<TValue, TContains> _target;
+
+        public DebugView(MustNotContainValidationRule<TValue, TContains> value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Type ValueType => _target.ValueType;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationError Error => _target.Error;
+        public global::Assimalign.Cohesion.ObjectValidation.IValidationContext ParentContext => _target.ParentContext;
     }
 }
 

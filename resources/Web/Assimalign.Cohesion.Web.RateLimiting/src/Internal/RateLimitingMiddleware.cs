@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Internal;
 /// neither applied nor acknowledged.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("RateLimitingMiddleware")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
 {
     /// <summary>
@@ -168,6 +170,13 @@ internal sealed class RateLimitingMiddleware : IWebApplicationMiddleware
             // The request token may be cancelled; the rejection write must not observe it or the answer
             // would cancel itself.
             await onRejected.Invoke(rejection, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(RateLimitingMiddleware value)
+        {
         }
     }
 }

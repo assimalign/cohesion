@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// Each accepted connection is returned as a live <see cref="DuplexConnection"/> whose IO loops are
 /// already running.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TcpConnectionListener {Id,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class TcpConnectionListener : DuplexConnectionListener
 {
     private readonly TcpConnectionListenerOptions _options;
@@ -463,5 +465,20 @@ public sealed class TcpConnectionListener : DuplexConnectionListener
             socket.Dispose();
             throw;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly TcpConnectionListener _target;
+
+        public DebugView(TcpConnectionListener value)
+        {
+            _target = value;
+        }
+
+        public ListenerId Id => _target.Id;
+        public EndPoint EndPoint => _target.EndPoint;
+        public ConnectionCapabilities Capabilities => _target.Capabilities;
+        public global::System.Collections.Generic.IReadOnlyCollection<global::Assimalign.Cohesion.Connections.IDuplexConnection> Connections => _target.Connections;
     }
 }

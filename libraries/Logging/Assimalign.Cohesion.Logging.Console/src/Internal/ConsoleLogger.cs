@@ -3,6 +3,8 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// <summary>
 /// Per-category logger created by <see cref="ConsoleLoggerProvider"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("ConsoleLogger")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ConsoleLogger : Logger
 {
     private readonly ConsoleLoggerProvider _provider;
@@ -28,6 +30,8 @@ internal sealed class ConsoleLogger : Logger
         return new ConsoleScopedLogger(Category, _provider, entry.Id);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ConsoleScopedLogger")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ConsoleScopedLogger : ScopedLogger
     {
         private readonly ConsoleLoggerProvider _provider;
@@ -51,5 +55,30 @@ internal sealed class ConsoleLogger : Logger
 
             return new ConsoleScopedLogger(Category, _provider, entry.Id);
         }
+
+        private sealed class DebugView
+        {
+            private readonly ConsoleScopedLogger _target;
+
+            public DebugView(ConsoleScopedLogger value)
+            {
+                _target = value;
+            }
+
+            public LogId ParentId => _target.ParentId;
+            public string Category => _target.Category;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly ConsoleLogger _target;
+
+        public DebugView(ConsoleLogger value)
+        {
+            _target = value;
+        }
+
+        public string Category => _target.Category;
     }
 }

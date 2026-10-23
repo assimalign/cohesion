@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Caching.InMemory;
 /// <summary>
 /// Configuration knobs for <see cref="MemoryCache"/>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MemoryCacheOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MemoryCacheOptions
 {
     private TimeSpan _expirationScanFrequency = TimeSpan.FromMinutes(1);
@@ -92,4 +94,19 @@ public sealed class MemoryCacheOptions
     /// the cache uses <see cref="TimeProvider.System"/>.
     /// </summary>
     public TimeProvider? TimeProvider { get; set; }
+
+    private sealed class DebugView
+    {
+        private readonly MemoryCacheOptions _target;
+
+        public DebugView(MemoryCacheOptions value)
+        {
+            _target = value;
+        }
+
+        public TimeSpan ExpirationScanFrequency => _target.ExpirationScanFrequency;
+        public long? SizeLimit => _target.SizeLimit;
+        public double CompactionPercentage => _target.CompactionPercentage;
+        public TimeProvider? TimeProvider => _target.TimeProvider;
+    }
 }

@@ -481,6 +481,8 @@ public static class ResourceRuntime
         return _hostControlPlanes.TryGetValue(host, out controlPlane);
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ResourceContextScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ResourceContextScope : IDisposable
     {
         private readonly ResourceContextFrame? _prior;
@@ -508,8 +510,17 @@ public static class ResourceRuntime
             _ambientContext.Value = _prior;
             _ = Interlocked.Exchange(ref _disposed, 1);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(ResourceContextScope value)
+            {
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("ResourceContextFrame")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class ResourceContextFrame
     {
         private TaskCompletionSource<IHost>? _entryHostReady;
@@ -618,6 +629,13 @@ public static class ResourceRuntime
                 _entryHostReady?.TrySetException(exception);
             }
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(ResourceContextFrame value)
+            {
+            }
+        }
     }
 
     private static async Task ObserveEntryCompletionAsync(
@@ -698,6 +716,8 @@ public static class ResourceRuntime
         Task<IHost> HostReady,
         Task Completion) : IResourceEntryInvocation;
 
+    [global::System.Diagnostics.DebuggerDisplay("RegisteredResourceControlPlane")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
     private sealed class RegisteredResourceControlPlane : IResourceControlPlane
     {
         private readonly IResourceControlPlane _inner;
@@ -748,5 +768,19 @@ public static class ResourceRuntime
             ResourceCommand command,
             CancellationToken cancellationToken = default) =>
             _inner.ExecuteCommandAsync(command, cancellationToken);
+
+        private sealed class DebugView
+        {
+            private readonly RegisteredResourceControlPlane _target;
+
+            public DebugView(RegisteredResourceControlPlane value)
+            {
+                _target = value;
+            }
+
+            public IReadOnlyList<string> AcceptedCommandKinds => _target.AcceptedCommandKinds;
+            public IReadOnlyList<ResourceCommand> Commands => _target.Commands;
+            public IReadOnlyDictionary<string, Uri> ObservedEndpoints => _target.ObservedEndpoints;
+        }
     }
 }

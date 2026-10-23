@@ -24,6 +24,8 @@ namespace Assimalign.Cohesion.Dns.Internal;
 /// guarded by a single lock.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DnsDelegationCache {Count,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class DnsDelegationCache
 {
     private readonly int _capacity;
@@ -143,4 +145,16 @@ internal sealed class DnsDelegationCache
     }
 
     private sealed record Entry(DnsName Zone, IReadOnlyList<IPEndPoint> Endpoints, DateTimeOffset ExpiresAtUtc);
+
+    private sealed class DebugView
+    {
+        private readonly DnsDelegationCache _target;
+
+        public DebugView(DnsDelegationCache value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

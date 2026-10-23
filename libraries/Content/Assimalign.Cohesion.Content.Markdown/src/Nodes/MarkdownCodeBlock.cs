@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Content.Markdown;
 /// A fenced code block: an optional info string (whose first word conventionally names the
 /// language) and the literal, uninterpreted content.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("MarkdownCodeBlock")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class MarkdownCodeBlock : MarkdownBlock
 {
     private string _literal = string.Empty;
@@ -26,5 +28,18 @@ public sealed class MarkdownCodeBlock : MarkdownBlock
             ArgumentNullException.ThrowIfNull(value);
             _literal = value;
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly MarkdownCodeBlock _target;
+
+        public DebugView(MarkdownCodeBlock value)
+        {
+            _target = value;
+        }
+
+        public string? Info => _target.Info;
+        public string Literal => _target.Literal;
     }
 }

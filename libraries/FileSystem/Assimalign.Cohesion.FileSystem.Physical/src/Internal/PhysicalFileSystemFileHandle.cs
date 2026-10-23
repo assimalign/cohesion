@@ -6,6 +6,8 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("PhysicalFileSystemFileHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class PhysicalFileSystemFileHandle : IFileSystemFileHandle
 {
     private readonly SafeFileHandle _handle;
@@ -95,4 +97,11 @@ internal sealed class PhysicalFileSystemFileHandle : IFileSystemFileHandle
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+    private sealed class DebugView
+    {
+        public DebugView(PhysicalFileSystemFileHandle value)
+        {
+        }
+    }
 }
