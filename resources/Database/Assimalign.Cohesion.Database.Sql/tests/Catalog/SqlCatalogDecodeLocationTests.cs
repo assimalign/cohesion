@@ -21,6 +21,7 @@ public sealed class SqlCatalogDecodeLocationTests
         bracket.Commit();
 
         var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06059" && diagnostic.Severity == DiagnosticSeverity.Error);
         var corruption = StorageCorruptionException.Find(failure).ShouldNotBeNull();
         corruption.PageId.ShouldBe(location.PageId);
         corruption.SlotIndex.ShouldBe(location.SlotIndex);

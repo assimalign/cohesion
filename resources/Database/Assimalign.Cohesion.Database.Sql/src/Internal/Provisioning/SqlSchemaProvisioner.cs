@@ -245,14 +245,14 @@ internal sealed partial class SqlSchemaProvisioner
                 }
 
                 string state = compensation.IsComplete
-                    ? "Every completed step was compensated."
-                    : "Compensation was incomplete; the live catalog must be reconciled before retrying.";
+                    ? ErrorMessages.CompensationComplete
+                    : ErrorMessages.CompensationIncomplete;
                 Exception inner = compensation.Failures.Count == 0
                     ? failure
                     : new AggregateException(new[] { failure }.Concat(compensation.Failures));
                 string where = applied.Count < script.Steps.Count
-                    ? $"step {applied.Count + 1} of {script.Steps.Count} ({Describe(script.Steps[applied.Count].Operation)}) failed"
-                    : $"recording the applied schema failed after all {script.Steps.Count} step(s)";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationStepFailureContext, applied.Count + 1, script.Steps.Count, Describe(script.Steps[applied.Count].Operation))
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaRecordFailureContext, script.Steps.Count);
                 // Keep the named dependent view visible at the schema-apply boundary,
                 // rather than requiring callers to inspect the compensation's inner error.
                 string dependency = failure is DatabaseException databaseFailure &&
@@ -359,7 +359,7 @@ internal sealed partial class SqlSchemaProvisioner
     // Keep verification's formatting local out of the Debug async state machine.
     private string AppendCatalogDifference(string reason, SqlCompiledSchema schema)
         => FirstCatalogDifference(schema) is { } difference
-            ? reason + $"; first difference from the declaration: {difference}"
+            ? reason + string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclarationDifferenceContext, difference)
             : reason;
 
     /// <summary>
@@ -372,7 +372,7 @@ internal sealed partial class SqlSchemaProvisioner
     /// <returns>The first unsupported object, described for a message, or null.</returns>
     internal static string? DescribeUnsupported(SqlCompiledSchema schema)
         => schema.Principals.Count > 0
-            ? $"principal '{schema.Principals[0].Name}', and principals and grants are refused until their DDL exists"
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrincipalDdlUnavailable, schema.Principals[0].Name)
             : null;
 
     /// <summary>
@@ -409,7 +409,7 @@ internal sealed partial class SqlSchemaProvisioner
         {
             throw error is not null
                 ? new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProvisionerResolveColumnTypeDatabase, column.Name, declared, error))
-                : SqlEvaluationException.UnknownType(declared, $"Column '{column.Name}'");
+                : SqlEvaluationException.UnknownType(declared, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnSubject, column.Name));
         }
 
         if (type.Storage.Type != column.Type &&
@@ -493,7 +493,7 @@ internal sealed partial class SqlSchemaProvisioner
                         // Use the DDL path before any storage exists: domain base types and
                         // numeric/length bounds must accept exactly the same literal here.
                         SqlPlanExecutor.ResolveDefault(boundColumn, SqlPersistedExpression.LoadDefaultValue(literal,
-                            $"DEFAULT on column '{table.Name}.{column.Name}'"));
+                            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.QualifiedColumnDefaultSubject, table.Name, column.Name)));
                     }
                 }
                 catch (DatabaseException exception)
@@ -541,7 +541,7 @@ internal sealed partial class SqlSchemaProvisioner
             recorded.Generation == _catalog.DdlGeneration;
 
     // Names where a provisioning message happened: the engine and the database.
-    private string Describe() => $"SQL engine '{_database.Engine.Name}', database '{_database.Name}'";
+    private string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineDatabaseContext, _database.Engine.Name, _database.Name);
 
     private static string Describe(SqlSchemaMigrationOperation operation)
         => operation.ParentName is null
@@ -691,12 +691,12 @@ internal sealed partial class SqlSchemaProvisioner
         {
             if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, expected.Name, out SqlCatalogTable actual))
             {
-                return $"table '{expected.Name}' is missing";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTableMissing, expected.Name);
             }
 
             if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
-                return $"table '{expected.Name}' was not created by schema '{schema.Name}'";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableSchemaOwnershipMismatch, expected.Name, schema.Name);
             }
 
             if (DescribeColumnDifference(expected, actual) is { } column)
@@ -706,8 +706,8 @@ internal sealed partial class SqlSchemaProvisioner
 
             if (!NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
             {
-                return $"table '{expected.Name}': its primary key is ({string.Join(", ", actual.PrimaryKeyColumns)}), " +
-                    $"declared ({string.Join(", ", expected.PrimaryKey?.Columns ?? Array.Empty<string>())})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrimaryKeyActualContext, expected.Name, string.Join(", ", actual.PrimaryKeyColumns)) +
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrimaryKeyDeclaredContext, string.Join(", ", expected.PrimaryKey?.Columns ?? Array.Empty<string>()));
             }
 
             foreach (CompiledSchemaConstraint constraint in expected.Constraints)
@@ -716,7 +716,7 @@ internal sealed partial class SqlSchemaProvisioner
                     string.Equals(value.Name, constraint.Name, StringComparison.OrdinalIgnoreCase));
                 if (persisted is null)
                 {
-                    return $"table '{expected.Name}': constraint '{constraint.Name}' is missing";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredConstraintMissing, expected.Name, constraint.Name);
                 }
 
                 if ((persisted.Kind == SqlCatalogConstraintKind.Reference) != (constraint.Kind == CompiledSchemaConstraintKind.Reference) ||
@@ -727,7 +727,7 @@ internal sealed partial class SqlSchemaProvisioner
                     CompiledDeleteAction(persisted.OnDelete) != constraint.OnDelete ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
-                    return $"table '{expected.Name}': constraint '{constraint.Name}' differs from its declaration";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintDeclarationMismatch, expected.Name, constraint.Name);
                 }
             }
 
@@ -736,8 +736,8 @@ internal sealed partial class SqlSchemaProvisioner
                 SqlCatalogConstraint? extra = actual.Constraints.FirstOrDefault(value => !expected.Constraints.Any(declared =>
                     string.Equals(declared.Name, value.Name, StringComparison.OrdinalIgnoreCase)));
                 return extra is null
-                    ? $"table '{expected.Name}' has {actual.Constraints.Count} constraint(s), declared {expected.Constraints.Count}"
-                    : $"table '{expected.Name}': constraint '{extra.Name}' is not declared";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintCountMismatch, expected.Name, actual.Constraints.Count, expected.Constraints.Count)
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraConstraint, expected.Name, extra.Name);
             }
 
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
@@ -749,13 +749,13 @@ internal sealed partial class SqlSchemaProvisioner
                     index => string.Equals(index.Name, expectedIndex.Name, StringComparison.OrdinalIgnoreCase));
                 if (actualIndex is null)
                 {
-                    return $"table '{expected.Name}': index '{expectedIndex.Name}' is missing";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredIndexMissing, expected.Name, expectedIndex.Name);
                 }
 
                 if (actualIndex.IsUnique != expectedIndex.IsUnique ||
                     !NamesEqual(expectedIndex.Columns, actualIndex.ColumnNames))
                 {
-                    return $"table '{expected.Name}': index '{expectedIndex.Name}' differs from its declaration (uniqueness or columns)";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IndexDeclarationMismatch, expected.Name, expectedIndex.Name);
                 }
             }
 
@@ -764,8 +764,8 @@ internal sealed partial class SqlSchemaProvisioner
                 SqlCatalogIndex? extra = actualIndexes.FirstOrDefault(index => !expected.Indexes.Any(declared =>
                     string.Equals(declared.Name, index.Name, StringComparison.OrdinalIgnoreCase)));
                 return extra is null
-                    ? $"table '{expected.Name}' has {actualIndexes.Count} schema-owned index(es), declared {expected.Indexes.Count}"
-                    : $"table '{expected.Name}': index '{extra.Name}' is not declared";
+                    ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaIndexCountMismatch, expected.Name, actualIndexes.Count, expected.Indexes.Count)
+                    : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraIndex, expected.Name, extra.Name);
             }
         }
 
@@ -775,8 +775,8 @@ internal sealed partial class SqlSchemaProvisioner
                 string.Equals(declared.Name, table.Name, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(table.Schema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)));
             return extra is null
-                ? $"the database has {ownedTables.Count} table(s) created by schema '{schema.Name}', declared {schema.Tables.Count}"
-                : $"table '{extra.Schema}.{extra.Name}' was created by schema '{schema.Name}' but is not declared";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OwnedTableCountMismatch, ownedTables.Count, schema.Name, schema.Tables.Count)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraOwnedTable, extra.Schema, extra.Name, schema.Name);
         }
 
         return null;
@@ -791,14 +791,14 @@ internal sealed partial class SqlSchemaProvisioner
                 string.Equals(live.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
             if (missing is not null)
             {
-                return $"table '{expected.Name}': column '{missing.Name}' is missing";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredColumnMissing, expected.Name, missing.Name);
             }
 
             SqlCatalogColumn? extra = actual.Columns.FirstOrDefault(column => !expected.Columns.Any(declared =>
                 string.Equals(declared.Name, column.Name, StringComparison.OrdinalIgnoreCase)));
             return extra is null
-                ? $"table '{expected.Name}' has {actual.Columns.Count} column(s), declared {expected.Columns.Count}"
-                : $"table '{expected.Name}': column '{extra.Name}' is not declared";
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnCountMismatch, expected.Name, actual.Columns.Count, expected.Columns.Count)
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExtraColumn, expected.Name, extra.Name);
         }
 
         for (int index = 0; index < expected.Columns.Count; index++)
@@ -809,28 +809,28 @@ internal sealed partial class SqlSchemaProvisioner
                 !IsPrimaryKeyColumn(expected.PrimaryKey, expectedColumn.Name);
             if (!string.Equals(expectedColumn.Name, actualColumn.Name, StringComparison.OrdinalIgnoreCase))
             {
-                return $"table '{expected.Name}': column {index + 1} is '{actualColumn.Name}', declared '{expectedColumn.Name}'";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnOrderMismatch, expected.Name, index + 1, actualColumn.Name, expectedColumn.Name);
             }
 
             if (DescribeTypeDifference(expectedColumn, actualColumn) is { } type)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' {type}";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDifferenceContext, expected.Name, expectedColumn.Name, type);
             }
 
             if (expectedIsNullable != actualColumn.IsNullable)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' is " +
-                    $"{(actualColumn.IsNullable ? "nullable" : "not nullable")}, declared {(expectedIsNullable ? "nullable" : "not nullable")}";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnTypeContext, expected.Name, expectedColumn.Name) +
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclarationComparison, (actualColumn.IsNullable ? ErrorMessages.NullableColumnDescription : ErrorMessages.NonNullableColumnDescription), (expectedIsNullable ? ErrorMessages.NullableColumnDescription : ErrorMessages.NonNullableColumnDescription));
             }
 
             if (actualColumn.Identity is not null)
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has identity metadata absent from its declaration";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnIdentityUndeclared, expected.Name, expectedColumn.Name);
             }
 
             if (!string.Equals(actualColumn.DefaultLiteral, CanonicalDefault(expectedColumn.DefaultLiteral), StringComparison.Ordinal))
             {
-                return $"table '{expected.Name}': column '{expectedColumn.Name}' has a different default from its declaration";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultMismatch, expected.Name, expectedColumn.Name);
             }
         }
 
@@ -851,20 +851,20 @@ internal sealed partial class SqlSchemaProvisioner
         }
         catch (DatabaseException exception)
         {
-            return $"is declared with a type this engine does not resolve ({exception.Message})";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeUnresolvedReason, exception.Message);
         }
 
         if (type.Type != actual.Type.Type || type.MaxLength != actual.Type.MaxLength ||
             type.Precision != actual.Type.Precision || type.Scale != actual.Type.Scale)
         {
-            return $"is {DescribeType(actual.Type.Type, actual.Type.MaxLength, actual.Type.Precision, actual.Type.Scale)}, " +
-                $"declared {DescribeType(type.Type, type.MaxLength, type.Precision, type.Scale)}";
+            return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualTypeContext, DescribeType(actual.Type.Type, actual.Type.MaxLength, actual.Type.Precision, actual.Type.Scale)) +
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeContext, DescribeType(type.Type, type.MaxLength, type.Precision, type.Scale));
         }
 
         return string.Equals(domain, actual.DomainName, StringComparison.OrdinalIgnoreCase)
             ? null
-            : $"is {(actual.DomainName is null ? "of no domain" : $"of domain '{actual.DomainName}'")}, " +
-              $"declared {(domain is null ? "with no domain" : $"of domain '{domain}'")}";
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualTypeContext, (actual.DomainName is null ? ErrorMessages.NoActualDomain : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualDomainContext, actual.DomainName))) +
+              string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredTypeContext, (domain is null ? ErrorMessages.NoDeclaredDomain : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ActualDomainContext, domain)));
     }
 
     private static string DescribeType(DatabaseType type, int? maxLength, int? precision, int? scale)
@@ -887,7 +887,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         try
         {
-            return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(declared, "Compiled CHECK predicate"), "Compiled CHECK predicate");
+            return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(declared, ErrorMessages.CompiledCheckSubject), ErrorMessages.CompiledCheckSubject);
         }
         catch (DatabaseException)
         {
@@ -914,7 +914,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         return expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null }
             ? null
-            : SqlPersistedExpression.Canonicalize(expression, "Compiled column DEFAULT");
+            : SqlPersistedExpression.Canonicalize(expression, ErrorMessages.CompiledDefaultSubject);
     }
 
     /// <summary>

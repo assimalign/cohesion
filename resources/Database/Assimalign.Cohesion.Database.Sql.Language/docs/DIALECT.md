@@ -3471,6 +3471,8 @@ the diagnostic fixes introduce no persisted-format change beyond #1422's format-
 | `CS03056` | DDL refused because constraints or indexes depend on the object; namespace RESTRICT retains CS03030 | 2BP01 (`dependent_objects_still_exist`) |
 | `CS05057` | Unsupported execution/DDL operation, including a subquery encountered by CHECK admission | 0A000 (`feature_not_supported`) |
 | `CS06058` | Damaged or incompatible loaded persisted expression or missing-value literal | XX001 (`data_corrupted`) |
+| `CS06059` | Malformed persisted SQL catalog metadata, including truncated typed records; retains page/slot and original cause | XX001 (`data_corrupted`) |
+| `CS06060` | Unsupported SQL catalog metadata format or version; earlier/future metadata is refused without an upgrade reader | 0A000 (`feature_not_supported`) |
 | `CS03059` | Expression cannot be stored as a valid deterministic row definition | 42P17 (`invalid_object_definition`) |
 | `CS05060` | Executor/catalog invariant failure, including unavailable constraint indexes or freshly rendered CREATE VIEW text that cannot reload | XX000 (`internal_error`) |
 | `CS03061` | Column already exists | 42701 (`duplicate_column`) |

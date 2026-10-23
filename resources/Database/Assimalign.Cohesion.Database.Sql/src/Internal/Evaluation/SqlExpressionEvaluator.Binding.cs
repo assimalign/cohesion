@@ -476,7 +476,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (unary.Operator == SqlUnaryOperator.Negate
             && unary.Operand is SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } magnitude
             && ulong.TryParse(magnitude.Value, NumberStyles.None, CultureInfo.InvariantCulture, out ulong digits)
-            && digits == BigIntMinimumMagnitude)
+            && digits == bigIntMinimumMagnitude)
         {
             collation = CollationOf(unary, [FindCollation(magnitude, bound: true)]);
             return new SqlBoundConstant(long.MinValue);

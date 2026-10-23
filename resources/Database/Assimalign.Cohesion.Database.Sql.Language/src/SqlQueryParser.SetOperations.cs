@@ -102,7 +102,7 @@ public sealed partial class SqlQueryParser
             try
             {
                 var query = ParseQueryExpression(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the query operand");
+                Expect(ref lexer, TokenType.RightParen, _errorQueryOperandClosingExpected);
                 return query;
             }
             finally { _parenthesisDepth--; }

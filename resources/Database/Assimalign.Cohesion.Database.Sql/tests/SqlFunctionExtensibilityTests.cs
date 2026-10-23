@@ -22,9 +22,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed partial class SqlFunctionExtensibilityTests
 {
-    private const string FunctionSignatureMismatch = "CS01006";
-    private const string FunctionFailed = "CS05007";
-    private const string AmbiguousFunctionCall = "CS01008";
+    private const string functionSignatureMismatch = "CS01006";
+    private const string functionFailed = "CS05007";
+    private const string ambiguousFunctionCall = "CS01008";
 
     /// <summary>The builder starts with the standard library, and the built engine executes it and the application's functions.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: the builder holds the standard library and the engine freezes the registrations")]
@@ -125,12 +125,12 @@ public sealed partial class SqlFunctionExtensibilityTests
     /// <param name="code">The coded failure.</param>
     /// <param name="message">The start of its message.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: an ambiguous call is CS01008 and a call no overload accepts is CS01006, at plan time")]
-    [InlineData("SELECT describe(NULL) FROM t", AmbiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well.")]
-    [InlineData("SELECT describe(@missing) FROM t", AmbiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous")]
-    [InlineData("SELECT describe(flag) FROM t", FunctionSignatureMismatch, "CS01006: Function 'describe' has no overload that accepts argument types (BOOLEAN). Accepted: describe(BIGINT) or describe(TEXT).")]
-    [InlineData("SELECT clamp(name, 1, 2) FROM t", FunctionSignatureMismatch, "CS01006: Function 'clamp' has no overload that accepts argument types (TEXT, INTEGER, INTEGER). Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
-    [InlineData("SELECT clamp(1, 2) FROM t", FunctionSignatureMismatch, "CS01006: Function 'clamp' takes exactly 3 arguments but was called with 2. Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
-    [InlineData("SELECT id FROM t WHERE describe(NULL) = 'x'", AmbiguousFunctionCall, "CS01008:")]
+    [InlineData("SELECT describe(NULL) FROM t", ambiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous: describe(BIGINT) and describe(TEXT) accept it equally well.")]
+    [InlineData("SELECT describe(@missing) FROM t", ambiguousFunctionCall, "CS01008: Function call 'describe(unknown)' is ambiguous")]
+    [InlineData("SELECT describe(flag) FROM t", functionSignatureMismatch, "CS01006: Function 'describe' has no overload that accepts argument types (BOOLEAN). Accepted: describe(BIGINT) or describe(TEXT).")]
+    [InlineData("SELECT clamp(name, 1, 2) FROM t", functionSignatureMismatch, "CS01006: Function 'clamp' has no overload that accepts argument types (TEXT, INTEGER, INTEGER). Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
+    [InlineData("SELECT clamp(1, 2) FROM t", functionSignatureMismatch, "CS01006: Function 'clamp' takes exactly 3 arguments but was called with 2. Accepted: clamp(BIGINT, BIGINT, BIGINT).")]
+    [InlineData("SELECT id FROM t WHERE describe(NULL) = 'x'", ambiguousFunctionCall, "CS01008:")]
     public async Task ExecuteAsync_UnresolvableCall_ShouldFailAtPlanTime(string sql, string code, string message)
     {
         foreach (bool withRows in new[] { false, true })
@@ -311,7 +311,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
         // Assert
         var coded = failed.ShouldBeOfType<SqlEvaluationException>();
-        coded.Code.ShouldBe(FunctionFailed);
+        coded.Code.ShouldBe(functionFailed);
         coded.DiagnosticDetail("CS05007").ShouldStartWith("Function 'clamp' failed: ", Case.Sensitive);
         coded.InnerException.ShouldBeOfType<ArgumentException>();
         passedThrough.ShouldNotBeOfType<SqlEvaluationException>();
@@ -345,7 +345,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         var committed = await RowsAsync(session, "SELECT id FROM t ORDER BY id");
 
         // Assert
-        failed.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionFailed);
+        failed.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(functionFailed);
         failed.InnerException.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("not positive");
         divided.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS02001");
         inside.ShouldBe([[1L], [4L]]);
@@ -409,7 +409,7 @@ public sealed partial class SqlFunctionExtensibilityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT product(v) FROM t"));
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionFailed);
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(functionFailed);
         failure.DiagnosticDetail("CS05007").ShouldStartWith("Function 'product' failed: ", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<OverflowException>();
     }

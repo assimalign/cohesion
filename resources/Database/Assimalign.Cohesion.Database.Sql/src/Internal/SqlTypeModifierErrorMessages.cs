@@ -1,6 +1,7 @@
-using ModelErrorMessages = Assimalign.Cohesion.Database.Sql.Schema.ErrorMessages;
+using ModelErrorMessages = Assimalign.Cohesion.Database.Sql.ErrorMessages;
 
-// The shared Types module retains its owning language namespace in each consumer.
+// Deviates from the repo RootNamespace rule per shared-source design: this assembly-local
+// resource binding keeps the owning Types module namespace in each consumer.
 namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 internal static class SqlTypeModifierErrorMessages

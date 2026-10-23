@@ -113,7 +113,7 @@ public sealed partial class SqlQueryParser
             }
             if (characters is not null) { arguments.Add(characters); }
         }
-        Expect(ref lexer, TokenType.RightParen, $"')' after {name}");
+        Expect(ref lexer, TokenType.RightParen, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionClosingParenthesisExpected, name));
         return new SqlFunctionCallExpression(name, arguments, Location.Create(1, 1, position, position + name.Length));
     }
 

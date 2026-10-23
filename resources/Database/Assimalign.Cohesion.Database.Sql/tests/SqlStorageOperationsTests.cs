@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
@@ -368,7 +368,7 @@ public sealed class SqlStorageOperationsTests
             await Should.ThrowAsync<DatabaseTransactionCommitUnconfirmedException>(async () => await other.ExecuteAsync("INSERT INTO u (id) VALUES (1)"));
         }
 
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(Timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await drop.WaitAsync(_timeout));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
 
@@ -422,17 +422,17 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         await using var ddl = await database.CreateSessionAsync();
         var drop = ddl.ExecuteAsync("DROP TABLE t").AsTask();
         bool catalogCommitted = await Eventually(() => !database.Catalog.TryGetTable("dbo", "t", out _));
-        await drop.WaitAsync(Timeout);
+        await drop.WaitAsync(_timeout);
         database.TableReclamation.ReclaimedPages.ShouldBe(0);
 
         // Act: storage goes offline after DROP returned; then release the old statement.
         database.DataStorage.TakeOffline(offlineError);
         release.SetResult();
-        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(_timeout));
         await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -489,7 +489,7 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         await using var ddl = await database.CreateSessionAsync();
         var create = ddl.ExecuteAsync("CREATE TABLE u (id INT PRIMARY KEY)").AsTask();
         bool createWaited = !await CompletesWithin(create, TimeSpan.FromMilliseconds(200));
@@ -497,8 +497,8 @@ public sealed class SqlStorageOperationsTests
         // Act: the database goes offline while the create waits; then the gate is released.
         database.DataStorage.TakeOffline(offlineError);
         release.SetResult();
-        await Record.ExceptionAsync(async () => await holding.WaitAsync(Timeout));
-        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(Timeout));
+        await Record.ExceptionAsync(async () => await holding.WaitAsync(_timeout));
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await create.WaitAsync(_timeout));
         await Record.ExceptionAsync(async () => await database.Coordinator.RollbackAsync(holder));
         var reopened = await engine.OpenDatabaseAsync(name);
         await using var observer = await reopened.CreateSessionAsync();
@@ -574,7 +574,7 @@ public sealed class SqlStorageOperationsTests
             await release.Task;
             return true;
         }, durable: false).AsTask();
-        await entered.Task.WaitAsync(Timeout);
+        await entered.Task.WaitAsync(_timeout);
         busy.DataStorage.CheckpointJournalSize = 1;
         long busyJournalWhileHeld = busy.DataStorage.JournalLength;
         busyJournalWhileHeld.ShouldBeGreaterThan(1024, "the busy database's journal must hold its inserts before the deferred checkpoint");
@@ -594,11 +594,11 @@ public sealed class SqlStorageOperationsTests
         // the checkpoints that truncated it.
         var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(written.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
         bool heldThroughout = !statement.IsCompleted;
 
         release.SetResult();
-        await statement.WaitAsync(Timeout);
+        await statement.WaitAsync(_timeout);
         long busyJournalAfterTheStatement = busy.DataStorage.JournalLength;
         await busy.Coordinator.CommitAsync(context);
 
@@ -656,7 +656,7 @@ public sealed class SqlStorageOperationsTests
         bool faulted = await Eventually(() => engine.State == EngineState.Faulted);
         strategy.FailEveryDataRead = false;
         database.DataStorage.BufferPoolCapacity = capacity;
-        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(Timeout);
+        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(_timeout);
         bool recovered = await Eventually(() => engine.State == EngineState.Running);
 
         // Assert
@@ -797,7 +797,7 @@ public sealed class SqlStorageOperationsTests
         // counting the checkpoints that truncated it.
         var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -848,7 +848,7 @@ public sealed class SqlStorageOperationsTests
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
         // DROP TABLE needs the table's exclusive lock, which the writer's intent lock holds.
-        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(Timeout);
+        await other.ExecuteAsync("DROP TABLE t").AsTask().WaitAsync(_timeout);
         watch.Stop();
 
         // Assert
@@ -896,7 +896,7 @@ public sealed class SqlStorageOperationsTests
         var watch = Stopwatch.StartNew();
         while (!condition())
         {
-            if (watch.Elapsed > Timeout)
+            if (watch.Elapsed > _timeout)
             {
                 return false;
             }

@@ -106,7 +106,7 @@ internal static class SqlDefinitionBinder
         {
             throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareFunctionSqlPlanning2, create.Name), create.Body.Location ?? create.Location);
         }
-        string body = SqlPersistedExpression.Canonicalize(create.Body, $"Function '{create.Name}'");
+        string body = SqlPersistedExpression.Canonicalize(create.Body, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionSubject, create.Name));
         return new SqlCatalogFunction(create.Name, signature, create.Parameters.Select(parameter => parameter.Name).ToArray(),
             types.Select(TypeName).ToArray(), TypeName(result),
             create.Volatility, create.IsStrict, body, dependencies.Order(StringComparer.Ordinal).ToArray(),
@@ -140,7 +140,7 @@ internal static class SqlDefinitionBinder
             {
                 throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BinderDeclareDomainSqlPlanning3, create.Name), value.Location ?? create.Location);
             }
-            literal = SqlPersistedExpression.Canonicalize(value, $"DEFAULT of domain '{create.Name}'");
+            literal = SqlPersistedExpression.Canonicalize(value, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DomainDefaultSubject, create.Name));
             if (value is not SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
             {
                 var column = new SqlCatalogColumn(create.Name, type.Storage, !create.IsNotNull, literal);
@@ -159,7 +159,7 @@ internal static class SqlDefinitionBinder
                 bindingContext: SqlBindingContext.Domain);
             dependencies = Dependencies(predicate, scope, SqlFunctionVolatility.Immutable);
             calls = FunctionCalls(predicate, scope);
-            check = SqlPersistedExpression.Canonicalize(predicate, $"CHECK of domain '{create.Name}'");
+            check = SqlPersistedExpression.Canonicalize(predicate, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DomainCheckSubject, create.Name));
         }
         return new SqlCatalogDomain(create.Name, type.Name, literal, create.IsNotNull, create.ConstraintName, check,
             dependencies.Order(StringComparer.Ordinal).ToArray(), schema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema, schema, calls, []);
@@ -234,7 +234,7 @@ internal static class SqlDefinitionBinder
         {
             throw Refuse(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlDefinitionBinderBindSqlPlanning, function.Name), location);
         }
-        var expression = SqlPersistedExpression.Load(function.Body, $"Function '{function.Name}'");
+        var expression = SqlPersistedExpression.Load(function.Body, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionSubject, function.Name));
         string? unavailableDomain = types.Append(result).Select(UnresolvedDomainReason).FirstOrDefault(reason => reason is not null);
         string? unresolved = null;
         SqlBoundExpression? body = null;
@@ -259,7 +259,7 @@ internal static class SqlDefinitionBinder
             }
             else
             {
-                unresolved = $"Function '{function.Name}': {failure.Message}";
+                unresolved = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionFailureContext, function.Name, failure.Message);
                 string reason = unresolved;
                 body = new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(new SqlUnresolvedDefinition("SQL function", function.Name, reason)));
             }
@@ -416,7 +416,7 @@ internal static class SqlDefinitionBinder
 
     private static string? UnresolvedDomainReason(SqlType type)
         => type.Check is SqlExpressionFunction { Unresolved: { } reason }
-            ? $"Domain '{type.Name}' has an unresolved SQL CHECK ({reason})." : null;
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnresolvedDomainCheck, type.Name, reason) : null;
 
     private static SqlFunctionVolatility Volatility(string value, Location? location = null) => value switch
     {

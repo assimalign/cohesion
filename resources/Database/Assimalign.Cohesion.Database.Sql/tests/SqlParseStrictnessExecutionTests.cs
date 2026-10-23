@@ -19,8 +19,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlParseStrictnessExecutionTests
 {
-    private const string Schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
-    private const string Rows = "INSERT INTO t VALUES (1, 10, 100), (2, 20, 200);";
+    private const string schema = "CREATE TABLE t (id INT PRIMARY KEY, a INT, b INT);";
+    private const string rowsValue = "INSERT INTO t VALUES (1, 10, 100), (2, 20, 200);";
 
     /// <summary>
     /// A stray character used to lex as a one-character identifier: SELECT * FROM t ? read
@@ -83,10 +83,10 @@ public sealed class SqlParseStrictnessExecutionTests
             await using var engine = SqlDatabaseEngine.Create("sql-strictness", new SqlDatabaseEngineOptions());
             var database = await engine.CreateDatabaseAsync("strictness");
             await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-            await ExecuteAsync(session, Schema);
+            await ExecuteAsync(session, schema);
             if (withRows)
             {
-                await ExecuteAsync(session, Rows);
+                await ExecuteAsync(session, rowsValue);
             }
             var before = await SnapshotAsync(session);
 

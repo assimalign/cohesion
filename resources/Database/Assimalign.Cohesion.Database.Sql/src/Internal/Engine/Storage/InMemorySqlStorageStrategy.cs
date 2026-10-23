@@ -1,4 +1,5 @@
 using System.Threading;
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 
@@ -32,12 +33,12 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
         // set of the name, in any spelling, means the database exists.
         if (!catalog && (_files.Exists(databaseName, DataFileSet) || _files.Exists(databaseName, DatabaseFileNames.CatalogFileSet)))
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase, databaseName));
+            throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase, databaseName));
         }
 
         if (!_files.TryCreate(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase2, GetLabel(databaseName, catalog)));
+            throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyCreateStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         return SqlStorage.Create(data, journal, backup, GetLabel(databaseName, catalog), _durability);
@@ -52,7 +53,7 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
     {
         if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStorageStrategyOpenStorageDatabase2, GetLabel(databaseName, catalog)));
+            throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlStorageStrategyOpenStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         try

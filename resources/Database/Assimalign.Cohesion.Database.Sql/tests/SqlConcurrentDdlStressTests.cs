@@ -64,7 +64,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
     private const int sequentialCycles = 120;
     private const int minimumAdds = 3;
     private const int paddingLength = 4300;
-    private static readonly TimeSpan catchUpLimit = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan _catchUpLimit = TimeSpan.FromMinutes(2);
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-ddl-stress", Guid.NewGuid().ToString("N"));
     private readonly ITestOutputHelper _output;
 
@@ -150,7 +150,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     $"CREATE TABLE t (id INT, qty INT, CONSTRAINT pad CHECK (qty >= 0 OR '{new string('p', paddingLength)}' <> ''))");
             }
 
-            using var deadline = new CancellationTokenSource(duration + catchUpLimit);
+            using var deadline = new CancellationTokenSource(duration + _catchUpLimit);
             using var stop = new CancellationTokenSource();
             var elapsed = Stopwatch.StartNew();
 
@@ -211,7 +211,7 @@ public sealed class SqlConcurrentDdlStressTests : IDisposable
                     // insert lands; past the duration the DDL pauses until one does.
                     while (elapsed.Elapsed < duration
                         || ((Volatile.Read(ref addsSucceeded) < minimumAdds || Volatile.Read(ref positiveCommits) == 0 || waits.IsEmpty)
-                            && elapsed.Elapsed < duration + catchUpLimit))
+                            && elapsed.Elapsed < duration + _catchUpLimit))
                     {
                         if (elapsed.Elapsed >= duration && Volatile.Read(ref positiveCommits) == 0)
                         {

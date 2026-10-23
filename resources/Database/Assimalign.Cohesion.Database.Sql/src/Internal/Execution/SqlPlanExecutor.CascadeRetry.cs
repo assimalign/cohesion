@@ -19,9 +19,15 @@ internal sealed partial class SqlPlanExecutor
 
     // Private control flow, caught only by ExecuteDeleteAsync before any apply can
     // use this acquisition path. This never becomes a user diagnostic or wire error.
-    private sealed class SqlCascadeLockRetry(LockResource resource, LockMode mode) : Exception
+    private sealed class SqlCascadeLockRetry : Exception
     {
-        internal LockResource Resource { get; } = resource;
-        internal LockMode Mode { get; } = mode;
+        internal SqlCascadeLockRetry(LockResource resource, LockMode mode)
+        {
+            Resource = resource;
+            Mode = mode;
+        }
+
+        internal LockResource Resource { get; }
+        internal LockMode Mode { get; }
     }
 }

@@ -238,7 +238,7 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = ParseDefinitionType(ref lexer, $"Column '{columnName}'", out var resolvedType);
+        string dataType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out var resolvedType);
 
         // Parse optional constraints
         bool isNullable = true;

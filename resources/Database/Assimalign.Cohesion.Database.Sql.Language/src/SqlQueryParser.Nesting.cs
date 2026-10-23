@@ -180,7 +180,7 @@ public sealed partial class SqlQueryParser
         if (_parenthesisDepth >= _nestingLimit)
         {
             RejectNesting(ref lexer, position, position + 1,
-                $"Parentheses nest deeper than the supported limit of {_nestingLimit} levels.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParenthesisNestingLimit, _nestingLimit));
             return false;
         }
 
@@ -261,7 +261,7 @@ public sealed partial class SqlQueryParser
         }
     }
 
-    private string ExpressionTooDeepMessage => $"Expression nesting exceeds the supported limit of {_nestingLimit} levels.";
+    private string ExpressionTooDeepMessage => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionNestingLimit, _nestingLimit);
 
     /// <summary>
     /// A level of parentheses or calls runs the whole precedence ladder: about 1 to 2 KB of stack
@@ -282,7 +282,7 @@ public sealed partial class SqlQueryParser
         }
 
         RejectNesting(ref lexer, NestingStackCode, start, end,
-            "Expression nesting exceeds the stack available to the parser on this thread.");
+            ErrorMessages.ParserStackExhausted);
         return false;
     }
 

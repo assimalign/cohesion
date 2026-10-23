@@ -43,17 +43,17 @@ namespace Assimalign.Cohesion.Database.Sql.Benchmarks;
 /// </remarks>
 internal static class Program
 {
-    private const string Q1 = "SELECT UPPER(name), ABS(id), LENGTH(name) FROM t";
-    private const string Q2 = "SELECT id FROM t WHERE ABS(id) > 10";
-    private const string Q3 = "SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g";
-    private const string Q4 = "SELECT upper_r(name), ABS(id), LENGTH(name) FROM t";
-    private const string Q5L = "SELECT upper_leaf(name) FROM t";
-    private const string Q5T = "SELECT upper_r(name) FROM t";
-    private const string Q6 = "SELECT id, ABS(-5) FROM t";
-    private const string Q6C = "SELECT id, 5 FROM t";
-    private const string Q7Insert = "INSERT INTO {0} (id, name, v) VALUES (@id, @name, @v)";
-    private const string Q7Check = "LENGTH(name) > 0 AND ABS(v) < 1000000000";
-    private const string Q7RCheck = "has_text(name) AND ABS(v) < 1000000000";
+    private const string q1 = "SELECT UPPER(name), ABS(id), LENGTH(name) FROM t";
+    private const string q2 = "SELECT id FROM t WHERE ABS(id) > 10";
+    private const string q3 = "SELECT g, COUNT(*), SUM(v), AVG(v), MIN(s), MAX(s) FROM t GROUP BY g";
+    private const string q4 = "SELECT upper_r(name), ABS(id), LENGTH(name) FROM t";
+    private const string q5L = "SELECT upper_leaf(name) FROM t";
+    private const string q5T = "SELECT upper_r(name) FROM t";
+    private const string q6 = "SELECT id, ABS(-5) FROM t";
+    private const string q6C = "SELECT id, 5 FROM t";
+    private const string q7Insert = "INSERT INTO {0} (id, name, v) VALUES (@id, @name, @v)";
+    private const string q7Check = "LENGTH(name) > 0 AND ABS(v) < 1000000000";
+    private const string q7RCheck = "has_text(name) AND ABS(v) < 1000000000";
     private static readonly string _binaryQuery = $"SELECT {string.Join(", ", Enumerable.Repeat($"X'{new string('A', 512)}'", 4))} FROM t";
 
     private static async Task<int> Main(string[] args)
@@ -124,7 +124,7 @@ internal static class Program
                 }
             }
 
-            foreach (var (name, sql) in new[] { ("Q1", Q1), ("Q2", Q2), ("Q3", Q3), ("Q4", Q4), ("Q5L", Q5L), ("Q5T", Q5T), ("Q6", Q6), ("Q6C", Q6C), ("QB", _binaryQuery), ("QBS", "SELECT b FROM binary_storage") })
+            foreach (var (name, sql) in new[] { ("Q1", q1), ("Q2", q2), ("Q3", q3), ("Q4", q4), ("Q5L", q5L), ("Q5T", q5T), ("Q6", q6), ("Q6C", q6C), ("QB", _binaryQuery), ("QBS", "SELECT b FROM binary_storage") })
             {
                 if (cases.Contains(name))
                 {
@@ -132,7 +132,7 @@ internal static class Program
                 }
             }
 
-            foreach (var (name, check) in new[] { ("Q7", Q7Check), ("Q7R", Q7RCheck) })
+            foreach (var (name, check) in new[] { ("Q7", q7Check), ("Q7R", q7RCheck) })
             {
                 if (cases.Contains(name))
                 {
@@ -240,7 +240,7 @@ internal static class Program
                 {
                     engine = await Q8Schema.CreateBuilder(root, checks).BuildAsync();
                 });
-                string buildCollections = LastCollections;
+                string buildCollections = _lastCollections;
 
                 var database = await engine!.OpenDatabaseAsync("q8");
                 var (applyElapsed, applyCpu, applyThreadBytes, applyProcessBytes, applyHopped) = await TimeAsync(async () =>
@@ -249,10 +249,10 @@ internal static class Program
                 });
                 provisioning.Add(new Sample(applyElapsed, applyCpu, applyThreadBytes, applyProcessBytes, 1, applyHopped, Q8Schema.Tables)
                 {
-                    Collections = LastCollections,
+                    Collections = _lastCollections,
                 });
                 await engine.DisposeAsync();
-                LastCollections = buildCollections;
+                _lastCollections = buildCollections;
                 return new Sample(elapsed, cpu, threadBytes, processBytes, 1, hopped, Q8Schema.Tables);
             });
             // Exclude MeasureAsync's warm-up, just as the complete build measurement does.
@@ -333,7 +333,7 @@ internal static class Program
             $"CONSTRAINT ck_{table} CHECK ({check}))");
 
         // Every value is created before the clock starts, so the harness allocates nothing per statement.
-        string sql = string.Format(CultureInfo.InvariantCulture, Q7Insert, table);
+        string sql = string.Format(CultureInfo.InvariantCulture, q7Insert, table);
         var ids = new object[rows];
         var names = new object[rows];
         var values = new object[rows];
@@ -383,7 +383,7 @@ internal static class Program
         long ended = Stopwatch.GetTimestamp();
         process.Refresh();
         var cpuAfter = process.TotalProcessorTime;
-        LastCollections = $"{GC.CollectionCount(0) - gen0}/{GC.CollectionCount(1) - gen1}/{GC.CollectionCount(2) - gen2}" +
+        _lastCollections = $"{GC.CollectionCount(0) - gen0}/{GC.CollectionCount(1) - gen1}/{GC.CollectionCount(2) - gen2}" +
             $"@{(GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds:F0}ms";
         long threadAfter = GC.GetAllocatedBytesForCurrentThread();
         long processAfter = GC.GetTotalAllocatedBytes(precise: true);
@@ -397,7 +397,7 @@ internal static class Program
     }
 
     /// <summary>The collections (gen0/gen1/gen2) and total GC pause of the last measured iteration.</summary>
-    private static string LastCollections = string.Empty;
+    private static string _lastCollections = string.Empty;
 
     private static async Task<IReadOnlyList<Sample>> MeasureAsync(int iterations, Func<Task<Sample>> run)
     {
@@ -406,7 +406,7 @@ internal static class Program
         for (int iteration = 0; iteration < iterations; iteration++)
         {
             var sample = await run();
-            samples.Add(sample with { Collections = LastCollections });
+            samples.Add(sample with { Collections = _lastCollections });
         }
 
         return samples;

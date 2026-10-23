@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlDomainTests
 {
-    private const string UnregisteredType = "CS02010";
+    private const string unregisteredType = "CS02010";
 
     /// <summary>The design's §3.7 domain: <c>email</c> over <c>VARCHAR(320)</c>, checked by <c>is_email</c>.</summary>
     private static SqlType Email() => SqlType.CreateDomain("email", SqlType.VarChar(320),
@@ -112,10 +112,10 @@ public sealed class SqlDomainTests
         var added = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "ALTER TABLE t ADD COLUMN code nosuch"));
 
         // Assert
-        unknown.ShouldHaveMessage($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist: it is neither a built-in type nor a domain " +
+        unknown.ShouldHaveMessage($"{unregisteredType}: Column 'code': type 'nosuch' does not exist: it is neither a built-in type nor a domain " +
             "this engine registers. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types) before Build.");
         withArguments.Message.ShouldContain("CS00005", Case.Sensitive);
-        added.ShouldStartWithMessage($"{UnregisteredType}: Column 'code': type 'nosuch' does not exist", Case.Sensitive);
+        added.ShouldStartWithMessage($"{unregisteredType}: Column 'code': type 'nosuch' does not exist", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         table.Columns.ShouldHaveSingleItem();
     }
@@ -233,10 +233,10 @@ public sealed class SqlDomainTests
                 await ExecuteAsync(session, "DELETE FROM contacts WHERE id = 2");
 
                 rows.ShouldBe([[1L, "ann@example.com"], [2L, "bob@example.com"]]);
-                insert.ShouldHaveMessage($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not " +
+                insert.ShouldHaveMessage($"{unregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not " +
                     "register, so the column cannot be written and the write is refused. Register the domain on the engine's builder " +
                     "(SqlDatabaseEngineBuilder.Types), or drop the column.");
-                update.ShouldStartWithMessage($"{UnregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email'", Case.Sensitive);
+                update.ShouldStartWithMessage($"{unregisteredType}: Column 'email' of table 'dbo.contacts' is of domain 'email'", Case.Sensitive);
                 (await RowsAsync(session, "SELECT id, note FROM contacts")).ShouldBe([[1L, "changed"]]);
             }
 
@@ -254,7 +254,7 @@ public sealed class SqlDomainTests
             declaring.Options.RootPath = root;
             declaring.AddDatabase("crm");
             var refused = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await declaring.BuildAsync());
-            refused.ShouldStartWithMessage($"{UnregisteredType}: SQL engine 'sql-domains', database 'crm': Column 'email' of table 'dbo.contacts' " +
+            refused.ShouldStartWithMessage($"{unregisteredType}: SQL engine 'sql-domains', database 'crm': Column 'email' of table 'dbo.contacts' " +
                 "is of domain 'email', which this engine does not register.", Case.Sensitive);
         }
         finally
@@ -658,9 +658,9 @@ public sealed class SqlDomainTests
 
                 // Assert
                 rows.ShouldBe([[1, "ABCDEFGHIJ", 12.5m], [2, "XYZ", 1.25m]]);
-                insert.ShouldStartWithMessage($"{UnregisteredType}: Column 'c' of table 'dbo.r' is of domain 'code', which this engine registers over " +
+                insert.ShouldStartWithMessage($"{unregisteredType}: Column 'c' of table 'dbo.r' is of domain 'code', which this engine registers over " +
                     "VARCHAR(3), but the column stores VARCHAR(10), so the column cannot be written", Case.Sensitive);
-                update.ShouldStartWithMessage($"{UnregisteredType}: Column 'a' of table 'dbo.r' is of domain 'amount', which this engine registers over " +
+                update.ShouldStartWithMessage($"{unregisteredType}: Column 'a' of table 'dbo.r' is of domain 'amount', which this engine registers over " +
                     "NUMERIC(4, 1), but the column stores NUMERIC(10, 2)", Case.Sensitive);
             }
         }

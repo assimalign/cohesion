@@ -41,7 +41,7 @@ public sealed partial class SqlQueryParser
         DatabaseTypeInfo? targetTypeInfo = null;
         if (IsIdentifierOrKeyword(ref lexer))
         {
-            targetType = ParseDefinitionType(ref lexer, $"CAST target '{CurrentText(ref lexer)}'", out targetTypeInfo);
+            targetType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorCastTargetSubject, CurrentText(ref lexer)), out targetTypeInfo);
         }
         else
         {

@@ -85,3 +85,22 @@ The shared Types module also binds modifier-refusal templates to each consumer's
 resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
 codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
 format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+Parser nesting refusal templates use the generated ErrorMessages accessor; their existing
+codes, text, limits and locations are preserved. The assembly-local Types resource binding now
+lives under Internal. Private constants use repository casing and extension containers are
+partial. Successful parsing adds no resource lookup or grammar change.
+
+## Error message producers and catalog carriers
+
+Human diagnostic context (implicit-alias recovery, token descriptions, expected delimiters and
+type-declaration subjects) uses generated resources without changing any code, span or text.
+The parser caches these templates in static readonly fields because expected-token descriptions
+are also evaluated on successful parses; it adds no instance fields or repeated resource lookup
+on that path. Canonical SQL, recognized construct names and token spellings remain data.
+
+The dialect records CS06059/XX001 for malformed persisted SQL catalog metadata and CS06060/0A000
+for unsupported metadata formats. These engine-side carrier corrections do not change grammar,
+accepted storage formats or the no-upgrade policy.

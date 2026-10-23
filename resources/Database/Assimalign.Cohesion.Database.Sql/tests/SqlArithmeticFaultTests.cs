@@ -23,14 +23,14 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlArithmeticFaultTests
 {
-    private const string DivisionByZero = "CS02001";
-    private const string OutOfRange = "CS02002";
+    private const string divisionByZero = "CS02001";
+    private const string outOfRange = "CS02002";
 
-    private const string CreateNumbers =
+    private const string createNumbers =
         "CREATE TABLE numbers (id INT PRIMARY KEY, tiny_value TINYINT, small_value SMALLINT, int_value INT, " +
         "big_value BIGINT, real_value REAL, double_value DOUBLE, decimal_value DECIMAL(10, 2), zero_value INT)";
 
-    private const string InsertNumbers =
+    private const string insertNumbers =
         "INSERT INTO numbers VALUES " +
         "(1, -8, -300, -70000, -5000000000, -1.5, -2.25, -3.75, 0), " +
         "(2, 8, 300, 70000, 9223372036854775807, 2.5, 4.5, 6.25, 0)";
@@ -66,7 +66,7 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, $"SELECT {expression} FROM numbers WHERE id = 1", parameters));
 
         // Assert: a coded statement failure, not DivideByZeroException, and the session runs on.
-        AssertCode(failure, DivisionByZero);
+        AssertCode(failure, divisionByZero);
         failure.DiagnosticDetail("CS02001").ShouldStartWith("Division by zero", Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
@@ -94,7 +94,7 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, $"SELECT {expression} FROM numbers WHERE id = 1", parameters));
 
         // Assert: the operand is not zero, so the message must not claim it is.
-        AssertCode(failure, OutOfRange);
+        AssertCode(failure, outOfRange);
         failure.Message.ShouldContain("underflows DECIMAL", Case.Sensitive);
         (await ScalarAsync(session, "SELECT @tinyDouble + 1 FROM numbers WHERE id = 1", parameters)).ShouldBe(1m);
     }
@@ -137,7 +137,7 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, $"SELECT COUNT(*) FROM numbers WHERE {predicate}"));
 
         // Assert
-        AssertCode(failure, DivisionByZero);
+        AssertCode(failure, divisionByZero);
     }
 
     /// <summary>ISO store assignment: a value a numeric column cannot hold is out of range, and nothing is written.</summary>
@@ -159,7 +159,7 @@ public sealed class SqlArithmeticFaultTests
             new Dictionary<string, object?> { ["huge"] = 1e300 }));
 
         // Assert
-        AssertCode(failure, OutOfRange);
+        AssertCode(failure, outOfRange);
         failure.Message.ShouldContain("does not fit column", Case.Sensitive);
         var rows = await RowsAsync(session, "SELECT id, tiny_value, small_value, int_value, decimal_value FROM numbers ORDER BY id");
         rows.Count.ShouldBe(2);
@@ -230,7 +230,7 @@ public sealed class SqlArithmeticFaultTests
         fractional.DiagnosticDetail("CS02002").ShouldBe("Numeric value out of range: numeric literal 1e-30 cannot be represented exactly as DECIMAL.");
         cast.ShouldBeOfType<SqlEvaluationException>();
         var diagnostic = cast.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe(OutOfRange);
+        diagnostic.Code.ShouldBe(outOfRange);
         diagnostic.Start.ShouldBe(castLocation.Start);
         diagnostic.End.ShouldBe(castLocation.End);
         cast.Message.ShouldStartWith("CAST to", Case.Sensitive);
@@ -266,7 +266,7 @@ public sealed class SqlArithmeticFaultTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
 
         // Assert: the UPDATE faults on its second target, so a partial apply would show here.
-        AssertCode(failure, DivisionByZero);
+        AssertCode(failure, divisionByZero);
         var rows = await RowsAsync(session, "SELECT id, int_value FROM numbers ORDER BY id");
         rows.Count.ShouldBe(2);
         rows[0].ShouldBe(new object?[] { 1, -70000 });
@@ -287,13 +287,13 @@ public sealed class SqlArithmeticFaultTests
 
         // Act / Assert: the row-level fault rejects the insert.
         AssertCode(await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "INSERT INTO ratios VALUES (1, 0)")), DivisionByZero);
+            ExecuteAsync(session, "INSERT INTO ratios VALUES (1, 0)")), divisionByZero);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM ratios")).ShouldBe(0L);
         (await ExecuteAsync(session, "INSERT INTO ratios VALUES (4, 2)")).AffectedCount.ShouldBe(1);
 
         // Act / Assert: validating existing rows faults before the constraint is published.
         AssertCode(await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "ALTER TABLE pending ADD CONSTRAINT pending_ratio CHECK (numerator / denominator >= 0)")), DivisionByZero);
+            ExecuteAsync(session, "ALTER TABLE pending ADD CONSTRAINT pending_ratio CHECK (numerator / denominator >= 0)")), divisionByZero);
         (await ExecuteAsync(session, "INSERT INTO pending VALUES (-1, 1)")).AffectedCount.ShouldBe(1);
     }
 
@@ -315,9 +315,9 @@ public sealed class SqlArithmeticFaultTests
 
         // Act: both kinds of fault, including a write whose second target faults.
         AssertCode(await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "UPDATE numbers SET int_value = 10 / (id - 2)")), DivisionByZero);
+            ExecuteAsync(session, "UPDATE numbers SET int_value = 10 / (id - 2)")), divisionByZero);
         AssertCode(await Should.ThrowAsync<DatabaseException>(() =>
-            ExecuteAsync(session, "SELECT big_value + 1 FROM numbers WHERE id = 2")), OutOfRange);
+            ExecuteAsync(session, "SELECT big_value + 1 FROM numbers WHERE id = 2")), outOfRange);
 
         // Assert: still the same active transaction, with its own insert and none of the failed update.
         session.CurrentTransaction.ShouldBeSameAs(transaction);
@@ -365,7 +365,7 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, $"SELECT {expression} FROM numbers WHERE id = 2", parameters));
 
         // Assert
-        AssertCode(failure, OutOfRange);
+        AssertCode(failure, outOfRange);
         failure.DiagnosticDetail("CS02002").ShouldStartWith("Numeric value out of range", Case.Sensitive);
         (await ScalarAsync(session, "SELECT big_value FROM numbers WHERE id = 2")).ShouldBe(long.MaxValue);
     }
@@ -428,7 +428,7 @@ public sealed class SqlArithmeticFaultTests
             ExecuteAsync(session, $"SELECT {expression} FROM numbers WHERE id = 1", parameters));
 
         // Assert
-        AssertCode(failure, OutOfRange);
+        AssertCode(failure, outOfRange);
         (await ScalarAsync(session, "SELECT COUNT(*) FROM numbers")).ShouldBe(2L);
     }
 
@@ -473,7 +473,7 @@ public sealed class SqlArithmeticFaultTests
         // Act / Assert: COALESCE(REAL, DECIMAL) is typed DECIMAL; 3e38 does not fit it.
         AssertCode(await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
             "SELECT COALESCE(@large, decimal_value) FROM numbers WHERE id = 1",
-            new Dictionary<string, object?> { ["large"] = 3e38f })), OutOfRange);
+            new Dictionary<string, object?> { ["large"] = 3e38f })), outOfRange);
     }
 
     /// <summary>SUM and AVG accumulation overflow carries the overflow code.</summary>
@@ -496,7 +496,7 @@ public sealed class SqlArithmeticFaultTests
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() =>
                 ExecuteAsync(session, $"SELECT {aggregate}({column}) FROM totals"));
-            AssertCode(failure, OutOfRange);
+            AssertCode(failure, outOfRange);
             failure.ShouldContainMessage(aggregate, Case.Sensitive);
         }
     }
@@ -505,15 +505,15 @@ public sealed class SqlArithmeticFaultTests
     /// <param name="statement">The faulting statement.</param>
     /// <param name="code">The expected diagnostic code.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Arithmetic: wire faults are coded execution failures that keep the session")]
-    [InlineData("SELECT id / 0 FROM users", DivisionByZero)]
-    [InlineData("SELECT id % 0 FROM users", DivisionByZero)]
-    [InlineData("SELECT CAST(id AS DECIMAL) / 0 FROM users", DivisionByZero)]
-    [InlineData("UPDATE users SET id = id / (id - 2)", DivisionByZero)]
-    [InlineData("SELECT 9223372036854775807 + id FROM users", OutOfRange)]
-    [InlineData("SELECT -(-9223372036854775807 - 1) FROM users", OutOfRange)]
-    [InlineData("SELECT ABS(-9223372036854775807 - 1) FROM users", OutOfRange)]
-    [InlineData("SELECT 9223372036854775808 FROM users", OutOfRange)]
-    [InlineData("UPDATE users SET id = id + 2147483647", OutOfRange)]
+    [InlineData("SELECT id / 0 FROM users", divisionByZero)]
+    [InlineData("SELECT id % 0 FROM users", divisionByZero)]
+    [InlineData("SELECT CAST(id AS DECIMAL) / 0 FROM users", divisionByZero)]
+    [InlineData("UPDATE users SET id = id / (id - 2)", divisionByZero)]
+    [InlineData("SELECT 9223372036854775807 + id FROM users", outOfRange)]
+    [InlineData("SELECT -(-9223372036854775807 - 1) FROM users", outOfRange)]
+    [InlineData("SELECT ABS(-9223372036854775807 - 1) FROM users", outOfRange)]
+    [InlineData("SELECT 9223372036854775808 FROM users", outOfRange)]
+    [InlineData("UPDATE users SET id = id + 2147483647", outOfRange)]
     public async Task Wire_ArithmeticFault_ShouldReturnExecutionFailureAndKeepSession(string statement, string code)
     {
         // Arrange
@@ -575,7 +575,7 @@ public sealed class SqlArithmeticFaultTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.ShouldStartWithMessage(DivisionByZero + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(divisionByZero + ":", Case.Sensitive);
         (await CountAsync(writer)).ShouldBe(3L);
         (await CountAsync(observer)).ShouldBe(2L);
         await ExecuteAsync(writer, "COMMIT");
@@ -598,8 +598,8 @@ public sealed class SqlArithmeticFaultTests
     {
         var database = await engine.CreateDatabaseAsync("arithmetic");
         var session = await database.CreateSessionAsync(CancellationToken.None);
-        (await ExecuteAsync(session, CreateNumbers)).Status.ShouldBe(DatabaseResultStatus.Success);
-        (await ExecuteAsync(session, InsertNumbers)).AffectedCount.ShouldBe(2);
+        (await ExecuteAsync(session, createNumbers)).Status.ShouldBe(DatabaseResultStatus.Success);
+        (await ExecuteAsync(session, insertNumbers)).AffectedCount.ShouldBe(2);
         return session;
     }
 

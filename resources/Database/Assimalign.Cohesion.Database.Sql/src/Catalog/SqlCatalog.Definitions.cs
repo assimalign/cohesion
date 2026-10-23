@@ -272,27 +272,27 @@ public sealed partial class SqlCatalog
             if (kind == functionRecordKind)
             {
                 var value = JsonSerializer.Deserialize(json, SqlCatalogJsonContext.Default.SqlCatalogFunction)
-                    ?? throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog);
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog);
                 if (!_functions.TryAdd(value.Signature, new DefinitionSlot<SqlCatalogFunction>(value, location)))
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog2, value.Signature));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog2, value.Signature));
                 }
 
             }
             else
             {
                 var value = JsonSerializer.Deserialize(json, SqlCatalogJsonContext.Default.SqlCatalogDomain)
-                    ?? throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog3);
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog3);
                 if (!_domains.TryAdd(value.Name, new DefinitionSlot<SqlCatalogDomain>(value, location)))
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog4, value.Name));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog4, value.Name));
                 }
 
             }
         }
         catch (Exception failure) when (failure is JsonException or ArgumentException)
         {
-            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog5, failure.Message));
+            throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadDefinitionSqlCatalog5, failure.Message));
         }
     }
 

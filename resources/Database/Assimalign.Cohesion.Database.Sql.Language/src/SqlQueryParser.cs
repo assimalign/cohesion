@@ -601,14 +601,14 @@ public sealed partial class SqlQueryParser : QueryParser
 
     private string ImplicitAliasHint(ref TokenLexer lexer)
         => _implicitAlias is { } alias && alias.NextPosition == lexer.Current.Position
-            ? $" '{alias.Alias}' was read as an alias of table '{alias.Table}'."
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorImplicitTableAliasHint, alias.Alias, alias.Table)
             : string.Empty;
 
     private static string DescribeToken(ref TokenLexer lexer)
     {
         if (IsAtEnd(ref lexer))
         {
-            return "end of statement";
+            return _errorEndOfStatement;
         }
 
         string text = CurrentText(ref lexer);
@@ -617,7 +617,7 @@ public sealed partial class SqlQueryParser : QueryParser
             text = string.Concat(text.AsSpan(0, 40), "...");
         }
 
-        return lexer.Current.Type == TokenType.String ? $"string literal {text}" : $"'{text}'";
+        return lexer.Current.Type == TokenType.String ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorStringLiteralTokenDescription, text) : $"'{text}'";
     }
 
     private static string StatementName(SqlQueryExpression expression) => expression switch

@@ -26,17 +26,17 @@ namespace Assimalign.Cohesion.Database.Sql.AotSample;
 /// </summary>
 internal static class Program
 {
-    private const string EngineName = "aot-sql";
-    private const string DatabaseName = "aot";
+    private const string engineName = "aot-sql";
+    private const string databaseName = "aot";
 
-    private const string Projection =
+    private const string projection =
         "SELECT Id, slugify(Name) AS slug, scaled(Score, 1.5) AS scaled, in_range(Score, 50, 150) AS ranged, " +
         "describe(Name, Score, Active, Token) AS described, clamp(Score, 0, 150) AS clamped, is_missing(Note) AS missing, " +
         "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
-    private const string Aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
+    private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
 
-    private const string Registered = "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME";
+    private const string registered = "SELECT FUNCTION_NAME FROM COHESION_SCHEMA.FUNCTIONS WHERE IS_BUILT_IN = 'NO' ORDER BY FUNCTION_NAME";
 
     private static readonly object?[][] _projection =
     [
@@ -51,7 +51,7 @@ internal static class Program
 
     // E3: a domain column, an application's casts to and from the cents domain (the inner CAST tells
     // the outer one its source is cents), built-in casts from text to DATE and from UUID to canonical TEXT.
-    private const string Domains =
+    private const string domains =
         "SELECT Email, CAST(CAST(Score AS cents) AS TEXT) AS shown, CAST('$4.56' AS cents) AS parsed, " +
         "CAST('2026-02-01' AS DATE) AS day, CAST(Token AS TEXT) AS token FROM customers ORDER BY Id";
 
@@ -83,7 +83,7 @@ internal static class Program
         "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE FROM customers WHERE Id = 1";
     private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]];
 
-    private const string Characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
+    private const string characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
 
     private const string typeAliases = "SELECT n, CAST(s AS CHARACTER VARYING(5)), CAST(f AS DOUBLE PRECISION), " +
@@ -116,7 +116,7 @@ internal static class Program
 
     private const string derivedJoin = "SELECT d.key_id FROM customers c JOIN (SELECT Id FROM customers WHERE Id = 1) d (key_id) ON c.Id = d.key_id";
 
-    private const string CannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
+    private const string cannotCast = "SELECT CAST(Active AS DATE) FROM customers WHERE Id < 0";
 
     private static int _passed;
     private static int _failed;
@@ -147,7 +147,7 @@ internal static class Program
     /// <summary>Builds the engine: the functions, the declared database with its CHECK, and a server on the in-memory driver.</summary>
     private static async Task<SqlDatabaseEngine> BuildAsync(InMemoryConnectionListener listener)
     {
-        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder(EngineName);
+        SqlDatabaseEngineBuilder sql = SqlDatabaseEngine.CreateBuilder(engineName);
         sql.Functions
             .Add(SqlScalarFunction.Create("slugify", static (string text) => Slugify(text), SqlFunctionVolatility.Immutable))
             .Add(SqlScalarFunction.Create("scaled", static (long value, decimal factor) => value * factor, SqlFunctionVolatility.Immutable))
@@ -175,7 +175,7 @@ internal static class Program
                 static text => (long)(decimal.Parse(text.TrimStart('$'), CultureInfo.InvariantCulture) * 100), SqlCastContext.Explicit))
             .AddCast(SqlCast.Create<long, string>(cents, SqlType.Text,
                 static value => "$" + (value / 100m).ToString("0.00", CultureInfo.InvariantCulture), SqlCastContext.Assignment));
-        sql.AddDatabase(DatabaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
+        sql.AddDatabase(databaseName, database => database.Schema(schema => schema.Table<Customer>("customers", table =>
         {
             table.Key(customer => customer.Id);
             table.Column(customer => customer.Name);
@@ -189,14 +189,14 @@ internal static class Program
         sql.AddServer(options => options.Listener = listener);
 
         SqlDatabaseEngine engine = await sql.BuildAsync();
-        Check("build declared the database", engine.TryGetDatabase(DatabaseName, out _), true);
+        Check("build declared the database", engine.TryGetDatabase(databaseName, out _), true);
         await engine.Servers[0].StartAsync();
         return engine;
     }
 
     private static async Task RunInProcessAsync(SqlDatabaseEngine engine)
     {
-        engine.TryGetDatabase(DatabaseName, out SqlDatabase? database);
+        engine.TryGetDatabase(databaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE SCHEMA native_namespace", cancellationToken: CancellationToken.None);
         Check("in process: CREATE SCHEMA and SCHEMATA", await RowsAsync(session,
@@ -339,7 +339,7 @@ internal static class Program
             await session.ExecuteAsync("INSERT INTO temporal_text_guard(f) VALUES ('1e400')", cancellationToken: CancellationToken.None)), "CS02002");
         Check("in process: strict typed literals", await RowsAsync(session, typedLiterals), _typedLiterals);
         Check("in process: ISO type names and SQL Server lexical aliases", await RowsAsync(session, typeAliases), _typeAliases);
-        Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, Characters), _characters);
+        Check("in process: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(session, characters), _characters);
         await session.ExecuteAsync("CREATE TABLE default_guard (id INT DEFAULT 7 NOT NULL, label TEXT DEFAULT 'seed', note INT)");
         await session.ExecuteAsync("INSERT INTO default_guard (label, id) VALUES (DEFAULT, 1), (NULL, 2)");
         await session.ExecuteAsync("INSERT INTO default_guard DEFAULT VALUES");
@@ -391,29 +391,29 @@ internal static class Program
             }
             Check("in process: EXPLAIN binary bounds", describedBytes, true);
         }
-        Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, Projection), _projection);
-        Check("in process: typed and hand-written aggregates", await RowsAsync(session, Aggregates), _aggregates);
-        Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, Registered), _registered);
-        Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, Domains), _domains);
+        Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, projection), _projection);
+        Check("in process: typed and hand-written aggregates", await RowsAsync(session, aggregates), _aggregates);
+        Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, registered), _registered);
+        Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, domains), _domains);
         CheckFailure("in process: the domain's check refuses a row",
-            await FailureAsync(() => session.ExecuteAsync(DomainRefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
+            await FailureAsync(() => session.ExecuteAsync(domainRefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("in process: the declared CHECK refuses a row",
-            await FailureAsync(() => session.ExecuteAsync(RefusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
+            await FailureAsync(() => session.ExecuteAsync(refusedInsert, RefusedParameters, CancellationToken.None).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
         CheckFailure("in process: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(session, "SELECT clamp(1, 5, 0) FROM customers")),
             "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
         CheckFailure("in process: a CAST no cast performs is CS02011 while planning",
-            await FailureAsync(() => RowsAsync(session, CannotCast)),
+            await FailureAsync(() => RowsAsync(session, cannotCast)),
             "CS02011: Cannot CAST type BOOLEAN to DATE");
     }
 
     // A row whose name slugifies to nothing, which the declared CHECK refuses.
-    private const string RefusedInsert = "INSERT INTO customers (Id, Name, Score, Active, Token) VALUES (3, '!!!', 1, TRUE, @token)";
+    private const string refusedInsert = "INSERT INTO customers (Id, Name, Score, Active, Token) VALUES (3, '!!!', 1, TRUE, @token)";
 
     // A row whose email the email domain's check refuses.
-    private const string DomainRefusedInsert =
+    private const string domainRefusedInsert =
         "INSERT INTO customers (Id, Name, Score, Active, Token, Email) VALUES (4, 'Mary Somerville', 1, TRUE, @token, 'nobody')";
 
     private static Dictionary<string, object?> RefusedParameters => new() { ["token"] = Token(3) };
@@ -424,7 +424,7 @@ internal static class Program
     {
         await using var client = SqlClient.Create(new SqlClientOptions
         {
-            Settings = new DatabaseConnectionSettings { Database = DatabaseName, Principal = "aot", EndPoint = listener.EndPoint },
+            Settings = new DatabaseConnectionSettings { Database = databaseName, Principal = "aot", EndPoint = listener.EndPoint },
             ConnectionFactory = listener.CreateFactory(),
         });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -474,7 +474,7 @@ internal static class Program
             await RowsAsync(connection, "SELECT id, label, note FROM default_wire ORDER BY id", timeout.Token),
             [[1, "seed", null], [2, "seed", null], [7, "seed", null]]);
 
-        Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, Characters, timeout.Token), _characters);
+        Check("over the wire: CHAR storage, cast, length, concat, LIKE and seek", await RowsAsync(connection, characters, timeout.Token), _characters);
         var explained = await RowsAsync(connection, "EXPLAIN SELECT c FROM fixed_codes WHERE c = 'a'", timeout.Token);
         Check("over the wire: EXPLAIN uses existing result rows", explained.Any(row => Equals(row[2], "IndexSeek") && row[4] is string && row.Length == 8), true);
         var hashAnalysis = await RowsAsync(connection,
@@ -518,24 +518,24 @@ internal static class Program
         Check("over the wire: T1 scalars and transaction clock", await RowsAsync(connection, t1Scalars, timeout.Token), _t1Scalars);
         Check("over the wire: strict typed literals", await RowsAsync(connection, typedLiterals, timeout.Token), _typedLiterals);
         Check("over the wire: ISO type names and SQL Server lexical aliases", await RowsAsync(connection, typeAliases, timeout.Token), _typeAliases);
-        var fixedCodes = await connection.QueryAsync(Characters, cancellationToken: timeout.Token);
+        var fixedCodes = await connection.QueryAsync(characters, cancellationToken: timeout.Token);
         Check("over the wire: CHAR type", fixedCodes.Columns[0].Type == Types.DatabaseType.Character, true);
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
-        Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, Projection, timeout.Token), _projection);
-        Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, Aggregates, timeout.Token), _aggregates);
-        Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, Registered, timeout.Token), _registered);
-        Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, Domains, timeout.Token), _domains);
+        Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, projection, timeout.Token), _projection);
+        Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, aggregates, timeout.Token), _aggregates);
+        Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, registered, timeout.Token), _registered);
+        Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, domains, timeout.Token), _domains);
         CheckFailure("over the wire: the domain's check refuses a row",
-            await FailureAsync(() => connection.ExecuteAsync(DomainRefusedInsert, RefusedParameters, timeout.Token).AsTask()),
+            await FailureAsync(() => connection.ExecuteAsync(domainRefusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "DOMAIN constraint 'email' on 'dbo.customers' was violated");
         CheckFailure("over the wire: the declared CHECK refuses a row",
-            await FailureAsync(() => connection.ExecuteAsync(RefusedInsert, RefusedParameters, timeout.Token).AsTask()),
+            await FailureAsync(() => connection.ExecuteAsync(refusedInsert, RefusedParameters, timeout.Token).AsTask()),
             "CHECK constraint 'ck_name' on 'dbo.customers' was violated");
         CheckFailure("over the wire: a throwing function is CS05007",
             await FailureAsync(() => RowsAsync(connection, "SELECT clamp(1, 5, 0) FROM customers", timeout.Token)),
             "CS05007: Function 'clamp' failed: '5' cannot be greater than 0.");
         CheckFailure("over the wire: a CAST no cast performs is CS02011 while planning",
-            await FailureAsync(() => RowsAsync(connection, CannotCast, timeout.Token)),
+            await FailureAsync(() => RowsAsync(connection, cannotCast, timeout.Token)),
             "CS02011: Cannot CAST type BOOLEAN to DATE");
         Check("over the wire: the parameterized call folds",
             await RowsAsync(connection, "SELECT slugify(@text) AS s FROM customers WHERE Id = 1", timeout.Token,

@@ -81,9 +81,9 @@ internal sealed class SqlLockWaitProbe
     /// <summary>A wait this old is canceled, so a stuck wait cannot hang the run.</summary>
     internal static readonly TimeSpan CancelAfter = TimeSpan.FromSeconds(12);
 
-    private const string TransactionsSource = "Assimalign.Cohesion.Database.Transactions";
+    private const string transactionsSource = "Assimalign.Cohesion.Database.Transactions";
 
-    private static readonly AsyncLocal<int> CurrentWorker = new();
+    private static readonly AsyncLocal<int> _currentWorker = new();
 
     private readonly SqlDatabase _database;
     private readonly string _name;
@@ -187,7 +187,7 @@ internal sealed class SqlLockWaitProbe
 
     private async Task RunWorkerAsync(Worker worker, bool deleter, CancellationToken stop)
     {
-        CurrentWorker.Value = worker.Id + 1;
+        _currentWorker.Value = worker.Id + 1;
         var random = new Random(worker.Id * 7919 + 13);
         await using var session = await _database.CreateSessionAsync();
 
@@ -554,7 +554,7 @@ internal sealed class SqlLockWaitProbe
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == TransactionsSource)
+            if (eventSource.Name == transactionsSource)
             {
                 // Transactions | Locks, and the warnings; the threshold is the probe's slow wait.
                 EnableEvents(eventSource, EventLevel.Verbose, (EventKeywords)0x3, new Dictionary<string, string?>
@@ -574,7 +574,7 @@ internal sealed class SqlLockWaitProbe
             long sequence = (long)payload[1]!;
             switch (written.EventName)
             {
-                case "TransactionBegun" when CurrentWorker.Value is int worker and > 0:
+                case "TransactionBegun" when _currentWorker.Value is int worker and > 0:
                     probe._sequenceWorkers[sequence] = worker - 1;
                     break;
                 case "LockWaitStart":

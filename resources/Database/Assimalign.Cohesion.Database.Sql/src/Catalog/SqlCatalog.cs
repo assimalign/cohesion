@@ -67,7 +67,7 @@ public sealed partial class SqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = SqlCatalogCreation.CollationRecordKind;
-    private const int _pendingMigrationRecordKind = 9;
+    private const int pendingMigrationRecordKind = 9;
 
     // The record-space format marker from version 4 on (#1099). Catalogs written
     // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
@@ -528,7 +528,7 @@ public sealed partial class SqlCatalog
                     CommitScriptAbsence(publication, SqlObjectIdentity.Table(schema, name));
                     return default;
                 }
-                throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LookupTableMissing, schema, name));
+                throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
             }
 
             EnsureNoViewReads(slot.Table);
@@ -1228,7 +1228,7 @@ public sealed partial class SqlCatalog
                 state.Generation,
                 index,
                 chunkCount,
-                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : _pendingMigrationRecordKind));
+                document.AsSpan(offset, length), pending is null ? schemaStateRecordKind : pendingMigrationRecordKind));
         }
 
         lock (_sync)
@@ -1236,7 +1236,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (state.Generation != _ddlGeneration)
             {
-                throw new SqlCatalogException(ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog);
+                throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog);
             }
 
             var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
@@ -1300,13 +1300,13 @@ public sealed partial class SqlCatalog
 
                 switch (kind)
                 {
-                    case _viewRecordKind:
+                    case viewRecordKind:
                         LoadView(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
                         if (!reader.IsAtEnd) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewMetadataInvalid); }
                         break;
                     case namespaceRecordKind:
                         LoadNamespace(reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
-                        if (!reader.IsAtEnd) { throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed); }
+                        if (!reader.IsAtEnd) { throw new SqlCatalogException("CS06059", ErrorMessages.NamespaceRecordMalformed); }
                         break;
                     case SqlReclamationRecord.Kind:
                         var intent = SqlReclamationRecord.Decode(ref reader);
@@ -1337,13 +1337,13 @@ public sealed partial class SqlCatalog
 
                         if (reader.IsAtEnd)
                         {
-                            throw new SqlCatalogException(
+                            throw new SqlCatalogException("CS06060",
                                 ErrorMessages.SqlCatalogLoadSqlCatalog);
                         }
                         _ddlGeneration = (ulong)reader.ReadInt64();
                         if (!reader.IsAtEnd || _counterLocation is not null)
                         {
-                            throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog2);
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog2);
                         }
 
                         _counterLocation = (unit.PageId, unit.SlotIndex);
@@ -1366,7 +1366,7 @@ public sealed partial class SqlCatalog
                         break;
 
                     case schemaStateRecordKind:
-                    case _pendingMigrationRecordKind:
+                    case pendingMigrationRecordKind:
                         var chunk = DecodeSchemaStateChunk(ref reader);
                         (kind == schemaStateRecordKind ? schemaStateChunks : pendingChunks).Add(new SchemaStateChunk(
                             chunk.ContentHash,
@@ -1381,7 +1381,7 @@ public sealed partial class SqlCatalog
                         _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
                         if (!reader.IsAtEnd)
                         {
-                            throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog3);
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog3);
                         }
                         _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
                         break;
@@ -1406,12 +1406,12 @@ public sealed partial class SqlCatalog
                     case 13:
                         if (_scriptState is not null)
                         {
-                            throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog4);
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog4);
                         }
                         _scriptState = new SqlCatalogScriptState(reader.ReadString(out _), (ulong)reader.ReadInt64());
                         if (!reader.IsAtEnd)
                         {
-                            throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog5);
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog5);
                         }
                         _scriptStateLocation = (unit.PageId, unit.SlotIndex);
                         break;
@@ -1420,19 +1420,21 @@ public sealed partial class SqlCatalog
                         LoadDefinition(kind, reader.ReadString(out _), (unit.PageId, unit.SlotIndex));
                         if (!reader.IsAtEnd)
                         {
-                            throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog6);
+                            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog6);
                         }
                         break;
 
                     default:
-                        throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog7, kind));
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog7, kind));
                 }
             }
             catch (Exception error) when (error is SqlCatalogException or DatabaseTypeException
                 or System.IO.InvalidDataException or FormatException or ArgumentException or OverflowException or JsonException)
             {
                 var corruption = new StorageCorruptionException(unit.PageId, unit.SlotIndex, error.Message, error);
-                throw new SqlCatalogException(corruption.Message, error is SqlCatalogException catalog ? catalog.Diagnostics : Array.Empty<Diagnostic>(), corruption);
+                throw new SqlCatalogException(corruption.Message,
+                    error is SqlCatalogException { Diagnostics.Count: > 0 } catalog ? catalog.Diagnostics :
+                        [new Diagnostic { Code = "CS06059", Message = error.Message, Severity = DiagnosticSeverity.Error }], corruption);
             }
         }
 
@@ -1458,15 +1460,15 @@ public sealed partial class SqlCatalog
             {
                 _pendingMigration = JsonSerializer.Deserialize(pending.CanonicalDocument,
                     SqlCatalogJsonContext.Default.SqlCatalogPendingMigration)
-                    ?? throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog8);
+                    ?? throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog8);
                 if (!string.Equals(pending.ContentHash, _pendingMigration.ContentHash, StringComparison.Ordinal))
                 {
-                    throw new SqlCatalogException(ErrorMessages.SqlCatalogLoadSqlCatalog9);
+                    throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogLoadSqlCatalog9);
                 }
             }
             catch (Exception failure) when (failure is JsonException or ArgumentException)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog10, failure.Message));
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogLoadSqlCatalog10, failure.Message));
             }
             _pendingMigrationLocations = pendingChunks.Select(chunk => chunk.Location).ToList();
         }
@@ -1484,7 +1486,7 @@ public sealed partial class SqlCatalog
     {
         if (!_tables.TryGetValue((schema, name), out var slot))
         {
-            throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LookupTableMissing, schema, name));
+            throw new SqlCatalogException("CS01051", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
         }
 
         return slot;
@@ -1665,9 +1667,8 @@ public sealed partial class SqlCatalog
         // (#1241), so a table that has dropped many columns can refuse ADD or DROP COLUMN with
         // few live ones. Only a new table starts without them; say so.
         int dropped = table.DroppedColumnOrdinals.Count;
-        return EnsureStorable(record, $"table '{table.Schema}.{table.Name}'", dropped == 0 ? null :
-            $"It keeps the physical positions of {dropped} dropped columns, which are never reused (#1241); " +
-            "recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.");
+        return EnsureStorable(record, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogTableSubject, table.Schema, table.Name), dropped == 0 ? null :
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RetainedDroppedColumnHint, dropped));
     }
 
     private static byte[] EncodeTableRecord(SqlCatalogTable table)
@@ -1770,7 +1771,7 @@ public sealed partial class SqlCatalog
     {
         if (calls.Count > expressionLength)
         {
-            throw new SqlCatalogException(ErrorMessages.CatalogAppendFunctionCallsSqlCatalog);
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAppendFunctionCallsSqlCatalog);
         }
         int runs = 0;
         for (int index = 0; index < calls.Count; index++)
@@ -1792,7 +1793,7 @@ public sealed partial class SqlCatalog
         int runs = reader.ReadInt32();
         if (runs < 0 || runs > expressionLength)
         {
-            throw new SqlCatalogException(ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog);
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog);
         }
         var calls = new List<string>();
         for (int index = 0; index < runs; index++)
@@ -1803,7 +1804,7 @@ public sealed partial class SqlCatalog
             // bound rejects damaged expansion counts before allocating, without summation overflow.
             if (string.IsNullOrWhiteSpace(identity) || count <= 0 || count > expressionLength - calls.Count)
             {
-                throw new SqlCatalogException(ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog2);
+                throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadFunctionCallsSqlCatalog2);
             }
             for (int repeat = 0; repeat < count; repeat++) { calls.Add(identity); }
         }
@@ -1865,12 +1866,12 @@ public sealed partial class SqlCatalog
             int version = reader.ReadInt32();
             if (version != tableExtensionVersion)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog, version));
+                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog, version));
             }
             int count = reader.ReadInt32();
             if (count < 0)
             {
-                throw new SqlCatalogException(ErrorMessages.SqlCatalogDecodeTableSqlCatalog2);
+                throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeTableSqlCatalog2);
             }
             for (int index = 0; index < count; index++)
             {
@@ -1889,7 +1890,7 @@ public sealed partial class SqlCatalog
                 }
                 catch (ArgumentException exception)
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog3, constraintName, exception.Message));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog3, constraintName, exception.Message));
                 }
             }
             if (version >= 2)
@@ -1899,7 +1900,7 @@ public sealed partial class SqlCatalog
                     int id = reader.ReadInt32();
                     if (id < -1 || id > byte.MaxValue)
                     {
-                        throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog4, id));
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog4, id));
                     }
                     var column = columns[index];
                     columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1911,7 +1912,7 @@ public sealed partial class SqlCatalog
                 int droppedCount = reader.ReadInt32();
                 if (droppedCount < 0)
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog5, droppedCount, schema, name));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog5, droppedCount, schema, name));
                 }
                 for (int index = 0; index < droppedCount; index++)
                 {
@@ -1929,7 +1930,7 @@ public sealed partial class SqlCatalog
                     }
                     if (string.IsNullOrWhiteSpace(domain))
                     {
-                        throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog6, columns[index].Name, schema, name));
+                        throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog6, columns[index].Name, schema, name));
                     }
                     var column = columns[index];
                     columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1941,7 +1942,7 @@ public sealed partial class SqlCatalog
         {
             if (reader.IsAtEnd)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
             }
             var column = columns[index];
             columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1951,7 +1952,7 @@ public sealed partial class SqlCatalog
         {
             if (reader.IsAtEnd)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
+                throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog7, schema, name));
             }
             var constraint = constraints[index];
             constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
@@ -1968,7 +1969,7 @@ public sealed partial class SqlCatalog
                 var column = columns[index];
                 if (increment == 0 || column.IsNullable)
                 {
-                    throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
+                    throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
                 var identity = new SqlCatalogIdentity(always, start, increment);
                 columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
@@ -1985,7 +1986,7 @@ public sealed partial class SqlCatalog
         ValidateColumns(schema, name, columns, primaryKey);
         if (!reader.IsAtEnd)
         {
-            throw new SqlCatalogException(ErrorMessages.SqlCatalogDecodeTableSqlCatalog8);
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeTableSqlCatalog8);
         }
         SqlCatalogTable table;
         try
@@ -1994,14 +1995,14 @@ public sealed partial class SqlCatalog
         }
         catch (ArgumentException exception)
         {
-            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog9, schema, name, exception.Message));
+            throw new SqlCatalogException("CS06059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeTableSqlCatalog9, schema, name, exception.Message));
         }
         ValidateConstraints(table);
         return table;
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
-        => EnsureStorable(EncodeIndexRecord(index), $"index '{index.Name}'");
+        => EnsureStorable(EncodeIndexRecord(index), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexSubject, index.Name));
 
     private static byte[] EncodeIndexRecord(SqlCatalogIndex index)
     {
@@ -2042,13 +2043,13 @@ public sealed partial class SqlCatalog
             int version = reader.ReadInt32();
             if (version != 1)
             {
-                throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
+                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
             }
             isPrimaryKey = reader.ReadBoolean();
         }
         if (!reader.IsAtEnd || (isPrimaryKey && !isUnique))
         {
-            throw new SqlCatalogException(ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
         }
         return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey);
     }
@@ -2077,7 +2078,7 @@ public sealed partial class SqlCatalog
         int count = reader.ReadInt32();
         if (count < 0)
         {
-            throw new SqlCatalogException(ErrorMessages.SqlCatalogReadColumnNamesSqlCatalog);
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadColumnNamesSqlCatalog);
         }
         var columns = new List<string>();
         for (int index = 0; index < count; index++)
@@ -2560,7 +2561,7 @@ public sealed partial class SqlCatalog
             owner is not DatabaseObjectOwner.Adhoc and not DatabaseObjectOwner.Schema ||
             (owner == DatabaseObjectOwner.Schema ? string.IsNullOrWhiteSpace(owningSchema) : owningSchema is not null))
         {
-            throw new SqlCatalogException(ErrorMessages.SqlCatalogReadOwnershipSqlCatalog);
+            throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogReadOwnershipSqlCatalog);
         }
 
         return (owner, owningSchema);
@@ -2580,7 +2581,7 @@ public sealed partial class SqlCatalog
                   .AppendInt64(registration.RootPageId);
         }
 
-        return EnsureStorable(writer.ToArray(), $"the database's {registrations.Count} index registrations");
+        return EnsureStorable(writer.ToArray(), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogRegistrationsSubject, registrations.Count));
     }
 
     private static IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)
@@ -2629,13 +2630,13 @@ public sealed partial class SqlCatalog
         byte[] document = reader.ReadBinary();
         if (reader.IsAtEnd)
         {
-            throw new SqlCatalogException(
+            throw new SqlCatalogException("CS06060",
                 ErrorMessages.DecodeSchemaStateChunkSqlCatalog);
         }
         ulong generation = (ulong)reader.ReadInt64();
         if (!reader.IsAtEnd)
         {
-            throw new SqlCatalogException(ErrorMessages.DecodeSchemaStateChunkSqlCatalog2);
+            throw new SqlCatalogException("CS06059", ErrorMessages.DecodeSchemaStateChunkSqlCatalog2);
         }
         return new SchemaStateChunk(contentHash, generation, index, count, document, default);
     }
@@ -2645,7 +2646,7 @@ public sealed partial class SqlCatalog
         SchemaStateChunk first = chunks[0];
         if (first.Count <= 0 || first.Count != chunks.Count)
         {
-            throw new SqlCatalogException(ErrorMessages.CatalogAssembleSchemaStateSqlCatalog);
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog);
         }
 
         var ordered = new byte[first.Count][];
@@ -2659,7 +2660,7 @@ public sealed partial class SqlCatalog
                 chunk.Index >= ordered.Length ||
                 ordered[chunk.Index] is not null)
             {
-                throw new SqlCatalogException(ErrorMessages.CatalogAssembleSchemaStateSqlCatalog2);
+                throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog2);
             }
 
             ordered[chunk.Index] = chunk.Document;
@@ -2672,7 +2673,7 @@ public sealed partial class SqlCatalog
         {
             if (chunk is null)
             {
-                throw new SqlCatalogException(ErrorMessages.CatalogAssembleSchemaStateSqlCatalog3);
+                throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog3);
             }
 
             chunk.CopyTo(document, offset);
@@ -2685,7 +2686,7 @@ public sealed partial class SqlCatalog
         }
         catch (DecoderFallbackException)
         {
-            throw new SqlCatalogException(ErrorMessages.CatalogAssembleSchemaStateSqlCatalog4);
+            throw new SqlCatalogException("CS06059", ErrorMessages.CatalogAssembleSchemaStateSqlCatalog4);
         }
     }
 

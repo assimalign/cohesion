@@ -40,13 +40,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlExpressionEvaluator
 {
     /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
-    private static readonly object True = true;
+    private static readonly object _true = true;
 
     /// <summary>The boxed Boolean results every predicate returns, shared rather than boxed per row.</summary>
-    private static readonly object False = false;
+    private static readonly object _false = false;
 
     /// <summary>Backs <see cref="ForExecution"/> for a statement without subquery values.</summary>
-    private static readonly SqlExpressionEvaluator RowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
+    private static readonly SqlExpressionEvaluator _rowEvaluator = new(Array.Empty<SqlCatalogColumn>(), null);
 
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly SqlBindingContext _bindingContext;
@@ -150,7 +150,7 @@ internal sealed partial class SqlExpressionEvaluator
     internal static SqlExpressionEvaluator ForExecution(SqlSubqueryValues? subqueryValues, CancellationToken cancellationToken = default,
         bool[]? sharedColumns = null, DateTimeOffset? transactionStart = null)
         => subqueryValues is null && !cancellationToken.CanBeCanceled && sharedColumns is null && transactionStart is null && Volatile.Read(ref BeforeLikeMatch) is null
-            ? RowEvaluator
+            ? _rowEvaluator
             : new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), null, subqueryValues: subqueryValues,
                 cancellationToken: cancellationToken, sharedColumns: sharedColumns,
                 functions: transactionStart is { } instant ? SqlFunctionEnvironment.Standard.At(instant) : null);
@@ -355,7 +355,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>Returns the shared box of a Boolean result.</summary>
-    private static object Box(bool value) => value ? True : False;
+    private static object Box(bool value) => value ? _true : _false;
 
     private static object? Deliver(object? value, bool copySharedBinary)
         => copySharedBinary ? SqlBinaryValue.CopyShared(value) : value;
@@ -683,7 +683,7 @@ internal sealed partial class SqlExpressionEvaluator
         => string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }.Where(part => part is not null));
 
     /// <summary>The magnitude of the BIGINT minimum, which only a negated literal can spell.</summary>
-    private const ulong BigIntMinimumMagnitude = 9223372036854775808UL;
+    private const ulong bigIntMinimumMagnitude = 9223372036854775808UL;
 
     /// <remarks>
     /// A numeric literal its type cannot hold raises <see cref="OverflowException"/> with

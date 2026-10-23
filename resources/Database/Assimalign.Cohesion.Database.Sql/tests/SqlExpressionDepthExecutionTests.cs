@@ -50,19 +50,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </remarks>
 public sealed class SqlExpressionDepthExecutionTests : IDisposable
 {
-    private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
-    private const int Hostile = 200_000;
+    private const int limitValue = SqlQueryParserOptions.DefaultExpressionNestingLimit;
+    private const int hostile = 200_000;
 
     /// <summary>
     /// A LIKE depth no runtime-sized thread holds: at the 40 or more bytes a level optimized code
     /// spends, a million levels need 40 MB, five times the 8 MB Linux default. The statement text
     /// stays near 3 MB, under the protocol's 16 MB frame.
     /// </summary>
-    private const int HostileOnAnyThread = 1_000_000;
-    private const string StatementTooComplex = "CS05004";
+    private const int hostileOnAnyThread = 1_000_000;
+    private const string statementTooComplex = "CS05004";
 
     /// <summary>The depth of the trees the near-stack-limit walks use: well inside the runtime's reserve.</summary>
-    private const int WalkDepth = 128;
+    private const int walkDepth = 128;
 
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-expression-depth", Guid.NewGuid().ToString("N"));
 
@@ -70,15 +70,15 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     public static TheoryData<string, object> AtLimit => new()
     {
         // 256 terms; each + is a level over the chain before it.
-        { $"SELECT {Chain("1", " + ", Limit)} FROM t", (long)Limit },
+        { $"SELECT {Chain("1", " + ", limitValue)} FROM t", (long)limitValue },
         // 255 signs over a column: negation computes in BIGINT, an odd count of signs negates.
-        { $"SELECT {Repeat("- ", Limit - 1)}id FROM t", -1L },
-        { $"SELECT {Repeat("ABS(", Limit - 1)}id{Close(Limit - 1)} FROM t", 1L },
-        { $"SELECT {Repeat("CASE WHEN TRUE THEN ", Limit - 1)}id{Repeat(" END", Limit - 1)} FROM t", 1 },
+        { $"SELECT {Repeat("- ", limitValue - 1)}id FROM t", -1L },
+        { $"SELECT {Repeat("ABS(", limitValue - 1)}id{Close(limitValue - 1)} FROM t", 1L },
+        { $"SELECT {Repeat("CASE WHEN TRUE THEN ", limitValue - 1)}id{Repeat(" END", limitValue - 1)} FROM t", 1 },
         // 256 grouping parentheses add no level to the tree.
-        { $"SELECT {Open(Limit)}id{Close(Limit)} FROM t", 1 },
+        { $"SELECT {Open(limitValue)}id{Close(limitValue)} FROM t", 1 },
         // 255 comparisons in right-nested AND groups: 254 nested chains over a comparison.
-        { $"SELECT id FROM t WHERE {RightNested("id <> 0", "AND", Limit - 1)}", 1 },
+        { $"SELECT id FROM t WHERE {RightNested("id <> 0", "AND", limitValue - 1)}", 1 },
         // A flat chain is one level however long.
         { $"SELECT id FROM t WHERE {Chain("id <> 0", " AND ", 10_000)}", 1 },
         { $"SELECT id FROM t WHERE {Chain("id = 0", " OR ", 9_999)} OR id = 1", 1 },
@@ -103,8 +103,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// <summary>One level past the limit and the adversarial 200,000 terms are parse failures on both session seams.</summary>
     /// <param name="terms">The number of terms in a <c>1 + 1 + ...</c> chain.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: an expression past the limit is CS00006 before anything executes")]
-    [InlineData(Limit)]
-    [InlineData(Hostile)]
+    [InlineData(limitValue)]
+    [InlineData(hostile)]
     public async Task ExecuteAsync_PastLimit_ShouldFailToParseAndKeepTheSession(int terms)
     {
         // Arrange: the comparison adds a level over the chain.
@@ -135,11 +135,11 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Arrange
         string sql = shape switch
         {
-            "parentheses" => $"SELECT {Open(Hostile)}id{Close(Hostile)} FROM t",
-            "signs" => $"SELECT {Repeat("- ", Hostile)}id FROM t",
-            "not" => $"SELECT id FROM t WHERE {Repeat("NOT ", Hostile)}TRUE",
-            "functions" => $"SELECT {Repeat("ABS(", Hostile)}id{Close(Hostile)} FROM t",
-            _ => $"UPDATE t SET id = 2 WHERE {RightNested("id = 0", "OR", Hostile)}",
+            "parentheses" => $"SELECT {Open(hostile)}id{Close(hostile)} FROM t",
+            "signs" => $"SELECT {Repeat("- ", hostile)}id FROM t",
+            "not" => $"SELECT id FROM t WHERE {Repeat("NOT ", hostile)}TRUE",
+            "functions" => $"SELECT {Repeat("ABS(", hostile)}id{Close(hostile)} FROM t",
+            _ => $"UPDATE t SET id = 2 WHERE {RightNested("id = 0", "OR", hostile)}",
         };
 
         // Act
@@ -523,7 +523,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             pastLimit.Message.ShouldContain("supported limit of 40 levels", Case.Sensitive);
         }
 
-        new SqlDatabaseEngineOptions().ExpressionNestingLimit.ShouldBe(Limit);
+        new SqlDatabaseEngineOptions().ExpressionNestingLimit.ShouldBe(limitValue);
     }
 
     /// <summary>
@@ -553,7 +553,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var typedPastLimit = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(Request($"SELECT {Chain("1", " + ", 41)} FROM t")).AsTask());
 
         // Assert
-        unset.ShouldBe(Limit);
+        unset.ShouldBe(limitValue);
         builder.Options.ExpressionNestingLimit.ShouldBe(40);
         atLimit.ShouldBe(40L);
         pastLimit.Message.ShouldBe("SQL parse error CS00006: Expression nesting exceeds the supported limit of 40 levels.");
@@ -580,7 +580,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Arrange: 127 terms under a comparison, 128 levels.
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        var request = Request(sql.Replace("{0}", Chain("1", " + ", WalkDepth - 1), StringComparison.Ordinal));
+        var request = Request(sql.Replace("{0}", Chain("1", " + ", walkDepth - 1), StringComparison.Ordinal));
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(request).AsTask());
@@ -609,7 +609,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var session = await SeedAsync(engine);
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("INSERT INTO t VALUES (2, 'b')");
-        var delete = Request($"DELETE FROM t WHERE id < {Chain("1", " + ", WalkDepth - 1)}");
+        var delete = Request($"DELETE FROM t WHERE id < {Chain("1", " + ", walkDepth - 1)}");
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(delete).AsTask());
@@ -630,7 +630,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
+        var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", walkDepth - 2)}qty > 0))");
 
         // Act
         var outcome = NearStackLimit.Run(() => session.ExecuteAsync(create).AsTask());
@@ -653,8 +653,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     public void Walkers_NearStackLimit_ShouldThrowInsufficientStack()
     {
         // Arrange: two separately parsed trees of each shape, so equivalence walks both.
-        string chain = Chain("1", " + ", WalkDepth);
-        string conjunction = $"{Chain("TRUE", " AND ", 1_000)} AND {Chain("1", " + ", WalkDepth - 2)} = 126";
+        string chain = Chain("1", " + ", walkDepth);
+        string conjunction = $"{Chain("TRUE", " AND ", 1_000)} AND {Chain("1", " + ", walkDepth - 2)} = 126";
         var columns = new[] { new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)) };
         var evaluator = new SqlExpressionEvaluator(columns, null);
 
@@ -684,7 +684,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
                 outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>(name);
             }
 
-            evaluator.Evaluate(deep, [1]).ShouldBe(expression == chain ? (object)(long)WalkDepth : true);
+            evaluator.Evaluate(deep, [1]).ShouldBe(expression == chain ? (object)(long)walkDepth : true);
         }
     }
 
@@ -697,8 +697,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var session = await SeedAsync(engine);
         var parameters = new Dictionary<string, object?>
         {
-            ["value"] = new string('a', Hostile),
-            ["pattern"] = string.Concat(Enumerable.Repeat("%a", Hostile)),
+            ["value"] = new string('a', hostile),
+            ["pattern"] = string.Concat(Enumerable.Repeat("%a", hostile)),
         };
         // Act
         var outcome = RunOnThread(1024, () => ReadScalarAsync(
@@ -734,8 +734,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     public void Check_AtLimit_ShouldPersistReopenAndEnforce()
     {
         // Arrange: 254 signs over a column, compared: 256 levels.
-        string predicate = Repeat("- ", Limit - 2) + "qty > 0";
-        string tooDeep = Repeat("- ", Limit - 1) + "qty > 0";
+        string predicate = Repeat("- ", limitValue - 2) + "qty > 0";
+        string tooDeep = Repeat("- ", limitValue - 1) + "qty > 0";
 
         // Act
         var (refused, canonical, reopened) = OnLargeStack(async () =>
@@ -764,7 +764,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         // Assert
         refused.Message.ShouldContain("CS00006", Case.Sensitive);
         canonical.ShouldStartWith("-(-(-(", Case.Sensitive);
-        canonical.Count(character => character == '(').ShouldBe(Limit - 3);
+        canonical.Count(character => character == '(').ShouldBe(limitValue - 3);
         reopened.ShouldBe(canonical);
     }
 
@@ -809,7 +809,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     public void Load_OnSmallStack_ShouldNotReportDamage()
     {
         // Arrange: the stored text of 254 signs over a column, compared, 256 levels deep.
-        string canonical = Repeat("-(", Limit - 3) + "-qty" + Close(Limit - 3) + " > 0";
+        string canonical = Repeat("-(", limitValue - 3) + "-qty" + Close(limitValue - 3) + " > 0";
         const string subject = "CHECK constraint 'ck' on table 'dbo.c'";
 
         // Act: reading the deepest text back costs the parser about 1.4 MB of stack in a debug
@@ -841,7 +841,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var database = await engine.CreateDatabaseAsync("db");
         await using (var session = await database.CreateSessionAsync(CancellationToken.None))
         {
-            await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", WalkDepth - 2)}qty > 0))");
+            await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({Repeat("- ", walkDepth - 2)}qty > 0))");
         }
         var table = Table(database, "c");
         RunOnThread(8 * 1024, () => new SqlBoundTableCache(database.Catalog).Get(table)).Failure.ShouldBeNull();
@@ -974,8 +974,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
         string sql = statement == "chain"
-            ? $"SELECT {Chain("1", "+", Hostile)} FROM users"
-            : $"SELECT {Open(Hostile)}1{Close(Hostile)} FROM users";
+            ? $"SELECT {Chain("1", "+", hostile)} FROM users"
+            : $"SELECT {Open(hostile)}1{Close(hostile)} FROM users";
 
         // Act
         await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(sql).Encode());
@@ -990,7 +990,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         else
         {
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.ShouldStartWithMessage(StatementTooComplex + ":", Case.Sensitive);
+            error.ShouldStartWithMessage(statementTooComplex + ":", Case.Sensitive);
         }
         harness.Server.Sessions.Count.ShouldBe(1);
         (await ScalarAsync(client, "SELECT 1 FROM users WHERE id = 1")).ShouldBe(1L);
@@ -1044,7 +1044,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         {
             var error = ProtocolErrorMessage.Decode(reply.Payload.Span);
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.ShouldStartWithMessage(StatementTooComplex + ": Statement too complex", Case.Sensitive);
+            error.ShouldStartWithMessage(statementTooComplex + ": Statement too complex", Case.Sensitive);
         }
         else
         {
@@ -1063,7 +1063,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         await using var harness = await ServerTestHarness.StartAsync();
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
-        string sql = $"SELECT COUNT(*) FROM users WHERE '{new string('a', HostileOnAnyThread)}' LIKE '{string.Concat(Enumerable.Repeat("%a", HostileOnAnyThread))}'";
+        string sql = $"SELECT COUNT(*) FROM users WHERE '{new string('a', hostileOnAnyThread)}' LIKE '{string.Concat(Enumerable.Repeat("%a", hostileOnAnyThread))}'";
         // Act / Assert
         (await ScalarAsync(client, sql)).ShouldBe(2L);
         harness.Server.Sessions.Count.ShouldBe(1);
@@ -1164,8 +1164,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     private static void AssertStatementTooComplex(DatabaseException failure)
     {
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(StatementTooComplex);
-        failure.DiagnosticDetail(StatementTooComplex).ShouldStartWith("Statement too complex", Case.Sensitive);
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(statementTooComplex);
+        failure.DiagnosticDetail(statementTooComplex).ShouldStartWith("Statement too complex", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
     }
 
@@ -1179,12 +1179,12 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         return table!;
     }
 
-    private static SqlDatabaseEngine CreateEngine(int limit = Limit) => CreateEngine(null, limit);
+    private static SqlDatabaseEngine CreateEngine(int limit = limitValue) => CreateEngine(null, limit);
 
     // The background workers stay quiet for the test's lifetime, so a statement never waits on
     // one of them and resumes on a pool thread: the stack tests run each statement on a thread
     // of a known size, and its walks must stay there.
-    private static SqlDatabaseEngine CreateEngine(string? rootPath, int limit = Limit)
+    private static SqlDatabaseEngine CreateEngine(string? rootPath, int limit = limitValue)
     {
         var options = new SqlDatabaseEngineOptions
         {
@@ -1292,8 +1292,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     /// </remarks>
     private static class NearStackLimit
     {
-        private const int FrameBytes = 1024;
-        private const int HeadroomFrames = 3;
+        private const int frameBytes = 1024;
+        private const int headroomFrames = 3;
 
         /// <summary>Runs <paramref name="work"/> with a few KB of stack left before the check fails.</summary>
         /// <param name="work">The work.</param>
@@ -1305,7 +1305,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
             var thread = new Thread(() =>
             {
                 int frames = Descend(0, null);
-                Descend(Math.Max(0, frames - HeadroomFrames), () =>
+                Descend(Math.Max(0, frames - headroomFrames), () =>
                 {
                     try
                     {
@@ -1328,7 +1328,7 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
         private static int Descend(int framesLeft, Action? work)
         {
-            Span<byte> frame = stackalloc byte[FrameBytes];
+            Span<byte> frame = stackalloc byte[frameBytes];
             frame[^1] = 1;
             int depth;
             if (work is null)

@@ -274,9 +274,9 @@ SQL transactions currently use ordinary `BEGIN`, `COMMIT` and `ROLLBACK` command
 on one connection. The wire protocol does not expose a durable transaction token,
 status lookup or replay deduplication. A connection loss after the server publishes
 COMMIT but before the response reaches the client has an unknown outcome. Client
-exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
-documents and enforces this boundary by faulting its scope/store and refusing replay;
-see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
+exceptions do not promise that a failed COMMIT left no writes. Callers must reconcile
+an uncertain outcome through application state before deciding whether to retry;
+the client provides no automatic replay or reconciliation operation.
 
 **Pool reset (#1540):** negotiated server status certifies a clean session. Return rolls back
 an unfinished transaction before pooling; reset failure or legacy status support discards the
@@ -562,3 +562,10 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Rules audit after main cleanup
+
+Private test constants use repository casing. The transaction-outcome guidance is self-contained:
+connection loss after COMMIT can remain uncertain, and the client supplies no automatic replay
+or reconciliation operation. The removed mapper package is no longer a documentation dependency.
+Wire bytes, diagnostics, pooling and public APIs are unchanged.

@@ -1186,7 +1186,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
         {
-            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1236,7 +1236,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
+            throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
@@ -1315,7 +1315,7 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
-        throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LookupTableMissing, schema, name));
+        throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
     }
 
     /// <summary>
@@ -1462,7 +1462,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentIndexMissing, plan.IndexName, currentTable.Schema, currentTable.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexMissing, plan.IndexName, currentTable.Schema, currentTable.Name));
         }
 
         EnsureCanChange(metadata.Owner, metadata.Name, metadata.OwningSchema, "DROP INDEX", statement);
@@ -1507,7 +1507,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(expected.Schema, expected.Name, out SqlCatalogTable current))
         {
-            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentTableMissing, expected.Schema, expected.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, expected.Schema, expected.Name));
         }
 
         return current;

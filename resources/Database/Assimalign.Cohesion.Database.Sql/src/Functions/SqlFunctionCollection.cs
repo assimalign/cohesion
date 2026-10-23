@@ -149,5 +149,5 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
         return left.VariadicParameter is null || left.VariadicParameter.IsSameParameterType(right.VariadicParameter!);
     }
 
-    private static string Article(SqlFunctionKind kind) => kind == SqlFunctionKind.Scalar ? "a scalar function" : "an aggregate";
+    private static string Article(SqlFunctionKind kind) => kind == SqlFunctionKind.Scalar ? ErrorMessages.ScalarFunctionKindLabel : ErrorMessages.AggregateKindLabel;
 }

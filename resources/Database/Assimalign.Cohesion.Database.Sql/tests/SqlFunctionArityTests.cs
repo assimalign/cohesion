@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlFunctionArityTests : IDisposable
 {
-    private const string FunctionSignatureMismatch = "CS01006";
+    private const string functionSignatureMismatch = "CS01006";
 
     private static readonly string[] _schema =
     [
@@ -112,8 +112,8 @@ public sealed class SqlFunctionArityTests : IDisposable
             var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
             // Assert
-            error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionSignatureMismatch, $"withRows: {withRows}");
-            error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
+            error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(functionSignatureMismatch, $"withRows: {withRows}");
+            error.ShouldStartWithMessage($"{functionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
             (await SnapshotAsync(session)).ShouldBe(before);
             database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
             database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
@@ -169,7 +169,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         var accepted = await ExecuteAsync(session, "INSERT INTO ck1 VALUES (-4);");
 
         // Assert
-        refused.ShouldStartWithMessage(FunctionSignatureMismatch, Case.Sensitive);
+        refused.ShouldStartWithMessage(functionSignatureMismatch, Case.Sensitive);
         violation.ShouldNotBeNull();
         accepted.AffectedCount.ShouldBe(1);
         (await RowsAsync(session, "SELECT c FROM ck1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { -4 });
@@ -227,8 +227,8 @@ public sealed class SqlFunctionArityTests : IDisposable
         var error = Should.Throw<SqlEvaluationException>(() => evaluator.Evaluate(call, []));
 
         // Assert
-        error.Code.ShouldBe(FunctionSignatureMismatch);
-        error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
+        error.Code.ShouldBe(functionSignatureMismatch);
+        error.ShouldStartWithMessage($"{functionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         failure.Message.ShouldContain("open the database with that build and drop the constraint", Case.Sensitive);
         failure.Message.ShouldNotContain("restore the database from a backup", Case.Sensitive);
         var coded = failure.InnerException.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlEvaluationException>();
-        coded.Code.ShouldBe(FunctionSignatureMismatch);
+        coded.Code.ShouldBe(functionSignatureMismatch);
     }
 
     private SqlDatabaseEngine CreateEngine()

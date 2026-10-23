@@ -69,7 +69,7 @@ public sealed class SqlCatalogTable
 
         if (columns.Count == 0)
         {
-            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableSqlCatalog, schema, name));
+            throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableSqlCatalog, schema, name));
         }
 
         ObjectId = objectId;

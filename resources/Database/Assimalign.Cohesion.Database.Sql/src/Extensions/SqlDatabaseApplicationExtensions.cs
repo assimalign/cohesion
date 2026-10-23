@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Registers deferred SQL composition through the dependency-free Database root contract.</summary>
-public static class SqlDatabaseApplicationExtensions
+public static partial class SqlDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {

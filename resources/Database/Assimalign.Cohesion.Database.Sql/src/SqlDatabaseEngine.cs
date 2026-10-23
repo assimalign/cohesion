@@ -7,6 +7,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -606,7 +607,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
             ThrowIfDisposed();
             if (_databases.ContainsKey(name))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
+                throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
             }
 
             if (_strategy.StorageExists(name, catalog: false))
@@ -722,7 +723,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
 
             if (!_strategy.StorageExists(name, catalog: false))
             {
-                throw new DatabaseNotFoundException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenDatabaseFilesFailure, name));
+                throw DatabaseNotFoundException.CreateEngineAbsence("CK03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenDatabaseFilesFailure, name));
             }
 
             string catalogLabel = SqlStorageStrategy.GetLabel(name, catalog: true);
@@ -796,7 +797,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                             if (!SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog, SqlNamespaceNames.Default))
                             {
                                 SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
-                                if (creating) { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name)); }
+                                if (creating) { throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name)); }
                                 SqlSchemaProvisioner.ValidateRecordedFormats(probeCatalog);
                             }
                         }
@@ -815,7 +816,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     SqlDatabase.ThrowIfFormatIsNotCurrent(name, catalog.RecordSpaceFormatVersion);
                     if (creating)
                     {
-                        throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
+                        throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name));
                     }
                     SqlSchemaProvisioner.ValidateRecordedFormats(catalog);
                 }

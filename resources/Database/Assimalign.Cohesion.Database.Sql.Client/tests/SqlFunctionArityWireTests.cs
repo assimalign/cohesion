@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlFunctionArityWireTests
 {
-    private const string FunctionSignatureMismatch = "CS01006";
+    private const string functionSignatureMismatch = "CS01006";
 
     /// <summary>Each position fails the same way, over the seeded table and an empty one.</summary>
     /// <param name="statement">A statement with a wrong-arity call.</param>
@@ -54,7 +54,7 @@ public sealed class SqlFunctionArityWireTests
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
         failure.Message.ShouldBe(message);
-        failure.Message.ShouldStartWith(FunctionSignatureMismatch, Case.Sensitive);
+        failure.Message.ShouldStartWith(functionSignatureMismatch, Case.Sensitive);
         SqlResultSet users = await connection.QueryAsync("SELECT id, name, score FROM users ORDER BY id",
             cancellationToken: SqlClientTestHarness.Timeout());
         users.Select(row => (row["id"], row["name"], row["score"])).ShouldBe([(1, "ada", 100L), (2, "grace", 200L)]);

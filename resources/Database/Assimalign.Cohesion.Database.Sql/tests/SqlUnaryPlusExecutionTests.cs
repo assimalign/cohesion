@@ -22,9 +22,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlUnaryPlusExecutionTests
 {
-    private const string InvalidOperandType = "CS02003";
+    private const string invalidOperandType = "CS02003";
 
-    private const string CreateValues =
+    private const string createValues =
         "CREATE TABLE v (id INT, tiny TINYINT, small SMALLINT, whole INT, big BIGINT, single REAL, approximate DOUBLE, " +
         "exact DECIMAL(10, 2), name VARCHAR(20), flag BOOLEAN, missing INT)";
 
@@ -99,8 +99,8 @@ public sealed class SqlUnaryPlusExecutionTests
             await session.ExecuteAsync($"SELECT {expression} FROM v", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(InvalidOperandType);
-        failure.ShouldStartWithMessage(InvalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(invalidOperandType);
+        failure.ShouldStartWithMessage(invalidOperandType + ": Invalid operand type: unary", Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
     }
 
@@ -128,8 +128,8 @@ public sealed class SqlUnaryPlusExecutionTests
             await session.ExecuteAsync($"SELECT {sign}@p FROM v", parameters, CancellationToken.None));
 
         // Assert
-        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(InvalidOperandType);
-        failure.ShouldHaveMessage($"{InvalidOperandType}: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is String.");
+        failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(invalidOperandType);
+        failure.ShouldHaveMessage($"{invalidOperandType}: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is String.");
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { withRow ? 1L : 0L });
         (await RowsAsync(session, $"SELECT {sign}@p FROM v", new Dictionary<string, object?> { ["p"] = null }))
             .Select(row => row[0]).ShouldAllBe(value => value == null);
@@ -149,7 +149,7 @@ public sealed class SqlUnaryPlusExecutionTests
             await session.ExecuteAsync("CREATE TABLE c (name TEXT, CHECK (+name = 'a'))", cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.ShouldStartWithMessage(InvalidOperandType, Case.Sensitive);
+        failure.ShouldStartWithMessage(invalidOperandType, Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
     }
 
@@ -176,7 +176,7 @@ public sealed class SqlUnaryPlusExecutionTests
         header.Columns.Select(column => column.Item2).ShouldBe([(byte)DatabaseType.Int32, (byte)DatabaseType.Int64, (byte)DatabaseType.Int64]);
         DecodeRow(row.Payload.ToArray()).ShouldBe(new object?[] { 2, 4L, -2L });
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.ShouldStartWithMessage(InvalidOperandType + ":", Case.Sensitive);
+        error.ShouldStartWithMessage(invalidOperandType + ":", Case.Sensitive);
         harness.Server.Sessions.Count.ShouldBe(1);
     }
 
@@ -187,7 +187,7 @@ public sealed class SqlUnaryPlusExecutionTests
     {
         var database = await engine.CreateDatabaseAsync("signs");
         var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync(CreateValues, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync(createValues, cancellationToken: CancellationToken.None);
         if (withRow)
         {
             await session.ExecuteAsync(

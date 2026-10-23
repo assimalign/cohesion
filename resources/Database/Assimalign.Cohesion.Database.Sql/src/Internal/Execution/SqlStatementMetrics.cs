@@ -171,9 +171,14 @@ internal sealed class SqlStatementMetrics
 
     // Join-only telemetry shares the existing path slot. Scalar statements keep
     // exactly their previous instance layout and allocate no new telemetry object.
-    private sealed class JoinWork(IReadOnlyList<string> paths)
+    private sealed class JoinWork
     {
-        internal IReadOnlyList<string> Paths { get; set; } = paths;
+        internal JoinWork(IReadOnlyList<string> paths)
+        {
+            Paths = paths;
+        }
+
+        internal IReadOnlyList<string> Paths { get; set; }
         internal string? ScalarPath;
         internal long CandidatePairs;
         internal long MemoryBytes;

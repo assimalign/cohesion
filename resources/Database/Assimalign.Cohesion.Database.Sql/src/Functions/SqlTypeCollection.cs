@@ -170,8 +170,8 @@ public sealed class SqlTypeCollection : IReadOnlyCollection<SqlType>
             && registered.Storage.Precision == domain.Storage.Precision
             && registered.Storage.Scale == domain.Storage.Scale
                 ? null
-                : $"it declares domain '{domain.Name}' over {domain.BaseType!.Name}, but the engine registers " +
-                  (registered.IsDomain ? $"domain '{registered.Name}' over {registered.BaseType!.Name}" : $"the built-in type {registered.Name}");
+                : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDomainRegistrationConflict, domain.Name, domain.BaseType!.Name) +
+                  (registered.IsDomain ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredDomainDescription, registered.Name, registered.BaseType!.Name) : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredBuiltInTypeDescription, registered.Name));
     }
 
     /// <summary>Freezes the registrations into the catalog the engine executes; phase 2 of the build.</summary>

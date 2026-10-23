@@ -358,7 +358,7 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
             {
                 var subquery = ParseSubquery(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
+                Expect(ref lexer, TokenType.RightParen, _errorInSubqueryClosingParenthesisExpected);
 
                 return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
             }
@@ -374,7 +374,7 @@ public sealed partial class SqlQueryParser
                     values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 }
             }
-            Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
+            Expect(ref lexer, TokenType.RightParen, _errorInListClosingParenthesisExpected);
 
             return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
         }
@@ -777,7 +777,7 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && StartsQuery(lexer))
             {
                 var subSelect = ParseSubquery(ref lexer);
-                Expect(ref lexer, TokenType.RightParen, "')' after the subquery");
+                Expect(ref lexer, TokenType.RightParen, _errorSubqueryClosingParenthesisExpected);
 
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
@@ -1001,17 +1001,17 @@ public sealed partial class SqlQueryParser
             SkipQueryRemainder(ref lexer);
         }
         int callEnd = CurrentTokenEnd(ref lexer);
-        Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
+        Expect(ref lexer, TokenType.RightParen, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionArgumentsClosingExpected, name));
         if (listagg)
         {
             if (IsWord(ref lexer, "WITHIN")) { Advance(ref lexer); }
             else { AddExpectedDiagnostic(ref lexer, "WITHIN GROUP after LISTAGG"); }
             ExpectKeyword(ref lexer, "GROUP", "GROUP after WITHIN");
-            Expect(ref lexer, TokenType.LeftParen, "'(' after WITHIN GROUP");
+            Expect(ref lexer, TokenType.LeftParen, _errorWithinGroupOpeningExpected);
             if (ordering.Count > 0) { AddExpectedDiagnostic(ref lexer, "only WITHIN GROUP ordering for LISTAGG"); }
             ParseAggregateOrdering(ref lexer, ordering);
             callEnd = CurrentTokenEnd(ref lexer);
-            Expect(ref lexer, TokenType.RightParen, "')' after WITHIN GROUP ordering");
+            Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
         SkipCallExtensions(ref lexer);
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg);
@@ -1131,7 +1131,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer); // consume EXISTS
 
         SqlQueryBodyExpression? subquery = null;
-        if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
+        if (Expect(ref lexer, TokenType.LeftParen, _errorExistsOpeningExpected))
         {
             if (StartsQuery(lexer, queryExpected: true))
             {
@@ -1142,7 +1142,7 @@ public sealed partial class SqlQueryParser
                 AddExpectedDiagnostic(ref lexer, "a SELECT subquery after EXISTS (");
             }
 
-            Expect(ref lexer, TokenType.RightParen, "')' after the EXISTS subquery");
+            Expect(ref lexer, TokenType.RightParen, _errorExistsClosingExpected);
         }
 
         subquery ??= new SqlSelectExpression(

@@ -114,7 +114,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             if (state.Generation != _ddlGeneration || state.ContentHash.Length != 64 || !state.ContentHash.All(Uri.IsHexDigit))
             {
-                throw new SqlCatalogException(ErrorMessages.CatalogSaveScriptStateAsyncSqlCatalog);
+                throw new SqlCatalogException("CS03201", ErrorMessages.CatalogSaveScriptStateAsyncSqlCatalog);
             }
             using var transaction = _storage.BeginTransaction();
             var record = new DatabaseKeyWriter().AppendInt32(13).AppendString(state.ContentHash, Collation.Binary).AppendInt64((long)state.Generation).ToArray();

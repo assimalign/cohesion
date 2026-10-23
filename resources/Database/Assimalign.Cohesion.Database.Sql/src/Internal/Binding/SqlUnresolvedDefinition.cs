@@ -38,5 +38,5 @@ internal sealed class SqlUnresolvedDefinition
 
     /// <summary>Describes the definition and its call: <c>CHECK constraint 'ck' on table 'dbo.t' calls function 'f(TEXT)', which ...</c>.</summary>
     /// <returns>The description.</returns>
-    internal string Describe() => $"{Subject} calls function '{Signature}', {Reason}";
+    internal string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnresolvedFunctionDescription, Subject, Signature, Reason);
 }

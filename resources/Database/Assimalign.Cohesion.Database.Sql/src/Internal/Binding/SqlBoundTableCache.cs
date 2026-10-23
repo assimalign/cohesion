@@ -310,7 +310,7 @@ internal sealed class SqlBoundTableCache
                 continue;
             }
 
-            string subject = $"CHECK constraint '{constraint.Name}' on table '{tableName}'";
+            string subject = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CheckConstraintSubject, constraint.Name, tableName);
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
             try
             {
@@ -335,7 +335,7 @@ internal sealed class SqlBoundTableCache
             {
                 // Converted to the column's type once, here: no decoded row and no INSERT converts it again.
                 defaults[ordinal] = declaredDefaults?[ordinal] ?? SqlPlanExecutor.BindDefaultExpression(column,
-                    $"DEFAULT of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
 
             if (column.MissingValueLiteral is { } text)
@@ -346,7 +346,7 @@ internal sealed class SqlBoundTableCache
                     throw new SqlExecutionException(SqlExecutionException.DamagedDefinitionCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MissingValueNotLiteral, column.Name));
                 }
                 missing[ordinal] = string.Equals(text, column.DefaultLiteral, StringComparison.Ordinal) ? defaults[ordinal] : SqlPlanExecutor.BindDefaultExpression(frozen,
-                    $"Missing value of column '{column.Name}' on table '{tableName}'", functions, _catalog.DefaultCollation, cancellationToken);
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnMissingValueSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
             if (column.DomainName is not null)
             {
@@ -371,12 +371,12 @@ internal sealed class SqlBoundTableCache
         var column = table.Columns[ordinal];
         string name = column.DomainName!;
         string? reason = !functions.Types.TryGetDomain(name, out var domain)
-            ? "which this engine does not register"
+            ? ErrorMessages.RegistrationMissingReason
             : domain.Storage.Type != column.Type.Type
                 || domain.Storage.MaxLength != column.Type.MaxLength
                 || domain.Storage.Precision != column.Type.Precision
                 || domain.Storage.Scale != column.Type.Scale
-                ? $"which this engine registers over {domain.BaseType!.Name}, but the column stores {SqlType.ForStorage(column.Type).Name}"
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredDomainStorageMismatch, domain.BaseType!.Name, SqlType.ForStorage(column.Type).Name)
                 : null;
         if (reason is not null)
         {
@@ -438,7 +438,7 @@ internal sealed class SqlBoundTableCache
             // An application function the engine registers, with a result that no longer fits where
             // the stored predicate uses it: its registration changed after the predicate was stored.
             unresolved = new SqlUnresolvedDefinition(subject, Signature(table, mismatch.Call, functions),
-                $"which this engine registers returning {mismatch.Returned}, where the CHECK needs {mismatch.Needed}");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RegisteredResultTypeMismatch, mismatch.Returned, mismatch.Needed));
         }
 
         if (unresolved is not null)
@@ -503,11 +503,11 @@ internal sealed class SqlBoundTableCache
         {
             if (!functions.Catalog.TryGetOverloads(call.FunctionName, out var overloads))
             {
-                return "which this engine does not register";
+                return ErrorMessages.RegistrationMissingReason;
             }
             if (overloads[0].Kind != SqlFunctionKind.Scalar)
             {
-                return "which this engine registers as an aggregate";
+                return ErrorMessages.RegisteredAsAggregateReason;
             }
 
             try
@@ -518,19 +518,19 @@ internal sealed class SqlBoundTableCache
                     // Resolve only to explain the missing identity; never use the replacement.
                     var diagnostic = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: functions);
                     _ = diagnostic.ResolveFunction(call);
-                    return $"whose recorded identity '{SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!)}' this engine does not register";
+                    return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RecordedFunctionIdentityMissing, SqlDefinitionBinder.DescribeIdentity(scope.RecordedIdentity(call)!));
                 }
                 return resolved.Volatility != SqlFunctionVolatility.Immutable
-                    ? "which this engine no longer registers as IMMUTABLE"
+                    ? ErrorMessages.ImmutableRegistrationMissing
                     : resolved is SqlExpressionFunction { Unresolved: { } reason } ? reason : null;
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.AmbiguousFunctionCallCode)
             {
-                return $"which more than one overload this engine registers accepts equally well ({exception.Message})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OverloadSelectionAmbiguousReason, exception.Message);
             }
             catch (SqlEvaluationException exception) when (exception.Code == SqlEvaluationException.FunctionSignatureMismatchCode)
             {
-                return $"which no overload this engine registers accepts ({exception.Message})";
+                return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.NoAcceptedOverloadReason, exception.Message);
             }
         }
     }

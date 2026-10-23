@@ -194,7 +194,7 @@ public sealed class SqlDomainWireTests
 
     private sealed class DomainHarness : IAsyncDisposable
     {
-        private const string DatabaseName = "app";
+        private const string databaseName = "app";
 
         private readonly SqlDatabaseEngine _engine;
         private readonly InMemoryConnectionListener _listener;
@@ -222,11 +222,11 @@ public sealed class SqlDomainWireTests
             SqlDatabaseEngine engine = await builder.BuildAsync();
             if (create)
             {
-                await engine.CreateDatabaseAsync(DatabaseName);
+                await engine.CreateDatabaseAsync(databaseName);
             }
             else
             {
-                await engine.OpenDatabaseAsync(DatabaseName);
+                await engine.OpenDatabaseAsync(databaseName);
             }
 
             var listener = new InMemoryConnectionListener();
@@ -234,7 +234,7 @@ public sealed class SqlDomainWireTests
             await server.StartAsync();
             var client = SqlClient.Create(new SqlClientOptions
             {
-                Settings = new DatabaseConnectionSettings { Database = DatabaseName, Principal = "tester", EndPoint = listener.EndPoint },
+                Settings = new DatabaseConnectionSettings { Database = databaseName, Principal = "tester", EndPoint = listener.EndPoint },
                 ConnectionFactory = listener.CreateFactory(),
             });
 

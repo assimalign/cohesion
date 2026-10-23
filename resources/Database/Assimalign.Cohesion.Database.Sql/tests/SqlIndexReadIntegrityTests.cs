@@ -34,7 +34,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlIndexReadIntegrityTests
 {
-    private const string Seek = "SELECT id FROM t WHERE val = 20";
+    private const string seek = "SELECT id FROM t WHERE val = 20";
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: storage read failures abort transactions and keep the wire session (#1364)")]
     [InlineData(0, false, false)]
@@ -139,10 +139,10 @@ public sealed class SqlIndexReadIntegrityTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corrupt pages fail scans and seeks with the database and page (#1160)")]
-    [InlineData(Seek, 0)]
+    [InlineData(seek, 0)]
     [InlineData("SELECT id FROM t", 0)]
-    [InlineData(Seek, 1)]
-    [InlineData(Seek, 2)]
+    [InlineData(seek, 1)]
+    [InlineData(seek, 2)]
     public async Task Select_ReadsRottenRowPage_ShouldFailWithCodedDatabaseCorruption(string statement, int wrapper)
     {
         // Arrange: three rows on one page behind an index, read once through the seek, then the
@@ -154,7 +154,7 @@ public sealed class SqlIndexReadIntegrityTests
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await session.ExecuteAsync("CREATE INDEX ix_val ON t (val)");
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10), (2, 20), (3, 30)");
-        (await Ids(session, Seek)).ShouldBe([2]);
+        (await Ids(session, seek)).ShouldBe([2]);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
         var rowPage = database.DataStorage.GetOwnerPages(Table(database, "t").ObjectId).ShouldHaveSingleItem();
         Evict(database, rowPage);
@@ -175,7 +175,7 @@ public sealed class SqlIndexReadIntegrityTests
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;
         await using var next = await database.CreateSessionAsync();
-        var healed = await Ids(next, Seek);
+        var healed = await Ids(next, seek);
 
         // Assert: the statement failed with the page's checksum error. The failed read was not
         // cached, so once the device returns the page whole the same seek finds its row.
@@ -207,7 +207,7 @@ public sealed class SqlIndexReadIntegrityTests
         DeleteBeneathIndex(database, reclaimed);
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert: the stale entry was examined and skipped; its page still holds the other rows.
         ids.Order().ShouldBe([1, 3]);
@@ -231,7 +231,7 @@ public sealed class SqlIndexReadIntegrityTests
         database.DataStorage.FreeSpaceMap.IsAllocated(reclaimed.PageId).ShouldBeFalse();
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert
         ids.ShouldBeEmpty();
@@ -260,7 +260,7 @@ public sealed class SqlIndexReadIntegrityTests
         }
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert
         ids.ShouldBeEmpty();

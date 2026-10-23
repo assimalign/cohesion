@@ -15,3 +15,8 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Rules audit after main cleanup
+
+The model protocol extension container is partial. Its public Family and message extensions,
+identifiers, capabilities and encoded payloads are unchanged.

@@ -167,7 +167,7 @@ internal static class SqlFunctionResolver
         }
         if (tie is not null)
         {
-            throw SqlEvaluationException.AmbiguousFunctionCall(name, DescribeTypes(types), $"{best} and {tie}");
+            throw SqlEvaluationException.AmbiguousFunctionCall(name, DescribeTypes(types), string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AmbiguousOverloadPair, best, tie));
         }
 
         return best;
@@ -506,30 +506,30 @@ internal static class SqlFunctionResolver
             text = variadic switch
             {
                 null => string.Empty,
-                0 => "any number of arguments",
-                int minimum => $"{Count(minimum)} or more arguments",
+                0 => ErrorMessages.AnyArgumentCount,
+                int minimum => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MinimumArgumentCount, Count(minimum)),
             };
         }
         else if (counts.Count == 1 && variadic is null)
         {
             int only = counts.Min;
-            text = only == 0 ? "no arguments" : $"exactly {Count(only)} {(only == 1 ? "argument" : "arguments")}";
+            text = only == 0 ? ErrorMessages.NoArgumentsExpected : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExactArgumentCount, Count(only), (only == 1 ? ErrorMessages.ExpectedArgumentSingular : ErrorMessages.ExpectedArgumentPlural));
         }
         else
         {
             var listed = counts.Select(Count).ToList();
             if (variadic is null && counts.Max - counts.Min + 1 == counts.Count)
             {
-                text = $"{listed[0]} to {listed[^1]} arguments";
+                text = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArgumentCountRange, listed[0], listed[^1]);
             }
             else
             {
                 if (variadic is int minimum)
                 {
-                    listed.Add($"{Count(minimum)} or more");
+                    listed.Add(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MinimumArgumentCountFragment, Count(minimum)));
                 }
 
-                text = $"{string.Join(", ", listed.Take(listed.Count - 1))} or {listed[^1]} arguments";
+                text = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ListedArgumentCounts, string.Join(", ", listed.Take(listed.Count - 1)), listed[^1]);
             }
         }
 
@@ -538,7 +538,7 @@ internal static class SqlFunctionResolver
             return text;
         }
 
-        return text.Length == 0 ? "only '*'" : $"{text} or '*'";
+        return text.Length == 0 ? ErrorMessages.StarOnlyExpected : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AlternativeStarExpected, text);
 
         static string Count(int count) => count.ToString(CultureInfo.InvariantCulture);
     }
@@ -560,9 +560,9 @@ internal static class SqlFunctionResolver
 
         return arguments.Count switch
         {
-            0 => "none",
+            0 => ErrorMessages.NoArgumentsReceived,
             1 when star => "'*'",
-            _ when star => $"{count} arguments including '*'",
+            _ when star => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StarArgumentCountReceived, count),
             _ => count,
         };
     }

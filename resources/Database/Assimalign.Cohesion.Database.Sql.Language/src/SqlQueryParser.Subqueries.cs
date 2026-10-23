@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Language;
 
 public sealed partial class SqlQueryParser
 {
-    private const int MaximumSubqueryDepth = 32;
+    private const int maximumSubqueryDepth = 32;
     private int _subqueryDepth;
     private int _paginationDepth;
     private string _paginationClause = "LIMIT or OFFSET";
@@ -41,11 +41,11 @@ public sealed partial class SqlQueryParser
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid, _paginationClause));
         }
 
-        if (_subqueryDepth >= MaximumSubqueryDepth)
+        if (_subqueryDepth >= maximumSubqueryDepth)
         {
             AddUnsupportedSurfaceDiagnostic(lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length,
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid2, MaximumSubqueryDepth));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseSubqueryVoid2, maximumSubqueryDepth));
 
             // Skip this query iteratively, leaving its closing parenthesis to the
             // caller. Never recurse into input beyond the declared depth limit.

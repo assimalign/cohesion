@@ -98,7 +98,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (arguments.Count == 0 || star || !SqlStandardLibrary.IsCoalesce(call.FunctionName) && arguments.Count != 2)
         {
             bool coalesce = SqlStandardLibrary.IsCoalesce(call.FunctionName);
-            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, coalesce ? "1 or more arguments" : "exactly 2 arguments",
+            throw SqlEvaluationException.FunctionSignatureMismatch(call.FunctionName, coalesce ? ErrorMessages.OneOrMoreArgumentsExpected : ErrorMessages.TwoArgumentsExpected,
                 SqlFunctionResolver.DescribeArguments(arguments), coalesce ? SqlStandardLibrary.CoalesceUsage :
                     call.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) ? "EXTRACT(field FROM temporal)" : "NULLIF(value, value)");
         }
@@ -475,7 +475,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// </summary>
     private void RememberTypedCall(SqlFunctionCallExpression call, (SqlFunction? Function, DatabaseType Type) typed)
     {
-        if (ReferenceEquals(this, RowEvaluator))
+        if (ReferenceEquals(this, _rowEvaluator))
         {
             return;
         }

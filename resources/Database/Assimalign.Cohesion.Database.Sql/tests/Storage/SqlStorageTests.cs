@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Text;
+
+using Shouldly;
 using Xunit;
 
 namespace Assimalign.Cohesion.Database.Sql.Storage.Tests;
@@ -22,8 +24,8 @@ public class SqlStorageTests
     {
         using var storage = CreateInMemory("users");
 
-        Assert.NotEqual(default, storage.Id);
-        Assert.Equal(StorageModel.Sql, storage.Model);
+        storage.Id.ShouldNotBe(default);
+        storage.Model.ShouldBe(StorageModel.Sql);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - Create: Should accept StorageStream")]
@@ -34,7 +36,7 @@ public class SqlStorageTests
         using var backup = StorageStream.FromInMemory();
         using var storage = SqlStorage.Create(data, journal, backup, "users");
 
-        Assert.NotEqual(default, storage.Id);
+        storage.Id.ShouldNotBe(default);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Should return valid page and slot")]
@@ -48,8 +50,8 @@ public class SqlStorageTests
 
         var (pageId, slotIndex) = storage.InsertRow(row);
 
-        Assert.True((long)pageId >= 1);
-        Assert.Equal(0, slotIndex);
+        ((long)pageId).ShouldBeGreaterThanOrEqualTo(1);
+        slotIndex.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - ReadRow: Should return inserted data")]
@@ -64,7 +66,7 @@ public class SqlStorageTests
         var (pageId, slotIndex) = storage.InsertRow(original);
         var result = storage.ReadRow(pageId, slotIndex);
 
-        Assert.Equal(original, result.ToArray());
+        result.ToArray().ShouldBe(original);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Multiple inserts should produce sequential slots")]
@@ -83,11 +85,11 @@ public class SqlStorageTests
         var (page2, slot2) = storage.InsertRow(MakeRow(2));
         var (page3, slot3) = storage.InsertRow(MakeRow(3));
 
-        Assert.Equal(0, slot1);
-        Assert.Equal(1, slot2);
-        Assert.Equal(2, slot3);
-        Assert.Equal(page1, page2);
-        Assert.Equal(page2, page3);
+        slot1.ShouldBe(0);
+        slot2.ShouldBe(1);
+        slot3.ShouldBe(2);
+        page2.ShouldBe(page1);
+        page3.ShouldBe(page2);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - ReadRow: Should preserve column values through roundtrip")]
@@ -103,8 +105,8 @@ public class SqlStorageTests
         var (pageId, slotIndex) = storage.InsertRow(row);
         var result = storage.ReadRow(pageId, slotIndex);
 
-        Assert.Equal(99, BitConverter.ToInt32(result.Span));
-        Assert.Equal(19.95, BitConverter.ToDouble(result.Span.Slice(4)));
+        BitConverter.ToInt32(result.Span).ShouldBe(99);
+        BitConverter.ToDouble(result.Span.Slice(4)).ShouldBe(19.95);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - UpdateRow: Should overwrite existing data")]
@@ -121,7 +123,7 @@ public class SqlStorageTests
         storage.UpdateRow(pageId, slotIndex, updated);
 
         var result = storage.ReadRow(pageId, slotIndex);
-        Assert.Equal(999, BitConverter.ToInt32(result.Span));
+        BitConverter.ToInt32(result.Span).ShouldBe(999);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - DeleteRow: Should prevent reading deleted record")]
@@ -135,7 +137,7 @@ public class SqlStorageTests
         var (pageId, slotIndex) = storage.InsertRow(row);
         storage.DeleteRow(pageId, slotIndex);
 
-        Assert.ThrowsAny<Exception>(() => storage.ReadRow(pageId, slotIndex));
+        Should.Throw<Exception>(() => storage.ReadRow(pageId, slotIndex));
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - FlushChanges: Should not throw")]
@@ -184,7 +186,7 @@ public class SqlStorageTests
             StorageStream.FromInMemory()))
         {
             var result = storage.ReadRow(savedPageId, savedSlot);
-            Assert.Equal(original, result.ToArray());
+            result.ToArray().ShouldBe(original);
         }
     }
 
@@ -215,7 +217,7 @@ public class SqlStorageTests
             new MemoryStream()))
         {
             var result = storage.ReadRow(savedPageId, savedSlot);
-            Assert.Equal(original, result.ToArray());
+            result.ToArray().ShouldBe(original);
         }
     }
 
@@ -245,9 +247,9 @@ public class SqlStorageTests
             ids.Add(BitConverter.ToInt32(iterator.Current.Data.Span));
         }
 
-        Assert.Equal(2, ids.Count);
-        Assert.Equal(1, ids[0]);
-        Assert.Equal(3, ids[1]);
+        ids.Count.ShouldBe(2);
+        ids[0].ShouldBe(1);
+        ids[1].ShouldBe(3);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - InsertRow: Large rows should span multiple pages")]
@@ -267,10 +269,10 @@ public class SqlStorageTests
         var (page2, _) = storage.InsertRow(bigRow2);
         var (page3, _) = storage.InsertRow(bigRow3);
 
-        Assert.True((long)page3 > (long)page1, "Large rows should cause page overflow.");
+        ((long)page3).ShouldBeGreaterThan((long)page1, "Large rows should cause page overflow.");
 
         var result1 = storage.ReadRow(page1, 0);
-        Assert.Equal(bigRow1, result1.ToArray());
+        result1.ToArray().ShouldBe(bigRow1);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlStorage] - Dispose: Should be idempotent")]

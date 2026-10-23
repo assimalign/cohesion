@@ -7650,3 +7650,47 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Rules audit after main cleanup
+
+The transient cost, cascade-retry and EXPLAIN analysis carriers use explicit constructors with
+the same property/field layout. Private names follow repository casing; the four constructors
+add no state or hot-path work. SELECT-only EXPLAIN ANALYZE, plain EXPLAIN admission, transient
+probes, hash-budget refusal and cascade release/retry retain their existing contracts.
+Assembly-local Engine/Types resource bindings live under Internal and keep the linked module's
+owning namespace. SqlStorageTests keeps its existing cases and assertions through Shouldly.
+
+## Error message producers and catalog carriers
+
+Failure-detail producers now use the same generated resources as their outer exception templates:
+unresolved function/domain reasons, signature arity, declaration conflicts, schema drift and
+compensation explanations, and catalog size-refusal context. Persisted-definition explanation
+strings are cached. Canonical SQL, type/identity spellings and protocol/diagnostic framing remain
+data. Existing message text, codes and source-span policy are preserved for these resource moves.
+Handshake refusal prose uses these resources too, preserving its numeric protocol categories and
+current-culture formatting.
+
+Owned catalog producers no longer depend on the public message-only SqlCatalogException
+constructor. Malformed persisted catalog metadata reports CS06059 (SQLSTATE XX001); unsupported
+catalog metadata formats/versions report CS06060 (0A000). Table/index declaration, stale identity,
+identity range/type and script-state refusals use their existing specific identities. A truncated
+typed decode receives CS06059 at the catalog boundary while retaining the same SqlCatalogException,
+StorageCorruptionException, original cause, page and slot. Existing authored carriers remain intact.
+The public legacy constructor, refusal behavior, storage versions and lack of upgrade readers are
+unchanged. Runtime regressions pin the new carriers alongside existing message/location checks.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+An orphan directory without its data file refuses creation with CK06004 and the unchanged remedy.
+A directly opened missing physical data/catalog set carries CK06005. In-memory and file-backed
+strategies share the same condition identities. The orphan-directory format text is resourced
+through this assembly's existing Engine binding; no new public helper or reference is required.
+
+Identical SQL error text shares one canonical resource entry; internal accessor aliases are deduplicated without changing the text or culture.

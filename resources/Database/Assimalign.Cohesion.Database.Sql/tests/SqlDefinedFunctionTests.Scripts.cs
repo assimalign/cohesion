@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDefinedFunctionTests
 {
-    private const string ScriptSql = "CREATE FUNCTION inc(p INT) RETURNS INT IMMUTABLE RETURN p + 1; CREATE DOMAIN positive AS INT DEFAULT 4 NOT NULL CHECK (VALUE > 0); CREATE TABLE items (id positive, n INT DEFAULT inc(2)); INSERT INTO items (id) VALUES (1); CREATE INDEX ix_n ON items(n);";
+    private const string scriptSql = "CREATE FUNCTION inc(p INT) RETURNS INT IMMUTABLE RETURN p + 1; CREATE DOMAIN positive AS INT DEFAULT 4 NOT NULL CHECK (VALUE > 0); CREATE TABLE items (id positive, n INT DEFAULT inc(2)); INSERT INTO items (id) VALUES (1); CREATE INDEX ix_n ON items(n);";
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Declared scripts reopen on disk, preserve ownership, verify and refuse changed checksums")]
     public async Task BuildAsync_PersistedScript_ShouldSkipVerifyAndRefuseChangedChecksum()
@@ -39,7 +39,7 @@ public sealed partial class SqlDefinedFunctionTests
                 (await RowsAsync(session, "SELECT IS_SQL_DEFINED FROM COHESION_SCHEMA.FUNCTIONS WHERE FUNCTION_NAME = 'inc'")).ShouldBe([["YES"]]);
                 (await RowsAsync(session, "SELECT IS_SQL_DEFINED FROM COHESION_SCHEMA.DOMAINS WHERE DOMAIN_NAME = 'positive'")).ShouldBe([["YES"]]);
             }
-            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await ScriptBuilder(root: root, sql: ScriptSql + " ").BuildAsync());
+            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await ScriptBuilder(root: root, sql: scriptSql + " ").BuildAsync());
             failure.Message.ShouldContain("CS03201");
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
@@ -113,7 +113,7 @@ public sealed partial class SqlDefinedFunctionTests
             builder.AddDatabase("q8", database =>
             {
                 database.Schema(Benchmarks.Q8Schema.CreateSchema(checks: true));
-                database.Script("001", ScriptSql);
+                database.Script("001", scriptSql);
             });
             await using var engine = await builder.BuildAsync();
             var declaration = engine.DeclaredDatabases.ShouldHaveSingleItem();
@@ -258,7 +258,7 @@ public sealed partial class SqlDefinedFunctionTests
     }
 
     private static SqlDatabaseEngineBuilder ScriptBuilder(CrashCaptureSqlStorageStrategy? storage = null, string? root = null,
-        string sql = ScriptSql, SqlProvisioningMode mode = SqlProvisioningMode.Apply)
+        string sql = scriptSql, SqlProvisioningMode mode = SqlProvisioningMode.Apply)
     {
         var builder = SqlDatabaseEngine.CreateBuilder("sql-script");
         if (storage is not null) { builder.Options.StorageStrategy = storage; }

@@ -83,7 +83,7 @@ public sealed partial class SqlQueryParser
             {
                 AddExpectedDiagnostic(ref lexer, "START or INCREMENT in IDENTITY options");
             }
-            Expect(ref lexer, TokenType.RightParen, "')' after IDENTITY options");
+            Expect(ref lexer, TokenType.RightParen, _errorIdentityOptionsClosingExpected);
         }
         return new SqlIdentityDefinition(always, start ?? (increment < 0 ? -1 : 1), increment);
     }

@@ -64,3 +64,10 @@ The shared Types module also binds modifier-refusal templates to each consumer's
 resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
 codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
 format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+Assembly-local Defaults/Types resource bindings live under Internal while preserving their
+linked owning namespaces. SqlSchemaMigrationResult lives in ValueObjects with the same public
+namespace, positional properties and construction. Canonical documents, hashes and format
+cohesion/database-schema/v8 are unchanged.

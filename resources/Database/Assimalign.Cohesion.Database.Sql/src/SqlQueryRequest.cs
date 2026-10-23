@@ -123,11 +123,11 @@ public sealed class SqlQueryRequest : DatabaseRequest
         var error = statement.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            if (database is { } name && error.Code is "CS00006" or ParserOutOfStackCode)
+            if (database is { } name && error.Code is "CS00006" or parserOutOfStackCode)
             {
                 SqlDatabaseEventSource.Log.StatementTooComplex(name, statement.ExpressionNestingDepth);
             }
-            if (error.Code == ParserOutOfStackCode)
+            if (error.Code == parserOutOfStackCode)
             {
                 // The text is within the dialect; the thread is too small for it. That is a
                 // statement too complex for the executing thread, the same failure a planner or
@@ -146,7 +146,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
 
     // The parser's code for text within the nesting limit that the calling thread has too little
     // stack left to parse (#1151); the same text parses on a larger stack.
-    private const string ParserOutOfStackCode = "CS00007";
+    private const string parserOutOfStackCode = "CS00007";
 
     /// <summary>
     /// Parser options at the highest nesting limit any engine can be configured with (#1151), for

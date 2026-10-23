@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 public sealed partial class SqlCatalog
 {
-    private const int _viewRecordKind = 17;
+    private const int viewRecordKind = 17;
     private readonly Dictionary<string, DefinitionSlot<SqlCatalogView>> _views = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets an immutable capture of persisted user views.</summary>
@@ -68,17 +68,17 @@ public sealed partial class SqlCatalog
     {
         ArgumentNullException.ThrowIfNull(view);
         cancellationToken.ThrowIfCancellationRequested();
-        var record = new DatabaseKeyWriter().AppendInt32(_viewRecordKind)
+        var record = new DatabaseKeyWriter().AppendInt32(viewRecordKind)
             .AppendString(JsonSerializer.Serialize(SqlViewRecord.From(view), SqlCatalogJsonContext.Default.SqlViewRecord), Collation.Binary).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewRecordTooLarge); }
         lock (_sync)
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(view.Schema, view.Name);
-            if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewNameIsTable); }
+            if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewTargetIsTable); }
             _views.TryGetValue(key, out var previous);
             if (previous is not null && !orReplace) { throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewExists, view.Schema, view.Name)); }
-            if (!_namespaces.ContainsKey(view.Schema)) { throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, view.Schema)); }
+            if (!_namespaces.ContainsKey(view.Schema)) { throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, view.Schema)); }
             if (previous is not null)
             {
                 var old = previous.Value.Columns;
@@ -155,7 +155,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(schema, name);
-            if (_tables.ContainsKey((schema, name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewNameIsTable); }
+            if (_tables.ContainsKey((schema, name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewTargetIsTable); }
             if (!_views.TryGetValue(key, out var slot))
             {
                 if (publication is not null) { CommitScriptAbsence(publication, key); return default; }
@@ -181,8 +181,8 @@ public sealed partial class SqlCatalog
 
     private static void RefuseViewDependency(SqlCatalogView view, string target = "the object", bool rename = false)
         => throw new SqlCatalogException("CS03302", rename
-            ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDependent, view.Schema, view.Name)
-            : string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewDropDependent, target, view.Schema, view.Name));
+            ? string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDependent, view.Schema, view.Name)
+            : string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, target, view.Schema, view.Name));
 
     private void ValidateViewDirectory(IReadOnlyDictionary<ulong, SqlCatalogTable> tables)
     {

@@ -8,7 +8,7 @@ using Shouldly;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-internal static class SqlDiagnosticAssertions
+internal static partial class SqlDiagnosticAssertions
 {
     extension(ProtocolErrorMessage error)
     {

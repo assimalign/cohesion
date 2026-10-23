@@ -42,7 +42,7 @@ public sealed class SqlCatalogIndex
 
         if (columnNames.Count == 0)
         {
-            throw new SqlCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogIndexSqlCatalog, name));
+            throw new SqlCatalogException("CS03059", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogIndexSqlCatalog, name));
         }
 
         TableObjectId = tableObjectId;

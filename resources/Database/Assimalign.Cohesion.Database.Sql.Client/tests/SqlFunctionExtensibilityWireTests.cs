@@ -279,7 +279,7 @@ public sealed class SqlFunctionExtensibilityWireTests
     /// </summary>
     private sealed class FunctionHarness : IAsyncDisposable
     {
-        private const string DatabaseName = "app";
+        private const string databaseName = "app";
 
         private readonly SqlDatabaseEngine _engine;
         private readonly InMemoryConnectionListener _listener;
@@ -307,14 +307,14 @@ public sealed class SqlFunctionExtensibilityWireTests
             SqlDatabaseEngine engine = await builder.BuildAsync();
             if (create)
             {
-                var database = await engine.CreateDatabaseAsync(DatabaseName);
+                var database = await engine.CreateDatabaseAsync(databaseName);
                 await using var session = await database.CreateSessionAsync();
                 await session.ExecuteAsync("CREATE TABLE users (id INT NOT NULL, name VARCHAR(100), score BIGINT)");
                 await session.ExecuteAsync("INSERT INTO users (id, name, score) VALUES (1, 'ada', 100), (2, 'grace', 200)");
             }
             else
             {
-                await engine.OpenDatabaseAsync(DatabaseName);
+                await engine.OpenDatabaseAsync(databaseName);
             }
 
             var listener = new InMemoryConnectionListener();
@@ -322,7 +322,7 @@ public sealed class SqlFunctionExtensibilityWireTests
             await server.StartAsync();
             var client = SqlClient.Create(new SqlClientOptions
             {
-                Settings = new DatabaseConnectionSettings { Database = DatabaseName, Principal = "tester", EndPoint = listener.EndPoint },
+                Settings = new DatabaseConnectionSettings { Database = databaseName, Principal = "tester", EndPoint = listener.EndPoint },
                 ConnectionFactory = listener.CreateFactory(),
             });
 

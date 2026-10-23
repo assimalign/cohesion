@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlTransactionContractTests
 {
-    private const string AlreadyActive = "A transaction or operation is already active on this session.";
+    private const string alreadyActive = "A transaction or operation is already active on this session.";
 
     /// <summary>
     /// A rollback is idempotent for a transaction that did not commit, and refused for one that
@@ -87,8 +87,8 @@ public sealed class SqlTransactionContractTests
         var unsupported = await Should.ThrowAsync<DatabaseException>(async () => await session.BeginTransactionAsync(IsolationLevel.Serializable, TestTimeout.Token()));
 
         // Assert: the text BEGIN keeps its state-misuse diagnostic.
-        again.ShouldHaveMessage(AlreadyActive);
-        serializable.ShouldHaveMessage(AlreadyActive);
+        again.ShouldHaveMessage(alreadyActive);
+        serializable.ShouldHaveMessage(alreadyActive);
         text.Status.ShouldBe(DatabaseResultStatus.Error);
         text.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("CS04001");
         unsupported.Message.ShouldStartWith("IsolationLevel.Serializable is not supported by the SQL engine yet", Case.Sensitive);
@@ -143,7 +143,7 @@ public sealed class SqlTransactionContractTests
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (20, 1)", cancellationToken: TestTimeout.Token());
-        await engine.DropDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await engine.DropDatabaseAsync(databaseName, TestTimeout.Token());
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
 
@@ -196,7 +196,7 @@ public sealed class SqlTransactionContractTests
         await using var session = await database.CreateSessionAsync(TestTimeout.Token());
         var transaction = await session.BeginTransactionAsync(TestTimeout.Token());
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (30, 1)", cancellationToken: TestTimeout.Token());
-        await engine.DropDatabaseAsync(DatabaseName, TestTimeout.Token());
+        await engine.DropDatabaseAsync(databaseName, TestTimeout.Token());
 
         // Act
         var commit = await Should.ThrowAsync<DatabaseException>(async () =>
@@ -348,7 +348,7 @@ public sealed class SqlTransactionContractTests
 
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
-        var schema = SqlSchema.Compile(DatabaseName, _ => { });
+        var schema = SqlSchema.Compile(databaseName, _ => { });
 
         // Act
         var beginOnHolder = await Should.ThrowAsync<DatabaseException>(async () => await holder.BeginTransactionAsync(TestTimeout.Token()));
@@ -363,7 +363,7 @@ public sealed class SqlTransactionContractTests
         var commit = await Should.ThrowAsync<DatabaseOfflineException>(async () => await open.CommitAsync(TestTimeout.Token()));
 
         // Assert
-        beginOnHolder.ShouldHaveMessage(AlreadyActive);
+        beginOnHolder.ShouldHaveMessage(alreadyActive);
         canceledSession.CancellationToken.ShouldBe(canceled.Token);
         canceledBegin.CancellationToken.ShouldBe(canceled.Token);
         canceledText.CancellationToken.ShouldBe(canceled.Token);
@@ -375,7 +375,7 @@ public sealed class SqlTransactionContractTests
         }
     }
 
-    private const string DatabaseName = "contract";
+    private const string databaseName = "contract";
 
     // Quiet workers: only the statements a test runs write anything.
     private static SqlDatabaseEngine CreateEngine() => SqlDatabaseEngine.Create("contract-engine", new SqlDatabaseEngineOptions
@@ -388,7 +388,7 @@ public sealed class SqlTransactionContractTests
     // A database with one committed row: t (1, 1).
     private static async Task<SqlDatabase> CreateDatabaseAsync(SqlDatabaseEngine engine)
     {
-        var database = await engine.CreateDatabaseAsync(DatabaseName, TestTimeout.Token());
+        var database = await engine.CreateDatabaseAsync(databaseName, TestTimeout.Token());
         await using var setup = await database.CreateSessionAsync(TestTimeout.Token());
         await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)", cancellationToken: TestTimeout.Token());
         await setup.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 1)", cancellationToken: TestTimeout.Token());

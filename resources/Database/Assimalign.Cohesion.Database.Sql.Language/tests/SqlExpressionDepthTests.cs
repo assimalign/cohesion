@@ -22,10 +22,10 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// </summary>
 public sealed class SqlExpressionDepthTests
 {
-    private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
+    private const int limitValue = SqlQueryParserOptions.DefaultExpressionNestingLimit;
 
     /// <summary>The adversarial size from the #1068 review that overflowed the stack.</summary>
-    private const int Hostile = 200_000;
+    private const int hostile = 200_000;
 
     /// <summary>
     /// Builds an expression whose tree is exactly <c>depth</c> levels deep, one construct each:
@@ -70,15 +70,15 @@ public sealed class SqlExpressionDepthTests
     public void Parse_ExpressionAtLimit_ShouldParse(string construct)
     {
         // Arrange
-        string expression = Build(construct, Limit);
+        string expression = Build(construct, limitValue);
 
         // Act
         var statement = Parse($"SELECT {expression} FROM t;");
 
         // Assert
         Errors(statement).ShouldBeEmpty();
-        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.ShouldHaveSingleItem().Expression.Depth.ShouldBe(Limit);
-        statement.ExpressionNestingDepth.ShouldBe(Limit);
+        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.ShouldHaveSingleItem().Expression.Depth.ShouldBe(limitValue);
+        statement.ExpressionNestingDepth.ShouldBe(limitValue);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: one level past the default limit reports CS00006")]
@@ -86,7 +86,7 @@ public sealed class SqlExpressionDepthTests
     public void Parse_ExpressionPastLimit_ShouldReportSql0006(string construct)
     {
         // Arrange
-        string expression = Build(construct, Limit + 1);
+        string expression = Build(construct, limitValue + 1);
 
         // Act
         var statement = Parse($"SELECT {expression} FROM t;");
@@ -100,7 +100,7 @@ public sealed class SqlExpressionDepthTests
     public void Parse_HostileExpression_ShouldReportSql0006(string construct)
     {
         // Arrange
-        string expression = Build(construct, Hostile);
+        string expression = Build(construct, hostile);
         var parser = new SqlQueryParser();
 
         // Act
@@ -120,10 +120,10 @@ public sealed class SqlExpressionDepthTests
     /// <param name="terms">How many comparisons the chain joins.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: an AND or OR chain of any length is one level")]
     [InlineData("AND", 2)]
-    [InlineData("AND", Limit + 1)]
+    [InlineData("AND", limitValue + 1)]
     [InlineData("AND", 10_000)]
     [InlineData("OR", 10_000)]
-    [InlineData("OR", Hostile)]
+    [InlineData("OR", hostile)]
     public void Parse_FlatLogicalChain_ShouldBeOneLevel(string keyword, int terms)
     {
         // Arrange
@@ -284,9 +284,9 @@ public sealed class SqlExpressionDepthTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: parentheses nest at most as deep as the limit")]
     [InlineData(1, false)]
-    [InlineData(Limit, false)]
-    [InlineData(Limit + 1, true)]
-    [InlineData(Hostile, true)]
+    [InlineData(limitValue, false)]
+    [InlineData(limitValue + 1, true)]
+    [InlineData(hostile, true)]
     public void Parse_Parentheses_ShouldBeBounded(int pairs, bool rejected)
     {
         // Arrange
@@ -300,7 +300,7 @@ public sealed class SqlExpressionDepthTests
         {
             var error = AssertRejected(statement, SqlQueryCommandType.Select);
             error.Message.ShouldBe("Parentheses nest deeper than the supported limit of 256 levels.");
-            error.Start.ShouldBe("SELECT ".Length + Limit);
+            error.Start.ShouldBe("SELECT ".Length + limitValue);
         }
         else
         {
@@ -315,15 +315,15 @@ public sealed class SqlExpressionDepthTests
     public void Parse_ParenthesesAroundTreeAtLimit_ShouldParse()
     {
         // Arrange: 256 grouping parentheses around a 256-level chain.
-        string sql = "SELECT " + new string('(', Limit) + Build("additive", Limit) + new string(')', Limit) + " FROM t;";
+        string sql = "SELECT " + new string('(', limitValue) + Build("additive", limitValue) + new string(')', limitValue) + " FROM t;";
 
         // Act
         var statement = Parse(sql);
 
         // Assert
         Errors(statement).ShouldBeEmpty();
-        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(Limit);
-        statement.ExpressionNestingDepth.ShouldBe(Limit);
+        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(limitValue);
+        statement.ExpressionNestingDepth.ShouldBe(limitValue);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a chain is measured by tree depth and reported at the link that crosses the limit")]
@@ -331,27 +331,27 @@ public sealed class SqlExpressionDepthTests
     {
         // Arrange: term i starts at 7 + 4(i - 1); the operator after term k at 7 + 4k - 2. The
         // node built at operator k is k + 1 levels deep, so operator 256 crosses the limit.
-        string sql = $"SELECT {Build("additive", Limit + 1)} FROM t;";
+        string sql = $"SELECT {Build("additive", limitValue + 1)} FROM t;";
 
         // Act
         var error = AssertRejected(Parse(sql), SqlQueryCommandType.Select);
 
         // Assert
         error.Message.ShouldBe("Expression nesting exceeds the supported limit of 256 levels.");
-        error.Start.ShouldBe("SELECT ".Length + 4 * Limit - 2);
+        error.Start.ShouldBe("SELECT ".Length + 4 * limitValue - 2);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: prefix operators are reported at the operand that would be one level too deep")]
     public void Parse_PrefixChain_ShouldReportAtTooDeepOperand()
     {
         // Arrange: 256 signs over a leaf make 257 levels; the leaf is the level too deep.
-        string sql = "SELECT " + string.Concat(Enumerable.Repeat("- ", Limit)) + "a FROM t;";
+        string sql = "SELECT " + string.Concat(Enumerable.Repeat("- ", limitValue)) + "a FROM t;";
 
         // Act
         var error = AssertRejected(Parse(sql), SqlQueryCommandType.Select);
 
         // Assert
-        error.Start.ShouldBe("SELECT ".Length + 2 * Limit);
+        error.Start.ShouldBe("SELECT ".Length + 2 * limitValue);
     }
 
     /// <summary>The examples DIALECT.md gives report CS00006 at the token it names.</summary>
@@ -364,9 +364,9 @@ public sealed class SqlExpressionDepthTests
         // Arrange
         bool calls = example == "256 nested calls";
         string expression = calls
-            ? string.Concat(Enumerable.Repeat("ABS(", Limit)) + "1" + new string(')', Limit)
-            : string.Concat(Enumerable.Range(1, Limit - 1).Select(term => $"a = {Number(term)} OR (")) +
-                $"a = {Number(Limit)}" + new string(')', Limit - 1);
+            ? string.Concat(Enumerable.Repeat("ABS(", limitValue)) + "1" + new string(')', limitValue)
+            : string.Concat(Enumerable.Range(1, limitValue - 1).Select(term => $"a = {Number(term)} OR (")) +
+                $"a = {Number(limitValue)}" + new string(')', limitValue - 1);
         string sql = $"SELECT id FROM t WHERE {expression};";
 
         // The innermost 1, or the 255th OR.
@@ -374,7 +374,7 @@ public sealed class SqlExpressionDepthTests
         if (!calls)
         {
             expected = -1;
-            for (int occurrence = 0; occurrence < Limit - 1; occurrence++)
+            for (int occurrence = 0; occurrence < limitValue - 1; occurrence++)
             {
                 expected = sql.IndexOf(" OR ", expected + 1, StringComparison.Ordinal);
             }
@@ -389,8 +389,8 @@ public sealed class SqlExpressionDepthTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: the limit spans subqueries, whose clauses nest below the subquery node")]
-    [InlineData(Limit - 1, false)]
-    [InlineData(Limit, true)]
+    [InlineData(limitValue - 1, false)]
+    [InlineData(limitValue, true)]
     public void Parse_SubqueryClauses_ShouldCountBelowTheSubquery(int terms, bool rejected)
     {
         // Arrange: a scalar subquery is one level, its projection the rest.
@@ -409,9 +409,9 @@ public sealed class SqlExpressionDepthTests
             Errors(statement).ShouldBeEmpty();
             var subquery = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression
                 .ShouldBeOfType<SqlSubqueryExpression>();
-            subquery.Depth.ShouldBe(Limit);
-            subquery.Select.ExpressionDepth.ShouldBe(Limit - 1);
-            statement.ExpressionNestingDepth.ShouldBe(Limit);
+            subquery.Depth.ShouldBe(limitValue);
+            subquery.Select.ExpressionDepth.ShouldBe(limitValue - 1);
+            statement.ExpressionNestingDepth.ShouldBe(limitValue);
         }
     }
 
@@ -432,8 +432,8 @@ public sealed class SqlExpressionDepthTests
     public void Parse_EveryClause_ShouldEnforceLimit(string template, SqlQueryCommandType command)
     {
         // Arrange
-        string atLimit = string.Format(CultureInfo.InvariantCulture, template, Build("additive", Limit));
-        string pastLimit = string.Format(CultureInfo.InvariantCulture, template, Build("additive", Limit + 1));
+        string atLimit = string.Format(CultureInfo.InvariantCulture, template, Build("additive", limitValue));
+        string pastLimit = string.Format(CultureInfo.InvariantCulture, template, Build("additive", limitValue + 1));
 
         // Act
         var accepted = Parse(atLimit);
@@ -441,7 +441,7 @@ public sealed class SqlExpressionDepthTests
 
         // Assert
         Errors(accepted).ShouldNotContain(error => error.Code == "CS00006");
-        accepted.ExpressionNestingDepth.ShouldBe(Limit);
+        accepted.ExpressionNestingDepth.ShouldBe(limitValue);
         AssertRejected(rejected, command);
     }
 
@@ -450,7 +450,7 @@ public sealed class SqlExpressionDepthTests
     {
         // Arrange: ~ is reported before the limit; the unclosed parentheses and missing END after
         // it would each report CS00003 if the abandoned rules were allowed to.
-        string sql = $"SELECT ~a, (CASE WHEN {Build("additive", Limit + 1)} THEN 1 FROM t WHRE (id = 1;";
+        string sql = $"SELECT ~a, (CASE WHEN {Build("additive", limitValue + 1)} THEN 1 FROM t WHRE (id = 1;";
 
         // Act
         var statement = Parse(sql);
@@ -466,16 +466,16 @@ public sealed class SqlExpressionDepthTests
     {
         // Arrange
         var parser = new SqlQueryParser();
-        var rejected = OnLargeStack(() => (SqlQueryStatement)parser.Parse("SELECT " + new string('(', Hostile) + "1" + new string(')', Hostile) + " FROM t;"));
+        var rejected = OnLargeStack(() => (SqlQueryStatement)parser.Parse("SELECT " + new string('(', hostile) + "1" + new string(')', hostile) + " FROM t;"));
 
         // Act
-        var statement = OnLargeStack(() => (SqlQueryStatement)parser.Parse($"SELECT {Build("minus", Limit)} FROM t;"));
+        var statement = OnLargeStack(() => (SqlQueryStatement)parser.Parse($"SELECT {Build("minus", limitValue)} FROM t;"));
 
         // Assert
         AssertRejected(rejected, SqlQueryCommandType.Select);
         Errors(statement).ShouldBeEmpty();
-        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(Limit);
-        statement.ExpressionNestingDepth.ShouldBe(Limit);
+        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(limitValue);
+        statement.ExpressionNestingDepth.ShouldBe(limitValue);
     }
 
     /// <summary>
@@ -491,7 +491,7 @@ public sealed class SqlExpressionDepthTests
     public void Parse_DeepestStatementByStackSize_ShouldParseOrReportSql0007(int stackKilobytes, string? code)
     {
         // Arrange
-        string sql = "SELECT " + new string('(', Limit) + Build("function", Limit) + new string(')', Limit) + " FROM t;";
+        string sql = "SELECT " + new string('(', limitValue) + Build("function", limitValue) + new string(')', limitValue) + " FROM t;";
 
         // Act: parsed on the sized thread itself, not through the large-stack helper.
         var (statement, failure) = RunOnThread(stackKilobytes, () => (SqlQueryStatement)new SqlQueryParser().Parse(sql));
@@ -502,7 +502,7 @@ public sealed class SqlExpressionDepthTests
         if (code is null)
         {
             Errors(statement).ShouldBeEmpty();
-            statement.ExpressionNestingDepth.ShouldBe(Limit);
+            statement.ExpressionNestingDepth.ShouldBe(limitValue);
             return;
         }
 
@@ -531,8 +531,8 @@ public sealed class SqlExpressionDepthTests
     /// deeper than the limit.
     /// </summary>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: the COUNT(*) star is a level below its call")]
-    [InlineData(Limit - 2, false)]
-    [InlineData(Limit - 1, true)]
+    [InlineData(limitValue - 2, false)]
+    [InlineData(limitValue - 1, true)]
     public void Parse_CountStarAtLimit_ShouldCountTheStar(int calls, bool rejected)
     {
         // Arrange: the calls enclose COUNT, which encloses the star.
@@ -549,8 +549,8 @@ public sealed class SqlExpressionDepthTests
         }
 
         Errors(statement).ShouldBeEmpty();
-        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(Limit);
-        statement.ExpressionNestingDepth.ShouldBe(Limit);
+        statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression.Depth.ShouldBe(limitValue);
+        statement.ExpressionNestingDepth.ShouldBe(limitValue);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: the canonical text of a CHECK at the limit parses back to the same tree")]
@@ -558,7 +558,7 @@ public sealed class SqlExpressionDepthTests
     {
         // Arrange: a sign applied to a sign is rendered with parentheses, so the canonical text
         // of this predicate adds 253 pairs; it still parses under both limits.
-        string predicate = string.Concat(Enumerable.Repeat("- ", Limit - 2)) + "a > 0";
+        string predicate = string.Concat(Enumerable.Repeat("- ", limitValue - 2)) + "a > 0";
         var check = ParseCheck(predicate);
 
         // Act
@@ -566,7 +566,7 @@ public sealed class SqlExpressionDepthTests
         var reloaded = ParseCheck(canonical);
 
         // Assert
-        check.Depth.ShouldBe(Limit);
+        check.Depth.ShouldBe(limitValue);
         canonical.ShouldStartWith("-(-(-(");
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(check));
         SqlExpressionRenderer.Render(reloaded).ShouldBe(canonical);
@@ -600,7 +600,7 @@ public sealed class SqlExpressionDepthTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: the renderer refuses a hand-built tree deeper than any parser reads")]
     [InlineData(SqlQueryParserOptions.MaximumExpressionNestingLimit + 1)]
-    [InlineData(Hostile)]
+    [InlineData(hostile)]
     public void Render_TreePastCeiling_ShouldThrowNotSupported(int depth)
     {
         // Arrange: the parser cannot produce this tree; the internal constructors can.
@@ -705,9 +705,9 @@ public sealed class SqlExpressionDepthTests
         new SqlQueryParserOptions().ExpressionNestingLimit.ShouldBe(256);
         foreach (var parser in parsers)
         {
-            parser.ExpressionNestingLimit.ShouldBe(Limit);
-            Errors(parser.Parse($"SELECT {Build("additive", Limit)} FROM t;")).ShouldBeEmpty();
-            AssertRejected((SqlQueryStatement)parser.Parse($"SELECT {Build("additive", Limit + 1)} FROM t;"), SqlQueryCommandType.Select);
+            parser.ExpressionNestingLimit.ShouldBe(limitValue);
+            Errors(parser.Parse($"SELECT {Build("additive", limitValue)} FROM t;")).ShouldBeEmpty();
+            AssertRejected((SqlQueryStatement)parser.Parse($"SELECT {Build("additive", limitValue + 1)} FROM t;"), SqlQueryCommandType.Select);
         }
     }
 
@@ -847,7 +847,7 @@ public sealed class SqlExpressionDepthTests
         return statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
     }
 
-    private static SqlQueryStatement Parse(string sql) => Parse(sql, Limit);
+    private static SqlQueryStatement Parse(string sql) => Parse(sql, limitValue);
 
     // Every level of parentheses, calls, CASE or CAST runs the whole precedence ladder, about 6 KB
     // of stack in a debug build (about 1 KB in a release build), so the deepest text the default
@@ -858,12 +858,12 @@ public sealed class SqlExpressionDepthTests
 
     private static T OnLargeStack<T>(Func<T> work)
     {
-        var (result, failure) = RunOnThread(LargeStackKilobytes, work);
+        var (result, failure) = RunOnThread(largeStackKilobytes, work);
         failure.ShouldBeNull();
         return result!;
     }
 
-    private const int LargeStackKilobytes = 8 * 1024;
+    private const int largeStackKilobytes = 8 * 1024;
 
     private static List<Diagnostic> Errors(QueryStatement statement)
         => statement.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToList();

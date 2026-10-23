@@ -134,4 +134,36 @@
   <data name="DecimalScaleInvalid" xml:space="preserve"><value>The decimal scale must be between 0 and precision.</value></data>
   <data name="TypeLengthInvalid" xml:space="preserve"><value>String and binary types accept one positive length argument between 1 and 10485760.</value></data>
   <data name="TypeArgumentsUnsupported" xml:space="preserve"><value>This type does not accept type arguments.</value></data>
+  <data name="ParenthesisNestingLimit" xml:space="preserve"><value>Parentheses nest deeper than the supported limit of {0} levels.</value></data>
+  <data name="ExpressionNestingLimit" xml:space="preserve"><value>Expression nesting exceeds the supported limit of {0} levels.</value></data>
+  <data name="ParserStackExhausted" xml:space="preserve"><value>Expression nesting exceeds the stack available to the parser on this thread.</value></data>
+  <data name="ImplicitTableAliasHint" xml:space="preserve"><value> '{0}' was read as an alias of table '{1}'.</value></data>
+  <data name="EndOfStatement" xml:space="preserve"><value>end of statement</value></data>
+  <data name="StringLiteralTokenDescription" xml:space="preserve"><value>string literal {0}</value></data>
+  <data name="FunctionClosingParenthesisExpected" xml:space="preserve"><value>')' after {0}</value></data>
+  <data name="InSubqueryClosingParenthesisExpected" xml:space="preserve"><value>')' after the IN subquery</value></data>
+  <data name="InListClosingParenthesisExpected" xml:space="preserve"><value>')' after the IN list</value></data>
+  <data name="SubqueryClosingParenthesisExpected" xml:space="preserve"><value>')' after the subquery</value></data>
+  <data name="FunctionArgumentsClosingExpected" xml:space="preserve"><value>')' after the {0} arguments</value></data>
+  <data name="WithinGroupOpeningExpected" xml:space="preserve"><value>'(' after WITHIN GROUP</value></data>
+  <data name="WithinGroupClosingExpected" xml:space="preserve"><value>')' after WITHIN GROUP ordering</value></data>
+  <data name="ExistsOpeningExpected" xml:space="preserve"><value>'(' after EXISTS</value></data>
+  <data name="ExistsClosingExpected" xml:space="preserve"><value>')' after the EXISTS subquery</value></data>
+  <data name="ColumnSubject" xml:space="preserve"><value>Column '{0}'</value></data>
+  <data name="CastTargetSubject" xml:space="preserve"><value>CAST target '{0}'</value></data>
+  <data name="ArrayTypeClosingExpected" xml:space="preserve"><value>']' after the array type</value></data>
+  <data name="FunctionParametersOpeningExpected" xml:space="preserve"><value>'(' before function parameters</value></data>
+  <data name="FunctionParameterSubject" xml:space="preserve"><value>Function '{0}' parameter '{1}'</value></data>
+  <data name="FunctionReturnTypeSubject" xml:space="preserve"><value>Function '{0}' return type</value></data>
+  <data name="FunctionSignatureOpeningExpected" xml:space="preserve"><value>'(' before the function signature</value></data>
+  <data name="FunctionParameterTypeSubject" xml:space="preserve"><value>Function '{0}' parameter type</value></data>
+  <data name="DomainSubject" xml:space="preserve"><value>Domain '{0}'</value></data>
+  <data name="DomainCheckOpeningExpected" xml:space="preserve"><value>'(' before the domain CHECK</value></data>
+  <data name="CteBodyOpeningExpected" xml:space="preserve"><value>'(' before the common table expression body</value></data>
+  <data name="CteBodyClosingExpected" xml:space="preserve"><value>')' after the common table expression body</value></data>
+  <data name="IdentityOptionsClosingExpected" xml:space="preserve"><value>')' after IDENTITY options</value></data>
+  <data name="ViewColumnsClosingExpected" xml:space="preserve"><value>')' after view columns</value></data>
+  <data name="ValuesRowOpeningExpected" xml:space="preserve"><value>'(' before the VALUES row</value></data>
+  <data name="ValuesRowClosingExpected" xml:space="preserve"><value>')' after the VALUES row</value></data>
+  <data name="QueryOperandClosingExpected" xml:space="preserve"><value>')' after the query operand</value></data>
 </root>

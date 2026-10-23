@@ -31,9 +31,9 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlTimingCollection.Name)]
 public sealed class SqlCreateIndexMemoryTests : IDisposable
 {
-    private const int Rows = 9_000;
-    private const int KeyLength = 900;
-    private const long PoolBytes = 1024 * 1024; // the smallest pool an engine accepts (Storage.MinimumBufferPoolBytes)
+    private const int rows = 9_000;
+    private const int keyLength = 900;
+    private const long poolBytes = 1024 * 1024; // the smallest pool an engine accepts (Storage.MinimumBufferPoolBytes)
 
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-sql-index-memory", Guid.NewGuid().ToString("N"));
 
@@ -59,20 +59,20 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         await using var engine = SqlDatabaseEngine.Create("create-index-memory", new SqlDatabaseEngineOptions
         {
             RootPath = _rootPath,
-            BufferPoolCapacity = PoolBytes,
+            BufferPoolCapacity = poolBytes,
             CheckpointInterval = TimeSpan.FromHours(1),
             MaintenanceInterval = TimeSpan.FromHours(1),
         });
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync();
-        await session.ExecuteAsync($"CREATE TABLE t (id INT PRIMARY KEY, k VARCHAR({KeyLength}))", cancellationToken: TestTimeout.Token(60));
+        await session.ExecuteAsync($"CREATE TABLE t (id INT PRIMARY KEY, k VARCHAR({keyLength}))", cancellationToken: TestTimeout.Token(60));
         var sql = new StringBuilder();
-        for (int first = 0; first < Rows; first += 100)
+        for (int first = 0; first < rows; first += 100)
         {
             sql.Clear().Append("INSERT INTO t (id, k) VALUES ");
             for (int id = first; id < first + 100; id++)
             {
-                string key = ((id * 7_919L) % Rows).ToString("D6", CultureInfo.InvariantCulture).PadRight(KeyLength, (char)('a' + (id % 26)));
+                string key = ((id * 7_919L) % rows).ToString("D6", CultureInfo.InvariantCulture).PadRight(keyLength, (char)('a' + (id % 26)));
                 sql.Append(id == first ? "" : ", ").Append(CultureInfo.InvariantCulture, $"({id}, '{key}')");
             }
 
@@ -104,7 +104,7 @@ public sealed class SqlCreateIndexMemoryTests : IDisposable
         // Assert: every page is built in one bracket, with compact pre-images and no spilling.
         // The 8 KiB storage page is format-defined; the OS/GC page size does not enter this bound.
         long indexPages = storage.PageManager.PageCount - pagesBefore;
-        long poolPages = PoolBytes / Page.Size;
+        long poolPages = poolBytes / Page.Size;
         storage.BufferPoolCapacity.ShouldBe((int)poolPages);
         indexPages.ShouldBeGreaterThanOrEqualTo(10 * poolPages, "the index must be built over at least ten times the pool");
         atCommit.ShouldBeGreaterThan(0, "the checkpoint-size hook never observed pre-images inside the build's commit");

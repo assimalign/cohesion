@@ -241,7 +241,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.Startup)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StartupFrameExpected, frame.Value.Type), string.Empty, string.Empty).ConfigureAwait(false);
                 return false;
             }
 
@@ -249,7 +249,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolVersionUnsupported, startup.Version.Major, ProtocolVersion.Current), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -273,7 +273,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (database is null)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.HandshakeDatabaseMissing, startup.Database), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -300,7 +300,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationResponseExpected, frame.Value.Type), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -308,7 +308,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             if (!authenticated)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PrincipalAuthenticationFailed, startup.Principal), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 

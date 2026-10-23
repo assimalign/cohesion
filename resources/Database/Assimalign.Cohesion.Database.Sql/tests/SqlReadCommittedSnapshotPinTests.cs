@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(SqlReadCommittedStressCollection.Name)]
 public sealed class SqlReadCommittedSnapshotPinTests
 {
-    private const string Join = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id ORDER BY a.id";
+    private const string join = "SELECT a.id, b.id FROM a JOIN b ON a.id = b.id ORDER BY a.id";
 
     private readonly ITestOutputHelper _output;
 
@@ -63,7 +63,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
         var blocker = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, TestTimeout.Token());
         await coordinator.LockManager.AcquireAsync(blocker.Sequence, LockResource.Object(TableId(database, "a")), LockMode.Exclusive, TestTimeout.Token());
         int openBefore = coordinator.GetOpenContexts().Count;
-        var pending = readerSession.ExecuteAsync(Join, cancellationToken: TestTimeout.Token()).AsTask();
+        var pending = readerSession.ExecuteAsync(join, cancellationToken: TestTimeout.Token()).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         int openWhileWaiting = coordinator.GetOpenContexts().Count;
 
@@ -78,7 +78,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
         long prunedAfterTheStatement = coordinator.RunVersionPurgePass(CancellationToken.None);
         int retainedRecordsAfter = coordinator.VersionStore.TrackedVersionCount;
         long physicalEntriesAfter = await PhysicalEntriesAsync(database);
-        var refreshed = await RowsAsync(readerSession, Join);
+        var refreshed = await RowsAsync(readerSession, join);
         await reader.CommitAsync(TestTimeout.Token());
 
         // Assert: the statement saw the writer in flight, so it returned row 2; its pin held the
@@ -166,7 +166,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
         await coordinator.LockManager.AcquireAsync(blocker.Sequence, LockResource.Object(TableId(database, "a")), LockMode.Exclusive, TestTimeout.Token());
         int openBefore = coordinator.GetOpenContexts().Count;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        string sql = outcome == "fails" ? "SELECT a.id / 0, b.id FROM a JOIN b ON a.id = b.id" : Join;
+        string sql = outcome == "fails" ? "SELECT a.id / 0, b.id FROM a JOIN b ON a.id = b.id" : join;
 
         // Act
         var pending = session.ExecuteAsync(sql, cancellationToken: cancellation.Token).AsTask();
@@ -197,7 +197,7 @@ public sealed class SqlReadCommittedSnapshotPinTests
             await coordinator.RollbackAsync(blocker, CancellationToken.None);
         }
 
-        var rows = await RowsAsync(session, Join);
+        var rows = await RowsAsync(session, join);
         var stateAfter = transaction.State;
         await transaction.CommitAsync(TestTimeout.Token());
 

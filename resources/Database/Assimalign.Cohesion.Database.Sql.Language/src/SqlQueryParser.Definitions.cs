@@ -63,7 +63,7 @@ public sealed partial class SqlQueryParser
             while (CurrentText(ref lexer) == "[")
             {
                 Advance(ref lexer);
-                Expect(ref lexer, TokenType.RightBracket, "']' after the array type");
+                Expect(ref lexer, TokenType.RightBracket, _errorArrayTypeClosingExpected);
             }
             AddTypeModifierDiagnostic(subject, ErrorMessages.SqlQueryParserParseDefinitionTypeVoid, arrayStart, _lastTokenEnd, "CK00001");
             resolvedType = null;
@@ -189,7 +189,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a function name");
         var parameters = new List<SqlFunctionParameter>();
-        if (Expect(ref lexer, TokenType.LeftParen, "'(' before function parameters"))
+        if (Expect(ref lexer, TokenType.LeftParen, _errorFunctionParametersOpeningExpected))
         {
             if (lexer.Current.Type != TokenType.RightParen)
             {
@@ -200,13 +200,13 @@ public sealed partial class SqlQueryParser
                         Advance(ref lexer);
                     }
                     string parameter = ParseDefinitionName(ref lexer, "a parameter name");
-                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer, $"Function '{name}' parameter '{parameter}'")));
+                    parameters.Add(new SqlFunctionParameter(parameter, ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionParameterSubject, name, parameter))));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after function parameters");
         }
         ExpectKeyword(ref lexer, "RETURNS", "RETURNS and a result type");
-        string returnType = ParseDefinitionType(ref lexer, $"Function '{name}' return type");
+        string returnType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionReturnTypeSubject, name));
         string volatility = "VOLATILE";
         bool strict = false, sawVolatility = false, sawNullBehavior = false;
         while (!IsAtEnd(ref lexer) && !IsKeyword(ref lexer, "RETURN"))
@@ -253,7 +253,7 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a function name");
         var types = new List<string>();
-        if (Expect(ref lexer, TokenType.LeftParen, "'(' before the function signature"))
+        if (Expect(ref lexer, TokenType.LeftParen, _errorFunctionSignatureOpeningExpected))
         {
             if (lexer.Current.Type != TokenType.RightParen)
             {
@@ -263,7 +263,7 @@ public sealed partial class SqlQueryParser
                     {
                         Advance(ref lexer);
                     }
-                    types.Add(ParseDefinitionType(ref lexer, $"Function '{name}' parameter type"));
+                    types.Add(ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionParameterTypeSubject, name)));
                 } while (lexer.Current.Type == TokenType.Comma);
             }
             ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after the function signature");
@@ -278,10 +278,10 @@ public sealed partial class SqlQueryParser
         if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL")
         {
             string? error = SqlTypeModifiers.GetError(name, null, null, out string code);
-            AddTypeModifierDiagnostic($"Domain '{name}'", error!, pos, _lastTokenEnd, code);
+            AddTypeModifierDiagnostic(string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorDomainSubject, name), error!, pos, _lastTokenEnd, code);
         }
         ExpectKeyword(ref lexer, "AS", "AS and a base type");
-        string type = ParseDefinitionType(ref lexer, $"Domain '{name}'");
+        string type = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorDomainSubject, name));
         SqlExpression? defaultValue = null, check = null;
         string? constraint = null;
         bool notNull = false;
@@ -304,7 +304,7 @@ public sealed partial class SqlQueryParser
         if (constraint is not null || IsKeyword(ref lexer, "CHECK"))
         {
             ExpectKeyword(ref lexer, "CHECK", "CHECK after a domain constraint name");
-            if (Expect(ref lexer, TokenType.LeftParen, "'(' before the domain CHECK"))
+            if (Expect(ref lexer, TokenType.LeftParen, _errorDomainCheckOpeningExpected))
             {
                 check = ParseExpression(ref lexer);
                 ExpectDdlToken(ref lexer, TokenType.RightParen, "')' after the domain CHECK");

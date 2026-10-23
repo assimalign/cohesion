@@ -33,8 +33,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 [StructLayout(LayoutKind.Auto)]
 public readonly struct SqlValue : IEquatable<SqlValue>
 {
-    private static readonly object BoxedTrue = true;
-    private static readonly object BoxedFalse = false;
+    private static readonly object _boxedTrue = true;
+    private static readonly object _boxedFalse = false;
 
     // The text or binary value; for a value the engine read from a row, the boxed value it read,
     // so handing it back to the row allocates nothing.
@@ -468,7 +468,7 @@ public readonly struct SqlValue : IEquatable<SqlValue>
         {
             // Shared boxes, as the evaluator's predicates return: a function returning BOOLEAN
             // allocates nothing per row.
-            DatabaseType.Boolean => Read<bool>() ? BoxedTrue : BoxedFalse,
+            DatabaseType.Boolean => Read<bool>() ? _boxedTrue : _boxedFalse,
             DatabaseType.Int8 => Read<sbyte>(),
             DatabaseType.Int16 => Read<short>(),
             DatabaseType.Int32 => Read<int>(),

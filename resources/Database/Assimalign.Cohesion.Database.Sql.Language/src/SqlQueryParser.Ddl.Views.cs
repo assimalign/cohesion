@@ -39,7 +39,7 @@ public sealed partial class SqlQueryParser
                 if (lexer.Current.Type != TokenType.Comma) { break; }
                 Advance(ref lexer);
             }
-            Expect(ref lexer, TokenType.RightParen, "')' after view columns");
+            Expect(ref lexer, TokenType.RightParen, _errorViewColumnsClosingExpected);
         }
         if (IsKeyword(ref lexer, "WITH"))
         {

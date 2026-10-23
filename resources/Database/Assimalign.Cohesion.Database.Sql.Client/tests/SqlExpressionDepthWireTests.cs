@@ -21,8 +21,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlExpressionDepthWireTests
 {
-    private const int Limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
-    private const int Hostile = 200_000;
+    private const int limit = SqlQueryParserOptions.DefaultExpressionNestingLimit;
+    private const int hostile = 200_000;
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: an expression at the 256-level limit executes over the wire")]
     public async Task QueryAsync_AtLimit_ShouldExecute()
@@ -32,11 +32,11 @@ public sealed class SqlExpressionDepthWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
 
         // Act
-        var rows = await connection.QueryAsync($"SELECT {Chain(Limit)} AS total FROM users WHERE id = 1",
+        var rows = await connection.QueryAsync($"SELECT {Chain(limit)} AS total FROM users WHERE id = 1",
             cancellationToken: SqlClientTestHarness.Timeout());
 
         // Assert
-        rows.ShouldHaveSingleItem()["total"].ShouldBe((long)Limit);
+        rows.ShouldHaveSingleItem()["total"].ShouldBe((long)limit);
     }
 
     /// <summary>
@@ -73,8 +73,8 @@ public sealed class SqlExpressionDepthWireTests
     /// </summary>
     /// <param name="terms">The number of terms in a <c>1 + 1 + ...</c> chain.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Nesting: an expression past the limit is a ParseFailure that keeps the connection")]
-    [InlineData(Limit + 1)]
-    [InlineData(Hostile)]
+    [InlineData(limit + 1)]
+    [InlineData(hostile)]
     public async Task ExecuteAsync_PastLimit_ShouldReportParseFailureAndKeepServing(int terms)
     {
         // Arrange
@@ -171,8 +171,8 @@ public sealed class SqlExpressionDepthWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         var parameters = new Dictionary<string, object?>
         {
-            ["value"] = new string('a', Hostile),
-            ["pattern"] = string.Concat(Enumerable.Repeat("%a", Hostile)),
+            ["value"] = new string('a', hostile),
+            ["pattern"] = string.Concat(Enumerable.Repeat("%a", hostile)),
         };
 
         // Act

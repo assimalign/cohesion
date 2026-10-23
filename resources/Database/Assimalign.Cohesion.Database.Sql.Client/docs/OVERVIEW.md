@@ -101,3 +101,10 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Rules audit after main cleanup
+
+Private test constants use repository casing. The transaction-outcome guidance is self-contained:
+connection loss after COMMIT can remain uncertain, and the client supplies no automatic replay
+or reconciliation operation. The removed mapper package is no longer a documentation dependency.
+Wire bytes, diagnostics, pooling and public APIs are unchanged.

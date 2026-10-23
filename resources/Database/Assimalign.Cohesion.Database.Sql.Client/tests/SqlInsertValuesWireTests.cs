@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 /// </summary>
 public sealed class SqlInsertValuesWireTests
 {
-    private const string ColumnReferenceNotAllowed = "CS01005";
+    private const string columnReferenceNotAllowed = "CS01005";
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - DEFAULT: VALUES, DEFAULT VALUES and UPDATE share defaults over both transports")]
     [InlineData(false)]
@@ -114,7 +114,7 @@ public sealed class SqlInsertValuesWireTests
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldBe($"{ColumnReferenceNotAllowed}: Column reference '{reference}' is not allowed in INSERT ... VALUES, " +
+        failure.Message.ShouldBe($"{columnReferenceNotAllowed}: Column reference '{reference}' is not allowed in INSERT ... VALUES, " +
             "which has no columns in scope. Use literals, parameters and expressions over them, or INSERT ... SELECT to read values from a table.");
         SqlResultSet ones = await connection.QueryAsync("SELECT 1 AS one FROM users", cancellationToken: SqlClientTestHarness.Timeout());
         ones.Select(row => row["one"]).ShouldBe(new object?[] { 1L, 1L });

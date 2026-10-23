@@ -157,14 +157,10 @@
   <data name="ColumnNameMissing" xml:space="preserve"><value>Table '{0}.{1}' has no column named '{2}'.</value></data>
   <data name="WriteIndexUnavailable" xml:space="preserve"><value>Index '{0}' on '{1}.{2}' is unavailable; writes cannot bypass its constraints.</value></data>
   <data name="TableProvisioningCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists; schema provisioning cannot adopt it.</value></data>
-  <data name="ExecutionTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
-  <data name="CurrentTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
-  <data name="LookupTableMissing" xml:space="preserve"><value>Table '{0}.{1}' does not exist.</value></data>
   <data name="TableForeignKeyDependent" xml:space="preserve"><value>Table '{0}' is referenced by a foreign key and cannot be dropped.</value></data>
   <data name="IndexProvisioningCollision" xml:space="preserve"><value>Index '{0}' already exists on '{1}.{2}'; schema provisioning cannot adopt it.</value></data>
   <data name="ExecutionIndexExists" xml:space="preserve"><value>An index named '{0}' already exists on '{1}.{2}'.</value></data>
   <data name="ExecutionIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
-  <data name="CurrentIndexMissing" xml:space="preserve"><value>No index named '{0}' exists on '{1}.{2}'.</value></data>
   <data name="TableIdentityReplaced" xml:space="preserve"><value>Table '{0}.{1}' was replaced while waiting for a DDL lock. Retry the statement.</value></data>
   <data name="ColumnBinaryRequired" xml:space="preserve"><value>Column '{0}' requires binary data.</value></data>
   <data name="DateConversionUnsupported" xml:space="preserve"><value>Cannot convert {0} to DATE.</value></data>
@@ -261,9 +257,7 @@
 
   <data name="IdentityMetadataInvalid" xml:space="preserve"><value>Column '{0}' has invalid or duplicate identity metadata.</value></data>
 
-  <data name="NamespaceMissing" xml:space="preserve"><value>Schema '{0}' does not exist.</value></data>
 
-  <data name="NamespaceDependentObjects" xml:space="preserve"><value>Cannot drop schema '{0}' because other objects depend on it. Use DROP SCHEMA ... CASCADE to drop the dependent objects too.</value></data>
 
   <data name="NamespaceRecordMalformed" xml:space="preserve"><value>Malformed or duplicate SQL namespace record.</value></data>
 
@@ -271,7 +265,6 @@
 
   <data name="ViewRecordTooLarge" xml:space="preserve"><value>The view definition exceeds the catalog record limit of 8,092 bytes.</value></data>
 
-  <data name="ViewNameIsTable" xml:space="preserve"><value>The target is a table, not a view.</value></data>
 
   <data name="ViewExists" xml:space="preserve"><value>Relation &#x27;{0}.{1}&#x27; already exists.</value></data>
 
@@ -281,9 +274,7 @@
 
   <data name="ViewCycle" xml:space="preserve"><value>A view cannot depend on itself, directly or indirectly.</value></data>
 
-  <data name="ViewDependent" xml:space="preserve"><value>Cannot change the object because view &#x27;{0}.{1}&#x27; depends on it.</value></data>
 
-  <data name="ViewDropDependent" xml:space="preserve"><value>Cannot drop '{0}' because other objects depend on it: view '{1}.{2}' depends on it.</value></data>
   <data name="DatabaseCreationFailed" xml:space="preserve"><value>Database '{0}' could not be created because a storage or index operation failed. {1}</value></data>
   <data name="TransactionCommitAborted" xml:space="preserve"><value>The session's transaction is aborted and cannot commit; nothing was committed.</value></data>
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; statements are refused until it is rolled back.</value></data>
@@ -766,5 +757,98 @@
   <data name="DatabaseNameConsecutiveDots" xml:space="preserve"><value>The name holds two dots in a row.</value></data>
   <data name="DatabaseNameDeviceReserved" xml:space="preserve"><value>'{0}' is a Windows device name.</value></data>
   <data name="ExpressionNestingRequirement" xml:space="preserve"><value>must be between {0} and {1} levels.</value></data>
+  <data name="ScalarFunctionKindLabel" xml:space="preserve"><value>a scalar function</value></data>
+  <data name="AggregateKindLabel" xml:space="preserve"><value>an aggregate</value></data>
+  <data name="DeclaredDomainRegistrationConflict" xml:space="preserve"><value>it declares domain '{0}' over {1}, but the engine registers </value></data>
+  <data name="RegisteredDomainDescription" xml:space="preserve"><value>domain '{0}' over {1}</value></data>
+  <data name="RegisteredBuiltInTypeDescription" xml:space="preserve"><value>the built-in type {0}</value></data>
+  <data name="CheckConstraintSubject" xml:space="preserve"><value>CHECK constraint '{0}' on table '{1}'</value></data>
+  <data name="ColumnDefaultSubject" xml:space="preserve"><value>DEFAULT of column '{0}' on table '{1}'</value></data>
+  <data name="ColumnMissingValueSubject" xml:space="preserve"><value>Missing value of column '{0}' on table '{1}'</value></data>
+  <data name="RegistrationMissingReason" xml:space="preserve"><value>which this engine does not register</value></data>
+  <data name="RegisteredDomainStorageMismatch" xml:space="preserve"><value>which this engine registers over {0}, but the column stores {1}</value></data>
+  <data name="RegisteredResultTypeMismatch" xml:space="preserve"><value>which this engine registers returning {0}, where the CHECK needs {1}</value></data>
+  <data name="RegisteredAsAggregateReason" xml:space="preserve"><value>which this engine registers as an aggregate</value></data>
+  <data name="RecordedFunctionIdentityMissing" xml:space="preserve"><value>whose recorded identity '{0}' this engine does not register</value></data>
+  <data name="ImmutableRegistrationMissing" xml:space="preserve"><value>which this engine no longer registers as IMMUTABLE</value></data>
+  <data name="OverloadSelectionAmbiguousReason" xml:space="preserve"><value>which more than one overload this engine registers accepts equally well ({0})</value></data>
+  <data name="NoAcceptedOverloadReason" xml:space="preserve"><value>which no overload this engine registers accepts ({0})</value></data>
+  <data name="UnresolvedFunctionDescription" xml:space="preserve"><value>{0} calls function '{1}', {2}</value></data>
+  <data name="UnresolvedColumnDomainDescription" xml:space="preserve"><value>Column '{0}' of table '{1}' is of domain '{2}', {3}</value></data>
+  <data name="FunctionSubject" xml:space="preserve"><value>Function '{0}'</value></data>
+  <data name="DomainDefaultSubject" xml:space="preserve"><value>DEFAULT of domain '{0}'</value></data>
+  <data name="DomainCheckSubject" xml:space="preserve"><value>CHECK of domain '{0}'</value></data>
+  <data name="FunctionFailureContext" xml:space="preserve"><value>Function '{0}': {1}</value></data>
+  <data name="UnresolvedDomainCheck" xml:space="preserve"><value>Domain '{0}' has an unresolved SQL CHECK ({1}).</value></data>
+  <data name="AmbiguousOverloadPair" xml:space="preserve"><value>{0} and {1}</value></data>
+  <data name="AnyArgumentCount" xml:space="preserve"><value>any number of arguments</value></data>
+  <data name="MinimumArgumentCount" xml:space="preserve"><value>{0} or more arguments</value></data>
+  <data name="NoArgumentsExpected" xml:space="preserve"><value>no arguments</value></data>
+  <data name="ExactArgumentCount" xml:space="preserve"><value>exactly {0} {1}</value></data>
+  <data name="ExpectedArgumentSingular" xml:space="preserve"><value>argument</value></data>
+  <data name="ExpectedArgumentPlural" xml:space="preserve"><value>arguments</value></data>
+  <data name="ArgumentCountRange" xml:space="preserve"><value>{0} to {1} arguments</value></data>
+  <data name="MinimumArgumentCountFragment" xml:space="preserve"><value>{0} or more</value></data>
+  <data name="ListedArgumentCounts" xml:space="preserve"><value>{0} or {1} arguments</value></data>
+  <data name="StarOnlyExpected" xml:space="preserve"><value>only '*'</value></data>
+  <data name="AlternativeStarExpected" xml:space="preserve"><value>{0} or '*'</value></data>
+  <data name="NoArgumentsReceived" xml:space="preserve"><value>none</value></data>
+  <data name="StarArgumentCountReceived" xml:space="preserve"><value>{0} arguments including '*'</value></data>
+  <data name="OneOrMoreArgumentsExpected" xml:space="preserve"><value>1 or more arguments</value></data>
+  <data name="TwoArgumentsExpected" xml:space="preserve"><value>exactly 2 arguments</value></data>
+  <data name="CompensationComplete" xml:space="preserve"><value>Every completed step was compensated.</value></data>
+  <data name="CompensationIncomplete" xml:space="preserve"><value>Compensation was incomplete; the live catalog must be reconciled before retrying.</value></data>
+  <data name="MigrationStepFailureContext" xml:space="preserve"><value>step {0} of {1} ({2}) failed</value></data>
+  <data name="SchemaRecordFailureContext" xml:space="preserve"><value>recording the applied schema failed after all {0} step(s)</value></data>
+  <data name="DeclarationDifferenceContext" xml:space="preserve"><value>; first difference from the declaration: {0}</value></data>
+  <data name="PrincipalDdlUnavailable" xml:space="preserve"><value>principal '{0}', and principals and grants are refused until their DDL exists</value></data>
+  <data name="ColumnSubject" xml:space="preserve"><value>Column '{0}'</value></data>
+  <data name="QualifiedColumnDefaultSubject" xml:space="preserve"><value>DEFAULT on column '{0}.{1}'</value></data>
+  <data name="EngineDatabaseContext" xml:space="preserve"><value>SQL engine '{0}', database '{1}'</value></data>
+  <data name="DeclaredTableMissing" xml:space="preserve"><value>table '{0}' is missing</value></data>
+  <data name="TableSchemaOwnershipMismatch" xml:space="preserve"><value>table '{0}' was not created by schema '{1}'</value></data>
+  <data name="PrimaryKeyActualContext" xml:space="preserve"><value>table '{0}': its primary key is ({1}), </value></data>
+  <data name="PrimaryKeyDeclaredContext" xml:space="preserve"><value>declared ({0})</value></data>
+  <data name="DeclaredConstraintMissing" xml:space="preserve"><value>table '{0}': constraint '{1}' is missing</value></data>
+  <data name="ConstraintDeclarationMismatch" xml:space="preserve"><value>table '{0}': constraint '{1}' differs from its declaration</value></data>
+  <data name="ConstraintCountMismatch" xml:space="preserve"><value>table '{0}' has {1} constraint(s), declared {2}</value></data>
+  <data name="ExtraConstraint" xml:space="preserve"><value>table '{0}': constraint '{1}' is not declared</value></data>
+  <data name="DeclaredIndexMissing" xml:space="preserve"><value>table '{0}': index '{1}' is missing</value></data>
+  <data name="IndexDeclarationMismatch" xml:space="preserve"><value>table '{0}': index '{1}' differs from its declaration (uniqueness or columns)</value></data>
+  <data name="SchemaIndexCountMismatch" xml:space="preserve"><value>table '{0}' has {1} schema-owned index(es), declared {2}</value></data>
+  <data name="ExtraIndex" xml:space="preserve"><value>table '{0}': index '{1}' is not declared</value></data>
+  <data name="OwnedTableCountMismatch" xml:space="preserve"><value>the database has {0} table(s) created by schema '{1}', declared {2}</value></data>
+  <data name="ExtraOwnedTable" xml:space="preserve"><value>table '{0}.{1}' was created by schema '{2}' but is not declared</value></data>
+  <data name="DeclaredColumnMissing" xml:space="preserve"><value>table '{0}': column '{1}' is missing</value></data>
+  <data name="ColumnCountMismatch" xml:space="preserve"><value>table '{0}' has {1} column(s), declared {2}</value></data>
+  <data name="ExtraColumn" xml:space="preserve"><value>table '{0}': column '{1}' is not declared</value></data>
+  <data name="ColumnOrderMismatch" xml:space="preserve"><value>table '{0}': column {1} is '{2}', declared '{3}'</value></data>
+  <data name="ColumnDifferenceContext" xml:space="preserve"><value>table '{0}': column '{1}' {2}</value></data>
+  <data name="ColumnTypeContext" xml:space="preserve"><value>table '{0}': column '{1}' is </value></data>
+  <data name="DeclarationComparison" xml:space="preserve"><value>{0}, declared {1}</value></data>
+  <data name="NullableColumnDescription" xml:space="preserve"><value>nullable</value></data>
+  <data name="NonNullableColumnDescription" xml:space="preserve"><value>not nullable</value></data>
+  <data name="ColumnIdentityUndeclared" xml:space="preserve"><value>table '{0}': column '{1}' has identity metadata absent from its declaration</value></data>
+  <data name="ColumnDefaultMismatch" xml:space="preserve"><value>table '{0}': column '{1}' has a different default from its declaration</value></data>
+  <data name="DeclaredTypeUnresolvedReason" xml:space="preserve"><value>is declared with a type this engine does not resolve ({0})</value></data>
+  <data name="ActualTypeContext" xml:space="preserve"><value>is {0}, </value></data>
+  <data name="DeclaredTypeContext" xml:space="preserve"><value>declared {0}</value></data>
+  <data name="NoActualDomain" xml:space="preserve"><value>of no domain</value></data>
+  <data name="ActualDomainContext" xml:space="preserve"><value>of domain '{0}'</value></data>
+  <data name="NoDeclaredDomain" xml:space="preserve"><value>with no domain</value></data>
+  <data name="CompiledCheckSubject" xml:space="preserve"><value>Compiled CHECK predicate</value></data>
+  <data name="CompiledDefaultSubject" xml:space="preserve"><value>Compiled column DEFAULT</value></data>
+  <data name="DamagedCatalogHint" xml:space="preserve"><value>The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.</value></data>
+  <data name="UncheckedCallHint" xml:space="preserve"><value>An engine build that did not check function arguments stored it, and this engine cannot evaluate it; open the database with that build and drop the constraint or replace it with a valid one.</value></data>
   <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
+  <data name="FileStorageAlreadyExists" xml:space="preserve"><value>Storage for database '{0}' already exists.</value></data>
+  <data name="CatalogTableSubject" xml:space="preserve"><value>table '{0}.{1}'</value></data>
+  <data name="RetainedDroppedColumnHint" xml:space="preserve"><value>It keeps the physical positions of {0} dropped columns, which are never reused (#1241); recreating the table and copying its rows (CREATE TABLE, INSERT ... SELECT) reclaims them.</value></data>
+  <data name="CatalogIndexSubject" xml:space="preserve"><value>index '{0}'</value></data>
+  <data name="CatalogRegistrationsSubject" xml:space="preserve"><value>the database's {0} index registrations</value></data>
+  <data name="StartupFrameExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
 </root>

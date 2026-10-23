@@ -48,8 +48,7 @@ internal static class SqlPersistedExpression
     /// What a persisted definition that does not load means, and what to do about it. Canonical
     /// text always reloads, so such a definition was not written by this engine's DDL.
     /// </summary>
-    internal const string DamagedCatalogHint =
-        "The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.";
+    internal static readonly string DamagedCatalogHint = ErrorMessages.DamagedCatalogHint;
 
     /// <summary>
     /// What a persisted definition whose function call has arguments its function does not
@@ -57,13 +56,11 @@ internal static class SqlPersistedExpression
     /// build that did not match calls against their signatures stored it, and a backup holds the
     /// same definition, so restoring one does not help.
     /// </summary>
-    internal const string UncheckedCallHint =
-        "An engine build that did not check function arguments stored it, and this engine cannot evaluate it; " +
-        "open the database with that build and drop the constraint or replace it with a valid one.";
+    internal static readonly string UncheckedCallHint = ErrorMessages.UncheckedCallHint;
 
     // The parser's code for text within the nesting limits that the calling thread has too
     // little stack left to parse (#1151): the same text parses on a larger stack.
-    private const string ParserOutOfStackCode = "CS00007";
+    private const string parserOutOfStackCode = "CS00007";
 
     /// <summary>
     /// Renders the canonical text to persist for a parsed expression and proves it reloads to
@@ -308,7 +305,7 @@ internal static class SqlPersistedExpression
         // stored is read under the engine's own limit instead, as its DDL will be.
         var statement = new SqlQueryParser(parserOptions ?? SqlQueryRequest.CeilingParserOptions).Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        outOfStack = error?.Code == ParserOutOfStackCode;
+        outOfStack = error?.Code == parserOutOfStackCode;
         if (error is not null)
         {
             problem = $"{error.Code}: {error.Message}";

@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed partial class SqlFunctionExtensibilityTests
 {
-    private const string UnregisteredFunction = "CS01009";
+    private const string unregisteredFunction = "CS01009";
 
     /// <summary>
     /// A declared CHECK over a registered immutable function provisions as a schema-owned constraint,
@@ -187,7 +187,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             await ExecuteAsync(session, "INSERT INTO customers (id, email) VALUES (3, 'nobody')");
 
             // Assert
-            string expected = $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', " +
+            string expected = $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function 'is_email(TEXT)', " +
                 $"{reason}, so the constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.";
             rows.ShouldBe([[1L, "ann@example.com"]]);
@@ -247,7 +247,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             // Assert
             rows.ShouldBe([[1L, "ann@example.com"]]);
             insert.ShouldHaveMessage(
-                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
+                $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', {reason}, so the " +
                 "constraint cannot be evaluated and the write is refused. Register the function on the engine's builder " +
                 "(SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
         }
@@ -280,7 +280,7 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             failure.ShouldStartWithMessage(
-                $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
+                $"{unregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine registers returning TEXT, where the CHECK needs BOOLEAN.", Case.Sensitive);
         }
         finally
@@ -347,7 +347,7 @@ public sealed partial class SqlFunctionExtensibilityTests
             // Assert
             rows.ShouldBe([[1L]]);
             insert.ShouldHaveMessage(
-                $"{UnregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
+                $"{unregisteredFunction}: CHECK constraint 'ck_email' on table 'dbo.customers' calls function '{signature}', which no overload " +
                 $"this engine registers accepts ({mismatch}), so the constraint cannot be evaluated and the write is refused. Register the " +
                 "function on the engine's builder (SqlDatabaseEngineBuilder.Functions), or drop the constraint.");
         }
@@ -411,11 +411,11 @@ public sealed partial class SqlFunctionExtensibilityTests
 
             // Assert
             failure.ShouldHaveMessage(
-                $"{UnregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
+                $"{unregisteredFunction}: SQL engine 'sql-functions', database 'shop': CHECK constraint 'ck_email' on table 'dbo.customers' " +
                 "calls function 'is_email(TEXT)', which this engine does not register. The engine declares this database, so its build " +
                 "fails before the engine accepts work: register the function on the engine's builder (SqlDatabaseEngineBuilder.Functions), " +
                 "or drop the constraint through an engine that does not declare the database.");
-            failure.InnerException.ShouldNotBeNull().ShouldStartWithMessage($"{UnregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
+            failure.InnerException.ShouldNotBeNull().ShouldStartWithMessage($"{unregisteredFunction}: CHECK constraint 'ck_email'", Case.Sensitive);
             product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
             repaired.TryGetDatabase("shop", out SqlDatabase? shop).ShouldBeTrue();
             await using var session = await shop!.CreateSessionAsync(CancellationToken.None);

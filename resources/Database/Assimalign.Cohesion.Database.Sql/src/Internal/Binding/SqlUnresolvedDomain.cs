@@ -14,5 +14,5 @@ internal sealed record SqlUnresolvedDomain(string Table, string Column, string D
 {
     /// <summary>Describes the column and its domain for a message: <c>Column 'email' of table 'dbo.contacts' is of domain 'email', which this engine does not register</c>.</summary>
     /// <returns>The description, without a final period.</returns>
-    internal string Describe() => $"Column '{Column}' of table '{Table}' is of domain '{Domain}', {Reason}";
+    internal string Describe() => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnresolvedColumnDomainDescription, Column, Table, Domain, Reason);
 }
