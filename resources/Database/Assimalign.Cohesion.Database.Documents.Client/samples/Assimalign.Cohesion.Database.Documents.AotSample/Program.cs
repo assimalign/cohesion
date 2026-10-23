@@ -114,7 +114,7 @@ internal static class Program
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
             Check(explained.IsDocumentQuery && explained.Documents.Any(document =>
                 document.GetProperty("operator").GetString() == "IndexSeek" && document.GetProperty("index").GetString() == "by_score" &&
-                document.GetProperty("estimated_rows").ValueKind == System.Text.Json.JsonValueKind.Null &&
+                document.GetProperty("estimated_rows").GetInt64() == 1 &&
                 document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null), "EXPLAIN documents");
             Check((await connection.QueryAsync("SELECT * FROM COHESION_SCHEMA.INDEXES", cancellationToken: token)).Count == 1, "catalog");
             Check(await connection.ExecuteAsync("DROP INDEX by_score ON items", cancellationToken: token) == 0, "index drop");
@@ -211,6 +211,24 @@ internal static class Program
             Check(await connection.ExecuteAsync("UPSERT INTO items (KEY k, VALUE v) SELECT META().id AS k, 1 AS v FROM items", cancellationToken: token) == 3, "UPSERT SELECT session reuse");
             Check(await connection.ExecuteAsync("DROP COLLECTION items", cancellationToken: token) == 0, "OQL drop collection");
             Check(await connection.ExecuteAsync("DROP COLLECTION IF EXISTS items", cancellationToken: token) == 0, "absent collection");
+            await connection.CreateCollectionAsync("intersection", token);
+            await connection.ExecuteAsync("INSERT INTO intersection (KEY, VALUE) VALUES " + string.Join(',', Enumerable.Range(0, 200)
+                .Select(i => $"('{i:D3}',{{'a':{(i < 100 ? 1 : 0)},'b':{(i is >= 99 and < 199 ? 1 : 0)}}})")), cancellationToken: token);
+            await connection.ExecuteAsync("CREATE INDEX by_a ON intersection(a)", cancellationToken: token);
+            await connection.ExecuteAsync("CREATE INDEX by_b ON intersection(b)", cancellationToken: token);
+            const string intersectionQuery = "SELECT META().id AS id FROM intersection WHERE a=1 AND b=1";
+            var intersected = await connection.QueryAsync(intersectionQuery, cancellationToken: token);
+            Check(intersected.Count == 1 && intersected[0]["id"] is "099", "intersection result");
+            var intersectionPlan = await connection.QueryAsync("EXPLAIN " + intersectionQuery, cancellationToken: token);
+            Check(intersectionPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexIntersection" &&
+                document.GetProperty("estimated_rows").GetInt64() == 100 &&
+                document.GetProperty("detail").GetString() == "inputs=2; estimate_kind=upper_bound") &&
+                intersectionPlan.Documents.Count(document => document.GetProperty("operator").GetString() == "IndexSeek") == 2 &&
+                intersectionPlan.Documents.All(document => document.GetProperty("actual_rows").ValueKind == System.Text.Json.JsonValueKind.Null),
+                "intersection EXPLAIN estimates");
+            var unaffected = await connection.QueryAsync("SELECT COUNT(*) AS n FROM intersection", cancellationToken: token);
+            Check(unaffected[0]["n"] is 200L, "intersection EXPLAIN has no effects");
+            await connection.ExecuteAsync("DROP COLLECTION intersection", cancellationToken: token);
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
         }
         var sessionId = server.Sessions.Single().Id;

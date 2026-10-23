@@ -936,9 +936,10 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Distinct` | A separate parent node above Project, ProjectValue or Group, preserving the underlying stage |
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
-| `IndexSeek` | The chosen catalog index name, collection and inclusive/exclusive path bounds |
-| `Delete` | Snapshot-filtered deletion; detail states filter presence and IndexSeek or CollectionScan, with that access as its child |
-| `Update` | Snapshot-filtered partial update; detail states filter presence and its IndexSeek or CollectionScan child |
+| `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
+| `IndexIntersection` | Ordinal identity intersection before JSON reads; children are the selected IndexSeek inputs |
+| `Delete` | Snapshot-filtered deletion; detail names its IndexSeek, IndexIntersection or CollectionScan child |
+| `Update` | Snapshot-filtered partial update; detail names its IndexSeek, IndexIntersection or CollectionScan child |
 | `Insert`, `InsertSelect` | Document creation from VALUES or a fully materialized query; SELECT children describe the source access |
 | `Upsert`, `UpsertSelect` | Whole-document insert-or-replace from the same staged inputs; SELECT children describe the source access |
 | `SystemCollection` | A virtual `COHESION_SCHEMA` collection without stored-document access |
@@ -1009,8 +1010,9 @@ of zero; index definition changes are not document-row mutations.
 
 `ChooseAccess` takes a predicate and source alias independently of SELECT, so SELECT, UPDATE and DELETE
 share the same physical access selection. The planner uses applicable equality/range predicates on indexed paths,
-including parameters, reversed operands and conjunctive bounds. Choice ranks longest leading
-equality prefix, then a range on the next path, then UNIQUE, then ordinal index name. A bound
+including parameters, reversed operands and conjunctive bounds. Bounded index-entry probes rank
+candidate cost first; ties rank longest leading equality prefix, then a range on the next path,
+then UNIQUE, then ordinal index name. Comparable complete inputs may intersect identities. A bound
 only on a non-leading path scans. Equality-prefix and trailing-range seeks use prefix successors;
 EXPLAIN names the index and prints all equality and range components. Single-path descriptions
 retain their existing inclusive/exclusive scalar-bound spelling. The executor reapplies
@@ -1437,7 +1439,7 @@ The current engine materializes query inputs/results and whole JSON values in
 managed memory. UNNEST multiplies input rows and has no row cap; it is not a join and
 does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
-writer locking is conservative; there is no query-cost statistics model, join,
+writer locking is conservative; there are no persisted query statistics, join,
 subquery, external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
@@ -2433,3 +2435,73 @@ Malformed current-format bytes still carry located COHDBS003. The existing v1 in
 engine tests retain their original message prefix, coordinator-disposal and byte-identical-file
 assertions. Registration truncation retains its exact EndOfStreamException beneath the located
 corruption and catalog wrappers. No format reader, upgrader or public exception member is added.
+
+## Probe costing and identity intersection (D3, #1527)
+
+Planning binds the existing scalar equality prefixes and next-component ranges, then probes
+competing inputs with BTreeIndex.CountRange at the statement snapshot. Each probe examines at
+most 512 physical entries and 32 pages, including descent and invisible entries. A complete
+count measures visible physical index entries; stale catalog references or duplicate identities
+can make it exceed the JSON candidate count. An incomplete count is a lower bound. Cost is
+the complete count, or max(1024, twice the observed count) for an incomplete probe. Equal costs
+retain the prefix/range/UNIQUE/name tie rules. There are no persisted statistics, ANALYZE command,
+format changes or upgrade readers. Counts cannot distinguish every range beyond the probe cap;
+those ties remain heuristic rather than claiming precise selectivity.
+
+An uncontested execution path skips probing because no access choice remains. EXPLAIN also
+probes that sole input to describe its estimate, while still reading no document content and
+executing no mutation. estimated_rows on IndexSeek is the visible-entry count. Detail labels
+exact_index_entries versus lower_bound, with physical probe_entries and probe_pages. actual_rows
+remains NULL. The existing eight-column description and JSON Document wire frames are unchanged.
+
+Intersection requires a complete cheapest input of at least 16 entries. Additional complete
+inputs must cost at most twice that input, contribute a constrained path not already covered,
+and fit the maximum of four inputs. Input order is ascending count then ordinal index name,
+with the cheapest tie-selected path first. This bounds additional metadata work and avoids
+scanning a broad index merely to filter a tiny selective driver. Incomplete inputs keep one
+driver; no unmeasured independence assumption supplies a combined cardinality.
+
+Catalog searches return deduplicated, snapshot-visible metadata in ordinal identity order.
+The executor merges those ordered identities before calling ReadDocument or parsing JSON,
+stopping when the intersection becomes empty. The full predicate, including unused conjuncts,
+is reapplied after the merge. Select, UPDATE, DELETE and INSERT/UPSERT SELECT share this path.
+Mutations still stage all selected identities before writes, preserving Halloween safety and
+rollback. Snapshot pins, own writes, old index generations, NULL/MISSING rules, cancellation,
+corruption and I/O identities retain their existing contracts. Results remain materialized.
+IndexIntersection's estimated_rows is the minimum input count, explicitly an upper bound;
+its actual_rows remains NULL. A session-local internal LastQueryDocumentsRead counter records
+JSON read attempts before residual filtering and resets for each admitted OQL statement. It adds
+no per-query metrics object or process-wide atomic and is not a public event-source counter.
+
+Reference consultation under C:/Source/repos, with no copied code:
+RavenDB ravendb/ravendb/src/Corax/Querying/Matches/BinaryMatch.Boolean.cs:129-191 intersects
+candidate sets, exposes count/confidence and chooses a representation from bounded memory facts.
+Neo4j neo4j/neo4j/community/cypher/runtime-util/src/main/java/org/neo4j/internal/kernel/api/helpers/IntersectionNodeLabelIndexCursor.java:108-143
+advances ordered identity cursors to common nodes. Cohesion uses its already materialized ordinal
+metadata lists instead of adding cursor or bitmap APIs.
+PostgreSQL postgres/postgres/src/backend/optimizer/path/costsize.c:1159-1195 separates bitmap
+intersection work from heap fetches and estimates independent selectivity. That independence
+estimate was rejected here: bounded probes do not establish a joint distribution, so EXPLAIN
+reports the conservative minimum-input upper bound.
+
+Before/after evidence uses the frozen integration-head model assemblies and the final #1527
+assemblies, with copied-DLL hash checks, on Windows ARM64 .NET 10.0.13. One warmup precedes twelve
+sequential batches of fifty pre-parsed queries in one explicit Snapshot transaction, with tiering
+and background GC disabled. Stopwatch/current-thread allocation surround synchronous ExecuteAsync;
+row enumeration, exact identity verification, digesting and disposal are outside the interval.
+The first two fixtures include a 1024-character ASCII JSON payload. These shared-host observations
+locate work changes; they are not the controlled SF10 RavenDB comparison required by F04.T01.
+
+| Shape | Median ns/query before -> after | Median B/query before -> after | After samples <= before median |
+| --- | --- | --- | --- |
+| 600 documents, common status and four rare dates | 4108040 -> 55676 | 2774352 -> 48296 | 12/12 |
+| 200 documents, two 100-entry inputs with one common identity | 728120 -> 100485 | 517496 -> 215976 | 12/12 |
+| Uncontested index point lookup | 12761 -> 12976 | 17696 -> 17856 | 0/12 |
+
+The uncontested path skips counting but pays 160 B/query for added planning state and candidate
+metadata; this tradeoff is retained explicitly. No SQL allocation budget is changed. Output digests
+remain CA964C821139DC21, 0000000000086D51 and 00000000000860D6 respectively. Raw harness, frozen
+assemblies, hashes and twelve-sample JSONL are retained outside the repository at
+Temp/Wave11DocumentCostProbe. Regression work counters reduce the rare-predicate JSON reads from
+550 to four and intersect two 100-entry inputs down to one JSON read. Five-input coverage keeps
+four index inputs and sixteen JSON reads, then the fifth residual returns eight identities.

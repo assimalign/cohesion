@@ -60,3 +60,12 @@ executes its checks against real in-memory and TCP servers after NativeAOT publi
 ## Dedicated test actors (#1285)
 
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Document access estimates (#1527)
+
+EXPLAIN remains a nonexecuting query returning one JSON document per plan row. IndexSeek now
+includes an Int64 index-entry estimate and labels complete counts or lower bounds in Detail.
+IndexIntersection has IndexSeek children and a minimum-input upper bound, before JSON reads;
+actual_rows remains JSON null. The existing nullable count members and Document frames carry
+these values over InMemory and TCP, without a protocol-version or client API change. The AOT
+consumer checks intersection results, both input descriptions and nonexecuting behavior.

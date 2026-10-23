@@ -399,6 +399,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         _database.ThrowIfOffline();
         return _database.RunAsync(this, operation =>
         {
+            LastQueryDocumentsRead = 0;
             // Preserve the typed seam's parse diagnostics before touching an error-recovery AST.
             foreach (var diagnostic in request.Statement.Diagnostics)
             {
@@ -414,13 +415,17 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
                 operation.EnsureActive();
                 cancellationToken.ThrowIfCancellationRequested();
                 new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(explain.Statement);
-                var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters, cancellationToken).Plan((OqlExpression)explain.Statement);
+                var plan = new DocumentPlanner(_database.Catalog, operation.Context.Snapshot, parameters, cancellationToken,
+                    estimateSinglePath: true).Plan((OqlExpression)explain.Statement);
                 return ValueTask.FromResult<DatabaseResult>(DocumentPlanner.Describe(plan, request.Statement.Diagnostics));
             }
             new DocumentExpressionEvaluator(null, parameters, cancellationToken).ValidateInputs(request.Statement.OqlExpression);
             return DocumentPlanExecutor.ExecuteAsync(_database, operation, request.Statement, parameters, cancellationToken);
         }, cancellationToken);
     }
+
+    /// <summary>JSON documents read by the last admitted OQL statement, before its residual filter.</summary>
+    internal long LastQueryDocumentsRead { get; set; }
 
     /// <inheritdoc />
     /// <remarks>

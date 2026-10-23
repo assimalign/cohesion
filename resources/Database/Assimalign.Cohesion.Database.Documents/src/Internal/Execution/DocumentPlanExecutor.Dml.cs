@@ -29,6 +29,7 @@ internal static partial class DocumentPlanExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
+            operation.Session.LastQueryDocumentsRead++;
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version);
@@ -60,6 +61,7 @@ internal static partial class DocumentPlanExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
+            operation.Session.LastQueryDocumentsRead++;
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             if (evaluator.Matches(plan.Statement.Predicate, new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version)))

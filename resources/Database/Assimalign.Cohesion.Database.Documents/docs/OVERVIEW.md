@@ -203,3 +203,12 @@ adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames
 Documents keeps the existing model refusal for a recognized unsupported catalog version;
 its location is appended to the original format remedy. Current-format damage carries the
 common corruption code. Both paths retain the original cause and refuse before recovery writes.
+
+## Costed document access (#1527)
+
+Competing scalar and composite index paths use bounded snapshot-visible entry probes. A rare
+range can beat a common equality. Comparable complete inputs may intersect ordinal document
+identities before reading JSON; full residual filtering, ordering, snapshot and mutation rules
+remain intact. EXPLAIN names IndexSeek/IndexIntersection and labels entry estimates or bounds,
+without executing the statement. There are no persisted statistics, ANALYZE command or format
+changes. See DESIGN for probe budgets, eligibility thresholds and the limits of incomplete counts.

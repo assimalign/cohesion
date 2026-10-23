@@ -187,7 +187,12 @@ The path-count cap reports OQL0009 at the 33rd key (COHDOC022 for a directly con
 WHERE and INCLUDE MISSING receive OQL0002. ALL and DISTINCT ARRAY index keys get one COHDBL001
 at ALL/DISTINCT. The catalog uses v2 index records and refuses v1 indexes before recovery writes;
 there is no upgrade path or legacy reader. Composite seeks support a leading equality prefix
-and one range on the next path. Choice ranks prefix length, range, UNIQUE, then ordinal name.
+and one range on the next path. Bounded snapshot-visible probes rank candidate cost first;
+ties use prefix length, range, UNIQUE, then ordinal name. Comparable complete inputs may
+intersect document identities before JSON reads. The full predicate always filters candidates.
+EXPLAIN exposes the chosen IndexSeek or IndexIntersection and index-entry estimates, including
+incomplete lower bounds and the intersection's minimum-input upper bound. It does not execute
+the data statement; actual_rows remains NULL. No persisted statistics or ANALYZE command is added.
 
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests

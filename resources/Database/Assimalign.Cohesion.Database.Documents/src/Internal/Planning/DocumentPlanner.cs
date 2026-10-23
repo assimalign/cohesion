@@ -21,6 +21,7 @@ internal sealed partial class DocumentPlanner
     private readonly CancellationToken _cancellationToken;
     private readonly TransactionSnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly bool _estimateSinglePath;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentPlanner"/> class.
@@ -29,12 +30,15 @@ internal sealed partial class DocumentPlanner
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
-    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
+    /// <param name="estimateSinglePath">Whether a description also needs estimates for an uncontested input.</param>
+    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters,
+        CancellationToken cancellationToken = default, bool estimateSinglePath = false)
     {
         _catalog = catalog;
         _cancellationToken = cancellationToken;
         _snapshot = snapshot;
         _parameters = parameters;
+        _estimateSinglePath = estimateSinglePath;
     }
 
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
@@ -235,6 +239,8 @@ internal sealed partial class DocumentPlanner
         DocumentIndexPath? best = null;
         int bestPrefix = -1;
         bool bestRange = false;
+        long bestCost = long.MaxValue;
+        var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -257,17 +263,53 @@ internal sealed partial class DocumentPlanner
             }
             bool range = lower is not null || upper is not null;
             if (prefix.Count == 0 && !range) { continue; }
-            bool better = best is null || prefix.Count > bestPrefix || prefix.Count == bestPrefix &&
-                (range && !bestRange || range == bestRange && index.IsUnique && !best.Index.IsUnique);
-            if (!better) { continue; }
-            bestPrefix = prefix.Count;
-            bestRange = range;
             // Keep the single-path plan's scalar bound shape for callers inspecting it.
+            DocumentIndexPath candidate;
             if (index.Paths.Count == 1 && prefix.Count == 1)
-            { best = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
-            else { best = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
+            { candidate = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
+            else { candidate = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
+            candidates.Add((candidate, prefix.Count, range));
         }
-        return (DocumentAccessPath?)best ?? new DocumentScanPath();
+        if (candidates.Count == 0) { return new DocumentScanPath(); }
+        if (candidates.Count == 1 && !_estimateSinglePath) { return candidates[0].Path; }
+        var probed = new List<DocumentIndexPath>(candidates.Count);
+        foreach (var (path, prefix, range) in candidates)
+        {
+            var index = path.Index;
+            var estimate = _catalog.CountIndexRange(index, path.EqualityPrefix ?? [], path.Lower?.Value,
+                path.Lower?.Inclusive ?? false, path.Upper?.Value, path.Upper?.Inclusive ?? false,
+                _snapshot, _cancellationToken);
+            var candidate = path with { Estimate = estimate };
+            probed.Add(candidate);
+            long cost = estimate.IsComplete ? estimate.Count : Math.Max(1024, estimate.Count * 2);
+            bool better = best is null || cost < bestCost || cost == bestCost &&
+                (prefix > bestPrefix || prefix == bestPrefix &&
+                    (range && !bestRange || range == bestRange && index.IsUnique && !best.Index.IsUnique));
+            if (!better) { continue; }
+            best = candidate;
+            bestCost = cost;
+            bestPrefix = prefix;
+            bestRange = range;
+        }
+        // Exact, comparable inputs bound the extra index work. Tiny selective inputs
+        // are cheaper to filter directly; incomplete probes retain a single driver.
+        var selected = best!;
+        if (selected.Estimate is not { IsComplete: true, Count: >= 16 }) { return selected; }
+        var inputs = new List<DocumentIndexPath> { selected };
+        var covered = new HashSet<string>(ConstrainedPaths(selected), StringComparer.Ordinal);
+        foreach (var candidate in probed.OrderBy(path => path.Estimate!.Value.Count)
+            .ThenBy(path => path.Index.Name, StringComparer.Ordinal))
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (ReferenceEquals(candidate, selected) || candidate.Estimate is not { IsComplete: true } count ||
+                count.Count > bestCost * 2) { continue; }
+            var paths = ConstrainedPaths(candidate).ToArray();
+            if (paths.All(covered.Contains)) { continue; }
+            inputs.Add(candidate);
+            covered.UnionWith(paths);
+            if (inputs.Count == 4) { break; }
+        }
+        return inputs.Count == 1 ? selected : new DocumentIntersectionPath(inputs.AsReadOnly());
 
         void Collect(OqlExpression expression)
         {
@@ -308,6 +350,13 @@ internal sealed partial class DocumentPlanner
                 predicates.Add((pathName, LegacyIndexPath(path, alias), operation, value));
             }
         }
+    }
+
+    private static IEnumerable<string> ConstrainedPaths(DocumentIndexPath path)
+    {
+        int count = path.EqualityPrefix?.Count ?? 0;
+        if (path.Lower is not null || path.Upper is not null) { count++; }
+        for (int i = 0; i < count; i++) { yield return path.Index.Paths[i]; }
     }
 
     private static DocumentSeekBound Tighter(DocumentSeekBound? current, DocumentSeekBound candidate, bool isLower)

@@ -732,3 +732,11 @@ The root DatabaseException.Diagnostics carrier preserves the complete parser lis
 factories and session boundaries, including parsed typed requests. DatabaseParseException
 retains the existing first-error message and no error-recovery AST executes. Graph's path
 request factory shares this contract. Diagnostics remain plain Database.Types data.
+
+## Access estimates (#1527)
+
+The engine costs competing equality-prefix/range paths using bounded snapshot-visible B+Tree
+probes and may intersect selected identity sets before JSON reads. EXPLAIN retains its existing
+grammar and nonexecuting contract, naming IndexSeek/IndexIntersection with entry estimates or
+explicit bounds in the existing nullable count columns. actual_rows remains NULL; EXPLAIN ANALYZE
+and standalone ANALYZE remain unsupported in OQL. No persisted statistics or language AST changes.

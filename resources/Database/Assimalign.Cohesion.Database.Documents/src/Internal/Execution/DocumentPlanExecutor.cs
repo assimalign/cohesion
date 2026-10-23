@@ -60,6 +60,7 @@ internal static partial class DocumentPlanExecutor
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
+            operation.Session.LastQueryDocumentsRead++;
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
@@ -79,11 +80,41 @@ internal static partial class DocumentPlanExecutor
 
     private static ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadCandidatesAsync(DocumentDatabase database,
         DocumentOperation operation, DocumentCollectionMetadata collection, DocumentAccessPath access, CancellationToken cancellationToken)
-        => access is DocumentIndexPath seek
-            ? database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
+        => access switch
+        {
+            DocumentIndexPath seek => database.Catalog.SearchIndexAsync(collection.Id, seek.Index.Name, seek.EqualityPrefix ?? [],
                 seek.Lower?.Value, seek.Lower?.Inclusive ?? false, seek.Upper?.Value, seek.Upper?.Inclusive ?? false,
-                operation.Context.Snapshot, cancellationToken)
-            : ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot));
+                operation.Context.Snapshot, cancellationToken),
+            DocumentIntersectionPath intersection => ReadIntersectionAsync(database, operation, collection, intersection, cancellationToken),
+            _ => ValueTask.FromResult(database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)),
+        };
+
+    private static async ValueTask<IReadOnlyList<DocumentCatalogEntry>> ReadIntersectionAsync(DocumentDatabase database,
+        DocumentOperation operation, DocumentCollectionMetadata collection, DocumentIntersectionPath intersection,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<DocumentCatalogEntry>? matches = null;
+        foreach (var input in intersection.Inputs)
+        {
+            operation.EnsureActive();
+            var candidates = await ReadCandidatesAsync(database, operation, collection, input, cancellationToken).ConfigureAwait(false);
+            if (matches is null) { matches = candidates; continue; }
+            var merged = new List<DocumentCatalogEntry>(Math.Min(matches.Count, candidates.Count));
+            int left = 0, right = 0;
+            while (left < matches.Count && right < candidates.Count)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                operation.EnsureActive();
+                int comparison = string.CompareOrdinal(matches[left].Id, candidates[right].Id);
+                if (comparison == 0) { merged.Add(matches[left++]); right++; }
+                else if (comparison < 0) { left++; }
+                else { right++; }
+            }
+            matches = merged;
+            if (matches.Count == 0) { break; }
+        }
+        return matches ?? Array.Empty<DocumentCatalogEntry>();
+    }
 
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)

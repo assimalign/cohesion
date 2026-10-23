@@ -170,7 +170,7 @@ public sealed partial class DocumentQueryTests
         ((await PlanAsync(database, "SELECT * FROM items WHERE a = 1 AND b > 2")).Access as DocumentIndexPath)!.Index.Name.ShouldBe("z_unique");
         (await PlanAsync(database, "SELECT * FROM items WHERE b = 2")).Access.ShouldBeOfType<DocumentScanPath>();
         var detail = await RowsAsync(session, "EXPLAIN SELECT * FROM items WHERE a = 1 AND b = 2 AND c <= 3");
-        detail.Single(row => row.GetString(2) == "IndexSeek").GetString(5).ShouldBe("a = 1 AND b = 2 AND c <= 3");
+        detail.Single(row => row.GetString(2) == "IndexSeek").GetString(5).ShouldBe("a = 1 AND b = 2 AND c <= 3; estimate_kind=exact_index_entries; probe_entries=0; probe_pages=1");
         var cap = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync($"CREATE INDEX too_wide ON items ({string.Join(',', Enumerable.Range(0,33).Select(i => "p" + i))})"));
         cap.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("OQL0009");

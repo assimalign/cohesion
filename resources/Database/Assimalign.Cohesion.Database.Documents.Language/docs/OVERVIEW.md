@@ -44,3 +44,11 @@ are executable presence predicates. NIL remains a NULL synonym.
 See [DESIGN.md](DESIGN.md) for the supported-clause matrix, statement/expression grammar,
 diagnostics, scope restrictions, and extension rules. Co-located Shouldly tests provide the
 parser and lexer conformance corpora.
+
+## Access estimates (#1527)
+
+The engine costs competing equality-prefix/range paths using bounded snapshot-visible B+Tree
+probes and may intersect selected identity sets before JSON reads. EXPLAIN retains its existing
+grammar and nonexecuting contract, naming IndexSeek/IndexIntersection with entry estimates or
+explicit bounds in the existing nullable count columns. actual_rows remains NULL; EXPLAIN ANALYZE
+and standalone ANALYZE remain unsupported in OQL. No persisted statistics or language AST changes.

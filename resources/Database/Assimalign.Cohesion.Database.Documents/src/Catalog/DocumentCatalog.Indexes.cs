@@ -238,23 +238,7 @@ public sealed partial class DocumentCatalog
                 ?? throw new DocumentCatalogException($"Index '{indexName}' is not visible.");
         }
         var index = ResolveIndex(definition);
-        if (equalityPrefix.Count > definition.Paths.Count ||
-            equalityPrefix.Count == definition.Paths.Count && (lower is not null || upper is not null))
-        { throw new ArgumentException(ErrorMessages.SeekBoundsTooWide, nameof(equalityPrefix)); }
-        var prefix = DocumentIndexKeys.EncodePrefix(equalityPrefix);
-        IndexKey? start = equalityPrefix.Count == 0 ? null : prefix;
-        IndexKey? end = equalityPrefix.Count == 0 ? null : DocumentIndexKeys.Successor(prefix);
-        if (lower is not null)
-        {
-            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, lower);
-            start = includeLower ? key : DocumentIndexKeys.Successor(key);
-        }
-        if (upper is not null)
-        {
-            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, upper);
-            end = includeUpper ? DocumentIndexKeys.Successor(key) : key;
-        }
-        var range = new IndexKeyRange(start, end, true, false);
+        var range = SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper);
         var result = new Dictionary<string, DocumentCatalogEntry>(StringComparer.Ordinal);
         await using var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
@@ -279,6 +263,37 @@ public sealed partial class DocumentCatalog
             }
         }
         return result.Values.OrderBy(document => document.Id, StringComparer.Ordinal).ToArray();
+    }
+
+    // Counts physical, snapshot-visible index entries without loading document content.
+    // A completed count may still overestimate identities if catalog references are stale.
+    internal BTreeRangeCount CountIndexRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
+        CancellationToken cancellationToken)
+        => ResolveIndex(definition).CountRange(snapshot,
+            SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper),
+            entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
+
+    private static IndexKeyRange SeekRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        object? lower, bool includeLower, object? upper, bool includeUpper)
+    {
+        if (equalityPrefix.Count > definition.Paths.Count ||
+            equalityPrefix.Count == definition.Paths.Count && (lower is not null || upper is not null))
+        { throw new ArgumentException(ErrorMessages.SeekBoundsTooWide, nameof(equalityPrefix)); }
+        var prefix = DocumentIndexKeys.EncodePrefix(equalityPrefix);
+        IndexKey? start = equalityPrefix.Count == 0 ? null : prefix;
+        IndexKey? end = equalityPrefix.Count == 0 ? null : DocumentIndexKeys.Successor(prefix);
+        if (lower is not null)
+        {
+            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, lower);
+            start = includeLower ? key : DocumentIndexKeys.Successor(key);
+        }
+        if (upper is not null)
+        {
+            var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, upper);
+            end = includeUpper ? DocumentIndexKeys.Successor(key) : key;
+        }
+        return new IndexKeyRange(start, end, true, false);
     }
 
     /// <summary>Scrubs abandoned writers from every persisted B+Tree before recovery checkpointing.</summary>
