@@ -277,3 +277,9 @@ ordinary projection admission and the 16 MiB cap are unchanged.
 Graph handshake refusals and the CK07001 overflow notice bind their existing wording through
 resources. Protocol categories, authentication/version negotiation and the overflow notice's
 invariant formatting and published limits remain unchanged.
+
+## Debugger inspection (#1470)
+
+Graph debugger inspection uses stored metadata without traversing bindings, enumerating results or expanding query/session state.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

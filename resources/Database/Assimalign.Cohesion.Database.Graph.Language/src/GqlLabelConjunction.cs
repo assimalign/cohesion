@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// its operands per enclosing group. A hand-built node with a null operand list, a null operand or
 /// fewer than two operands is rejected by the planner with <c>CG05001</c>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlLabelConjunction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelConjunction.DebugView))]
 public sealed record GqlLabelConjunction : GqlLabelExpression
 {
     private readonly List<GqlLabelExpression>? _operands;
@@ -57,4 +59,16 @@ public sealed record GqlLabelConjunction : GqlLabelExpression
 
     /// <inheritdoc />
     public override int GetHashCode() => StructuralHash(this);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelConjunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelConjunction value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelExpression> Operands => _target.Operands;
+    }
 }

@@ -5,6 +5,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Owned slot values, with absence distinct from an OPTIONAL MATCH null binding.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphBindingRow Count={Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingRow.DebugView))]
 internal sealed class GraphBindingRow : IReadOnlyDictionary<string, object?>
 {
     private static readonly object _unbound = new();
@@ -120,5 +122,17 @@ internal sealed class GraphBindingRow : IReadOnlyDictionary<string, object?>
         int previous = _values.Length;
         Array.Resize(ref _values, Math.Max(slot + 1, Math.Max(4, previous * 2)));
         Array.Fill(_values, _unbound, previous, _values.Length - previous);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingRow value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
     }
 }

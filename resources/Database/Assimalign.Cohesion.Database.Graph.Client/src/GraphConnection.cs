@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 /// Values permit depth 64, 65,536 total values including the root, and 16 MiB encoded bytes.
 /// Pattern property maps remain scalar-only. Without graph.composite-values, composite parameters
 /// are refused locally with ExecutionFailure before a frame is sent; the connection remains reusable.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.DebugView))]
 public sealed class GraphConnection : IAsyncDisposable
 {
     // The operation names the event source writes: the public members that run a query.
@@ -246,6 +248,8 @@ public sealed class GraphConnection : IAsyncDisposable
     /// The end of a path query whose start was written, carried into the start's execution context
     /// so its <c>QueryStop</c> closes the activity its <c>QueryStart</c> opened.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("PathQueryEnd")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.PathQueryEnd.DebugView))]
     private sealed class PathQueryEnd
     {
         private readonly GraphConnection _connection;
@@ -265,6 +269,26 @@ public sealed class GraphConnection : IAsyncDisposable
 
         public void Write()
             => GraphClientEventSource.Log.QueryEnded(_connection, queryPathsOperation, startWritten: true, _status, _failure, _paths, _startTimestamp);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection.PathQueryEnd value)
+            {
+                _ = value;
+            }
+        }
     }
 
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
+    }
 }

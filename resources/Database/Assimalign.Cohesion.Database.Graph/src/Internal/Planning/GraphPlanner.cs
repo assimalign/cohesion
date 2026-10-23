@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphPlanner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanner.DebugView))]
 internal sealed partial class GraphPlanner
 {
     private readonly GraphDatabase _database;
@@ -1153,6 +1155,8 @@ internal sealed partial class GraphPlanner
     /// visible indexes grouped by label, and every variable's <c>variable.key = literal-or-parameter</c>
     /// equalities and required label conjunctions from the <c>WHERE</c> chain.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("AnchorSources")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanner.AnchorSources.DebugView))]
     private sealed class AnchorSources
     {
         private static readonly Dictionary<string, FirstValue> _none = new(StringComparer.Ordinal);
@@ -1253,6 +1257,22 @@ internal sealed partial class GraphPlanner
                 }
                 values.TryAdd(property.Property, new FirstValue(values.Count, value));
             }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanner.AnchorSources value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanner value)
+        {
+            _ = value;
         }
     }
 }

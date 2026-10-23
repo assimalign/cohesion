@@ -4,6 +4,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Statement-local name slots shared by streaming rows; slots never change identity.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphBindingLayout")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingLayout.DebugView))]
 internal sealed class GraphBindingLayout
 {
     private readonly Dictionary<string, int> _slots = new(StringComparer.Ordinal);
@@ -24,5 +26,13 @@ internal sealed class GraphBindingLayout
         _slots.Add(name, slot);
         _names.Add(name);
         return slot;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingLayout value)
+        {
+            _ = value;
+        }
     }
 }

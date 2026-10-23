@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// is rejected by the planner with <c>CG05001</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlLogicalExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression.DebugView))]
 public sealed class GqlLogicalExpression : GqlExpression
 {
     private readonly List<GqlExpression>? _operands;
@@ -67,4 +69,19 @@ public sealed class GqlLogicalExpression : GqlExpression
     /// </summary>
     /// <returns>The operand list, which the caller now owns.</returns>
     internal List<GqlExpression> DetachOperands() => _operands!;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalOperator Operator => _target.Operator;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression> Operands => _target.Operands;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

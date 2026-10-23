@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// RETURN * is accepted when exactly one named binding is in scope. Computed and multiple projections,
 /// catalog statements, mutations, and variables bound only by optional clauses are rejected while planning.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphPathsQueryRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphPathsQueryRequest.DebugView))]
 public sealed class GraphPathsQueryRequest : GraphRequest
 {
     /// <summary>Creates a path request from a parsed GQL statement.</summary>
@@ -60,4 +62,17 @@ public sealed class GraphPathsQueryRequest : GraphRequest
     /// </exception>
     public static GraphPathsQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
         => new(GraphQueryRequest.FromGql(gql, parameters).Statement, parameters);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphPathsQueryRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphPathsQueryRequest value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryStatement Statement => _target.Statement;
+        public global::Assimalign.Cohesion.Database.Graph.Protocol.GraphQueryLimits? Limits => _target.Limits;
+    }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// and a non-negated pure conjunction under the clause's top-level AND chain supplies required
 /// labels for node anchors.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("GqlLabeledPredicate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabeledPredicate.DebugView))]
 public sealed class GqlLabeledPredicate : GqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="GqlLabeledPredicate"/> class.</summary>
@@ -29,4 +31,20 @@ public sealed class GqlLabeledPredicate : GqlExpression
     public GqlLabelExpression LabelExpression { get; }
     /// <summary>Gets whether the predicate is <c>IS NOT LABELED</c>: true for an element the expression does not match.</summary>
     public bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlLabeledPredicate _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabeledPredicate value)
+        {
+            _target = value;
+        }
+
+        public string Variable => _target.Variable;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelExpression LabelExpression => _target.LabelExpression;
+        public bool IsNegated => _target.IsNegated;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

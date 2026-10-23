@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// or <see cref="GraphDatabaseEngine.Create(string, GraphDatabaseEngineOptions)"/> (owner decision 52 of
 /// 2026-10-09).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseEngineOptions")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions.DebugView))]
 public sealed class GraphDatabaseEngineOptions
 {
     /// <summary>Gets or sets the retained execution-memory ceiling per statement; defaults to 64 MiB.</summary>
@@ -209,4 +211,28 @@ public sealed class GraphDatabaseEngineOptions
         RootPath = RootPath,
         StorageStrategy = StorageStrategy,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngineOptions value)
+        {
+            _target = value;
+        }
+
+        public long QueryMemoryBudget => _target.QueryMemoryBudget;
+        public long QueryWorkBudget => _target.QueryWorkBudget;
+        public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
+        public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
+        public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
+        public long CheckpointJournalSize => _target.CheckpointJournalSize;
+        public global::System.TimeSpan WorkerFailureWindow => _target.WorkerFailureWindow;
+        public int WorkerFailureMinimumPasses => _target.WorkerFailureMinimumPasses;
+        public long JournalSizeLimit => _target.JournalSizeLimit;
+        public global::System.TimeSpan PageWriteBackInterval => _target.PageWriteBackInterval;
+        public int PageWriteBackBatchSize => _target.PageWriteBackBatchSize;
+        public global::System.TimeSpan MaintenanceInterval => _target.MaintenanceInterval;
+        public global::System.IO.FileSystemPath? RootPath => _target.RootPath;
+    }
 }

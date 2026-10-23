@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// <summary>A validated statement with each MATCH pattern's anchor.</summary>
 /// <param name="Query">The validated statement.</param>
 /// <param name="MatchClauses">The clause-ordered joins, filters and null-extension bindings.</param>
+[global::System.Diagnostics.DebuggerDisplay("GraphPlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan.DebugView))]
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMatchClausePlan> MatchClauses)
 {
     internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
@@ -27,4 +29,17 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMa
     /// statement that writes (#1228).
     /// </summary>
     internal IReadOnlyList<Diagnostic> Warnings { get; init; } = [];
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression Query => _target.Query;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Internal.GraphMatchClausePlan> MatchClauses => _target.MatchClauses;
+    }
 }

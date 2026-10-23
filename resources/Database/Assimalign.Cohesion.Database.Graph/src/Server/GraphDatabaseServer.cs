@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// after startup is attempted.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseServer.DebugView))]
 public sealed class GraphDatabaseServer : DatabaseServer
 {
     private readonly GraphDatabaseEngine _engine;
@@ -310,5 +312,17 @@ public sealed class GraphDatabaseServer : DatabaseServer
         {
             GraphDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngine Engine => _target.Engine;
     }
 }

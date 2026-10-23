@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphExecuteExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphExecuteExchange.DebugView))]
 internal sealed class GraphExecuteExchange
     : DatabaseProtocolExchange<GraphResultSet>
 {
@@ -156,5 +158,13 @@ internal sealed class GraphExecuteExchange
         }
         if (length == 0 || length > payload.Length) { throw new ProtocolException(ErrorMessages.CompositeRowMalformed); }
         return length;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphExecuteExchange value)
+        {
+            _ = value;
+        }
     }
 }

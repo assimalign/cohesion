@@ -29,6 +29,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// here, so a name is reported once per kind, at its first mention, with the span of the labeled
 /// predicate that names it when it is first named there.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphTokenResolver")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphTokenResolver.DebugView))]
 internal sealed class GraphTokenResolver
 {
     private static readonly string _errorUnknownRelationshipTypeDiagnostic = Resources.UnknownRelationshipTypeDiagnostic;
@@ -119,4 +121,12 @@ internal sealed class GraphTokenResolver
         Line = location?.StartLine ?? 1,
         Location = location is null ? null : DiagnosticLocation.Absolute,
     };
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphTokenResolver value)
+        {
+            _ = value;
+        }
+    }
 }

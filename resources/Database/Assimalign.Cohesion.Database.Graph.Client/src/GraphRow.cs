@@ -5,6 +5,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>A value projection row with ordinal and column-name access.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphRow Count={Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphRow.DebugView))]
 public sealed class GraphRow : IReadOnlyList<object?>
 {
     private readonly object?[] _values;
@@ -36,5 +38,17 @@ public sealed class GraphRow : IReadOnlyList<object?>
     public IEnumerator<object?> GetEnumerator() => ((IEnumerable<object?>)_values).GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Client.GraphRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphRow value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }
 

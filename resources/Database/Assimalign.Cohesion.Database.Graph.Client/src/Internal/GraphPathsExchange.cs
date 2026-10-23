@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphPathsExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphPathsExchange.DebugView))]
 internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
 {
     private readonly GraphProtocolExecuteMessage _request;
@@ -190,6 +192,14 @@ internal sealed class GraphPathsExchange : DatabaseProtocolExchange<bool>
         catch (InvalidOperationException exception)
         {
             throw new IOException(ErrorMessages.PathResponseReadClosed, exception);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.Internal.GraphPathsExchange value)
+        {
+            _ = value;
         }
     }
 }

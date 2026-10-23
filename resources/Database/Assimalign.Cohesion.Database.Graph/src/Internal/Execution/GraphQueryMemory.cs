@@ -6,6 +6,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Statement-owned retained execution memory; no shared atomics or process-heap samples.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphQueryMemory")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryMemory.DebugView))]
 internal sealed class GraphQueryMemory
 {
     private GraphQueryMemoryPool? _pool;
@@ -127,6 +129,14 @@ internal sealed class GraphQueryMemory
             var pool = _pool;
             _pool = null;
             if (buffers is not null) { pool?.ReturnBuffers(buffers); }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryMemory value)
+        {
+            _ = value;
         }
     }
 }

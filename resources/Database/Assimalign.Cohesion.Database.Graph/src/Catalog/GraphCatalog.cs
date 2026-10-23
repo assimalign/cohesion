@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog;
 /// <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog.DebugView))]
 public sealed class GraphCatalog
 {
     private readonly GraphStorage _storage;
@@ -574,4 +576,12 @@ public sealed class GraphCatalog
     private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog value)
+        {
+            _ = value;
+        }
+    }
 }

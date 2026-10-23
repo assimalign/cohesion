@@ -272,6 +272,8 @@ internal static class GraphLabelEvaluator
     }
 
     /// <summary>A node's labels, looked up linearly when there are few and through a hash set otherwise.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("LabelSet")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphLabelEvaluator.LabelSet.DebugView))]
     private readonly struct LabelSet
     {
         private readonly IReadOnlyList<string> _labels;
@@ -293,6 +295,14 @@ internal static class GraphLabelEvaluator
                 if (string.Equals(_labels[i], label, StringComparison.Ordinal)) { return true; }
             }
             return false;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphLabelEvaluator.LabelSet value)
+            {
+                _ = value;
+            }
         }
     }
 }

@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// typed with <c>new</c> members over the base's public members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession.DebugView))]
 public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 {
     private static readonly string _errorSessionDisposeAsyncCoreDatabase = ErrorMessages.SessionDisposeAsyncCoreDatabase;
@@ -406,5 +408,17 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         {
             await operation.AbortAsync(new DatabaseException(_errorSessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabase Database => _target.Database;
     }
 }

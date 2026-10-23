@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>A finite graph query or read-only catalog statement in one database.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GqlQueryExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression.DebugView))]
 public sealed class GqlQueryExpression : GqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="GqlQueryExpression"/> class.</summary>
@@ -143,4 +145,31 @@ public sealed class GqlQueryExpression : GqlExpression
 
     /// <summary>Gets the transaction command, or None for an ordinary statement.</summary>
     public GqlTransactionCommand TransactionCommand { get; internal init; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlMatchClause> MatchClauses => _target.MatchClauses;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlPathPattern> Creates => _target.Creates;
+        public global::System.Collections.Generic.IReadOnlyList<string> DeleteVariables => _target.DeleteVariables;
+        public bool DetachDelete => _target.DetachDelete;
+        public bool IsExplain => _target.IsExplain;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlProjection> Projections => _target.Projections;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlSetQuantifier SetQuantifier => _target.SetQuantifier;
+        public bool ReturnStar => _target.ReturnStar;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression>? GroupBy => _target.GroupBy;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlSortItem> OrderBy => _target.OrderBy;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression? Offset => _target.Offset;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression? Limit => _target.Limit;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlCatalogSurface? CatalogSurface => _target.CatalogSurface;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlTransactionCommand TransactionCommand => _target.TransactionCommand;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

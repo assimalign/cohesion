@@ -20,6 +20,8 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 /// <c>GraphStore</c> static factory and their internal implementation (the triplet of
 /// <c>database-area.md</c> rule 1).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphStore")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.DebugView))]
 public sealed partial class GraphStore
 {
     private static readonly string _errorGraphStoreEnsureUnchangedFailure = ErrorMessages.GraphStoreEnsureUnchangedFailure;
@@ -521,18 +523,38 @@ public sealed partial class GraphStore
     }
 
     // The common single-version identity stores its reference directly in the dictionary.
+    [global::System.Diagnostics.DebuggerDisplay("VersionChain")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.VersionChain.DebugView))]
     private struct VersionChain
     {
         internal Reference Head;
         internal History? Older;
         internal History? SweepPrevious;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.VersionChain value)
+            {
+                _ = value;
+            }
+        }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("History")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.History.DebugView))]
     private sealed class History
     {
         internal readonly Reference Reference;
         internal History? Next;
         internal History(Reference reference, History? next) { Reference = reference; Next = next; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.History value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private Found? ReadAt(ulong location, TransactionSnapshot snapshot, ulong? skipSourceId = null)
@@ -591,10 +613,35 @@ public sealed partial class GraphStore
         catch { OpenIndexes(); throw; }
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Reference")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference.DebugView))]
     private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, ulong Revision)
     {
         internal ulong Location => GraphStorage.PackLocation(PageId, SlotIndex);
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.Reference value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Storage.PageId PageId => _target.PageId;
+            public int SlotIndex => _target.SlotIndex;
+            public global::Assimalign.Cohesion.Database.Transactions.TransactionSequence Writer => _target.Writer;
+            public ulong Revision => _target.Revision;
+        }
     }
 
     private readonly record struct Found(Reference Reference, GraphRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore value)
+        {
+            _ = value;
+        }
+    }
 }

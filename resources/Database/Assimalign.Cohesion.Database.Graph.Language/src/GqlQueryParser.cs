@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>Parses the executable GQL subset using the shared lexer and analyzer pipeline.</summary>
 /// <remarks>Concurrent calls are serialized. Malformed input returns statement diagnostics.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryParser.DebugView))]
 public sealed partial class GqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
@@ -677,4 +679,12 @@ public sealed partial class GqlQueryParser : QueryParser
         return depth == 0;
     }
     private readonly record struct Lexeme(TokenType Type, string Text, int Start, int End, int Line);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryParser value)
+        {
+            _ = value;
+        }
+    }
 }

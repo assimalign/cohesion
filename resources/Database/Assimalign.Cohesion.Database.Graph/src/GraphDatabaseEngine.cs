@@ -67,6 +67,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseEngine {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngine.DebugView))]
 public sealed class GraphDatabaseEngine : DatabaseEngine
 {
     private static readonly string _errorEngineDisposeAsyncCoreAggregate = ErrorMessages.EngineDisposeAsyncCoreAggregate;
@@ -819,5 +821,18 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     private void RebuildSnapshot()
     {
         Volatile.Write(ref _instances, [.. _databases.Values]);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngine _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngine value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
     }
 }

@@ -67,6 +67,8 @@ internal static class GraphGrouping
     }
 
     /// <summary>Consumes one borrowed binding at a time; groups retain keys and aggregate state only.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGrouping.Accumulator.DebugView))]
     internal sealed class Accumulator : IDisposable
     {
         private readonly GraphGroupingPlan _plan;
@@ -137,6 +139,14 @@ internal static class GraphGrouping
         {
             _groups.Clear();
             _ordered.Clear();
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGrouping.Accumulator value)
+            {
+                _ = value;
+            }
         }
     }
 

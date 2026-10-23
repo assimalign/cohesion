@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>One operator owns a changing amount of retained storage until disposal or result transfer.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphMemoryOwner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphMemoryOwner.DebugView))]
 internal sealed class GraphMemoryOwner : IDisposable
 {
     private GraphQueryMemory? _memory;
@@ -71,5 +73,13 @@ internal sealed class GraphMemoryOwner : IDisposable
         _memory = null;
         memory?.EndLease(_bytes);
         _bytes = 0;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphMemoryOwner value)
+        {
+            _ = value;
+        }
     }
 }

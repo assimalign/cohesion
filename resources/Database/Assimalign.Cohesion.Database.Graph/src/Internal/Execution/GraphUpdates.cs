@@ -15,6 +15,8 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Statement-local entity versions, published once after all stages have run.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphUpdates")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphUpdates.DebugView))]
 internal sealed class GraphUpdates : IDisposable
 {
     private readonly GraphDatabase _database;
@@ -580,6 +582,14 @@ internal sealed class GraphUpdates : IDisposable
             var refreshed = copy ?? list;
             memo.Add(list, refreshed);
             return refreshed;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphUpdates value)
+        {
+            _ = value;
         }
     }
 }

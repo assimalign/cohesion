@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Graph.Language;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Compares typed expression structure, excluding source text and spans.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphExpressionShape")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphExpressionShape.DebugView))]
 internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
 {
     private readonly Dictionary<GqlExpression, int> _hashes = new(ReferenceEqualityComparer.Instance);
@@ -115,5 +117,13 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         while (first.MoveNext())
         { if (!second.MoveNext() || !Equivalent(first.Current, second.Current, token)) { return false; } }
         return !second.MoveNext();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphExpressionShape value)
+        {
+            _ = value;
+        }
     }
 }

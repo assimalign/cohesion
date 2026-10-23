@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Bounded, statically typed aggregate state; numeric promotion considers every retained input.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphAggregateAccumulator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphAggregateAccumulator.DebugView))]
 internal sealed class GraphAggregateAccumulator
 {
     private static readonly BigInteger _scale = BigInteger.Pow(10, 28);
@@ -193,4 +195,12 @@ internal sealed class GraphAggregateAccumulator
 
     private static double Finite(double value) => double.IsFinite(value) ? value
         : throw new OverflowException(ErrorMessages.ArithmeticFailure);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphAggregateAccumulator value)
+        {
+            _ = value;
+        }
+    }
 }

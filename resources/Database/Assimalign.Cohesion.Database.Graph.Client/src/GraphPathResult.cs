@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 /// <summary>A single-use stream of graph paths with statement completion diagnostics.</summary>
 /// <remarks>Enumerate to EOF before reading Diagnostics. Early disposal cancels the exchange
 /// and discards its connection, as with QueryPathsAsync.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphPathResult")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphPathResult.DebugView))]
 public sealed class GraphPathResult : IAsyncEnumerable<GraphPath>
 {
     private readonly GraphPathsExchange _exchange;
@@ -39,5 +41,17 @@ public sealed class GraphPathResult : IAsyncEnumerable<GraphPath>
             throw new InvalidOperationException(ErrorMessages.PathResultAlreadyEnumerated);
         }
         return _paths.GetAsyncEnumerator(cancellationToken);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Client.GraphPathResult _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphPathResult value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnostic> Diagnostics => _target.Diagnostics;
     }
 }

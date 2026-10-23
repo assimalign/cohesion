@@ -33,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction.DebugView))]
 public sealed class GraphDatabaseTransaction : DatabaseTransaction
 {
     // Aborted refusals are created on a normal path, so their messages are read once.
@@ -181,5 +183,18 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     {
         var offline = _database.TranslateOffline(error);
         return ReferenceEquals(offline, error) ? _database.TranslateKernelFailure(error) : offline;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }

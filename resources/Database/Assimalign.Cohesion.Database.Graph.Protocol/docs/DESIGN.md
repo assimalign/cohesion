@@ -60,3 +60,9 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+GraphProtocolPathWriter has an empty debugger view: its internal length and private Span buffer are not exposed or captured. Inspection performs no measure/write traversal and introduces no boxing of ref-like state. Static protocol codecs remain unchanged.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

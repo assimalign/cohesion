@@ -4,6 +4,8 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>One session's bounded cache of empty accounting buffers; execution has one owner.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphQueryMemoryPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryMemoryPool.DebugView))]
 internal sealed class GraphQueryMemoryPool : IDisposable
 {
     private GraphQueryMemoryBuffers? _buffers;
@@ -67,5 +69,13 @@ internal sealed class GraphQueryMemoryPool : IDisposable
         // local. Dispose never mutates rented collections or races their enumerators.
         _buffers = null;
         Array.Clear(_owners);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphQueryMemoryPool value)
+        {
+            _ = value;
+        }
     }
 }

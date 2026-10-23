@@ -6,6 +6,8 @@ using System.Threading;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Owns retained projections, evicting the worst row when an ordered page has a finite end.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphTopRows")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphTopRows.DebugView))]
 internal sealed class GraphTopRows : IDisposable
 {
     private readonly GraphMemoryOwner _memory;
@@ -60,5 +62,13 @@ internal sealed class GraphTopRows : IDisposable
         _top?.Clear();
         _rows.Clear();
         _memory.Dispose();
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphTopRows value)
+        {
+            _ = value;
+        }
     }
 }

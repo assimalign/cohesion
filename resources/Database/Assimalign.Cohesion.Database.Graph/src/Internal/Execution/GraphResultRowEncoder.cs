@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 // Scalar results retain the tuple codec's one array allocation per row. Composite columns
 // are marked in ResultHeader; only those columns have a value tag and optional length.
+[global::System.Diagnostics.DebuggerDisplay("GraphResultRowEncoder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphResultRowEncoder.DebugView))]
 internal sealed class GraphResultRowEncoder : IDisposable
 {
     private readonly DatabaseKeyWriter _scalarWriter;
@@ -76,4 +78,12 @@ internal sealed class GraphResultRowEncoder : IDisposable
     }
 
     public void Dispose() { _writer?.Dispose(); _stream?.Dispose(); }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphResultRowEncoder value)
+        {
+            _ = value;
+        }
+    }
 }

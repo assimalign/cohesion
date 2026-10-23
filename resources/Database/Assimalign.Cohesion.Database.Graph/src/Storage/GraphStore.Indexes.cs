@@ -295,6 +295,8 @@ public sealed partial class GraphStore
     private StorageTransaction ResolveStatementBracket(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
         ? bracket : throw new InvalidOperationException(ErrorMessages.StoreResolveStatementBracketFailure);
 
+    [global::System.Diagnostics.DebuggerDisplay("IndexUndo")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.IndexUndo.DebugView))]
     private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly GraphStore _store;
@@ -317,5 +319,13 @@ public sealed partial class GraphStore
             TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, treeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.IndexUndo value)
+            {
+                _ = value;
+            }
+        }
     }
 }

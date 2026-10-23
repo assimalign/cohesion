@@ -296,6 +296,8 @@ internal static partial class GraphPlanExecutor
         IReadOnlyDictionary<string, GqlExpression> properties, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
         => properties.ToDictionary(item => item.Key, item => GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, context, parameters), StringComparer.Ordinal);
 
+    [global::System.Diagnostics.DebuggerDisplay("ExpansionBudget")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.ExpansionBudget.DebugView))]
     internal sealed class ExpansionBudget
     {
         internal const int PhysicalLimit = 1_000_000;
@@ -327,6 +329,14 @@ internal static partial class GraphPlanExecutor
             _physical = next;
             if (overflow || _physical > WorkLimit)
             { throw new GraphPlanningException("CG05004", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ExpansionLimitExceeded, Physical, Viable, WorkLimit)); }
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.ExpansionBudget value)
+            {
+                _ = value;
+            }
         }
     }
 }

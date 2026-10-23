@@ -21,11 +21,26 @@ internal static partial class GraphPlanExecutor
     private abstract record PathTask;
     private sealed record NodeTask(IReadOnlyList<GqlNodePattern> Patterns, PathTask? Next) : PathTask;
     private sealed record EdgeTask(GqlRelationshipPattern Pattern, bool Forward, PathTask? Next) : PathTask;
+    [global::System.Diagnostics.DebuggerDisplay("IncidentTask")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask.DebugView))]
     private sealed record IncidentTask(EdgeTask Hop, IAsyncEnumerator<StoredGraphRelationship> Edges) : PathTask
     {
         internal GraphMemoryLease? TargetMemory { get; set; }
         internal void ReleaseTarget()
         { var memory = TargetMemory; TargetMemory = null; memory?.Dispose(); }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.EdgeTask Hop => _target.Hop;
+            public global::System.Collections.Generic.IAsyncEnumerator<global::Assimalign.Cohesion.Database.Graph.Storage.StoredGraphRelationship> Edges => _target.Edges;
+        }
     }
     private sealed record RepeatTask(GraphPathSegment Segment, bool Forward, int Count, string[] Names, PathTask? Next) : PathTask;
     private sealed record EndIterationTask(RepeatTask Repeat, PathTask? Next) : PathTask;
@@ -42,6 +57,8 @@ internal static partial class GraphPlanExecutor
         };
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("PathFrontier")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.PathFrontier.DebugView))]
     private sealed class PathFrontier : IDisposable
     {
         private readonly Stack<(PathState State, long Bytes)> _states = new();
@@ -83,6 +100,14 @@ internal static partial class GraphPlanExecutor
             _memory.Release(bytes);
         }
         public void Dispose() { _states.Clear(); _memory.Dispose(); }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.PathFrontier value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private static async IAsyncEnumerable<(Dictionary<string, object?> Bindings, MatchedProperties? Properties)> MatchCoreStreamAsync(

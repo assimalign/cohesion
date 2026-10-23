@@ -75,6 +75,8 @@ internal static class GraphOrderNumbers
         return new Limbs((ulong)low, (ulong)middle, highA * highB + (ulong)(middle >> 64));
     }
 
+    [global::System.Diagnostics.DebuggerDisplay("Limbs")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphOrderNumbers.Limbs.DebugView))]
     private readonly record struct Limbs(ulong Low, ulong Middle, ulong High)
     {
         internal int BitLength => High != 0 ? 192 - BitOperations.LeadingZeroCount(High)
@@ -94,5 +96,19 @@ internal static class GraphOrderNumbers
         }
 
         private ulong At(int index) => index switch { 0 => Low, 1 => Middle, 2 => High, _ => 0 };
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphOrderNumbers.Limbs _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphOrderNumbers.Limbs value)
+            {
+                _target = value;
+            }
+
+            public ulong Low => _target.Low;
+            public ulong Middle => _target.Middle;
+            public ulong High => _target.High;
+        }
     }
 }

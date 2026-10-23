@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// <c>database-area.md</c> rule 1), and <see cref="Open"/> takes the typed database and session.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphSchema")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphSchema.DebugView))]
 public sealed class GraphSchema
 {
     private readonly GraphDatabase _database;
@@ -296,5 +298,13 @@ public sealed class GraphSchema
     private static void EnsureMutable(string name, DatabaseObjectOwner owner, string? schema, string operation)
     {
         if (owner == DatabaseObjectOwner.Schema) { throw new DatabaseObjectLockedException(name, schema!, operation); }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphSchema value)
+        {
+            _ = value;
+        }
     }
 }

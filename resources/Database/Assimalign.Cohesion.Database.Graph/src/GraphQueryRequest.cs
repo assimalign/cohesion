@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// statement and the parameters live on <see cref="GraphRequest"/>, which a graph session's typed
 /// execute member takes.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphQueryRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphQueryRequest.DebugView))]
 public sealed class GraphQueryRequest : GraphRequest
 {
     /// <summary>Creates a request from a parsed GQL statement.</summary>
@@ -74,5 +76,18 @@ public sealed class GraphQueryRequest : GraphRequest
             throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRequestFromGqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
         }
         return new GraphQueryRequest(statement, parameters);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphQueryRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphQueryRequest value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryStatement Statement => _target.Statement;
+        public global::Assimalign.Cohesion.Database.Graph.Protocol.GraphQueryLimits? Limits => _target.Limits;
     }
 }

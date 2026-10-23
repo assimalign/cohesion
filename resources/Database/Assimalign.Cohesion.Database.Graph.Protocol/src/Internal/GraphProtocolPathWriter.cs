@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Graph.Protocol.Internal;
 
 // The same traversal measures and writes the unchanged Path payload. Measuring checks the
 // per-frame limit before any rental; encoding writes UTF-8 and scalar bits directly into spans.
+[global::System.Diagnostics.DebuggerDisplay("GraphProtocolPathWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Protocol.Internal.GraphProtocolPathWriter.DebugView))]
 internal ref struct GraphProtocolPathWriter
 {
     private readonly Span<byte> _buffer;
@@ -103,6 +105,14 @@ internal ref struct GraphProtocolPathWriter
                     break;
                 default: throw new ProtocolException(ErrorMessages.PathPropertyUnsupported);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Protocol.Internal.GraphProtocolPathWriter value)
+        {
+            _ = value;
         }
     }
 }
