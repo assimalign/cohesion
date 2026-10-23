@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,11 +22,14 @@ public sealed class VersionPurgeRefusalTests
     [Fact(DisplayName = "Cohesion Test [Sql] - Purge: refused undo reports once per episode without taking the database offline")]
     public async Task RunIteration_UndoRemainsRefused_ShouldReportOnceAndRecoverForEachEpisode()
     {
-        // Arrange: timers wait an hour. These explicit full passes retry the undo on another thread.
+        // Arrange: park the engine pump; explicit passes alone retry undo on another thread.
+        // The worker remains engine-owned so fault/offline assertions exercise the real owner.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", token);
         var healthy = await engine.CreateDatabaseAsync("healthy", token);
         await using var session = await database.CreateSessionAsync(token);
@@ -66,6 +70,7 @@ public sealed class VersionPurgeRefusalTests
                 }, token);
                 worker.FailureCount.ShouldBe(failuresBefore + episodes + 1);
                 worker.Fault.ShouldBeOfType<StorageTransactionException>();
+                engine.State.ShouldBe(EngineState.Faulted);
                 engine.HasFailingWorker(database.Name).ShouldBeFalse();
                 engine.HasFailingWorker(healthy.Name).ShouldBeFalse();
                 using var canceled = new CancellationTokenSource();
@@ -101,6 +106,8 @@ public sealed class VersionPurgeRefusalTests
         // Arrange
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         var worker = new SqlVersionPurgeWorker(engine);
         await using var lifetime = CheckpointPace.Own(worker);
@@ -147,6 +154,8 @@ public sealed class VersionPurgeRefusalTests
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock, checkpoint: true);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlCheckpointWorker>().Single(),
+            engine.CheckpointNeededSignal);
         var database = await engine.CreateDatabaseAsync("test", token);
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
@@ -194,6 +203,8 @@ public sealed class VersionPurgeRefusalTests
         // Arrange
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
         int attempts = 0;
@@ -226,6 +237,8 @@ public sealed class VersionPurgeRefusalTests
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", token);
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
@@ -272,6 +285,8 @@ public sealed class VersionPurgeRefusalTests
         // Arrange
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         await engine.CreateDatabaseAsync("test", CancellationToken.None);
         var worker = engine.Workers.OfType<SqlVersionPurgeWorker>().Single();
         int attempts = 0;
@@ -303,6 +318,8 @@ public sealed class VersionPurgeRefusalTests
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", token);
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
@@ -346,6 +363,8 @@ public sealed class VersionPurgeRefusalTests
         var token = timeout.Token;
         var clock = new ManualTimeProvider();
         await using var engine = CreateEngine(clock);
+        await using var pump = await PausedPump.CreateAsync(engine.Workers.OfType<SqlVersionPurgeWorker>().Single(),
+            engine.UndoDeferredSignal);
         var database = await engine.CreateDatabaseAsync("test", token);
         await using var session = await database.CreateSessionAsync(token);
         await SetupAsync(session, token);
@@ -467,6 +486,69 @@ public sealed class VersionPurgeRefusalTests
         detached.ShouldBe(rounds);
         fullPasses.ShouldBe(rounds * 2);
         failuresCollected.ShouldBe(failFirst ? rounds : 0);
+    }
+
+    // A fixed-pass fixture retains the engine-owned worker, but parks its pump between its
+    // trigger wait and RunPass. Lane execution and owner failure reporting remain real. The
+    // thirty-second limits below are hang guards, not timing or scheduling assertions.
+    private sealed class PausedPump : IAsyncDisposable
+    {
+        private readonly DatabaseEngineWorker _worker;
+        private readonly Action<TimeSpan>? _previous;
+        private readonly TaskCompletionSource _parked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private PausedPump(DatabaseEngineWorker worker)
+        {
+            _worker = worker;
+            _previous = Volatile.Read(ref TriggerObserver(worker));
+            Volatile.Write(ref TriggerObserver(worker), HoldAfterTrigger);
+        }
+
+        [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "TriggerWaitCompleted")]
+        private static extern ref Action<TimeSpan>? TriggerObserver(DatabaseEngineWorker worker);
+
+        internal static async Task<PausedPump> CreateAsync(DatabaseEngineWorker worker, ManualResetEventSlim signal)
+        {
+            var pause = new PausedPump(worker);
+            using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                while (!pause._parked.Task.IsCompleted)
+                {
+                    // An existing wait may have captured the old observer. Wake again after
+                    // it loops, until the new observer acknowledges that it owns the pump.
+                    signal.Set();
+                    await Task.Delay(5, guard.Token);
+                }
+                return pause;
+            }
+            catch
+            {
+                await pause.DisposeAsync();
+                throw;
+            }
+        }
+
+        private void HoldAfterTrigger(TimeSpan elapsed)
+        {
+            _parked.TrySetResult();
+            try
+            {
+                _resume.Task.GetAwaiter().GetResult();
+                _previous?.Invoke(elapsed);
+            }
+            finally { _exited.TrySetResult(); }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Volatile.Write(ref TriggerObserver(_worker), _previous);
+            _resume.TrySetResult();
+            if (_parked.Task.IsCompleted)
+            { await _exited.Task.WaitAsync(TimeSpan.FromSeconds(30)); }
+        }
     }
 
     private static SqlDatabaseEngine CreateEngine(ManualTimeProvider clock, bool checkpoint = false)

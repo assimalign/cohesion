@@ -7605,3 +7605,19 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+
+## Fixed-pass refusal fixture ownership (found during #1470)
+
+Explicit-pass SQL refusal fixtures pause the engine pump at its existing trigger observer before
+creating their databases. The observer acknowledges the pause before the fixture proceeds;
+only then do manual iterations dispatch and collect real lanes. The worker remains attached to
+the engine, preserving observational Faulted state, recovery and offline-policy coverage. In
+particular, the three refused-undo episodes assert Faulted while a refusal is held and Running
+after recovery. Using a detached replacement would miss that owner-state contract.
+
+The real-pump owed-pass tests retain their normal pump. Five-millisecond delays only yield while
+establishing the pause; thirty-second cancellation/join limits are hang guards. No duration or
+extra retry decides an assertion, and no parallelism cap is added. This corrects a fixture race:
+the engine pump could add a pass to an exact-count manually driven refusal episode. Product
+worker scheduling, fault semantics, public APIs, diagnostics and storage/wire formats are unchanged.
