@@ -239,7 +239,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.Startup)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected a startup frame but received {frame.Value.Type}.", string.Empty, string.Empty).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StartupExpected, frame.Value.Type), string.Empty, string.Empty).ConfigureAwait(false);
                 return false;
             }
 
@@ -247,7 +247,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
             if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.UnsupportedVersion, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProtocolVersionUnsupported, startup.Version.Major, ProtocolVersion.Current), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -258,7 +258,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             if (_engine.RefusesEveryDatabase(out var state))
             {
                 BlobDatabaseEventSource.Log.EngineRefused(_engine, BlobDatabaseEventSource.RefusalPhase.Handshake, state);
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"The Blob engine is {state}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseServerSessionExecuteAsyncTask, state), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -266,7 +266,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
             if (database is null)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, $"The server's engine has no database named '{startup.Database}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.DatabaseNotFound, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseNotFound, startup.Database), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -293,7 +293,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
             if (frame.Value.Type != ProtocolMessageType.AuthenticateResponse)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, $"Expected an authenticate response but received {frame.Value.Type}.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationResponseExpected, frame.Value.Type), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -301,7 +301,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
             if (!authenticated)
             {
-                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, $"Authentication failed for principal '{startup.Principal}'.", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.AuthenticationFailed, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AuthenticationFailed, startup.Principal), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -324,7 +324,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncValueTask, exception.Code, exception.Message), startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -598,7 +598,7 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
         BlobProperties properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false)
-            ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, request.Name));
+            ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, request.Name));
         await using Stream source = await container.OpenReadAsync(request.Name, cancellationToken).ConfigureAwait(false);
         await BlobProtocolTransfer.SendAsync(_reader!, _writer!, source,
             new BlobTransferStartMessage(properties.Length, properties.ContentType ?? ""), cancellationToken).ConfigureAwait(false);

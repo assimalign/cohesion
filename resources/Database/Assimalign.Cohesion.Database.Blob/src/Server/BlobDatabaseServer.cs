@@ -130,7 +130,7 @@ public sealed class BlobDatabaseServer : DatabaseServer
             // The base leaves a server whose start failed stopped for good, so a later stop has
             // nothing to release: the listener the server owns is released here, before the
             // refusal propagates (concrete-types plan, row 9).
-            var refusal = new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseServerStartCoreAsyncDatabase, state));
+            var refusal = DatabaseException.CreateBlobFailure("CB09002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseServerStartCoreAsyncDatabase, state));
             await DisposeListenerAfterFailedStartAsync().ConfigureAwait(false);
             throw refusal;
         }

@@ -30,9 +30,9 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 [Collection(nameof(BlobWorkerResilienceTests))]
 public sealed class BlobWorkerResilienceTests
 {
-    private const string Failing = "failing";
-    private const string Healthy = "healthy";
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+    private const string failingDatabaseName = "failing";
+    private const string healthyDatabaseName = "healthy";
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - Workers: a checkpoint whose page writes fail is retried after a backoff, and recovers when the fault clears")]
     public async Task CheckpointWorker_PageWritesFail_ShouldRetryAndRecoverWhileOtherDatabasesCheckpoint()
@@ -40,11 +40,11 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: the checkpointer looks every 100 ms; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         var workers = engine.Workers.ToArray();
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
 
         // Act: every data page write of one database fails while its journal is due.
         faults.FailPageWrites = true;
@@ -90,15 +90,15 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: observe the actual engine pump and its database lanes, without changing waits.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100));
-        options.CheckpointJournalSize = PaceJournalSize;
+        options.CheckpointJournalSize = paceJournalSize;
         await using var engine = BlobDatabaseEngine.Create("pace-engine", options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = (BlobCheckpointWorker)WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
         // Act / Assert: all five engines use the same per-visit progress proof.
         await CheckpointPace.VerifyAsync(worker, engine.CheckpointNeededSignal, failing.DataStorage, healthy.DataStorage,
-            Failing, Healthy, strategy.Faults(Failing),
-            id => UploadAsync(failing, id, 10), id => UploadAsync(healthy, id, 10), PaceJournalSize);
+            failingDatabaseName, healthyDatabaseName, strategy.Faults(failingDatabaseName),
+            id => UploadAsync(failing, id, 10), id => UploadAsync(healthy, id, 10), paceJournalSize);
     }
 
     /// <summary>
@@ -114,33 +114,33 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: checkpoints by journal size; nothing else writes pages back.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
-        options.CheckpointJournalSize = PaceJournalSize;
+        options.CheckpointJournalSize = paceJournalSize;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var stalled = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var stalled = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var stalledFaults = strategy.Faults(Failing);
-        var healthyFaults = strategy.Faults(Healthy);
+        var stalledFaults = strategy.Faults(failingDatabaseName);
+        var healthyFaults = strategy.Faults(healthyDatabaseName);
 
         try
         {
             // The stalled database's journal grows past the size with its trigger off, so no
             // statement takes its checkpoint over: the worker runs it, and hangs in its data fsync.
             stalled.DataStorage.CheckpointJournalSize = 0;
-            for (int id = 0; stalled.DataStorage.JournalLength < PaceJournalSize; id += 10)
+            for (int id = 0; stalled.DataStorage.JournalLength < paceJournalSize; id += 10)
             {
                 await UploadAsync(stalled, id, 10);
             }
 
             stalledFaults.StallDataFlushes();
-            stalled.DataStorage.CheckpointJournalSize = PaceJournalSize;
+            stalled.DataStorage.CheckpointJournalSize = paceJournalSize;
             bool hung = await Eventually(() => stalledFaults.StalledDataFlushes > 0);
             long stalledJournal = stalled.DataStorage.JournalLength;
 
             // Act: while the fsync hangs, the healthy database's journal passes the size again and again.
             long checkpoints = healthyFaults.HeaderWrites;
             var watch = Stopwatch.StartNew();
-            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < StallWindow; id += 10)
+            for (int id = 0; healthyFaults.HeaderWrites - checkpoints < 3 && watch.Elapsed < _stallWindow; id += 10)
             {
                 await UploadAsync(healthy, id, 10);
             }
@@ -175,11 +175,11 @@ public sealed class BlobWorkerResilienceTests
         // Arrange: the page writer runs every 50 ms; no checkpoint writes pages.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, writeBack: TimeSpan.FromMilliseconds(50)));
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
-        var faults = strategy.Faults(Failing);
-        var healthyFaults = strategy.Faults(Healthy);
+        var faults = strategy.Faults(failingDatabaseName);
+        var healthyFaults = strategy.Faults(healthyDatabaseName);
 
         // Act: the failing database's page writes fail while it has dirty pages.
         faults.FailPageWrites = true;
@@ -196,10 +196,10 @@ public sealed class BlobWorkerResilienceTests
         long failedPasses = worker.FailureCount;
         var elapsed = during.Elapsed;
 
-        var atTheClear = strategy.Capture(Failing).Data;
+        var atTheClear = strategy.Capture(failingDatabaseName).Data;
         faults.FailPageWrites = false;
         bool recovered = await Eventually(() =>
-            engine.State == EngineState.Running && !strategy.Capture(Failing).Data.AsSpan().SequenceEqual(atTheClear));
+            engine.State == EngineState.Running && !strategy.Capture(failingDatabaseName).Data.AsSpan().SequenceEqual(atTheClear));
 
         // Assert
         retried.ShouldBeTrue();
@@ -232,10 +232,10 @@ public sealed class BlobWorkerResilienceTests
         options.Durability = StorageCommitDurability.Grouped;
         options.GroupCommitWindow = window;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.WriteAheadFlush);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
         await using var session = await failing.CreateSessionAsync();
         var files = await session.GetContainerAsync("files");
 
@@ -251,7 +251,7 @@ public sealed class BlobWorkerResilienceTests
         var latencies = await TimedUploadsAsync(healthy, 5);
 
         faults.Clear();
-        var reopened = await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
         // Assert: a failed drain ends the group flush before its fsync.
         bool drain = fault == DeviceFault.JournalWrite;
@@ -282,20 +282,20 @@ public sealed class BlobWorkerResilienceTests
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         await UploadAsync(failing, 0, 10);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
         await using var session = await failing.CreateSessionAsync();
         var files = await session.GetContainerAsync("files");
 
         // Act: the next checkpoint's header slot write fails.
         faults.FailHeaderWrites = true;
         await WriteAsync(files, "k10", "before the fault");
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
         long journalAtTheFault = failing.DataStorage.JournalLength;
-        var atTheFault = strategy.Capture(Failing);
+        var atTheFault = strategy.Capture(failingDatabaseName);
 
         var refusals = new List<DatabaseOfflineException>
         {
@@ -308,10 +308,10 @@ public sealed class BlobWorkerResilienceTests
         await UploadAsync(healthy, 0, 10);
         long healthyWritten = healthy.DataStorage.JournalLength;
         bool healthyCheckpointed = await Eventually(() => healthy.DataStorage.JournalLength < healthyWritten);
-        var after = strategy.Capture(Failing);
+        var after = strategy.Capture(failingDatabaseName);
 
         faults.Clear();
-        var reopened = await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
         // Assert
         offline.ShouldBeTrue();
@@ -364,8 +364,8 @@ public sealed class BlobWorkerResilienceTests
         // an explicit transaction, and another queues behind it.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = await CreateAsync(engine, Failing);
-        var faults = strategy.Faults(Failing);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var faults = strategy.Faults(failingDatabaseName);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
         var queuedFiles = await queued.GetContainerAsync("files");
@@ -381,13 +381,13 @@ public sealed class BlobWorkerResilienceTests
 
         // The holder writes again, so the next checkpoint is due (it may already be refused).
         await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "held-2", "held-2"));
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
         bool ended = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5))) == waiting;
         var queuedRefusal = ended ? await Record.ExceptionAsync(() => waiting) : null;
         var holderRefusal = await Record.ExceptionAsync(async () => await WriteAsync(await holder.GetContainerAsync("files"), "after", "after"));
 
         faults.Clear();
-        var reopened = await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
         // Assert: both writers got the coded refusal naming what failed, and the reopen kept
         // neither write.
@@ -426,8 +426,8 @@ public sealed class BlobWorkerResilienceTests
         // session has looked its container up, and every journal write fails from now on.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy));
-        var failing = await CreateAsync(engine, Failing);
-        var faults = strategy.Faults(Failing);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var faults = strategy.Faults(failingDatabaseName);
         await using var holder = await failing.CreateSessionAsync();
         await using var queued = await failing.CreateSessionAsync();
         var queuedFiles = await queued.GetContainerAsync("files");
@@ -470,7 +470,7 @@ public sealed class BlobWorkerResilienceTests
         var deferredUndos = failing.Coordinator.VersionStore.PendingAbortedPurges;
 
         faults.Clear();
-        var reopened = await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
         // Assert
         queuedWithoutADrain.ShouldBeTrue(queuedState);
@@ -535,9 +535,9 @@ public sealed class BlobWorkerResilienceTests
         // page writes fail.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         await using var engine = BlobDatabaseEngine.Create("blob-engine", Options(strategy, checkpoint: TimeSpan.FromMilliseconds(100)));
-        var failing = await CreateAsync(engine, Failing);
+        var failing = await CreateAsync(engine, failingDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
         faults.FailPageWrites = true;
         await UploadAsync(failing, 0, 20);
         bool failed = await Eventually(() => worker.ConsecutiveFailures >= 1);
@@ -589,10 +589,10 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
 
         // Act: every data page write of one database fails while its journal is due, for good. The
         // minimum of failed passes, a backoff apart, passes inside the window.
@@ -604,9 +604,9 @@ public sealed class BlobWorkerResilienceTests
 
         // The window passes on the engine's clock; the next failed pass gives up on the database.
         clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
-        var error = engine.GetOfflineError(Failing);
+        var error = engine.GetOfflineError(failingDatabaseName);
 
         // The checkpointer keeps serving the other database, and the failure record ends.
         await UploadAsync(healthy, 0, 20);
@@ -617,7 +617,7 @@ public sealed class BlobWorkerResilienceTests
         var offlineList = engine.OfflineDatabases.ToArray();
 
         faults.Clear();
-        var reopened = await engine.OpenDatabaseAsync(Failing);
+        var reopened = await engine.OpenDatabaseAsync(failingDatabaseName);
 
         // Assert: online through the minimum of passes inside the window, offline on a failed pass
         // past it.
@@ -635,7 +635,7 @@ public sealed class BlobWorkerResilienceTests
         cause.Message.ShouldContain("passes in a row over 100 s, at least the engine's window of 100 s", Case.Sensitive);
         Mentions(refusal, "Injected page write failure").ShouldBeTrue(refusal.ToString());
         error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.CheckpointFailures);
-        offlineList.ShouldBe([(DatabaseName)Failing]);
+        offlineList.ShouldBe([(DatabaseName)failingDatabaseName]);
         healthy.IsOffline.ShouldBeFalse();
         healthyCheckpointed.ShouldBeTrue();
         running.ShouldBeTrue();
@@ -658,13 +658,13 @@ public sealed class BlobWorkerResilienceTests
         // passes out of reach.
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
-        options.CheckpointJournalSize = PaceJournalSize;
-        options.JournalSizeLimit = 4 * PaceJournalSize;
+        options.CheckpointJournalSize = paceJournalSize;
+        options.JournalSizeLimit = 4 * paceJournalSize;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
 
         // Act: the failing database's journal grows past the cap while its checkpoints fail.
         faults.FailPageWrites = true;
@@ -680,14 +680,14 @@ public sealed class BlobWorkerResilienceTests
             // A failed checkpoint found the journal past the cap between two writes.
         }
 
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
         long failedPasses = worker.FailureCount;
         bool failedTwice = await Eventually(() => worker.FailureCount >= 2);
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
 
         // The other database is still checkpointed by size.
-        long checkpoints = strategy.Faults(Healthy).HeaderWrites;
-        for (int id = 0; strategy.Faults(Healthy).HeaderWrites == checkpoints && id < 100_000; id += 10)
+        long checkpoints = strategy.Faults(healthyDatabaseName).HeaderWrites;
+        for (int id = 0; strategy.Faults(healthyDatabaseName).HeaderWrites == checkpoints && id < 100_000; id += 10)
         {
             await UploadAsync(healthy, id, 10);
         }
@@ -704,9 +704,9 @@ public sealed class BlobWorkerResilienceTests
         cause.Message.ShouldContain($"past the engine's limit of {options.JournalSizeLimit} bytes");
         cause.Message.ShouldContain($"'{worker.Name}'");
         cause.Message.ShouldContain("passes in a row");
-        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)failingDatabaseName]);
         healthy.IsOffline.ShouldBeFalse();
-        strategy.Faults(Healthy).HeaderWrites.ShouldBeGreaterThan(checkpoints);
+        strategy.Faults(healthyDatabaseName).HeaderWrites.ShouldBeGreaterThan(checkpoints);
     }
 
     /// <summary>
@@ -724,11 +724,11 @@ public sealed class BlobWorkerResilienceTests
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
         var options = Options(strategy);
         options.CheckpointJournalSize = 0;
-        options.JournalSizeLimit = 4 * PaceJournalSize;
+        options.JournalSizeLimit = 4 * paceJournalSize;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var database = await CreateAsync(engine, Failing);
+        var database = await CreateAsync(engine, failingDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
         for (int id = 0; database.DataStorage.JournalLength < options.JournalSizeLimit; id += 10)
         {
             await UploadAsync(database, id, 10);
@@ -739,7 +739,7 @@ public sealed class BlobWorkerResilienceTests
         // Act: the size trigger is armed and the first checkpoint fails; the fault clears before
         // the worker retries the database a backoff later.
         faults.FailPageWrites = true;
-        database.DataStorage.CheckpointJournalSize = PaceJournalSize;
+        database.DataStorage.CheckpointJournalSize = paceJournalSize;
         bool failed = await Eventually(() => worker.FailureCount >= 1);
         faults.FailPageWrites = false;
         bool truncated = await Eventually(() => worker.Fault is null && database.DataStorage.JournalLength < grown);
@@ -751,7 +751,7 @@ public sealed class BlobWorkerResilienceTests
         worker.FailureCount.ShouldBe(1);
         database.IsOffline.ShouldBeFalse();
         engine.OfflineDatabases.ShouldBeEmpty();
-        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.GetOfflineError(failingDatabaseName).ShouldBeNull();
         engine.State.ShouldBe(EngineState.Running);
     }
 
@@ -773,11 +773,11 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureWindow = TimeSpan.FromTicks(1);
         options.WorkerFailureMinimumPasses = 3;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var original = await CreateAsync(engine, Failing);
+        var original = await CreateAsync(engine, failingDatabaseName);
         await UploadAsync(original, 0, 10);
         await original.DisposeAsync();
-        strategy.CopyDatabase(Failing, Copy);
-        original = await engine.OpenDatabaseAsync(Failing);
+        strategy.CopyDatabase(failingDatabaseName, Copy);
+        original = await engine.OpenDatabaseAsync(failingDatabaseName);
         var copy = await engine.OpenDatabaseAsync(Copy);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.PageWriteBack);
 
@@ -789,13 +789,13 @@ public sealed class BlobWorkerResilienceTests
         strategy.Faults(Copy).FailPageWrites = false;
 
         // Assert
-        ((string)copy.DataStorage.Name).ShouldBe(Failing);
+        ((string)copy.DataStorage.Name).ShouldBe(failingDatabaseName);
         offline.ShouldBeTrue();
         engine.OfflineDatabases.ShouldBe([(DatabaseName)Copy]);
         error.ShouldNotBeNull().Cause.ShouldBe(StorageOfflineCause.PageWriteBackFailures);
         error.Message.ShouldContain($"database '{Copy}'");
         original.IsOffline.ShouldBeFalse();
-        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.GetOfflineError(failingDatabaseName).ShouldBeNull();
         (await CountAsync(original)).ShouldBe(10);
     }
 
@@ -817,9 +817,9 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var failing = await CreateAsync(engine, Failing);
+        var failing = await CreateAsync(engine, failingDatabaseName);
         var worker = WorkerOf(engine, DatabaseEngineWorkerKind.Checkpoint);
-        var faults = strategy.Faults(Failing);
+        var faults = strategy.Faults(failingDatabaseName);
 
         // Act: two transient faults, each failing the minimum of passes over 60 s of the clock.
         var rounds = new List<(bool Failed, bool Recovered)>();
@@ -843,7 +843,7 @@ public sealed class BlobWorkerResilienceTests
         clock.Elapsed.ShouldBe(TimeSpan.FromSeconds(120));
         failing.IsOffline.ShouldBeFalse();
         engine.OfflineDatabases.ShouldBeEmpty();
-        engine.GetOfflineError(Failing).ShouldBeNull();
+        engine.GetOfflineError(failingDatabaseName).ShouldBeNull();
         engine.State.ShouldBe(EngineState.Running);
         (await CountAsync(failing)).ShouldBe(40);
     }
@@ -866,15 +866,15 @@ public sealed class BlobWorkerResilienceTests
         var options = Options(new FaultInjectingJournalStorageStrategy());
         options.TimeProvider = clock;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        await engine.CreateDatabaseAsync(Failing);
-        await engine.CreateDatabaseAsync(Healthy);
+        await engine.CreateDatabaseAsync(failingDatabaseName);
+        await engine.CreateDatabaseAsync(healthyDatabaseName);
         var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
         var fullPasses = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
         bool fail = true;
         worker.BeforeFullPass = database =>
         {
             fullPasses.AddOrUpdate(database.Name, 1, static (_, count) => count + 1);
-            if (Volatile.Read(ref fail) && database.Name == Failing)
+            if (Volatile.Read(ref fail) && database.Name == failingDatabaseName)
             {
                 throw new InvalidOperationException("Injected version purge failure");
             }
@@ -883,16 +883,16 @@ public sealed class BlobWorkerResilienceTests
         // Act: the first full pass fails on one database.
         clock.Advance(options.MaintenanceInterval);
         CheckpointPace.RunSettled(worker, CancellationToken.None);
-        var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Refused: engine.HasFailingWorker(Failing));
+        var afterTheFailure = (Failing: fullPasses.GetValueOrDefault(failingDatabaseName), Healthy: fullPasses.GetValueOrDefault(healthyDatabaseName), Refused: engine.HasFailingWorker(failingDatabaseName));
 
         // A pass before the backoff has passed does not run it again, and keeps the failure.
         CheckpointPace.RunSettled(worker, CancellationToken.None);
-        var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(Failing), Refused: engine.HasFailingWorker(Failing));
+        var beforeTheBackoff = (Failing: fullPasses.GetValueOrDefault(failingDatabaseName), Refused: engine.HasFailingWorker(failingDatabaseName));
 
         // The backoff passes: the full pass runs again for the failing database alone, and fails.
         clock.Advance(DatabaseEngineWorker.FailureBackoff);
         CheckpointPace.RunSettled(worker, CancellationToken.None);
-        var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(Failing), Healthy: fullPasses.GetValueOrDefault(Healthy), Failures: worker.ConsecutiveFailures);
+        var afterTheRetry = (Failing: fullPasses.GetValueOrDefault(failingDatabaseName), Healthy: fullPasses.GetValueOrDefault(healthyDatabaseName), Failures: worker.ConsecutiveFailures);
 
         // The fault clears; the next retry, a backoff later, completes.
         Volatile.Write(ref fail, false);
@@ -903,11 +903,11 @@ public sealed class BlobWorkerResilienceTests
         afterTheFailure.ShouldBe((1, 1, true));
         beforeTheBackoff.ShouldBe((1, true));
         afterTheRetry.ShouldBe((2, 1, 2));
-        fullPasses.GetValueOrDefault(Failing).ShouldBe(3);
-        fullPasses.GetValueOrDefault(Healthy).ShouldBe(1);
+        fullPasses.GetValueOrDefault(failingDatabaseName).ShouldBe(3);
+        fullPasses.GetValueOrDefault(healthyDatabaseName).ShouldBe(1);
         worker.Fault.ShouldBeNull();
         worker.ConsecutiveFailures.ShouldBe(0);
-        engine.HasFailingWorker(Failing).ShouldBeFalse();
+        engine.HasFailingWorker(failingDatabaseName).ShouldBeFalse();
         engine.State.ShouldBe(EngineState.Running);
         engine.OfflineDatabases.ShouldBeEmpty();
     }
@@ -930,12 +930,12 @@ public sealed class BlobWorkerResilienceTests
         options.WorkerFailureMinimumPasses = DatabaseEngine.DefaultWorkerFailureMinimumPasses;
         options.TimeProvider = clock;
         await using var engine = BlobDatabaseEngine.Create("blob-engine", options);
-        var failing = await engine.CreateDatabaseAsync(Failing);
-        var healthy = await engine.CreateDatabaseAsync(Healthy);
+        var failing = await engine.CreateDatabaseAsync(failingDatabaseName);
+        var healthy = await engine.CreateDatabaseAsync(healthyDatabaseName);
         var worker = (BlobVersionPurgeWorker)WorkerOf(engine, DatabaseEngineWorkerKind.VersionPurge);
         worker.BeforeFullPass = database =>
         {
-            if (database.Name == Failing)
+            if (database.Name == failingDatabaseName)
             {
                 throw new InvalidOperationException("Injected version purge failure");
             }
@@ -950,7 +950,7 @@ public sealed class BlobWorkerResilienceTests
         bool onlineInsideTheWindow = !failing.IsOffline && engine.OfflineDatabases.Count == 0;
         clock.Advance(DatabaseEngine.DefaultWorkerFailureWindow);
         worker.RunIteration(CancellationToken.None);
-        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)Failing));
+        bool offline = await Eventually(() => engine.OfflineDatabases.Contains((DatabaseName)failingDatabaseName));
         var refusal = await Should.ThrowAsync<DatabaseOfflineException>(async () => await failing.CreateSessionAsync());
 
         // Assert
@@ -963,7 +963,7 @@ public sealed class BlobWorkerResilienceTests
         cause.Message.ShouldContain($"'{worker.Name}'");
         cause.Message.ShouldContain("on 3 passes in a row over 101 s, at least the engine's window of 100 s", Case.Sensitive);
         Mentions(refusal, "Injected version purge failure").ShouldBeTrue(refusal.ToString());
-        engine.OfflineDatabases.ShouldBe([(DatabaseName)Failing]);
+        engine.OfflineDatabases.ShouldBe([(DatabaseName)failingDatabaseName]);
         healthy.IsOffline.ShouldBeFalse();
         await using var healthySession = await healthy.CreateSessionAsync();
     }
@@ -1023,9 +1023,9 @@ public sealed class BlobWorkerResilienceTests
         options.Durability = kind == DatabaseEngineWorkerKind.WriteAheadFlush ? StorageCommitDurability.Grouped : StorageCommitDurability.Synchronous;
         options.GroupCommitWindow = TimeSpan.FromMilliseconds(20);
         await using var engine = BlobDatabaseEngine.Create("isolated-lanes", options);
-        var failing = await CreateAsync(engine, Failing);
-        var healthy = await CreateAsync(engine, Healthy);
-        var faults = strategy.Faults(Failing);
+        var failing = await CreateAsync(engine, failingDatabaseName);
+        var healthy = await CreateAsync(engine, healthyDatabaseName);
+        var faults = strategy.Faults(failingDatabaseName);
         Task blockedWrite = Task.CompletedTask;
         Task? disposal = null;
         async Task InspectDisposalAsync()
@@ -1034,7 +1034,7 @@ public sealed class BlobWorkerResilienceTests
             (await Eventually(() => engine.State == EngineState.Disposed)).ShouldBeTrue();
             disposal.IsCompleted.ShouldBeFalse("engine disposal must join the held lane before closing storage");
         }
-        long written = strategy.Faults(Healthy).PageWrites;
+        long written = strategy.Faults(healthyDatabaseName).PageWrites;
         try
         {
             // Act: page writes and journal fsyncs stall inside DeviceFaults. Purge/index use
@@ -1044,16 +1044,16 @@ public sealed class BlobWorkerResilienceTests
                 faults.StallPageWrites();
                 await UploadAsync(failing, 0, 1);
                 var worker = (BlobPageWriteBackWorker)WorkerOf(engine, kind);
-                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                await CheckpointPace.VerifyIsolationAsync(worker, failingDatabaseName, healthyDatabaseName, faults,
                     () => faults.StalledPageWrites, id => UploadAsync(healthy, id, 1), InspectDisposalAsync);
-                strategy.Faults(Healthy).PageWrites.ShouldBeGreaterThan(written);
+                strategy.Faults(healthyDatabaseName).PageWrites.ShouldBeGreaterThan(written);
             }
             else if (kind == DatabaseEngineWorkerKind.WriteAheadFlush)
             {
                 faults.StallJournalFlushes();
                 blockedWrite = DedicatedTestTask.Run(() => UploadAsync(failing, 0, 1));
                 var worker = (BlobWriteAheadFlushWorker)WorkerOf(engine, kind);
-                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                await CheckpointPace.VerifyIsolationAsync(worker, failingDatabaseName, healthyDatabaseName, faults,
                     () => faults.StalledJournalFlushes, id => UploadAsync(healthy, id, 1), InspectDisposalAsync);
             }
             else if (kind == DatabaseEngineWorkerKind.VersionPurge)
@@ -1061,15 +1061,15 @@ public sealed class BlobWorkerResilienceTests
                 faults.StallPurges();
                 var worker = (BlobVersionPurgeWorker)WorkerOf(engine, kind);
                 worker.BeforeDatabase = database => { if (ReferenceEquals(database, failing)) { faults.BeforePurge(); } };
-                await CheckpointPace.VerifyIsolationAsync(worker, Failing, Healthy, faults,
+                await CheckpointPace.VerifyIsolationAsync(worker, failingDatabaseName, healthyDatabaseName, faults,
                     () => faults.StalledPurges, id => UploadAsync(healthy, id, 1), InspectDisposalAsync);
             }
         }
         finally
         {
             faults.Clear();
-            await blockedWrite.WaitAsync(Timeout);
-            if (disposal is not null) { await disposal.WaitAsync(Timeout); }
+            await blockedWrite.WaitAsync(_timeout);
+            if (disposal is not null) { await disposal.WaitAsync(_timeout); }
         }
         // Assert: released work drains, and no database was failed or taken offline by a stall.
         (await Eventually(() => faults.StalledPageWrites == 0 && faults.StalledJournalFlushes == 0 && faults.StalledPurges == 0)).ShouldBeTrue();
@@ -1077,12 +1077,12 @@ public sealed class BlobWorkerResilienceTests
     }
 
     // Journal size used to exercise checkpoint lanes and failure retries.
-    private const long PaceJournalSize = 64 * 1024;
+    private const long paceJournalSize = 64 * 1024;
 
-    private const int UploadSize = 512;
+    private const int uploadSize = 512;
 
     // How long the hung-fsync test writes to the healthy database while the other one's fsync hangs.
-    private static readonly TimeSpan StallWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _stallWindow = TimeSpan.FromSeconds(5);
 
     // The worker failure minimum of passes and the journal cap are out of reach unless a test sets
     // them (owner decisions 25 and 42): the retry tests keep a database failing for seconds on purpose, and the pace
@@ -1125,7 +1125,7 @@ public sealed class BlobWorkerResilienceTests
         var files = await session.GetContainerAsync("files");
         for (int id = first; id < first + count; id++)
         {
-            await WriteAsync(files, $"k{id}", new string('x', UploadSize));
+            await WriteAsync(files, $"k{id}", new string('x', uploadSize));
         }
     }
 
@@ -1176,7 +1176,7 @@ public sealed class BlobWorkerResilienceTests
         var watch = Stopwatch.StartNew();
         while (!condition())
         {
-            if (watch.Elapsed > Timeout)
+            if (watch.Elapsed > _timeout)
             {
                 return false;
             }

@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Database.Blob.StreamingFixture;
 
 internal static class Program
 {
-    private const long LargeBlobLength = 128L * 1024 * 1024 + 123;
-    private const long CommittedLength = 1024 * 1024 + 19;
-    private const int BufferSize = 64 * 1024;
+    private const long largeBlobLength = 128L * 1024 * 1024 + 123;
+    private const long committedLength = 1024 * 1024 + 19;
+    private const int bufferSize = 64 * 1024;
 
     private static async Task<int> Main(string[] args)
     {
@@ -60,9 +60,9 @@ internal static class Program
     private static async Task RoundTripAsync(string root, CancellationToken token)
     {
         long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
-        if (available <= 0 || available >= LargeBlobLength)
+        if (available <= 0 || available >= largeBlobLength)
         {
-            throw new InvalidOperationException($"The fixture must have less memory than the blob: available={available}, blob={LargeBlobLength}.");
+            throw new InvalidOperationException($"The fixture must have less memory than the blob: available={available}, blob={largeBlobLength}.");
         }
 
         string expectedHash;
@@ -74,10 +74,10 @@ internal static class Program
             var container = await session.CreateContainerAsync("objects", token);
             await using (var output = await container.OpenWriteAsync("payload", cancellationToken: token))
             {
-                expectedHash = await WritePatternAsync(output, LargeBlobLength, 17, token);
+                expectedHash = await WritePatternAsync(output, largeBlobLength, 17, token);
             }
 
-            await VerifyAsync(container, "payload", LargeBlobLength, expectedHash, token);
+            await VerifyAsync(container, "payload", largeBlobLength, expectedHash, token);
             if (engine.State != EngineState.Running)
             {
                 throw new InvalidOperationException("Worker fault during large streaming write.");
@@ -88,7 +88,7 @@ internal static class Program
             // one hour. This image exercises recovery of a WAL larger than
             // available memory as well as bounded upload/download streams.
             string sourceDirectory = Path.Combine(root, "large");
-            if (new FileInfo(Path.Combine(sourceDirectory, "blob.log")).Length <= LargeBlobLength)
+            if (new FileInfo(Path.Combine(sourceDirectory, "blob.log")).Length <= largeBlobLength)
             {
                 throw new InvalidOperationException("The recovery image must retain the large object's complete journal.");
             }
@@ -107,10 +107,10 @@ internal static class Program
             var database = await reopened.OpenDatabaseAsync("large", token);
             await using var session = await database.CreateSessionAsync(token);
             var container = await session.GetContainerAsync("objects", token);
-            await VerifyAsync(container, "payload", LargeBlobLength, expectedHash, token);
+            await VerifyAsync(container, "payload", largeBlobLength, expectedHash, token);
         }
 
-        Console.WriteLine($"ROUNDTRIP_OK|{LargeBlobLength}|{available}|{expectedHash}");
+        Console.WriteLine($"ROUNDTRIP_OK|{largeBlobLength}|{available}|{expectedHash}");
     }
 
     private static async Task CrashWriterAsync(string root, CancellationToken token)
@@ -128,7 +128,7 @@ internal static class Program
         string committedHash;
         await using (var output = await container.OpenWriteAsync("committed", cancellationToken: token))
         {
-            committedHash = await WritePatternAsync(output, CommittedLength, 17, token);
+            committedHash = await WritePatternAsync(output, committedLength, 17, token);
         }
 
         var replacement = await container.OpenWriteAsync("committed", cancellationToken: token);
@@ -147,7 +147,7 @@ internal static class Program
         {
             throw new InvalidOperationException("Worker fault while preparing crash.");
         }
-        Console.WriteLine($"CRASH_READY|{CommittedLength}|{committedHash}");
+        Console.WriteLine($"CRASH_READY|{committedLength}|{committedHash}");
         await Console.Out.FlushAsync(token);
         await Task.Delay(Timeout.InfiniteTimeSpan, token);
         GC.KeepAlive(replacement);
@@ -176,7 +176,7 @@ internal static class Program
 
     private static async Task<string> WritePatternAsync(Stream stream, long length, int salt, CancellationToken token)
     {
-        var buffer = new byte[BufferSize];
+        var buffer = new byte[bufferSize];
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long offset = 0;
         while (offset < length)
@@ -202,7 +202,7 @@ internal static class Program
             throw new InvalidDataException("Blob metadata length differs from the uploaded length.");
         }
         await using var input = await container.OpenReadAsync(name, token);
-        var buffer = new byte[BufferSize];
+        var buffer = new byte[bufferSize];
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long actualLength = 0;
         int count;

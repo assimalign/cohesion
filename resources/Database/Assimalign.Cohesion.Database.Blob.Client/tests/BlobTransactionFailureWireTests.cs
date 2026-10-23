@@ -114,12 +114,26 @@ public sealed class BlobTransactionFailureWireTests
         // Assert: the refusal is the root session base's one "already active" message
         // (concrete-types plan §6.4), for the model's former "A transaction or stream is already
         // active on this session.".
+        const string refusalDetail = "A transaction or operation is already active on this session.";
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("A transaction or operation is already active on this session.", Case.Sensitive);
-        commit.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
-        commit.Message.ShouldContain("nothing was committed", Case.Sensitive);
-        commit.Message.ShouldContain(failure.Message, Case.Sensitive);
+        failure.Message.ShouldBe("CK04004: " + refusalDetail);
+        failure.Diagnostics.ShouldBeEmpty(); // Blob's Error frame carries the formatted message only.
+        commit.ShouldBeOfType<DatabaseException>();
+        var cause = commit.InnerException.ShouldBeOfType<DatabaseException>();
+        cause.Message.ShouldBe(refusalDetail);
+        var causeDiagnostic = cause.Diagnostics.ShouldHaveSingleItem();
+        causeDiagnostic.Code.ShouldBe("CK04004");
+        causeDiagnostic.Message.ShouldBe(refusalDetail);
+        causeDiagnostic.Severity.ShouldBe(Types.DiagnosticSeverity.Error);
+        causeDiagnostic.Start.ShouldBeNull();
+        causeDiagnostic.End.ShouldBeNull();
+        var commitDiagnostic = commit.Diagnostics.ShouldHaveSingleItem();
+        commitDiagnostic.Code.ShouldBe("CB04001");
+        commitDiagnostic.Message.ShouldBe(commit.Message);
+        commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed. Cause: " + refusalDetail);
         repeated.Message.ShouldBe(commit.Message);
+        repeated.InnerException.ShouldBeSameAs(cause);
+        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
         await using var next = await harness.Client.ConnectAsync(timeout.Token);

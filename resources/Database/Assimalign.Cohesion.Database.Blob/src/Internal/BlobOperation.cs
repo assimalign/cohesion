@@ -68,7 +68,7 @@ internal sealed class BlobOperation
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             if (_isUpload) { throw _database.TranslateFailure(new BlobUploadException(ErrorMessages.UploadTransactionInactive)); }
-            throw new DatabaseException(ErrorMessages.OperationTransactionInactive);
+            throw DatabaseException.CreateBlobFailure("CK04002", ErrorMessages.OperationTransactionInactive);
         }
     }
 

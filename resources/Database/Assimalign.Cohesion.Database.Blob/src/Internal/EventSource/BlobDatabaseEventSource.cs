@@ -44,8 +44,8 @@ internal sealed class BlobDatabaseEventSource : EventSource
     // a payload carries. Each can quote what a peer sent, before
     // authentication too, and a frame may hold 16 MB, so a longer value is cut and marked
     // (event-source.md rule 11: bounded payloads).
-    private const int MaxNameLength = 256;
-    private const int MaxTextLength = 1024;
+    private const int maxNameLength = 256;
+    private const int maxTextLength = 1024;
 
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
@@ -217,7 +217,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
+            HandshakeRefused(session.Id, Bound(database, maxNameLength), Bound(principal, maxNameLength), code.ToString(), Bound(detail, maxTextLength));
         }
     }
 
@@ -263,7 +263,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
+            SessionProtocolViolation(session.Id, Bound(message, maxTextLength));
         }
     }
 
@@ -324,7 +324,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            DatabaseRefused(session.Id, Bound(database.ToString(), MaxNameLength), phase, Bound(detail, MaxTextLength));
+            DatabaseRefused(session.Id, Bound(database.ToString(), maxNameLength), phase, Bound(detail, maxTextLength));
         }
     }
 
@@ -375,7 +375,7 @@ internal sealed class BlobDatabaseEventSource : EventSource
         {
             TransferFailed(
                 session?.Id ?? Guid.Empty,
-                Bound(container, MaxNameLength),
+                Bound(container, maxNameLength),
                 code?.ToString() ?? string.Empty,
                 exception.GetType().FullName ?? exception.GetType().Name);
         }

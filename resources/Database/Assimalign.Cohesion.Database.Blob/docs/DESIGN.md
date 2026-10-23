@@ -1779,3 +1779,53 @@ unchanged. No public API, error identity, SQLSTATE, storage or wire format, even
 Local predicate guards remain with the policies they validate; reusable unconditional catalog
 throws use exception-type extension members. Private cold comparison and location-attachment
 paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+Catalog conflict extension members and assembly-local Engine resource bindings live under `src/Internal/`. The bindings retain the shared module's marked namespace exception. Public Catalog and Storage namespaces, cached conflict text and exception identity remain unchanged. Private identifiers follow the field and constant conventions; transport payload names and values are preserved.
+
+## Direct catalog diagnostic carriers
+
+`BlobCatalogException` keeps its existing base class and public constructors and adds
+`public IReadOnlyList<Diagnostic> Diagnostics { get; }`. The collection is never null; existing
+public constructors leave it empty. Internal catalog producers attach `CB06006` for malformed or unsupported catalog data.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CB01001` | Container does not exist |
+| `CB01002` | Blob does not exist, including the wire download metadata check |
+| `CB03001` | Container already exists |
+| `CB03002` | Blob already exists and overwrite is disabled |
+| `CB04002` | Catalog changed since the transaction snapshot; DatabaseTransactionAbortedException |
+| `CB09001` | Container handle no longer identifies the snapshot-visible container |
+| `CB09002` | The engine refuses server start because it is disposed or failed as a whole |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04002` | Statement/operation transaction is no longer active |
+| `CK07003` | Another statement/operation already holds the session |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+The existing wire formatter emits each new code once as `CODE: message`; Blob statement errors
+remain terminal. The existing `CB06003` worker refusal text is resource-backed and cached,
+retaining its current prefix and offline precedence.
+Handshake refusal descriptions resolve through resources with their existing text and numeric
+protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.

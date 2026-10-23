@@ -51,12 +51,12 @@ internal static class BlobCatalogCodec
         {
             if (error.IsFormatRefusal)
             {
-                throw new BlobCatalogException(string.Format(CultureInfo.CurrentCulture,
+                throw new BlobCatalogException("CB06006", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.CatalogFormatRefusalLocation, (long)page, slot, error.Message), error)
                 { IsFormatRefusal = true };
             }
             var corruption = new Assimalign.Cohesion.Database.Storage.StorageCorruptionException(page, slot, error.Message, error);
-            throw new BlobCatalogException(corruption.Message, corruption);
+            throw new BlobCatalogException("CB06006", corruption.Message, corruption);
         }
     }
 
@@ -72,16 +72,16 @@ internal static class BlobCatalogCodec
             byte version = reader.ReadByte();
             if (version != 1)
             {
-                throw new BlobCatalogException(string.Format(CultureInfo.CurrentCulture,
+                throw new BlobCatalogException("CB06006", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.CatalogFormatUnsupported, version)) { IsFormatRefusal = true };
             }
             byte[] identity = reader.ReadBytes(16);
             if (identity.Length != 16)
             {
-                throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog);
+                throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog);
             }
             var id = new Guid(identity);
-            string name = ReadString(reader) ?? throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog2);
+            string name = ReadString(reader) ?? throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog2);
             CatalogRecord result;
             if (kind == 1)
             {
@@ -90,7 +90,7 @@ internal static class BlobCatalogCodec
                 if (owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
                     || (owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(schema)))
                 {
-                    throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog3);
+                    throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog3);
                 }
                 result = new CatalogRecord(new BlobContainerMetadata(id, name, owner, schema), null);
             }
@@ -105,23 +105,23 @@ internal static class BlobCatalogCodec
                 ulong head = reader.ReadUInt64();
                 if (length < 0 || ((length == 0) != (head == 0)))
                 {
-                    throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog4);
+                    throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog4);
                 }
                 result = new CatalogRecord(null, new BlobCatalogEntry(id, name, length, contentType, etag, created, modified, checksum, head));
             }
             else
             {
-                throw new BlobCatalogException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobCatalogCodecDecodeBlobCatalog5, kind));
+                throw new BlobCatalogException("CB06006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobCatalogCodecDecodeBlobCatalog5, kind));
             }
             if (id == Guid.Empty || string.IsNullOrWhiteSpace(name) || stream.Position != stream.Length)
             {
-                throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog6);
+                throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog6);
             }
             return result;
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
         {
-            throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecDecodeBlobCatalog7, error);
+            throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecDecodeBlobCatalog7, error);
         }
     }
 
@@ -146,7 +146,7 @@ internal static class BlobCatalogCodec
         }
         if (length < 0 || length > reader.BaseStream.Length - reader.BaseStream.Position)
         {
-            throw new BlobCatalogException(ErrorMessages.BlobCatalogCodecReadStringBlobCatalog);
+            throw new BlobCatalogException("CB06006", ErrorMessages.BlobCatalogCodecReadStringBlobCatalog);
         }
         return _utf8.GetString(reader.ReadBytes(length));
     }

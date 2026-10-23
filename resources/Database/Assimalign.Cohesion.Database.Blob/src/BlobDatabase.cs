@@ -48,6 +48,7 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// </remarks>
 public sealed class BlobDatabase : DatabaseInstance
 {
+    private static readonly string _workerFailureRefusalFormat = ErrorMessages.WorkerFailureRefusal;
     private readonly BlobDatabaseEngine _engine;
 
     // Test seam at the snapshot cleanup boundary, including operations without a pin.
@@ -155,8 +156,7 @@ public sealed class BlobDatabase : DatabaseInstance
     /// </remarks>
     internal string? GetWorkerFailureRefusal()
         => !IsOffline && _engine.HasFailingWorker(Name)
-            ? $"{WorkerFailureCode}: Database '{Name}' is unavailable while its engine's background work on it keeps failing; " +
-              $"it is served again once that work succeeds, and refused as offline ({OfflineCode}) if its engine gives up on it."
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _workerFailureRefusalFormat, WorkerFailureCode, Name, OfflineCode)
             : null;
 
     /// <summary>
@@ -299,7 +299,7 @@ public sealed class BlobDatabase : DatabaseInstance
 
             if (previous is not null)
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreateContainerAsyncDatabase, name));
+                throw DatabaseException.CreateBlobFailure("CB03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseCreateContainerAsyncDatabase, name));
             }
 
             var metadata = new BlobContainerMetadata(Guid.NewGuid(), name);
@@ -312,7 +312,7 @@ public sealed class BlobDatabase : DatabaseInstance
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return RunAsync(session, operation => new ValueTask<BlobContainer>(new BlobContainer(this,
-            Catalog.FindContainer(name, operation.Context.Snapshot) ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name)), session)), token);
+            Catalog.FindContainer(name, operation.Context.Snapshot) ?? throw DatabaseException.CreateBlobFailure("CB01001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name)), session)), token);
     }
 
     internal async ValueTask DropContainerAsync(string name, BlobDatabaseSession session, CancellationToken token)
@@ -322,7 +322,7 @@ public sealed class BlobDatabase : DatabaseInstance
         {
             await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
             var container = Catalog.FindContainer(name, operation.Context.Snapshot)
-                ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name));
+                ?? throw DatabaseException.CreateBlobFailure("CB01001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobDatabaseGetContainerAsyncDatabase, name));
             if (container != Catalog.FindContainer(name, LatestSnapshot(operation.Context)))
             {
                 DatabaseTransactionAbortedException.ThrowBlobConflict();
@@ -452,7 +452,7 @@ public sealed class BlobDatabase : DatabaseInstance
             ThrowIfOffline();
             if (context.State != TransactionState.Active)
             {
-                throw new DatabaseException(ErrorMessages.BlobDatabaseLockWriterAsyncDatabase);
+                throw DatabaseException.CreateBlobFailure("CK04002", ErrorMessages.BlobDatabaseLockWriterAsyncDatabase);
             }
         }
         catch

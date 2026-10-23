@@ -307,3 +307,11 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Host transaction refusal evidence
+
+An upload refused because the host already opened a transaction sends `CK04004: message` in
+the existing Error frame. The host transaction retains the original unprefixed, structured
+`CK04004` abort cause; its later commit reports `CB04001`, preserves that cause instance and
+commits nothing. Repeated commit after terminal session cleanup retains the same cause.
+`BlobClientException.Diagnostics` remains empty under the existing Blob wire contract.

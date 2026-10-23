@@ -12,6 +12,20 @@ namespace Assimalign.Cohesion.Database.Blob.Catalog.Tests;
 
 public sealed class CatalogDecodeLocationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Blob.Catalog] - Exceptions: legacy constructors retain caller messages and causes (#1470)")]
+    public void Exception_LegacyConstructors_ShouldRetainCallerContract()
+    {
+        var cause = new InvalidOperationException("caller cause");
+        var plain = new BlobCatalogException("caller message");
+        var wrapped = new BlobCatalogException("caller message", cause);
+        plain.Message.ShouldBe("caller message");
+        plain.InnerException.ShouldBeNull();
+        plain.Diagnostics.ShouldBeEmpty();
+        wrapped.Message.ShouldBe("caller message");
+        wrapped.InnerException.ShouldBeSameAs(cause);
+        wrapped.Diagnostics.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Blob.Catalog] - Decoding: confirmed malformed metadata reports page and slot (#1372)")]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -46,6 +60,13 @@ public sealed class CatalogDecodeLocationTests
                 if (cached) { catalog!.FindContainer("items", reader.Snapshot); }
                 else { BlobCatalog.Open(storage, coordinator); }
             });
+            failure.Diagnostics.Count.ShouldBe(1);
+            var diagnostic = failure.Diagnostics[0];
+            diagnostic.Code.ShouldBe("CB06006");
+            diagnostic.Message.ShouldBe(failure.Message);
+            diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+            diagnostic.Start.ShouldBeNull();
+            diagnostic.End.ShouldBeNull();
             failure.Message.ShouldContain($"page {(long)location.PageId}", Case.Sensitive);
             failure.Message.ShouldContain($"slot {location.SlotIndex}", Case.Sensitive);
             if (format)

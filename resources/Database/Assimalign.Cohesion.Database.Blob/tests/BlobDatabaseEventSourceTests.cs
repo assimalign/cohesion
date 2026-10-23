@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 [Collection(nameof(BlobDatabaseEventSourceCollection))]
 public sealed class BlobDatabaseEventSourceTests
 {
-    private static readonly string[] SessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
+    private static readonly string[] _sessionClosedPayload = ["sessionId", "reason", "durationMilliseconds"];
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob] - BlobDatabaseEventSource: Should be named for its assembly")]
     public void GetName_BlobDatabaseEventSource_ShouldEqualAssemblyName()
@@ -97,7 +97,7 @@ public sealed class BlobDatabaseEventSourceTests
         recorder.Events.Where(e => IsFor(e, 5, sessionId)).ShouldHaveSingleItem();
         closed.EventName.ShouldBe("SessionClosed");
         closed.Level.ShouldBe(EventLevel.Verbose);
-        closed.PayloadNames.ShouldBe(SessionClosedPayload);
+        closed.PayloadNames.ShouldBe(_sessionClosedPayload);
         closed.Payload![1].ShouldBe("Terminated");
         ((double)closed.Payload[2]!).ShouldBeGreaterThan(0);
         recorder.Events.Where(e => IsForSession(e, sessionId)).Select(e => e.EventId).ShouldBe([5]);
@@ -560,7 +560,7 @@ public sealed class BlobDatabaseEventSourceTests
         // Assert: the client gets the engine's message; the event names the container but not the
         // blob, which may be user data (plan D8, Q3).
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldBe("Blob 'missing' does not exist.");
+        error.Message.ShouldBe("CB01002: Blob 'missing' does not exist.");
         var failed = recorder.Events.Where(e => IsFor(e, 13, sessionId)).ShouldHaveSingleItem();
         failed.EventName.ShouldBe("TransferFailed");
         failed.Level.ShouldBe(EventLevel.Error);

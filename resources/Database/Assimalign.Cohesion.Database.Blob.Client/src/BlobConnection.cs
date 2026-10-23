@@ -23,11 +23,11 @@ namespace Assimalign.Cohesion.Database.Blob.Client;
 public sealed class BlobConnection : IAsyncDisposable
 {
     // The operation names the event source writes: the public members that run a transfer.
-    private const string UploadOperation = "Upload";
-    private const string DownloadOperation = "Download";
-    private const string DeleteOperation = "Delete";
-    private const string GetPropertiesOperation = "GetProperties";
-    private const string ListOperation = "List";
+    private const string uploadOperation = "Upload";
+    private const string downloadOperation = "Download";
+    private const string deleteOperation = "Delete";
+    private const string getPropertiesOperation = "GetProperties";
+    private const string listOperation = "List";
 
     private readonly DatabaseConnection _connection;
     // Diagnostics finish after a failed stream has returned its shared lease.
@@ -71,7 +71,7 @@ public sealed class BlobConnection : IAsyncDisposable
         {
             throw new ArgumentException(ErrorMessages.BlobConnectionUploadAsyncArgument);
         }
-        return ExecuteAsync<long>(UploadOperation, container, async (reader, writer, token) =>
+        return ExecuteAsync<long>(uploadOperation, container, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.Write,
                 new BlobWriteMessage(container, name, overwrite).Encode(), token).ConfigureAwait(false);
@@ -106,7 +106,7 @@ public sealed class BlobConnection : IAsyncDisposable
     {
         EnsureOpen();
         long startTimestamp = BlobClientEventSource.Log.GetTimestamp();
-        bool startWritten = BlobClientEventSource.Log.TransferStart(this, DownloadOperation, container);
+        bool startWritten = BlobClientEventSource.Log.TransferStart(this, downloadOperation, container);
 
         // Until the stream opens, the transfer's end is written here, from the finally: a failure
         // (TransferFailed, then TransferStop with Error) or a cancellation. Once it opened, the
@@ -137,7 +137,7 @@ public sealed class BlobConnection : IAsyncDisposable
         {
             if (!opened)
             {
-                BlobClientEventSource.Log.TransferEnded(this, DownloadOperation, container, startWritten, failure, 0, startTimestamp);
+                BlobClientEventSource.Log.TransferEnded(this, downloadOperation, container, startWritten, failure, 0, startTimestamp);
             }
         }
     }
@@ -152,7 +152,7 @@ public sealed class BlobConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed or unusable.</exception>
     public ValueTask<bool> DeleteAsync(string container, string name, CancellationToken cancellationToken = default)
-        => ExecuteAsync<bool>(DeleteOperation, container, async (reader, writer, token) =>
+        => ExecuteAsync<bool>(deleteOperation, container, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.Delete,
                 new BlobDeleteMessage(container, name).Encode(), token).ConfigureAwait(false);
@@ -174,7 +174,7 @@ public sealed class BlobConnection : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another exchange is active.</exception>
     /// <exception cref="ObjectDisposedException">The connection is disposed or unusable.</exception>
     public ValueTask<BlobProperties?> GetPropertiesAsync(string container, string name, CancellationToken cancellationToken = default)
-        => ExecuteAsync<BlobProperties?>(GetPropertiesOperation, container, async (reader, writer, token) =>
+        => ExecuteAsync<BlobProperties?>(getPropertiesOperation, container, async (reader, writer, token) =>
         {
             await WriteAsync(writer, BlobProtocolMessageType.GetProperties,
                 new BlobGetPropertiesMessage(container, name).Encode(), token).ConfigureAwait(false);
@@ -264,7 +264,7 @@ public sealed class BlobConnection : IAsyncDisposable
     {
         try
         {
-            await ExecuteCoreAsync<long>(ListOperation, container, async (reader, writer, token) =>
+            await ExecuteCoreAsync<long>(listOperation, container, async (reader, writer, token) =>
             {
                 await WriteAsync(writer, BlobProtocolMessageType.List,
                     new BlobListMessage(container, prefix).Encode(), token).ConfigureAwait(false);
@@ -364,7 +364,7 @@ public sealed class BlobConnection : IAsyncDisposable
     /// call costs nothing while nobody listens, at every JIT tier.
     /// </summary>
     private static long TransferredBytes<TResult>(string operation, TResult result)
-        => ReferenceEquals(operation, UploadOperation) && typeof(TResult) == typeof(long)
+        => ReferenceEquals(operation, uploadOperation) && typeof(TResult) == typeof(long)
             ? Unsafe.As<TResult, long>(ref result)
             : 0;
 
@@ -569,7 +569,7 @@ public sealed class BlobConnection : IAsyncDisposable
             }
             finally
             {
-                BlobClientEventSource.Log.TransferEnded(_owner, DownloadOperation, _container, _startWritten, failure, failure is null ? null : CopyFailureCode(failure), bytes, _startTimestamp);
+                BlobClientEventSource.Log.TransferEnded(_owner, downloadOperation, _container, _startWritten, failure, failure is null ? null : CopyFailureCode(failure), bytes, _startTimestamp);
             }
         }
 

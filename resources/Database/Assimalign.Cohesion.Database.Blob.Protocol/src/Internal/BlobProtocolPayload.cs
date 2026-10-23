@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Blob.Protocol.Internal;
 
 internal static class BlobProtocolPayload
 {
-    private const int MaxStringByteLength = 65_535;
+    private const int maxStringByteLength = 65_535;
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static void WriteString(List<byte> buffer, string value, bool allowEmpty)
@@ -20,7 +20,7 @@ internal static class BlobProtocolPayload
         try
         {
             int length = _utf8.GetByteCount(value);
-            if (length > MaxStringByteLength)
+            if (length > maxStringByteLength)
             {
                 throw new ProtocolException(ErrorMessages.ProtocolPayloadWriteStringProtocol2);
             }
@@ -43,7 +43,7 @@ internal static class BlobProtocolPayload
         }
         int length = BinaryPrimitives.ReadInt32BigEndian(payload[position..]);
         position += sizeof(int);
-        if (length < 0 || length > MaxStringByteLength || length > payload.Length - position || (!allowEmpty && length == 0))
+        if (length < 0 || length > maxStringByteLength || length > payload.Length - position || (!allowEmpty && length == 0))
         {
             throw new ProtocolException(ErrorMessages.BlobProtocolPayloadReadStringProtocol2);
         }

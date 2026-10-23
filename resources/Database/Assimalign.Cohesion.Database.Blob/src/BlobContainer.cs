@@ -105,7 +105,7 @@ public sealed class BlobContainer
 
             if (previous is not null && !overwrite)
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenWriteAsyncDatabase, name));
+                throw DatabaseException.CreateBlobFailure("CB03002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenWriteAsyncDatabase, name));
             }
 
             var stream = _database.DataStorage.OpenWrite(_database.Coordinator, operation.Context, async content =>
@@ -162,7 +162,7 @@ public sealed class BlobContainer
         {
             EnsureContainer(operation.Context);
             var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
-                ?? throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
+                ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
             return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
         }
         catch (Exception error)
@@ -313,7 +313,7 @@ public sealed class BlobContainer
         var current = _database.Catalog.FindContainer(Name, context.Snapshot);
         if (current?.Id != _container.Id)
         {
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerEnsureContainerDatabase, Name));
+            throw DatabaseException.CreateBlobFailure("CB09001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerEnsureContainerDatabase, Name));
         }
 
         if (writing && current != _database.Catalog.FindContainer(Name, _database.LatestSnapshot(context)))

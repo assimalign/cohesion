@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// </summary>
 public sealed class BlobTransactionFailureTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>The issue's reproduction: a failure, then a write, then ROLLBACK leaves the blobs unchanged.</summary>
     /// <param name="failure">The kind of operation that fails inside the transaction.</param>
@@ -633,7 +633,7 @@ public sealed class BlobTransactionFailureTests
         var refusal = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
         var stateAfterRefusal = transaction.State;
         await blocking.CommitAsync();
-        (await pending.WaitAsync(Timeout)).ShouldBeTrue();
+        (await pending.WaitAsync(_timeout)).ShouldBeTrue();
         await transaction.CommitAsync();
 
         // Assert
