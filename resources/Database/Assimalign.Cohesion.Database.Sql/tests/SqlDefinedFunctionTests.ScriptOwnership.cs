@@ -48,7 +48,7 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await builder.BuildAsync(CancellationToken.None));
 
         // Assert
-        failure.Message.ShouldContain("COHSQLS005");
+        failure.Message.ShouldContain("CS03205");
         failure.ShouldContainMessage(objectName);
         failure.Message.ShouldContain("declare the change in the typed schema");
         var afterCatalog = images.GetDurableImage("functions", catalog: true);

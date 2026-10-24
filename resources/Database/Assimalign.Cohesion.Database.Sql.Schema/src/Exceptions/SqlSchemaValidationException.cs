@@ -22,7 +22,7 @@ public sealed class SqlSchemaValidationException : DatabaseException
         ArgumentNullException.ThrowIfNull(errors);
         if (errors.Count == 0)
         {
-            throw new ArgumentException("At least one schema validation error is required.", nameof(errors));
+            throw new ArgumentException(ErrorMessages.SqlSchemaValidationExceptionArgument, nameof(errors));
         }
 
         Errors = Array.AsReadOnly(errors.ToArray());
@@ -35,7 +35,7 @@ public sealed class SqlSchemaValidationException : DatabaseException
     {
         ArgumentNullException.ThrowIfNull(errors);
         return errors.Count == 0
-            ? "Database schema validation failed."
-            : $"Database schema validation failed for '{errors[0].Declaration}': {errors[0].Message}";
+            ? ErrorMessages.ExceptionCreateMessageDatabase
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionCreateMessageDatabase2, errors[0].Declaration, errors[0].Message);
     }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A closed source value over existing metadata. One reference keeps stored-only binding
 /// allocation-neutral; a virtual relation never acquires a fabricated storage identity.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlRelationSource")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRelationSource.DebugView))]
 internal readonly struct SqlRelationSource
 {
     private readonly object _metadata;
@@ -22,4 +24,12 @@ internal readonly struct SqlRelationSource
     internal string Schema => Table?.Schema ?? View?.Schema ?? Derived?.CatalogView?.Schema ?? string.Empty;
     internal string Name => Table?.Name ?? View?.Name ?? Derived!.Name;
     internal IReadOnlyList<SqlCatalogColumn> Columns => Table?.Columns ?? View?.Columns ?? Derived!.Columns;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRelationSource value)
+        {
+            _ = value;
+        }
+    }
 }

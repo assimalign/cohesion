@@ -1,5 +1,9 @@
 # Database engine extensibility, provisioning and composition: design
 
+Current Database diagnostic identities and their historical mappings are maintained in the
+[error-code registry](../../resources/Database/Assimalign.Cohesion.Database/docs/ERROR-CODES.md).
+Use those identities when implementing the dated phase records below.
+
 **Status:** approved; the owner accepted decisions 49 to 73 (§13) on 2026-10-09, answers inline,
 and the follow-up 49a under 49 on 2026-10-11 (it lands in B2, after B2's core). Phases B1 and E1
 start from here · **Created:** 2026-10-08 ·
@@ -762,11 +766,11 @@ Deleted with E2: `SqlFunctionSignatures`, `SqlFunctionSignature`, the internal `
   standard library's and an application's, takes it, and no faster path is reserved for the
   built-ins, so the abstraction an application implements is the one the engine's own
   functions run on.
-- **Exceptions.** Anything a function throws other than `OperationCanceledException`,
-  `InsufficientExecutionStackException`, `OutOfMemoryException` or a `DatabaseException` becomes
-  `COHSQLE007` naming the function, with the original as the inner exception. It fails the
-  statement and an explicit transaction like any coded error (#1188). `SqlEvaluationException` stays
-  internal; the code leads the message, as `COHSQLE001` to `006` do today.
+- **Exceptions.** A function failure other than `InsufficientExecutionStackException`,
+  `OutOfMemoryException`, a `DatabaseException`, or cancellation requested by the statement
+  becomes `CS05007`, naming the function and retaining the original inner exception. It fails the
+  statement and an explicit transaction like any coded error (#1188). `SqlEvaluationException`
+  stays internal; Diagnostics carries the code separately from the unprefixed message.
 - **Thread safety.** One function instance serves every session at once, so a leaf must be
   stateless or thread-safe. Accumulators are per group and owned by the engine.
 - **Fallback if E1 slips.** E2 may bind through a per-row name lookup into the frozen engine

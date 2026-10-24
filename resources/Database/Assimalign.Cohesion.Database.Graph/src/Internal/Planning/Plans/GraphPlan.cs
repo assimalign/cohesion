@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// <summary>A validated statement with each MATCH pattern's anchor.</summary>
 /// <param name="Query">The validated statement.</param>
 /// <param name="MatchClauses">The clause-ordered joins, filters and null-extension bindings.</param>
+[global::System.Diagnostics.DebuggerDisplay("GraphPlan")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan.DebugView))]
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMatchClausePlan> MatchClauses)
 {
     internal IReadOnlyList<GraphProjectionPlan> Projections { get; init; } = [];
@@ -22,9 +24,22 @@ internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphMa
     internal IReadOnlyDictionary<string, object?>? Parameters { get; init; }
 
     /// <summary>
-    /// Gets the <c>COHDBG010</c>/<c>COHDBG011</c> warnings of a read-only statement that names a
+    /// Gets the <c>CG01010</c>/<c>CG01011</c> warnings of a read-only statement that names a
     /// label or relationship type the database does not have, in first-mention order; empty for a
     /// statement that writes (#1228).
     /// </summary>
     internal IReadOnlyList<Diagnostic> Warnings { get; init; } = [];
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlan value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression Query => _target.Query;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Internal.GraphMatchClausePlan> MatchClauses => _target.MatchClauses;
+    }
 }

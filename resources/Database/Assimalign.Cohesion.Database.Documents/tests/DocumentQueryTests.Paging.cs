@@ -167,7 +167,7 @@ public sealed partial class DocumentQueryTests
                     await DocumentPlanTestHelper.PlanAsync(database, query, parameters, CancellationToken.None));
                 // Assert
                 var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-                diagnostic.Code.ShouldBe("OQL0007");
+                diagnostic.Code.ShouldBe("CD00007");
                 diagnostic.Start.ShouldBe(query.Length - 2);
                 diagnostic.End.ShouldBe(query.Length);
                 diagnostic.Message.ShouldBe(parsed.Diagnostics.Single().Message);
@@ -210,17 +210,17 @@ public sealed partial class DocumentQueryTests
         const string query = "SELECT * FROM items LIMIT @n";
         // Act / Assert
         var missing = await Should.ThrowAsync<DatabaseException>(async () => await PlanAsync(database, query));
-        missing.Diagnostics.Single().Code.ShouldBe("COHDOC005");
+        missing.Diagnostics.Single().Code.ShouldBe("CD01005");
         missing.Diagnostics.Single().Start.ShouldBe(query.Length - 2);
         missing.Message.ShouldBe("OQL parameter 'n' has no value.");
         var bad = new Dictionary<string, object?> { ["n"] = double.NaN };
         var execute = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, bad, CancellationToken.None));
-        execute.Diagnostics.Single().Code.ShouldBe("OQL0007");
+        execute.Diagnostics.Single().Code.ShouldBe("CD00007");
         var explain = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("EXPLAIN " + query, bad, CancellationToken.None));
-        explain.Diagnostics.Single().Code.ShouldBe("OQL0007");
+        explain.Diagnostics.Single().Code.ShouldBe("CD00007");
         var select = new OqlSelectExpression("items", null, [new(new OqlStarExpression(), null)], null, [], null, [], false, false,
             new OqlBinaryExpression(new OqlLiteralExpression(1), "+", new OqlLiteralExpression(1)));
-        Should.Throw<DatabaseException>(() => DocumentPlanner.CreateLogicalPlan(select)).Diagnostics.Single().Code.ShouldBe("OQL0007");
+        Should.Throw<DatabaseException>(() => DocumentPlanner.CreateLogicalPlan(select)).Diagnostics.Single().Code.ShouldBe("CD00007");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Paging: INSERT and UPSERT SELECT consume only the final page")]

@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// <summary>
 /// A statement that fails inside an explicit transaction aborts the whole transaction (#1188):
 /// the session keeps it as <see cref="TransactionState.Faulted"/> and refuses every later
-/// statement with COHDBG007 until the caller rolls back, and nothing the transaction wrote survives.
+/// statement with CG04007 until the caller rolls back, and nothing the transaction wrote survives.
 /// </summary>
 public sealed class GraphTransactionFailureTests
 {
@@ -27,10 +27,10 @@ public sealed class GraphTransactionFailureTests
     /// <param name="code">The code the failing statement reports.</param>
     /// <param name="isolation">The isolation level the explicit transaction runs under.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a failed statement, a later write and ROLLBACK leave the graph unchanged")]
-    [InlineData("MATCH (n) RETURN m.name", "COHDBG001", IsolationLevel.Snapshot)]
-    [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "COHDBG003", IsolationLevel.Snapshot)]
-    [InlineData("MATCH (n) RETURN m.name", "COHDBG001", IsolationLevel.ReadCommitted)]
-    [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "COHDBG003", IsolationLevel.ReadCommitted)]
+    [InlineData("MATCH (n) RETURN m.name", "CG05001", IsolationLevel.Snapshot)]
+    [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "CG03003", IsolationLevel.Snapshot)]
+    [InlineData("MATCH (n) RETURN m.name", "CG05001", IsolationLevel.ReadCommitted)]
+    [InlineData("MATCH (n:Keep {name: 'k'}) DELETE n", "CG03003", IsolationLevel.ReadCommitted)]
     public async Task ExecuteAsync_FailureThenWriteThenRollback_ShouldLeaveGraphUnchanged(string failing, string code, IsolationLevel isolation)
     {
         // Arrange
@@ -50,7 +50,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
-        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        refused.Diagnostics[0].Code.ShouldBe("CG04007");
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);
         currentWhileFaulted.ShouldBeSameAs(transaction);
@@ -97,7 +97,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refusals.Select(error => ((DatabaseException)error).Diagnostics[0].Code).ShouldAllBe(code => code == "COHDBG007");
+        refusals.Select(error => ((DatabaseException)error).Diagnostics[0].Code).ShouldAllBe(code => code == "CG04007");
         (await database.GetNodeAsync(session, seed.Id)).ShouldNotBeNull();
         (await schema.GetLabelsAsync()).Select(label => label.Name).ShouldBe(["Keep"]);
         await using (var next = await session.BeginTransactionAsync())
@@ -108,7 +108,7 @@ public sealed class GraphTransactionFailureTests
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep", "Next"]);
     }
 
-    /// <summary>COMMIT on a faulted transaction fails with COHDBG007, commits nothing, and ends the transaction.</summary>
+    /// <summary>COMMIT on a faulted transaction fails with CG04007, commits nothing, and ends the transaction.</summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after a failed statement fails and commits nothing")]
     public async Task CommitAsync_AfterFailedStatement_ShouldThrowAndCommitNothing()
     {
@@ -124,8 +124,8 @@ public sealed class GraphTransactionFailureTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync());
 
         // Assert
-        error.Diagnostics[0].Code.ShouldBe("COHDBG007");
-        error.InnerException.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBG001");
+        error.Diagnostics[0].Code.ShouldBe("CG04007");
+        error.InnerException.ShouldBeAssignableTo<DatabaseException>().ShouldNotBeNull().Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG05001");
         transaction.State.ShouldBe(TransactionState.RolledBack);
         session.CurrentTransaction.ShouldBeNull();
         // The client's rollback in a catch block after the failed commit is a no-op, not a second error.
@@ -179,7 +179,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("COHDBG003", Case.Sensitive);
+        error.Message.ShouldStartWith("CG03003", Case.Sensitive);
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Required"]);
         (await Rows(session, "SHOW RELATIONSHIP TYPES")).ShouldBeEmpty();
         (await Rows(session, "MATCH (n:Required) RETURN n.name")).ShouldBeEmpty();
@@ -268,7 +268,7 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        refused.Diagnostics[0].Code.ShouldBe("CG04007");
         refused.Message.ShouldContain(failure.Message, Case.Sensitive);
         refused.InnerException.ShouldBeSameAs(failure);
         faultedState.ShouldBe(TransactionState.Faulted);
@@ -300,7 +300,7 @@ public sealed class GraphTransactionFailureTests
         await blocking.CommitAsync();
 
         // Assert: a canceled task rethrows a fresh cancellation exception, so the cause matches by kind.
-        refused.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        refused.Diagnostics[0].Code.ShouldBe("CG04007");
         refused.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
         faultedState.ShouldBe(TransactionState.Faulted);
         (await Rows(waiting, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Blocker"]);
@@ -358,7 +358,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         rejections.Count.ShouldBe(5);
-        traversal.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        traversal.Message.ShouldStartWith("CG05001", Case.Sensitive);
         state.ShouldBe(TransactionState.Active);
         transaction.State.ShouldBe(TransactionState.Committed);
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Keep", "Pending"]);
@@ -441,12 +441,12 @@ public sealed class GraphTransactionFailureTests
     }
 
     /// <summary>
-    /// Every commit of a transaction a statement aborted reports <c>COHDBG007</c> with the
+    /// Every commit of a transaction a statement aborted reports <c>CG04007</c> with the
     /// statement's failure as its cause (concrete-types plan §6.4): the second one too, where the
     /// model's own state machine reported "The transaction is RolledBack." once the first commit
     /// had ended the transaction.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: every COMMIT of an aborted transaction reports COHDBG007 with the cause")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: every COMMIT of an aborted transaction reports CG04007 with the cause")]
     public async Task CommitAsync_AgainAfterAbortedCommit_ShouldReportTheCodedCause()
     {
         // Arrange
@@ -464,7 +464,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         first.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
-        first.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        first.Diagnostics[0].Code.ShouldBe("CG04007");
         second.Message.ShouldBe(first.Message);
         second.InnerException.ShouldBeSameAs(failure);
         transaction.State.ShouldBe(TransactionState.RolledBack);
@@ -473,14 +473,14 @@ public sealed class GraphTransactionFailureTests
 
     /// <summary>
     /// A transaction whose session closed before the caller ended it was rolled back by the
-    /// session's teardown, and a later commit reports <c>COHDBG007</c> naming why (concrete-types
+    /// session's teardown, and a later commit reports <c>CG04007</c> naming why (concrete-types
     /// plan §6.4): "The session closed before the transaction ended." for an active transaction,
     /// and the statement's failure for one a statement aborted first. The model's own teardown
     /// disposed the transaction without a cause, and the commit reported "The transaction is
     /// RolledBack." either way.
     /// </summary>
     /// <param name="aborted">True when a statement aborted the transaction before the session closed.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after the session closed reports COHDBG007 naming why nothing committed")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: COMMIT after the session closed reports CG04007 naming why nothing committed")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CommitAsync_AfterSessionClosed_ShouldReportWhyNothingCommitted(bool aborted)
@@ -501,7 +501,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         commit.Message.ShouldStartWith("The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
-        commit.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        commit.Diagnostics[0].Code.ShouldBe("CG04007");
         if (failure is null)
         {
             commit.Message.ShouldEndWith("Cause: The session closed before the transaction ended.", Case.Sensitive);
@@ -519,7 +519,7 @@ public sealed class GraphTransactionFailureTests
 
     /// <summary>
     /// Closing a session aborts the statement running on it, and the statement's abort is the
-    /// cause a later commit of its transaction reports with <c>COHDBG007</c> (concrete-types plan
+    /// cause a later commit of its transaction reports with <c>CG04007</c> (concrete-types plan
     /// §6.4): the teardown's own cause does not replace it.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: closing a session aborts its running statement, whose cause a later COMMIT reports")]
@@ -544,7 +544,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         statement.ShouldNotBeOfType<TimeoutException>();
-        commit.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        commit.Diagnostics[0].Code.ShouldBe("CG04007");
         commit.Message.ShouldEndWith("Cause: The graph session closed while the operation was running.", Case.Sensitive);
         transaction.State.ShouldBe(TransactionState.RolledBack);
         await using var observer = await database.CreateSessionAsync();
@@ -649,12 +649,12 @@ public sealed class GraphTransactionFailureTests
     /// A transaction the kernel ended under its caller (its database was dropped while the session
     /// held it) reports <c>Faulted</c>, and the root bases order its refusal against the database's
     /// disposal and a canceled token (concrete-types plan §6.4): BEGIN refuses the open transaction
-    /// with <c>COHDBG007</c> before it checks anything of the model, where the model reported the
+    /// with <c>CG04007</c> before it checks anything of the model, where the model reported the
     /// disposed database; both execute seams check a canceled token before the model reports the
     /// disposed database, which they still report for a live token, and so does BEGIN once the
     /// caller rolled the ended transaction back.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a transaction the kernel ended refuses BEGIN with COHDBG007; the execute seams check a canceled token first")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Session: a transaction the kernel ended refuses BEGIN with CG04007; the execute seams check a canceled token first")]
     public async Task BeginTransactionAsync_TransactionEndedByTheKernel_ShouldOrderTheRefusals()
     {
         // Arrange
@@ -679,7 +679,7 @@ public sealed class GraphTransactionFailureTests
 
         // Assert
         state.ShouldBe(TransactionState.Faulted);
-        begin.Diagnostics[0].Code.ShouldBe("COHDBG007");
+        begin.Diagnostics[0].Code.ShouldBe("CG04007");
         canceledText.CancellationToken.ShouldBe(canceled.Token);
         text.ShouldNotBeNull();
         canceledRequest.CancellationToken.ShouldBe(canceled.Token);
@@ -905,7 +905,8 @@ public sealed class GraphTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Message.ShouldStartWith("COHDBG012: Database 'graph' went offline while a transaction was committing", Case.Sensitive);
+        error.Diagnostics.ShouldContain(d => d.Code == "CG06012");
+        error.Message.ShouldStartWith("Database 'graph' went offline while a transaction was committing", Case.Sensitive);
         stateAfterCommit.ShouldBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
@@ -954,7 +955,7 @@ public sealed class GraphTransactionFailureTests
         // Assert
         unspent.ShouldBe(0);
         StorageOfflineException.Find(error).ShouldNotBeNull();
-        error.Code.ShouldBe("COHDBG012");
+        error.Code.ShouldBe("CG06012");
         stateAfterCommit.ShouldBe(TransactionState.Faulted);
         session.CurrentTransaction.ShouldBeNull();
         (await Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
@@ -1089,7 +1090,7 @@ public sealed class GraphTransactionFailureTests
     /// kernel's exception is kept as the inner exception. Before #1272 this path kept the kernel's
     /// message, uncoded.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by COHDBG012")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Transaction: a commit record that could not be made durable crosses the boundary as committed-unconfirmed, led by CG06012")]
     public async Task TranslateKernelFailure_CommitUnconfirmed_ShouldBecomeTheCodedCommitUnconfirmedException()
     {
         // Arrange
@@ -1103,8 +1104,9 @@ public sealed class GraphTransactionFailureTests
         // Assert: not an abort, so a caller never retries work that committed.
         var unconfirmed = translated.ShouldBeOfType<DatabaseTransactionCommitUnconfirmedException>();
         unconfirmed.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CG06012");
         unconfirmed.Message.ShouldBe(
-            "COHDBG012: Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
+            "Database 'test' went offline while a transaction was committing: the durable flush of its commit record failed (flush) " +
             "after the transaction's commit record was written. The transaction may or may not have committed; do not retry it. Reopen the " +
             "database (OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
             "reading the data back then tells which.");

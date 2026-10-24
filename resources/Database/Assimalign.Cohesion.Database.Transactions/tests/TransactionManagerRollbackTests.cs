@@ -18,12 +18,12 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public class TransactionManagerRollbackTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
-    private static readonly LockResource Row = LockResource.Entry(1, 1);
-    private static readonly LockResource OtherRow = LockResource.Entry(1, 2);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly LockResource _row = LockResource.Entry(1, 1);
+    private static readonly LockResource _otherRow = LockResource.Entry(1, 2);
 
     // A lock owner the manager never assigned: no end of a managed transaction touches its requests.
-    private static readonly TransactionSequence Outsider = new(ulong.MaxValue - 1);
+    private static readonly TransactionSequence _outsider = new(ulong.MaxValue - 1);
 
     /// <summary>The steps of a rollback that await.</summary>
     public enum RollbackStep
@@ -44,7 +44,7 @@ public class TransactionManagerRollbackTests
         kernel.Log.FailAbort = true;
         var writer = await kernel.BeginWriterAsync();
         var next = await kernel.Manager.BeginAsync();
-        var waiting = kernel.Locks.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = kernel.Locks.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
 
         // Act
         await kernel.Manager.RollbackAsync(writer);
@@ -54,7 +54,7 @@ public class TransactionManagerRollbackTests
         kernel.Log.AbortAttempts.ShouldBe(1);
         kernel.Log.AbortRecords.ShouldBe(0);
         kernel.Manager.OldestActive.ShouldBe(next.Sequence);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         var probe = await kernel.Manager.BeginAsync();
         probe.Snapshot.IsVisible(writer.Sequence).ShouldBeTrue();
         (await kernel.Versions.GetVisibleVersionAsync(1, 1, probe.Snapshot)).ShouldBeNull();
@@ -82,14 +82,14 @@ public class TransactionManagerRollbackTests
 
         var writer = await kernel.BeginWriterAsync();
         var next = await kernel.Manager.BeginAsync();
-        var waiting = kernel.Locks.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
+        var waiting = kernel.Locks.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
         using var canceled = new CancellationTokenSource();
 
         // Act: cancel while the rollback waits in the step, then let the step finish.
         var rollback = kernel.Manager.RollbackAsync(writer, canceled.Token).AsTask();
         try
         {
-            await block.Entered.WaitAsync(Timeout);
+            await block.Entered.WaitAsync(_timeout);
             canceled.Cancel();
         }
         finally
@@ -97,7 +97,7 @@ public class TransactionManagerRollbackTests
             block.Release();
         }
 
-        await rollback.WaitAsync(Timeout);
+        await rollback.WaitAsync(_timeout);
 
         // Assert: the token reached neither step, and the rollback ended everything it started.
         writer.State.ShouldBe(TransactionState.RolledBack);
@@ -105,7 +105,7 @@ public class TransactionManagerRollbackTests
         kernel.Log.AbortTokens.ShouldAllBe(token => !token.CanBeCanceled);
         kernel.Log.AbortRecords.ShouldBe(1);
         kernel.Manager.OldestActive.ShouldBe(next.Sequence);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         await kernel.Manager.CommitAsync(next);
     }
 
@@ -142,7 +142,7 @@ public class TransactionManagerRollbackTests
         var kernel = Kernel.Create();
         kernel.Versions.FailPurges = 1;
         var writer = await kernel.BeginWriterAsync();
-        var waiting = kernel.Locks.AcquireAsync(Outsider, Row, LockMode.Exclusive).AsTask();
+        var waiting = kernel.Locks.AcquireAsync(_outsider, _row, LockMode.Exclusive).AsTask();
 
         // Act
         await kernel.Manager.RollbackAsync(writer);
@@ -162,7 +162,7 @@ public class TransactionManagerRollbackTests
         await kernel.Manager.DisposeAsync();
 
         // Assert: three undos ran, the failed one, the probe's abort at disposal, and the retry.
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         kernel.Versions.PurgeCalls.ShouldBe(3);
         kernel.Log.AbortRecords.ShouldBeGreaterThanOrEqualTo(1);
     }
@@ -195,7 +195,7 @@ public class TransactionManagerRollbackTests
         kernel.Log.FailCommit = true;
         kernel.Versions.FailPurges = 1;
         var writer = await kernel.BeginWriterAsync();
-        var waiting = kernel.Locks.AcquireAsync(Outsider, Row, LockMode.Exclusive).AsTask();
+        var waiting = kernel.Locks.AcquireAsync(_outsider, _row, LockMode.Exclusive).AsTask();
 
         // Act
         await Should.ThrowAsync<TransactionAbortedException>(async () => await kernel.Manager.CommitAsync(writer));
@@ -209,7 +209,7 @@ public class TransactionManagerRollbackTests
         await kernel.Manager.DisposeAsync();
 
         // Assert
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         kernel.Log.AbortRecords.ShouldBeGreaterThanOrEqualTo(1);
     }
 
@@ -229,19 +229,19 @@ public class TransactionManagerRollbackTests
         kernel.Versions.FailPurges = 1;
         var writer = await kernel.BeginWriterAsync();
         var blocker = await kernel.Manager.BeginAsync();
-        await kernel.Locks.AcquireAsync(blocker.Sequence, OtherRow, LockMode.Exclusive);
-        var parked = kernel.Locks.AcquireAsync(writer.Sequence, OtherRow, LockMode.Exclusive).AsTask();
+        await kernel.Locks.AcquireAsync(blocker.Sequence, _otherRow, LockMode.Exclusive);
+        var parked = kernel.Locks.AcquireAsync(writer.Sequence, _otherRow, LockMode.Exclusive).AsTask();
         var next = await kernel.Manager.BeginAsync();
-        var nextWaiting = kernel.Locks.AcquireAsync(next.Sequence, Row, LockMode.Exclusive).AsTask();
-        var outsiderWaiting = kernel.Locks.AcquireAsync(Outsider, Row, LockMode.Exclusive).AsTask();
+        var nextWaiting = kernel.Locks.AcquireAsync(next.Sequence, _row, LockMode.Exclusive).AsTask();
+        var outsiderWaiting = kernel.Locks.AcquireAsync(_outsider, _row, LockMode.Exclusive).AsTask();
         bool parkedBeforeTheEnd = !parked.IsCompleted;
 
         // Act: the rollback ends the writer and defers its undo.
         await kernel.Manager.RollbackAsync(writer);
-        var abandoned = await Should.ThrowAsync<TransactionAbortedException>(async () => await parked.WaitAsync(Timeout));
+        var abandoned = await Should.ThrowAsync<TransactionAbortedException>(async () => await parked.WaitAsync(_timeout));
         bool rowReleasedBeforeTheUndo = nextWaiting.IsCompleted || outsiderWaiting.IsCompleted;
         await kernel.Manager.CommitAsync(blocker);
-        bool otherRowFreeAfterTheBlocker = kernel.Locks.TryAcquire(Outsider, OtherRow, LockMode.Exclusive);
+        bool otherRowFreeAfterTheBlocker = kernel.Locks.TryAcquire(_outsider, _otherRow, LockMode.Exclusive);
 
         // Act: disposal aborts the running transaction, then completes the writer's undo.
         await kernel.Manager.DisposeAsync();
@@ -252,10 +252,10 @@ public class TransactionManagerRollbackTests
         abandoned.Message.ShouldStartWith($"Transaction {writer.Sequence} ended while it waited", Case.Sensitive);
         rowReleasedBeforeTheUndo.ShouldBeFalse();
         otherRowFreeAfterTheBlocker.ShouldBeTrue();
-        var aborted = await Should.ThrowAsync<TransactionAbortedException>(async () => await nextWaiting.WaitAsync(Timeout));
+        var aborted = await Should.ThrowAsync<TransactionAbortedException>(async () => await nextWaiting.WaitAsync(_timeout));
         aborted.Message.ShouldStartWith($"Transaction {next.Sequence} ended while it waited", Case.Sensitive);
         next.State.ShouldBe(TransactionState.Faulted);
-        await outsiderWaiting.WaitAsync(Timeout);
+        await outsiderWaiting.WaitAsync(_timeout);
         kernel.Versions.PurgeCalls.ShouldBe(3);
     }
 
@@ -273,17 +273,17 @@ public class TransactionManagerRollbackTests
         kernel.Versions.FailPurges = 1;
         var writer = await kernel.BeginWriterAsync();
         var live = await kernel.Manager.BeginAsync();
-        await kernel.Locks.AcquireAsync(live.Sequence, OtherRow, LockMode.Exclusive);
+        await kernel.Locks.AcquireAsync(live.Sequence, _otherRow, LockMode.Exclusive);
         await kernel.Manager.RollbackAsync(writer);
         writer.State.ShouldBe(TransactionState.RolledBack);
 
         // Act: a late request of the ended writer for the live transaction's row, then the live
         // transaction's request for the row the writer still holds.
-        var late = kernel.Locks.AcquireAsync(writer.Sequence, OtherRow, LockMode.Exclusive).AsTask();
+        var late = kernel.Locks.AcquireAsync(writer.Sequence, _otherRow, LockMode.Exclusive).AsTask();
         bool lateFailedAtOnce = late.IsFaulted;
         bool tryAcquired = kernel.Locks.TryAcquire(writer.Sequence, LockResource.Entry(1, 3), LockMode.Shared);
-        var regrant = kernel.Locks.AcquireAsync(writer.Sequence, Row, LockMode.Shared).AsTask();
-        var liveWaiting = kernel.Locks.AcquireAsync(live.Sequence, Row, LockMode.Exclusive).AsTask();
+        var regrant = kernel.Locks.AcquireAsync(writer.Sequence, _row, LockMode.Shared).AsTask();
+        var liveWaiting = kernel.Locks.AcquireAsync(live.Sequence, _row, LockMode.Exclusive).AsTask();
         await Task.WhenAny(liveWaiting, Task.Delay(TimeSpan.FromMilliseconds(100)));
         bool liveStillWaiting = !liveWaiting.IsCompleted;
 
@@ -299,10 +299,10 @@ public class TransactionManagerRollbackTests
         tryAcquired.ShouldBeFalse();
         regrant.IsCompletedSuccessfully.ShouldBeTrue();
         liveStillWaiting.ShouldBeTrue();
-        var ended = await Should.ThrowAsync<TransactionAbortedException>(async () => await liveWaiting.WaitAsync(Timeout));
+        var ended = await Should.ThrowAsync<TransactionAbortedException>(async () => await liveWaiting.WaitAsync(_timeout));
         ended.ShouldNotBeOfType<TransactionDeadlockException>();
-        kernel.Locks.TryAcquire(Outsider, Row, LockMode.Exclusive).ShouldBeTrue();
-        kernel.Locks.TryAcquire(writer.Sequence, OtherRow, LockMode.Exclusive).ShouldBeTrue();
+        kernel.Locks.TryAcquire(_outsider, _row, LockMode.Exclusive).ShouldBeTrue();
+        kernel.Locks.TryAcquire(writer.Sequence, _otherRow, LockMode.Exclusive).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Commit: a commit record written but not made durable ends the transaction as committed")]
@@ -314,7 +314,7 @@ public class TransactionManagerRollbackTests
         kernel.Log.UnconfirmCommit = true;
         kernel.Versions.FailPurges = int.MaxValue;
         var writer = await kernel.BeginWriterAsync();
-        var waiting = kernel.Locks.AcquireAsync(Outsider, Row, LockMode.Exclusive).AsTask();
+        var waiting = kernel.Locks.AcquireAsync(_outsider, _row, LockMode.Exclusive).AsTask();
 
         // Act
         var error = await Should.ThrowAsync<TransactionCommitUnconfirmedException>(async () => await kernel.Manager.CommitAsync(writer));
@@ -323,7 +323,7 @@ public class TransactionManagerRollbackTests
         // contradicts the commit record.
         error.InnerException.ShouldBeOfType<IOException>();
         writer.State.ShouldBe(TransactionState.Committed);
-        await waiting.WaitAsync(Timeout);
+        await waiting.WaitAsync(_timeout);
         kernel.Versions.PurgeCalls.ShouldBe(0);
         kernel.Log.AbortAttempts.ShouldBe(0);
         var reader = await kernel.Manager.BeginAsync();
@@ -350,18 +350,18 @@ public class TransactionManagerRollbackTests
         // Act
         try
         {
-            await block.Entered.WaitAsync(Timeout);
+            await block.Entered.WaitAsync(_timeout);
             secondRollback = await Should.ThrowAsync<TransactionAbortedException>(
-                async () => await kernel.Manager.RollbackAsync(writer).AsTask().WaitAsync(Timeout));
+                async () => await kernel.Manager.RollbackAsync(writer).AsTask().WaitAsync(_timeout));
             commit = await Should.ThrowAsync<TransactionAbortedException>(
-                async () => await kernel.Manager.CommitAsync(writer).AsTask().WaitAsync(Timeout));
+                async () => await kernel.Manager.CommitAsync(writer).AsTask().WaitAsync(_timeout));
         }
         finally
         {
             block.Release();
         }
 
-        await rollback.WaitAsync(Timeout);
+        await rollback.WaitAsync(_timeout);
 
         // Assert: the running rollback is the only end that happened.
         secondRollback.Message.ShouldContain("already ending");
@@ -380,7 +380,7 @@ public class TransactionManagerRollbackTests
         kernel.Versions.Block = block;
         var writer = await kernel.BeginWriterAsync();
         var rollback = kernel.Manager.RollbackAsync(writer).AsTask();
-        await block.Entered.WaitAsync(Timeout);
+        await block.Entered.WaitAsync(_timeout);
         Task dispose;
         bool disposedWhileRollbackRan;
 
@@ -397,8 +397,8 @@ public class TransactionManagerRollbackTests
             block.Release();
         }
 
-        await rollback.WaitAsync(Timeout);
-        await dispose.WaitAsync(Timeout);
+        await rollback.WaitAsync(_timeout);
+        await dispose.WaitAsync(_timeout);
 
         // Assert: disposal neither returned under the running rollback nor aborted its writer a
         // second time; the rollback ended the writer and appended its abort record.
@@ -433,7 +433,7 @@ public class TransactionManagerRollbackTests
         {
             var log = new ControlledLog();
             var versions = new ControlledVersionStore();
-            var locks = LockManager.Create();
+            var locks = new LockManager();
             return new Kernel(log, versions, locks, TransactionManager.Create(log, locks, versions));
         }
 
@@ -442,7 +442,7 @@ public class TransactionManagerRollbackTests
         {
             var writer = await Manager.BeginAsync();
             await Versions.AppendVersionAsync(1, 1, Payload("uncommitted"), writer.Sequence);
-            await Locks.AcquireAsync(writer.Sequence, Row, LockMode.Exclusive);
+            await Locks.AcquireAsync(writer.Sequence, _row, LockMode.Exclusive);
             return writer;
         }
     }

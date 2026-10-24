@@ -94,20 +94,20 @@ public class SqlConformanceTests
 
         statement.SqlExpression.CommandType.ShouldBe(expected);
         statement.Diagnostics.ShouldContain(d =>
-            d.Code == "COHDBL001" && d.Severity == DiagnosticSeverity.Error);
+            d.Code == "CK00001" && d.Severity == DiagnosticSeverity.Error);
         statement.SqlExpression.Text.ShouldBe(sql); // the raw text is stamped (#170)
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: temporal suffix lookahead leaves modifier validation to the grammar")]
-    [InlineData("()", "SQL0005")]
-    [InlineData("(-1)", "SQL0005")]
-    [InlineData("(x)", "SQL0005")]
-    [InlineData("(1,2,3)", "SQL0005")]
-    [InlineData("(x, (1))", "SQL0005")]
-    [InlineData("( /*arg*/ x)", "SQL0005")]
-    [InlineData("(0)", "COHDBL001")]
-    [InlineData("(6)", "COHDBL001")]
-    [InlineData("(7)", "COHDBL001")]
+    [InlineData("()", "CS00005")]
+    [InlineData("(-1)", "CS00005")]
+    [InlineData("(x)", "CS00005")]
+    [InlineData("(1,2,3)", "CS00005")]
+    [InlineData("(x, (1))", "CS00005")]
+    [InlineData("( /*arg*/ x)", "CS00005")]
+    [InlineData("(0)", "CK00001")]
+    [InlineData("(6)", "CK00001")]
+    [InlineData("(7)", "CK00001")]
     public void Parse_TemporalModifierBeforeSuffix_ShouldReportOnlyModifierDiagnostic(string modifier, string code)
     {
         // Arrange
@@ -166,13 +166,13 @@ public class SqlConformanceTests
         statement.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry SQL0002, empty input SQL0001")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Conformance: unknown commands carry CS00002, empty input CS00001")]
     public void Parse_UnknownAndEmpty_ShouldCarryDeclaredDiagnostics()
     {
-        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "SQL0002");
-        Parse("").Diagnostics.ShouldContain(d => d.Code == "SQL0001");
-        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "SQL0100");
-        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "SQL0100");
+        Parse("MERGE INTO t;").Diagnostics.ShouldContain(d => d.Code == "CS00002");
+        Parse("").Diagnostics.ShouldContain(d => d.Code == "CS00001");
+        Parse("SELECT 1").Diagnostics.ShouldContain(d => d.Code == "CS00100");
+        Parse("SELECT 1;").Diagnostics.ShouldNotContain(d => d.Code == "CS00100");
     }
 
     // ── Literal handling (#174) ────────────────────────────────────────
@@ -262,7 +262,7 @@ public class SqlConformanceTests
 
     // ── Builtin function recognition (#173) ────────────────────────────
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report COHDBL001")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Builtins: executable functions parse and unsupported names report CK00001")]
     [InlineData("COUNT", "SELECT COUNT(*) FROM t;")]
     [InlineData("SUM", "SELECT SUM(x) FROM t;")]
     [InlineData("COALESCE", "SELECT COALESCE(a, b, 0) FROM t;")]
@@ -277,7 +277,7 @@ public class SqlConformanceTests
         if (!SqlLanguageProfile.Instance.Functions.Contains(function, StringComparer.OrdinalIgnoreCase))
         {
             var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHDBL001");
+            diagnostic.Code.ShouldBe("CK00001");
             diagnostic.Message.ShouldNotBeNull().ShouldContain(function, Case.Sensitive);
             return;
         }

@@ -29,10 +29,15 @@ using Assimalign.Cohesion.FileSystem;
 /// </remarks>
 internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrategy
 {
-    private static readonly AsyncLocal<Budget?> s_failures = new();
-    private static readonly AsyncLocal<Budget?> s_flushFailures = new();
-    private static readonly AsyncLocal<Budget?> s_recordFailures = new();
+    private static readonly AsyncLocal<Budget?> _failures = new();
+    private static readonly AsyncLocal<Budget?> _flushFailures = new();
+    private static readonly AsyncLocal<Budget?> _recordFailures = new();
     private static readonly AsyncLocal<Action?> _beforeCommitFlush = new();
+
+    internal JournalCounters JournalCounters(string databaseName, bool catalog = false)
+    {
+        lock (_sync) { return _storages[Key(databaseName, catalog)].Journal.Counters; }
+    }
 
     /// <summary>Gets or sets a callback on this flow before a durable journal flush (#1246).</summary>
     internal static Action? BeforeCommitFlush
@@ -93,10 +98,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWrites(int writes, int skip = 0)
     {
-        var previous = s_failures.Value;
+        var previous = _failures.Value;
         var budget = new Budget { Skip = skip, Fail = writes };
-        s_failures.Value = budget;
-        return new FailureScope(s_failures, previous, budget);
+        _failures.Value = budget;
+        return new FailureScope(_failures, previous, budget);
     }
 
     /// <summary>
@@ -115,10 +120,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalWritesContaining(JournalRecordType type, int writes = 1)
     {
-        var previous = s_recordFailures.Value;
+        var previous = _recordFailures.Value;
         var budget = new Budget { Fail = writes, RecordType = type };
-        s_recordFailures.Value = budget;
-        return new FailureScope(s_recordFailures, previous, budget);
+        _recordFailures.Value = budget;
+        return new FailureScope(_recordFailures, previous, budget);
     }
 
     /// <summary>
@@ -135,10 +140,10 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// <returns>The scope that disarms the failure and reports how many failures remain unspent.</returns>
     internal static FailureScope FailJournalFlushes(int flushes, int skip = 0, string? databaseName = null, bool catalog = false)
     {
-        var previous = s_flushFailures.Value;
+        var previous = _flushFailures.Value;
         var budget = new Budget { Skip = skip, Fail = flushes, StorageName = databaseName is null ? null : Key(databaseName, catalog) };
-        s_flushFailures.Value = budget;
-        return new FailureScope(s_flushFailures, previous, budget);
+        _flushFailures.Value = budget;
+        return new FailureScope(_flushFailures, previous, budget);
     }
 
     /// <summary>
@@ -296,7 +301,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     // Spends the calling flow's record budget when the write carries a record of its type.
     private static bool SpendCarrying(ReadOnlySpan<byte> written)
     {
-        if (s_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
+        if (_recordFailures.Value is not { RecordType: { } type, Fail: > 0 } budget || !JournalFrames.Carries(written, type))
         {
             return false;
         }
@@ -356,14 +361,14 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
 
     // Every write funnels through the array overload, so each journal write is counted once: a
     // MemoryStream subclass's span overload would otherwise call back into the array overload.
-    private sealed class FaultInjectingStream : MemoryStream
+    private sealed class FaultInjectingStream : JournalTrackingStream
     {
         /// <summary>Gets or sets the length the last successful durable flush confirmed.</summary>
         public long ConfirmedLength { get; set; }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            if (Spend(s_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
+            if (Spend(_failures) || SpendCarrying(buffer.AsSpan(offset, count)))
             {
                 throw new IOException("Injected journal write failure.");
             }
@@ -477,7 +482,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
         public void Flush(bool durable)
         {
             // An unfiltered scope counts data fsyncs too; only journal fsyncs can fail here.
-            if (durable && _journal is null && s_flushFailures.Value is { StorageName: null } budget)
+            if (durable && _journal is null && _flushFailures.Value is { StorageName: null } budget)
             {
                 budget.Attempts++;
             }
@@ -489,7 +494,7 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
 
             _beforeCommitFlush.Value?.Invoke();
 
-            if (Spend(s_flushFailures, _storageName))
+            if (Spend(_flushFailures, _storageName))
             {
                 throw new IOException("Injected journal fsync failure.");
             }

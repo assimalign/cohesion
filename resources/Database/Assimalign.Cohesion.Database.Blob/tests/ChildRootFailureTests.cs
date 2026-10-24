@@ -52,7 +52,7 @@ public sealed class ChildRootFailureTests
             _ => ValueTask.FromException<int>(cause), CancellationToken.None).AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(catalog ? "COHDBB006" : "COHDBB005");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(catalog ? "CB06006" : "CB06005");
         failure.InnerException.ShouldBeSameAs(cause);
         if (transaction is not null)
         {
@@ -85,8 +85,8 @@ public sealed class ChildRootFailureTests
         var disposal = await Should.ThrowAsync<DatabaseException>(() => upload.DisposeAsync().AsTask());
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB007");
-        disposal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB007");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB02007");
+        disposal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB02007");
         (await files.GetPropertiesAsync("one", CancellationToken.None)).ShouldBeNull();
     }
 
@@ -109,7 +109,7 @@ public sealed class ChildRootFailureTests
         await upload.DisposeAsync();
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB007");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB02007");
         (await files.GetPropertiesAsync("one", CancellationToken.None)).ShouldBeNull();
     }
 

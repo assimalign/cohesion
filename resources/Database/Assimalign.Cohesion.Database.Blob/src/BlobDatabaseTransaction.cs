@@ -18,15 +18,15 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <para>
 /// <b>The end state machine is the root base's</b> (<see cref="DatabaseTransaction"/>, the
 /// #1188, #1225 and #1226 contracts): until the caller ends an aborted transaction, the session
-/// refuses every operation and BEGIN with <c>COHDBB001</c>; a rollback ends it, and a commit ends
-/// it with <c>COHDBB001</c> and commits nothing, as every later commit does. A transaction that
+/// refuses every operation and BEGIN with <c>CB04001</c>; a rollback ends it, and a commit ends
+/// it with <c>CB04001</c> and commits nothing, as every later commit does. A transaction that
 /// did not commit accepts any number of rollbacks, a token is observed only before a commit or
 /// rollback starts, and a commit is refused while an operation of the transaction (an open blob
 /// stream included) still runs. A commit or rollback that started always ends the context: the
 /// transaction kernel completes a started rollback whatever fails or is canceled, and aborts a
 /// commit it cannot complete (#1226). This type supplies the model's vocabulary only: the kernel
 /// state, the kernel commit and rollback with the engine's exception translation, the offline
-/// refusal (<c>COHDBB002</c>, #1243) and the <c>COHDBB001</c> aborted error. Blob DESIGN.md,
+/// refusal (<c>CB06002</c>, #1243) and the <c>CB04001</c> aborted error. Blob DESIGN.md,
 /// "Failed operations in explicit transactions", records the contract and the reference engines
 /// it follows.
 /// </para>
@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction.DebugView))]
 public sealed class BlobDatabaseTransaction : DatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
@@ -160,6 +162,19 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
             ? ErrorMessages.TransactionCommitAborted + reason
             : ErrorMessages.TransactionOperationsAborted + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHDBB001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CB04001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }

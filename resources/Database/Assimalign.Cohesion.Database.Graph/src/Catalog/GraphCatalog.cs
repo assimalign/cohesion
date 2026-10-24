@@ -27,6 +27,8 @@ namespace Assimalign.Cohesion.Database.Graph.Catalog;
 /// <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog.DebugView))]
 public sealed class GraphCatalog
 {
     private readonly GraphStorage _storage;
@@ -58,7 +60,7 @@ public sealed class GraphCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = GraphCatalogCodec.Decode(unit.Data.Span);
+            var record = GraphCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
@@ -225,7 +227,7 @@ public sealed class GraphCatalog
         var prior = EnsureUnchanged(4, index.LabelId, index.Name, context);
         if (prior?.Record.Index is { } previous && previous.PropertyKey != index.PropertyKey)
         {
-            throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
+            throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
                 index.Name, previous.PropertyKey)) { IsCallerError = true };
         }
         return SaveAsync(record, prior, context, cancellationToken);
@@ -262,7 +264,7 @@ public sealed class GraphCatalog
             RefuseSchemaOwner(found.Record, "ALTER");
             if (found.Record.Id != record.Id)
             {
-                throw new GraphCatalogException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
+                throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIdentityMismatch,
                     record.Name)) { IsCallerError = true };
             }
         }
@@ -274,7 +276,7 @@ public sealed class GraphCatalog
         {
             if (_definitions.TryGetValue(record.Id, out var keys) && keys.Any(key => key != (record.Kind, record.Name)))
             {
-                throw new GraphCatalogException(ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
+                throw new GraphCatalogException("CG03003", ErrorMessages.CatalogIdentityReused) { IsCallerError = true };
             }
         }
         return SaveAsync(record, previous, context, cancellationToken);
@@ -345,14 +347,14 @@ public sealed class GraphCatalog
     }
 
     internal static GraphCatalogException Conflict()
-        => new("Graph catalog write conflict: the definition changed after the transaction snapshot.") { IsConflict = true };
+        => new("CG04007", ErrorMessages.GraphCatalogConflictGraphCatalog) { IsConflict = true };
 
     private void RequireMutableDefinition(Guid id, TransactionSnapshot snapshot, string operation, bool labelOnly = false)
     {
         var found = FindDefinition(id, snapshot, labelOnly ? (byte)1 : null) ?? default;
         if (found.Record is null)
         {
-            throw new GraphCatalogException(ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
+            throw new GraphCatalogException("CG03003", ErrorMessages.CatalogOwnerMissing) { IsCallerError = true };
         }
         RefuseSchemaOwner(found.Record, operation);
     }
@@ -516,7 +518,7 @@ public sealed class GraphCatalog
                 }
                 if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
                 {
-                    throw new GraphCatalogException("Truncated graph catalog record.");
+                    GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 }
                 var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
                 if (writer != reference.Writer)
@@ -524,7 +526,7 @@ public sealed class GraphCatalog
                     RemoveStaleReference(key, versions, index);
                     continue;
                 }
-                var record = GraphCatalogCodec.Decode(bytes.Span);
+                var record = GraphCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
                 if ((record.Kind, record.Parent, record.Name) != key || record.Id != reference.Id)
                 {
                     RemoveStaleReference(key, versions, index);
@@ -567,11 +569,19 @@ public sealed class GraphCatalog
         ArgumentNullException.ThrowIfNull(context);
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.GraphCatalogEnsureActiveFailure);
         }
     }
 
     private readonly record struct Reference(PageId PageId, int SlotIndex, TransactionSequence Writer, Guid Id);
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Catalog.GraphCatalog value)
+        {
+            _ = value;
+        }
+    }
 }

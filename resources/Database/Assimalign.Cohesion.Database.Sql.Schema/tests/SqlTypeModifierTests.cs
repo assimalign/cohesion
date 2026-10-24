@@ -43,7 +43,7 @@ public sealed class SqlTypeModifierTests
             var diagnostic = error.Errors.ShouldHaveSingleItem();
             diagnostic.Code.ShouldBe(SqlSchemaValidationErrorCode.UnsupportedType);
             diagnostic.Declaration.ShouldBe(declaration);
-            error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            error.Message.ShouldContain("CK00001", Case.Sensitive);
             error.Message.ShouldContain(declaration, Case.Sensitive);
             error.Message.ShouldContain(type, Case.Sensitive);
         }

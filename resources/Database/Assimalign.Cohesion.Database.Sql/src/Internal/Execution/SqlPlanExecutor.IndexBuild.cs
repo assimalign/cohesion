@@ -11,6 +11,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // Test-only observation; null in production. Observers retain weak references only.
+    internal static Action<object?[]>? RowDecoded { get; set; }
+    internal static Action<IndexKey>? IndexKeyBuilt { get; set; }
+
     // Test seam: sample retained workspace while the validation cursor is still walking.
     internal static Action? UniqueIndexEntryValidated { get; set; }
 
@@ -93,6 +97,7 @@ internal sealed partial class SqlPlanExecutor
             }
             // CurrentKey owns its bytes; retaining it across a batch needs no copy.
             previous = key;
+            IndexKeyBuilt?.Invoke(key);
             UniqueIndexEntryValidated?.Invoke();
         }
     }

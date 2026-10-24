@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents an untyped or typed literal value in a SQL expression.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlLiteralExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlLiteralExpression.DebugView))]
 public sealed class SqlLiteralExpression : SqlExpression
 {
     /// <summary>
@@ -29,4 +31,17 @@ public sealed class SqlLiteralExpression : SqlExpression
     /// Gets the kind of literal.
     /// </summary>
     public SqlLiteralType LiteralType { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlLiteralExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlLiteralExpression value)
+        {
+            _target = value;
+        }
+
+        public string Value => _target.Value;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlLiteralType LiteralType => _target.LiteralType;
+    }
 }

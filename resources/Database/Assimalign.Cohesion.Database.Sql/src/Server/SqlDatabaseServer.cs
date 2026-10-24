@@ -47,6 +47,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// <c>engineBuilder.AddServer(factory)</c> builder verb.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer.DebugView))]
 public sealed class SqlDatabaseServer : DatabaseServer
 {
     private readonly SqlDatabaseEngine _engine;
@@ -70,21 +72,11 @@ public sealed class SqlDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B1 of
         // the engine extensibility design): the sessions read the limits live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException("A connection listener is required.", nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException("The session limit must be positive.", nameof(options));
-        }
-
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -325,17 +317,24 @@ public sealed class SqlDatabaseServer : DatabaseServer
         }
     }
 
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
-    }
-
     internal void OnSessionCompleted(SqlDatabaseServerSession session)
     {
         if (_sessions.TryRemove(session.Id, out _))
         {
             SqlDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.SqlDatabaseEngine Engine => _target.Engine;
+        public bool IsRunning => _target.IsRunning;
     }
 }

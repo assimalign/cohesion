@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>Retains completed outputs and keys, bounded by OFFSET + LIMIT when ordered.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlRowCollector")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCollector.DebugView))]
 internal sealed class SqlRowCollector
 {
     private readonly IReadOnlyList<SqlBoundOrdering> _orderBy;
@@ -163,4 +165,12 @@ internal sealed class SqlRowCollector
     }
 
     private readonly record struct Entry(object?[] Output, object?[] Keys, long Ordinal);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlRowCollector value)
+        {
+            _ = value;
+        }
+    }
 }

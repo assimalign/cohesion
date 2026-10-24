@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationOwnership")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseApplicationOwnership.DebugView))]
 internal sealed class DatabaseApplicationOwnership
 {
     internal readonly List<object> Infrastructure = [];
@@ -47,6 +49,14 @@ internal sealed class DatabaseApplicationOwnership
             {
                 failures.Add(exception);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseApplicationOwnership value)
+        {
+            _ = value;
         }
     }
 }

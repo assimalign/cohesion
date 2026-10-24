@@ -13,6 +13,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\ThreadPoolSaturation.cs" Link="TestObjects\ThreadPoolSaturation.cs" />
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\ThreadPoolSaturationCollection.cs" Link="TestObjects\ThreadPoolSaturationCollection.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\CheckpointPace.cs" Link="TestObjects\CheckpointPace.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
@@ -49,7 +52,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Tcp" />
 		<!-- Health during SQL recovery uses the real host and the SQL-only recovery barrier. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the
@@ -61,4 +64,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\JournalTrackingStream.cs" Link="TestObjects\JournalTrackingStream.cs" />
+	</ItemGroup>
 </Project>

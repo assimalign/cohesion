@@ -795,7 +795,7 @@ public sealed class StorageRedoTests
             // Format 4 refuses a missing checksum on a nonzero page before trusting its LSN.
             var corruption = Should.Throw<StorageCorruptionException>(() => TornStorage.Open(images));
             corruption.PageId.ShouldBe(pageId);
-            corruption.Code.ShouldBe("COHDBS003");
+            corruption.Code.ShouldBe("CK06003");
             return;
         }
 

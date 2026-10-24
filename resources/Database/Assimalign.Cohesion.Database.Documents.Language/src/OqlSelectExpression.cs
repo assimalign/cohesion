@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A query over one collection in the session's database.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlSelectExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression.DebugView))]
 public sealed class OqlSelectExpression : OqlExpression
 {
     /// <summary>Initializes a collection query.</summary>
@@ -64,4 +66,29 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Limit { get; }
     /// <summary>Gets the optional number of rows to skip.</summary>
     public OqlExpression? Offset { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression value)
+        {
+            _target = value;
+        }
+
+        public bool IsDistinct => _target.IsDistinct;
+        public bool IsValue => _target.IsValue;
+        public string Collection => _target.Collection;
+        public string? Alias => _target.Alias;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression> Unnest => _target.Unnest;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlProjection> Projections => _target.Projections;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Predicate => _target.Predicate;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> GroupBy => _target.GroupBy;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Having => _target.Having;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlOrdering> OrderBy => _target.OrderBy;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Limit => _target.Limit;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Offset => _target.Offset;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

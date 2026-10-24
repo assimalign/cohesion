@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a function call such as <c>COUNT(*)</c> or <c>UPPER(name)</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionCallExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlFunctionCallExpression.DebugView))]
 public sealed class SqlFunctionCallExpression : SqlExpression
 {
     /// <summary>
@@ -52,4 +54,20 @@ public sealed class SqlFunctionCallExpression : SqlExpression
     /// Gets the list of arguments passed to the function.
     /// </summary>
     public IReadOnlyList<SqlExpression> Arguments { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlFunctionCallExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlFunctionCallExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlSetQuantifier Quantifier => _target.Quantifier;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlOrderByColumn> OrderBy => _target.OrderBy;
+        public bool HasWithinGroupOrdering => _target.HasWithinGroupOrdering;
+        public string FunctionName => _target.FunctionName;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression> Arguments => _target.Arguments;
+    }
 }

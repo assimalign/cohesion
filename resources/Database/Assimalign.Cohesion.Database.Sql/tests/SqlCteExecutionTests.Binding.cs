@@ -11,19 +11,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 public sealed partial class SqlCteExecutionTests
 {
     [Theory(DisplayName = "Cohesion Test [Sql] - WITH: invalid scope and constant predicates fail before reads or writes")]
-    [InlineData("WITH t AS (SELECT 42 AS id) SELECT dbo.t.id FROM t", "COHSQLE015")]
-    [InlineData("WITH c AS (SELECT 1 AS id) SELECT dbo.c.id FROM c", "COHSQLE015")]
-    [InlineData("WITH t AS (SELECT 42 AS id) SELECT * FROM t CROSS JOIN dbo.t", "COHSQLE019")]
-    [InlineData("WITH t AS (SELECT 42 AS id) SELECT * FROM dbo.t CROSS JOIN t", "COHSQLE019")]
-    [InlineData("WITH t AS (SELECT 42 AS id) SELECT t.id FROM t x", "COHSQLE015")]
-    [InlineData("WITH t AS (SELECT 1 AS id) DELETE FROM t AS victim WHERE id IN (SELECT dbo.t.id FROM t)", "COHSQLE015")]
-    [InlineData("WITH unused AS (SELECT 1 WHERE COUNT(*) > 0) DELETE FROM t", "COHSQLE017")]
-    [InlineData("WITH unused AS (SELECT COUNT(*) AS n WHERE COUNT(*) > 0) DELETE FROM t", "COHSQLE017")]
-    [InlineData("WITH c AS (SELECT 1 AS x WHERE COUNT(*) > 0) SELECT x FROM c", "COHSQLE017")]
-    [InlineData("WITH c AS (SELECT COUNT(*) AS n WHERE COUNT(*) > 0) SELECT n FROM c", "COHSQLE017")]
-    [InlineData("WITH unused AS (SELECT 1 GROUP BY COUNT(*)) DELETE FROM t", "COHSQLE017")]
-    [InlineData("WITH unused AS (SELECT *) DELETE FROM t", "COHSQLE013")]
-    [InlineData("WITH a AS (SELECT id FROM b), b AS (SELECT 1 AS id) SELECT id FROM a", "COHSQLE026")]
+    [InlineData("WITH t AS (SELECT 42 AS id) SELECT dbo.t.id FROM t", "CS01015")]
+    [InlineData("WITH c AS (SELECT 1 AS id) SELECT dbo.c.id FROM c", "CS01015")]
+    [InlineData("WITH t AS (SELECT 42 AS id) SELECT * FROM t CROSS JOIN dbo.t", "CS01019")]
+    [InlineData("WITH t AS (SELECT 42 AS id) SELECT * FROM dbo.t CROSS JOIN t", "CS01019")]
+    [InlineData("WITH t AS (SELECT 42 AS id) SELECT t.id FROM t x", "CS01015")]
+    [InlineData("WITH t AS (SELECT 1 AS id) DELETE FROM t AS victim WHERE id IN (SELECT dbo.t.id FROM t)", "CS01015")]
+    [InlineData("WITH unused AS (SELECT 1 WHERE COUNT(*) > 0) DELETE FROM t", "CS05017")]
+    [InlineData("WITH unused AS (SELECT COUNT(*) AS n WHERE COUNT(*) > 0) DELETE FROM t", "CS05017")]
+    [InlineData("WITH c AS (SELECT 1 AS x WHERE COUNT(*) > 0) SELECT x FROM c", "CS05017")]
+    [InlineData("WITH c AS (SELECT COUNT(*) AS n WHERE COUNT(*) > 0) SELECT n FROM c", "CS05017")]
+    [InlineData("WITH unused AS (SELECT 1 GROUP BY COUNT(*)) DELETE FROM t", "CS05017")]
+    [InlineData("WITH unused AS (SELECT *) DELETE FROM t", "CS05013")]
+    [InlineData("WITH a AS (SELECT id FROM b), b AS (SELECT 1 AS id) SELECT id FROM a", "CS01026")]
     public async Task Execute_InvalidBinding_ShouldFailBeforeReadingAndPreserveRows(string sql, string code)
     {
         // Arrange
@@ -38,7 +38,7 @@ public sealed partial class SqlCteExecutionTests
 
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
-        if (sql.Contains("SELECT dbo.", StringComparison.Ordinal) && code == "COHSQLE015")
+        if (sql.Contains("SELECT dbo.", StringComparison.Ordinal) && code == "CS01015")
         {
             error.Message.ShouldContain("Missing FROM-clause entry", Case.Sensitive);
         }
@@ -140,7 +140,7 @@ public sealed partial class SqlCteExecutionTests
             await session.ExecuteAsync($"WITH a AS ({body}) SELECT * FROM a", cancellationToken: CancellationToken.None));
 
         // Assert
-        nested.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE013");
+        nested.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05013");
         nested.Message.ShouldBe(ordinary.Message);
         nested.Message.ShouldNotContain("common table", Case.Insensitive);
         session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);

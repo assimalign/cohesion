@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>Parses the executable OQL profile into an expression tree with diagnostics.</summary>
 /// <remarks>Instances serialize concurrent calls. Offsets are zero-based UTF-16 positions with exclusive ends.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("OqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser.DebugView))]
 public sealed partial class OqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
@@ -60,7 +62,7 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 if (!IsCompleteComment(item.Text))
                 {
-                    Error("OQL0003", "Unterminated block comment.", item);
+                    Error("CD00003", ErrorMessages.OqlQueryParserParseCoreVoid, item);
                 }
             }
             else
@@ -68,13 +70,13 @@ public sealed partial class OqlQueryParser : QueryParser
                 _tokens.Add(item);
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(item.Text))
                 {
-                    Error("OQL0003", "Unterminated quoted text.", item);
+                    Error("CD00003", ErrorMessages.OqlQueryParserParseCoreVoid2, item);
                 }
                 else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
                 {
                     // A character OQL does not use is never a name or an expression, so the
                     // statement is not parsed and nothing is bound (#1101).
-                    Error("OQL0002", $"Unexpected character {DescribeCharacter(item.Text)}; it is not part of OQL.", item);
+                    Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCoreVoid3, DescribeCharacter(item.Text)), item);
                 }
             }
         }
@@ -92,7 +94,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else if (Current.Type == TokenType.Eof)
         {
-            Error("OQL0001", "Query text is empty.", Current);
+            Error("CD00001", ErrorMessages.OqlQueryParserParseCoreVoid4, Current);
             expression = EmptyExpression();
         }
         else if (Is("EXPLAIN"))
@@ -163,7 +165,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
         else
         {
-            Error("OQL0002", "Expected SELECT, INSERT, UPSERT, UPDATE, DELETE, CREATE INDEX, DROP INDEX, CREATE COLLECTION, or DROP COLLECTION.", Current);
+            Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid5, Current);
             expression = EmptyExpression();
         }
 
@@ -179,11 +181,11 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             else if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
-                Error("OQL0002", "Only one statement is accepted per query.", Current);
+                Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid6, Current);
             }
             else if (Current.Type != TokenType.Eof)
             {
-                Error("OQL0002", $"Unexpected token '{Current.Text}'.", Current);
+                Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCoreVoid7, Current.Text), Current);
             }
         }
 
@@ -195,7 +197,7 @@ public sealed partial class OqlQueryParser : QueryParser
             if (!_parameterFormPositions.Contains(token.Start))
             {
                 _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
-                Error("OQL0002", "Unexpected character '?'; it is not part of OQL.", token);
+                Error("CD00002", ErrorMessages.OqlQueryParserParseCoreVoid8, token);
             }
             expression = EmptyExpression();
         }
@@ -592,14 +594,14 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         if (!Take(text))
         {
-            Error("OQL0002", $"Expected {text}.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserExpectVoid, text), Current);
         }
     }
     private void Expect(TokenType type, string text)
     {
         if (!Take(type))
         {
-            Error("OQL0002", $"Expected {text}.", Current);
+            Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserExpectVoid, text), Current);
         }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
@@ -625,7 +627,7 @@ public sealed partial class OqlQueryParser : QueryParser
             Advance();
             if (token.Text.Length == 2)
             {
-                Error("OQL0002", "An identifier cannot be empty.", token);
+                Error("CD00002", ErrorMessages.OqlQueryParserIdentifierVoid, token);
             }
 
             return token.Text.Length >= 2 ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : string.Empty;
@@ -636,7 +638,7 @@ public sealed partial class OqlQueryParser : QueryParser
             Advance();
             return token.Text;
         }
-        Error("OQL0002", "Expected an identifier.", token);
+        Error("CD00002", ErrorMessages.OqlQueryParserIdentifierVoid2, token);
         return string.Empty;
     }
 
@@ -714,4 +716,12 @@ public sealed partial class OqlQueryParser : QueryParser
     }
 
     private readonly record struct Lexeme(TokenType Type, string Text, int Start, int End, int Line);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlQueryParser value)
+        {
+            _ = value;
+        }
+    }
 }

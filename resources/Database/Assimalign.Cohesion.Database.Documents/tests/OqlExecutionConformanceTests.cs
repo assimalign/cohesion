@@ -309,9 +309,9 @@ public sealed class OqlExecutionConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Conformance: index catalog user errors have distinct codes and preserve the session")]
-    [InlineData("duplicate", "COHDOC024")]
-    [InlineData("missing", "COHDOC025")]
-    [InlineData("key-size", "COHDOC026")]
+    [InlineData("duplicate", "CD03024")]
+    [InlineData("missing", "CD01025")]
+    [InlineData("key-size", "CD02026")]
     public async Task Execute_IndexUserError_ShouldReturnDistinctCodeAndKeepSession(string scenario, string code)
     {
         // Arrange

@@ -41,7 +41,7 @@ internal static partial class GraphExpressionEvaluator
         {
             "<" => order is null ? null : order < 0, "<=" => order is null ? null : order <= 0,
             ">" => order is null ? null : order > 0, ">=" => order is null ? null : order >= 0,
-            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.CaseInvalid),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.CaseInvalid),
         };
     }
 
@@ -65,7 +65,7 @@ internal static partial class GraphExpressionEvaluator
             null => null,
             GraphNode or GraphRelationship => Property(operand, key),
             IReadOnlyDictionary<string, object?> map => map.TryGetValue(key, out var value) ? value : null,
-            _ => throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, expression.Location),
+            _ => throw new GraphPlanningException("CG02013", ErrorMessages.CompositeRequired, expression.Location),
         };
 
     private static object? Subscript(GqlSubscriptExpression subscript, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
@@ -81,6 +81,6 @@ internal static partial class GraphExpressionEvaluator
             if (offset < 0) { offset += list.Length; }
             return offset >= 0 && offset < list.Length ? list[(int)offset] : null;
         }
-        throw new GraphPlanningException("COHDBG013", ErrorMessages.CompositeRequired, subscript.Location);
+        throw new GraphPlanningException("CG02013", ErrorMessages.CompositeRequired, subscript.Location);
     }
 }

@@ -68,3 +68,27 @@ does not provide exactly-once retry or a way to resolve that acknowledgement rac
 See [DESIGN.md](DESIGN.md) for queue, pooling, and failure details, and the
 [Blob engine wire specification](../../Assimalign.Cohesion.Database.Blob/docs/DESIGN.md#blob-wire-family)
 for payload layouts.
+
+## Blob diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Host transaction refusal evidence
+
+An upload refused because the host already opened a transaction sends `CK04004: message` in
+the existing Error frame. The host transaction retains the original unprefixed, structured
+`CK04004` abort cause; its later commit reports `CB04001`, preserves that cause instance and
+commits nothing. Repeated commit after terminal session cleanup retains the same cause.
+`BlobClientException.Diagnostics` remains empty under the existing Blob wire contract.
+
+## Debugger inspection (#1470)
+
+Client debugger inspection uses captured metadata and constant capabilities without touching the connection or download stream.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

@@ -22,13 +22,13 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   `SqlQueryBodyExpression`, including WITH definitions and combined result tails.
 - **Nesting limit** — `SqlQueryParserOptions.ExpressionNestingLimit` (256 by
   default, 32..4096) bounds how deep an expression and its parentheses nest
-  (`SQL0006`); a flat `AND`/`OR` chain counts one level. The statement records
+  (`CS00006`); a flat `AND`/`OR` chain counts one level. The statement records
   how deep it nests (`SqlQueryStatement.ExpressionNestingDepth`). See
   [DIALECT.md](DIALECT.md#expression-nesting-limit-1151).
 - **Dialect contract** — [DIALECT.md](DIALECT.md) is the authoritative supported /
   recognized / rejected matrix. `SqlLanguageProfile.Instance` carries its lexical
   tables and implemented clause set; recognized clauses outside that set report
-  `COHDBL001` rather than an undifferentiated parse failure.
+  `CK00001` rather than an undifferentiated parse failure.
 - **Literal text** — public `SqlLiteralText` reads strict invariant dates, times, timestamps,
   day-time intervals and hexadecimal bytes. Typed literals normalize before binding;
   `N'...'` is String.
@@ -62,3 +62,64 @@ var strict = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLim
 ```
 
 See [DESIGN.md](DESIGN.md) for the parser's shape and the decisions behind it.
+
+## SELECT-only EXPLAIN ANALYZE (#1522)
+
+SqlExplainExpression.Analyze distinguishes execution analysis from a plain nonexecuting description.
+ANALYZE is contextual after EXPLAIN; standalone statistics maintenance is not introduced. The engine
+accepts SELECT query bodies only for execution analysis. DIALECT.md defines candidate counts,
+bounded probe estimates, budget refusals and the unchanged result shape.
+
+## Sql diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+Parser nesting refusal templates use the generated ErrorMessages accessor; their existing
+codes, text, limits and locations are preserved. The assembly-local Types resource binding now
+lives under Internal. Private constants use repository casing and extension containers are
+partial. Successful parsing adds no resource lookup or grammar change.
+
+## Error message producers and catalog carriers
+
+Human diagnostic context (implicit-alias recovery, token descriptions, expected delimiters and
+type-declaration subjects) uses generated resources without changing any code, span or text.
+The parser caches these templates in static readonly fields because expected-token descriptions
+are also evaluated on successful parses; it adds no instance fields or repeated resource lookup
+on that path. Canonical SQL, recognized construct names and token spellings remain data.
+
+The dialect records CS06059/XX001 for malformed persisted SQL catalog metadata and CS06060/0A000
+for unsupported metadata formats. These engine-side carrier corrections do not change grammar,
+accepted storage formats or the no-upgrade policy.
+
+## Debugger inspection
+
+Concrete source types with explicit nonpublic instance state use a private nested DebugView
+and debugger display/proxy attributes. The view is the last member in the same type file and
+exposes only reviewed public/protected state through read-only properties. Exception and
+EventSource types remain excluded. A type with no state to filter keeps its normal member view;
+a type whose base supplies both debugger attributes inherits that view.
+
+Inspection does not perform I/O, take lifecycle locks, mutate state, invoke application callbacks,
+or materialize lazy results. The additions are debugger metadata and nested helper types; existing
+instance fields, runtime operations, error identities, data formats and protocol contracts do
+not change. SDK and Studio source are outside this rule's scope.
+
+The concrete SqlQueryExpression base supplies the inherited view for its derived query
+expressions. Its projection uses nonvirtual CommandType; Text is omitted because an application
+subclass can override that getter. Scalar-expression views expose existing syntax data without
+walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
+a language profile through its protected getter.

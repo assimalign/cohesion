@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Database.Storage;
 
@@ -10,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Storage;
 public sealed class StorageCorruptionException : StorageException
 {
     /// <summary>Identifies a detected storage integrity violation.</summary>
-    public const string ErrorCode = "COHDBS003";
+    public const string ErrorCode = "CK06003";
 
     /// <summary>Gets the stable diagnostic code for storage corruption.</summary>
     public string Code => ErrorCode;
@@ -45,10 +46,26 @@ public sealed class StorageCorruptionException : StorageException
         PageId = pageId;
     }
 
+    /// <summary>Initializes an integrity failure in one confirmed record copy.</summary>
+    /// <param name="pageId">The page containing the record.</param>
+    /// <param name="slotIndex">The record's slot within the page.</param>
+    /// <param name="message">The integrity failure, without a diagnostic code prefix.</param>
+    /// <param name="inner">The underlying decoding failure, when present.</param>
+    public StorageCorruptionException(PageId pageId, int slotIndex, string message, Exception? inner = null)
+        : base(string.Format(CultureInfo.CurrentCulture, ErrorMessages.RecordCorrupt,
+            (long)pageId, slotIndex, message), inner!)
+    {
+        PageId = pageId;
+        SlotIndex = slotIndex;
+    }
+
     /// <summary>
     /// Gets the identifier of the corrupted page, when the corruption is page-scoped.
     /// </summary>
     public PageId? PageId { get; }
+
+    /// <summary>Gets the corrupted record's slot, when the failure is record-scoped.</summary>
+    public int? SlotIndex { get; }
 
     /// <summary>Finds storage corruption in an exception, its inner chain, or an aggregate.</summary>
     /// <param name="error">The failure to search, or null.</param>

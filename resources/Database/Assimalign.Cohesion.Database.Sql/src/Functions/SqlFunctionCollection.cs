@@ -34,6 +34,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// thread-safe.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlFunctionCollection, Count = {Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection.DebugView))]
 public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
 {
     private readonly List<SqlFunction> _functions = [];
@@ -79,24 +81,20 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
             if (registered.Kind != function.Kind)
             {
                 throw new InvalidOperationException(
-                    $"Function '{function.Name}' is registered as {Article(registered.Kind)}; " +
-                    $"{Article(function.Kind)} of the same name cannot be added.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionCollectionAddFailure, function.Name, Article(registered.Kind), Article(function.Kind)));
             }
 
             if (HasSameSignature(registered, function))
             {
                 throw new InvalidOperationException(
-                    $"Function {function} is already registered{(SqlStandardLibrary.Contains(registered) ? " by the standard library" : string.Empty)}; " +
-                    "a function cannot be replaced, only overloaded with other parameter types.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionCollectionAddFailure2, function, (SqlStandardLibrary.Contains(registered) ? ErrorMessages.StandardLibrarySuffix : string.Empty)));
             }
         }
 
         if (!SqlStandardLibrary.Contains(function) && SqlStandardLibrary.FindOverlap(function) is { } builtin)
         {
             throw new InvalidOperationException(
-                $"Function {function} takes calls the standard library's {builtin.Usage} takes, so it would replace the built-in for them " +
-                "or make them ambiguous, in stored CHECK constraints too; a standard-library function cannot be replaced. " +
-                $"Register the function under another name, or with a number of parameters {builtin.Name} does not take.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionCollectionAddFailure3, function, builtin.Usage, builtin.Name));
         }
 
         _functions.Add(function);
@@ -153,5 +151,17 @@ public sealed class SqlFunctionCollection : IReadOnlyCollection<SqlFunction>
         return left.VariadicParameter is null || left.VariadicParameter.IsSameParameterType(right.VariadicParameter!);
     }
 
-    private static string Article(SqlFunctionKind kind) => kind == SqlFunctionKind.Scalar ? "a scalar function" : "an aggregate";
+    private static string Article(SqlFunctionKind kind) => kind == SqlFunctionKind.Scalar ? ErrorMessages.ScalarFunctionKindLabel : ErrorMessages.AggregateKindLabel;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlFunctionCollection value)
+        {
+            _target = value;
+        }
+
+        public int Count => _target.Count;
+    }
 }

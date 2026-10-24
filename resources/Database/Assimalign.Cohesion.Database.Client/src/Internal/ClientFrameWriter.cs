@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("ClientFrameWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.Internal.ClientFrameWriter.DebugView))]
 internal sealed class ClientFrameWriter : ProtocolFrameWriter
 {
     private readonly ProtocolFrameWriter _writer;
@@ -28,7 +30,7 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         }
         catch (InvalidOperationException exception)
         {
-            throw new IOException("The connection closed while sending a request.", exception);
+            throw new IOException(ErrorMessages.FrameWriterWriteFrameCoreAsyncIO, exception);
         }
     }
 
@@ -40,9 +42,17 @@ internal sealed class ClientFrameWriter : ProtocolFrameWriter
         }
         catch (InvalidOperationException exception)
         {
-            throw new IOException("The connection closed while flushing a request.", exception);
+            throw new IOException(ErrorMessages.ClientFrameWriterFlushCoreAsyncIO, exception);
         }
     }
 
     protected override ValueTask DisposeAsyncCore() => _writer.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.Internal.ClientFrameWriter value)
+        {
+            _ = value;
+        }
+    }
 }

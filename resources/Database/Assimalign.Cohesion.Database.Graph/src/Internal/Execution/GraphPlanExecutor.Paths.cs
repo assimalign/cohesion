@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,7 +21,27 @@ internal static partial class GraphPlanExecutor
     private abstract record PathTask;
     private sealed record NodeTask(IReadOnlyList<GqlNodePattern> Patterns, PathTask? Next) : PathTask;
     private sealed record EdgeTask(GqlRelationshipPattern Pattern, bool Forward, PathTask? Next) : PathTask;
-    private sealed record IncidentTask(EdgeTask Hop, IAsyncEnumerator<StoredGraphRelationship> Edges) : PathTask;
+    [global::System.Diagnostics.DebuggerDisplay("IncidentTask")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask.DebugView))]
+    private sealed record IncidentTask(EdgeTask Hop, IAsyncEnumerator<StoredGraphRelationship> Edges) : PathTask
+    {
+        internal GraphMemoryLease? TargetMemory { get; set; }
+        internal void ReleaseTarget()
+        { var memory = TargetMemory; TargetMemory = null; memory?.Dispose(); }
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.IncidentTask value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.EdgeTask Hop => _target.Hop;
+            public global::System.Collections.Generic.IAsyncEnumerator<global::Assimalign.Cohesion.Database.Graph.Storage.StoredGraphRelationship> Edges => _target.Edges;
+        }
+    }
     private sealed record RepeatTask(GraphPathSegment Segment, bool Forward, int Count, string[] Names, PathTask? Next) : PathTask;
     private sealed record EndIterationTask(RepeatTask Repeat, PathTask? Next) : PathTask;
     private sealed record StartLeftTask(GraphNode Anchor, PathTask? Next) : PathTask;
@@ -36,9 +57,63 @@ internal static partial class GraphPlanExecutor
         };
     }
 
-    private static async ValueTask MatchCoreAsync(GraphDatabase database, GraphOperation operation, GraphPathPlan plan,
-        Dictionary<string, object?> input, Action<Dictionary<string, object?>, MatchedProperties?> acceptMatch,
-        ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool deferUnbound = false)
+    [global::System.Diagnostics.DebuggerDisplay("PathFrontier")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.PathFrontier.DebugView))]
+    private sealed class PathFrontier : IDisposable
+    {
+        private readonly Stack<(PathState State, long Bytes)> _states = new();
+        private readonly GraphMemoryOwner _memory;
+
+        internal PathFrontier(GraphQueryMemory memory)
+        {
+            _memory = new GraphMemoryOwner(memory);
+        }
+        internal int Count => _states.Count;
+        internal void Push(PathState state)
+        {
+            long bytes = Size(state);
+            _memory.Add(bytes);
+            _states.Push((state, bytes));
+        }
+        internal void ResizeActive(PathState state, ref long bytes)
+        {
+            long next = Size(state);
+            if (next > bytes) { _memory.Add(next - bytes); }
+            else { _memory.Release(bytes - next); }
+            bytes = next;
+        }
+        private static long Size(PathState state)
+        {
+            long bytes = 384 + 80L * state.Bindings.Count + 48L * state.Used.Count + 128L * state.Groups.Count
+                + 64L * state.Nodes.Count + 80L * state.Relationships.Count;
+            foreach (var values in state.Groups.Values) { bytes += 32 + 16L * values.Length; }
+            return bytes;
+        }
+        internal PathState Pop(out long bytes)
+        {
+            var item = _states.Pop();
+            bytes = item.Bytes;
+            return item.State;
+        }
+        internal void Release(long bytes)
+        {
+            _memory.Release(bytes);
+        }
+        public void Dispose() { _states.Clear(); _memory.Dispose(); }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPlanExecutor.PathFrontier value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<(Dictionary<string, object?> Bindings, MatchedProperties? Properties)> MatchCoreStreamAsync(
+        GraphDatabase database, GraphOperation operation, GraphPathPlan plan, Dictionary<string, object?> input,
+        ExpansionBudget budget, IReadOnlyDictionary<string, object?>? parameters,
+        [EnumeratorCancellation] CancellationToken token, bool deferUnbound = false)
     {
         token.ThrowIfCancellationRequested();
         operation.EnsureActive();
@@ -48,19 +123,19 @@ internal static partial class GraphPlanExecutor
         foreach (var node in shape.Nodes.SelectMany(nodes => nodes))
         {
             if (node.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
-            if (value is null) { return; }
-            if (value is not GraphNode) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is null) { yield break; }
+            if (value is not GraphNode) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
         foreach (var segment in shape.Segments.Where(segment => segment.Quantifier is null))
         {
             if (segment.Body.Edge?.Variable is not { } name || !input.TryGetValue(name, out var value)) { continue; }
-            if (value is null) { return; }
-            if (value is not GraphRelationship) { throw new GraphPlanningException("COHDBG013", ErrorMessages.EntityBindingRequired); }
+            if (value is null) { yield break; }
+            if (value is not GraphRelationship) { throw new GraphPlanningException("CG02013", ErrorMessages.EntityBindingRequired); }
         }
-        IReadOnlyList<StoredGraphNode> candidates;
+        IAsyncEnumerable<StoredGraphNode> candidates;
         var anchorNode = shape.Nodes[anchor.NodeIndex].FirstOrDefault(node => node.Variable is { } name && input.ContainsKey(name));
         if (anchorNode?.Variable is { } variable && input[variable] is GraphNode bound)
-        { candidates = operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : []; }
+        { candidates = StreamBoundNodesAsync(operation.Updates.FindNode(bound.Id.Value) is { } node ? [node] : [], budget, token); }
         else if (anchor.NodeIndex < shape.Segments.Count && shape.Segments[anchor.NodeIndex] is
             { Quantifier: null, Body.Edge: { Variable: { } edgeVariable } edgePattern } &&
             input.TryGetValue(edgeVariable, out var edgeBinding) && edgeBinding is GraphRelationship boundEdge)
@@ -71,18 +146,15 @@ internal static partial class GraphPlanExecutor
             if (edgePattern.Direction is GqlPatternDirection.Undirected or GqlPatternDirection.LeftOrRight &&
                 boundEdge.From != boundEdge.To && operation.Updates.FindNode(boundEdge.To.Value) is { } other)
             { endpoints.Add(other); }
-            candidates = endpoints;
+            candidates = StreamBoundNodesAsync(endpoints, budget, token);
         }
-        else if (anchor.Property is { } property)
-        { candidates = await operation.Updates.SearchIndexAsync(anchor.Label!, property, anchor.Value!, token).ConfigureAwait(false); }
-        else if (anchor.UnionLabels is { } labels) { candidates = operation.Updates.GetUnionNodes(labels, token); }
-        else { candidates = operation.Updates.GetNodes(anchor.Label, token); }
+        else { candidates = operation.Updates.StreamAnchorAsync(anchor, budget, token); }
 
-        foreach (var candidate in candidates)
+        await foreach (var candidate in candidates.ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
-            budget.Consume();
             var node = GraphDatabase.Materialize(candidate);
+            using var anchorMemory = budget.Memory.Reserve(GraphValueMemory.Node(node, token));
             PathTask? left = null;
             // Prepend continuations in reverse execution order: right, then left from the anchor.
             for (int i = 0; i < anchor.NodeIndex; i++)
@@ -90,16 +162,19 @@ internal static partial class GraphPlanExecutor
             PathTask? tasks = new StartLeftTask(node, left);
             for (int i = shape.Segments.Count - 1; i >= anchor.NodeIndex; i--)
             { tasks = SegmentTasks(shape.Segments[i], true, new NodeTask(shape.Nodes[i + 1], tasks)); }
-            var frontier = new Stack<PathState>();
+            using var frontier = new PathFrontier(budget.Memory);
             frontier.Push(new PathState(node, new(input, StringComparer.Ordinal), [node], [], [], new(StringComparer.Ordinal), null,
                 new NodeTask(shape.Nodes[anchor.NodeIndex], tasks)));
-            var incidents = new HashSet<IAsyncEnumerator<StoredGraphRelationship>>();
+            var incidents = new Dictionary<IAsyncEnumerator<StoredGraphRelationship>, IncidentTask>();
             try
             {
                 while (frontier.Count != 0)
                 {
                     budget.OnFrontier?.Invoke(frontier.Count);
-                    var state = frontier.Pop();
+                    var state = frontier.Pop(out long stateBytes);
+                    try
+                    {
+                    Dispatch:
                     token.ThrowIfCancellationRequested();
                     operation.EnsureActive();
                     switch (state.Task)
@@ -107,17 +182,18 @@ internal static partial class GraphPlanExecutor
                         case null:
                             if (plan.Pattern.Variable is { } pathVariable)
                             { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
+                            frontier.ResizeActive(state, ref stateBytes);
                             // Fixed chains retain the base matcher's source-ordered nodes, then edges,
                             // independently of the anchor. Repetitions retain reverse encounter order.
                             var finalProperties = shape.HasQuantifier ? state.Properties : FixedProperties(shape, state);
                             bool matches = true;
                             for (var check = finalProperties; check is not null; check = check.Previous)
                             { if (!PropertiesMatch(check.Expected, check.Actual, state.Bindings, operation.EvaluationContext, parameters, deferUnbound)) { matches = false; break; } }
-                            if (matches) { acceptMatch(state.Bindings, finalProperties); }
+                            if (matches) { yield return (state.Bindings, finalProperties); }
                             break;
                         case StartLeftTask start:
-                            frontier.Push(state with { Current = start.Anchor, Task = start.Next });
-                            break;
+                            state = state with { Current = start.Anchor, Task = start.Next };
+                            goto Dispatch;
                         case NodeTask nodes:
                             bool accepted = true;
                             var properties = state.Properties;
@@ -126,7 +202,12 @@ internal static partial class GraphPlanExecutor
                                 if (!AcceptNode(pattern, state.Current, state.Bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { accepted = false; break; }
                                 if (shape.HasQuantifier) { properties = new MatchedProperties(pattern.Properties, state.Current.Properties, properties); }
                             }
-                            if (accepted) { frontier.Push(state with { Properties = properties, Task = nodes.Next }); }
+                            if (accepted)
+                            {
+                                state = state with { Properties = properties, Task = nodes.Next };
+                                frontier.ResizeActive(state, ref stateBytes);
+                                goto Dispatch;
+                            }
                             break;
                         case RepeatTask repeat:
                             if (repeat.Count == 0)
@@ -160,10 +241,12 @@ internal static partial class GraphPlanExecutor
                             var incident = operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
                                 GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),
                                 operation.Updates.SelectTypes(edgeTask.Pattern), token, budget).GetAsyncEnumerator(token);
-                            incidents.Add(incident);
-                            frontier.Push(state with { Task = new IncidentTask(edgeTask, incident) });
+                            var incidentTask = new IncidentTask(edgeTask, incident);
+                            incidents.Add(incident, incidentTask);
+                            frontier.Push(state with { Task = incidentTask });
                             break;
                         case IncidentTask cursor:
+                            cursor.ReleaseTarget();
                             // Resume the parent cursor after exactly one child. Sibling fan-out never
                             // retains copies of bindings, trails, identity sets or groups in the frontier.
                             if (!await cursor.Edges.MoveNextAsync().ConfigureAwait(false))
@@ -186,7 +269,7 @@ internal static partial class GraphPlanExecutor
                                 !PropertiesMatch(hop.Pattern.Properties, relationship.Properties, bindings, operation.EvaluationContext, parameters, deferUnbound: true)) { break; }
                             // The hop's own checks precede the cap; deferred references still qualify.
                             // A qualifying 65th edge fails before any target constraints can hide it.
-                            if (state.Relationships.Count == 64) { throw new GraphPlanningException("COHDBG004", ErrorMessages.PathHopLimitExceeded); }
+                            if (state.Relationships.Count == 64) { throw new GraphPlanningException("CG05004", ErrorMessages.PathHopLimitExceeded); }
                             ulong next = edge.SourceId == from ? edge.TargetId : edge.SourceId;
                             if (operation.Updates.FindNode(next) is not { } target) { break; }
                             var nextNode = GraphDatabase.Materialize(target);
@@ -194,6 +277,7 @@ internal static partial class GraphPlanExecutor
                                 !AcceptNode(pattern, nextNode, bindings, operation.EvaluationContext, parameters, deferUnbound: true))) { break; }
                             budget.ConsumeViable();
                             var copy = state.Fork(bindings);
+                            cursor.TargetMemory = budget.Memory.Reserve(GraphValueMemory.Node(nextNode, token));
                             copy.Used.Add(edge.Id);
                             if (hop.Forward) { copy.Nodes.Add(nextNode); copy.Relationships.Add(relationship); }
                             else { copy.Nodes.Insert(0, nextNode); copy.Relationships.Insert(0, relationship); }
@@ -202,15 +286,25 @@ internal static partial class GraphPlanExecutor
                                     ? new MatchedProperties(hop.Pattern.Properties, relationship.Properties, copy.Properties) : copy.Properties });
                             break;
                     }
+                    }
+                    finally { frontier.Release(stateBytes); }
                 }
             }
             finally
             {
                 // Parent incident cursors remain in the DFS frontier while a child runs.
                 // Budget refusal, cancellation and evaluation/storage errors close them all.
-                await GraphUpdates.DisposeIncidentStreamsAsync(incidents).ConfigureAwait(false);
+                try { foreach (var incident in incidents.Values) { incident.ReleaseTarget(); } }
+                finally { await GraphUpdates.DisposeIncidentStreamsAsync(incidents.Keys).ConfigureAwait(false); }
             }
         }
+    }
+
+    private static async IAsyncEnumerable<StoredGraphNode> StreamBoundNodesAsync(IEnumerable<StoredGraphNode> nodes,
+        ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
+    {
+        foreach (var node in nodes) { token.ThrowIfCancellationRequested(); budget.Consume(); yield return node; }
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 
     private static MatchedProperties? FixedProperties(GraphPathShape shape, PathState state)

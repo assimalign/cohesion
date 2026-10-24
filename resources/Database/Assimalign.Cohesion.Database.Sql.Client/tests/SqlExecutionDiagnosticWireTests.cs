@@ -23,12 +23,12 @@ public sealed class SqlExecutionDiagnosticWireTests
         await connection.ExecuteAsync("CREATE TABLE target (id INT, v d)", cancellationToken: SqlClientTestHarness.Timeout());
         (string Sql, string Code)[] cases =
         [
-            ("SELECT (SELECT id FROM users)", "COHSQLE046"),
-            ("INSERT INTO users VALUES (3, 'x', 'bad')", "COHSQLE022"),
-            ("CREATE TABLE users (id INT)", "COHSQLE049"),
-            ("ALTER TABLE users DROP CONSTRAINT absent", "COHSQLE052"),
-            ("ALTER TABLE users ADD COLUMN id INT", "COHSQLE061"),
-            ("DROP DOMAIN d", "COHSQLD002"),
+            ("SELECT (SELECT id FROM users)", "CS02046"),
+            ("INSERT INTO users VALUES (3, 'x', 'bad')", "CS02022"),
+            ("CREATE TABLE users (id INT)", "CS03049"),
+            ("ALTER TABLE users DROP CONSTRAINT absent", "CS01052"),
+            ("ALTER TABLE users ADD COLUMN id INT", "CS03061"),
+            ("DROP DOMAIN d", "CS03302"),
         ];
 
         foreach (var item in cases)

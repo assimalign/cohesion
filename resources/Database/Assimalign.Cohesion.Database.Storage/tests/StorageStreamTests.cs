@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 using Assimalign.Cohesion.Database.Storage.Units;
@@ -30,7 +32,7 @@ public class StorageStreamTests
         var readBuffer = new byte[Page.Size];
         stream.ReadPage(pageId, readBuffer);
 
-        Assert.Equal(writeBuffer, readBuffer);
+        readBuffer.ShouldBe(writeBuffer);
     }
 
     [Fact(DisplayName = "Cohesion Test [StorageStream] - WritePage: Should seek to page offset")]
@@ -52,9 +54,9 @@ public class StorageStreamTests
         stream.ReadPage((PageId)0L, read0);
         stream.ReadPage((PageId)1L, read1);
 
-        Assert.Equal(10, read0[0]);
-        Assert.Equal(20, read1[0]);
-        Assert.Equal(Page.Size * 2, stream.Length);
+        read0[0].ShouldBe((byte)10);
+        read1[0].ShouldBe((byte)20);
+        stream.Length.ShouldBe(Page.Size * 2L);
     }
 
     [Fact(DisplayName = "Cohesion Test [StorageStream] - ReadPage: Should throw on truncated stream")]
@@ -65,7 +67,7 @@ public class StorageStreamTests
 
         var buffer = new byte[Page.Size];
 
-        Assert.Throws<StorageIOException>(() => stream.ReadPage((PageId)0L, buffer));
+        Should.Throw<StorageIOException>(() => stream.ReadPage((PageId)0L, buffer)).GetType().ShouldBe(typeof(StorageIOException));
     }
 
     [Fact(DisplayName = "Cohesion Test [StorageStream] - WritePageAsync/ReadPageAsync: Should roundtrip page bytes")]
@@ -82,7 +84,7 @@ public class StorageStreamTests
         var readBuffer = new byte[Page.Size];
         await stream.ReadPageAsync(pageId, readBuffer);
 
-        Assert.Equal(writeBuffer, readBuffer);
+        readBuffer.ShouldBe(writeBuffer);
     }
 
     [Fact(DisplayName = "Cohesion Test [StorageStream] - FromFile: Should create and persist file-backed stream")]
@@ -104,7 +106,7 @@ public class StorageStreamTests
             {
                 var readBuffer = new byte[Page.Size];
                 stream.ReadPage((PageId)0L, readBuffer);
-                Assert.Equal(77, readBuffer[123]);
+                readBuffer[123].ShouldBe((byte)77);
             }
         }
         finally
@@ -136,7 +138,7 @@ public class StorageStreamTests
         var lastStamp = new long[finalPages];
 
         // Act
-        var extender = Task.Run(() =>
+        var extender = DedicatedTestTask.Run(() =>
         {
             for (long page = initialPages; page < finalPages; page++)
             {
@@ -147,7 +149,7 @@ public class StorageStreamTests
             Volatile.Write(ref extended, 1);
         });
 
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             var random = new Random(seed);
             var buffer = new byte[Page.Size];

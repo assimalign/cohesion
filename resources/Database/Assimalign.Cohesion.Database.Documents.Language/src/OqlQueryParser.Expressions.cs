@@ -17,7 +17,7 @@ public sealed partial class OqlQueryParser
         var start = Current;
         if (++_depth > 128)
         {
-            Error("OQL0005", "Expression nesting exceeds 128 levels.", Current);
+            Error("CD00005", ErrorMessages.OqlQueryParserParseExpressionVoid, Current);
             _depth--;
             return new OqlLiteralExpression(null, Span(start, start));
         }
@@ -56,12 +56,12 @@ public sealed partial class OqlQueryParser
                         escape = ParseExpression(4);
                         if (escape is OqlLiteralExpression { Value: string text } && text.EnumerateRunes().Count() > 1)
                         {
-                            Error("OQL0002", "LIKE ESCAPE must be empty or one Unicode scalar.", escapeStart);
+                            Error("CD00002", ErrorMessages.OqlQueryParserParseExpressionVoid2, escapeStart);
                         }
                     }
                     left = new OqlLikeExpression(left, pattern, escape, negated, Span(start, Previous));
                 }
-                else { Error("OQL0002", "Expected IN, BETWEEN, or LIKE after NOT.", Current); }
+                else { Error("CD00002", ErrorMessages.OqlQueryParserParseExpressionVoid3, Current); }
                 continue;
             }
             if (Is("IS") && minimumPrecedence <= 3)
@@ -70,7 +70,7 @@ public sealed partial class OqlQueryParser
                 bool negate = Take("NOT");
                 string predicate = Current.Text.ToUpperInvariant();
                 if (Is("NULL") || Is("MISSING") || Is("VALUED")) { Advance(); }
-                else { Error("OQL0002", "Expected NULL, MISSING, or VALUED.", Current); }
+                else { Error("CD00002", ErrorMessages.OqlQueryParserParseExpressionVoid4, Current); }
                 left = new OqlUnaryExpression($"IS {(negate ? "NOT " : string.Empty)}{predicate}", left, Span(start, Previous));
                 continue;
             }
@@ -116,7 +116,7 @@ public sealed partial class OqlQueryParser
                 Advance();
                 var nameToken = Current;
                 string name = Identifier();
-                if (!variables.Add(name)) { Error("OQL0010", ErrorMessages.BindingNameDuplicate, nameToken); break; }
+                if (!variables.Add(name)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, nameToken); break; }
                 Expect("IN");
                 ParseExpression();
             }
@@ -141,7 +141,7 @@ public sealed partial class OqlQueryParser
                 Advance();
             }
             _parameterFormPositions.Add(start.Start);
-            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("OQL0002", Span(start, end)));
+            _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CD00002", Span(start, end)));
             return new OqlLiteralExpression(null, Span(start, end));
         }
         if (Take("NOT"))
@@ -153,7 +153,7 @@ public sealed partial class OqlQueryParser
         {
             OqlExpression? operand = Is("WHEN") ? null : ParseExpression();
             var branches = new List<KeyValuePair<OqlExpression, OqlExpression>>();
-            if (!Is("WHEN")) { Error("OQL0002", "CASE requires a WHEN branch.", Current); }
+            if (!Is("WHEN")) { Error("CD00002", ErrorMessages.OqlQueryParserParsePrimaryVoid, Current); }
             while (!Failed && Take("WHEN"))
             {
                 var condition = ParseExpression();
@@ -239,7 +239,7 @@ public sealed partial class OqlQueryParser
         {
             if (!ParameterBindings.IsValidReference(start.Text))
             {
-                Error("OQL0002", "A parameter name must be an identifier (a letter or _, then letters, digits or _) or digits only; use $name, @name, or $1.", start);
+                Error("CD00002", ErrorMessages.OqlQueryParserParsePrimaryVoid2, start);
             }
 
             return new OqlParameterExpression(start.Text[1..], Span(start, start));
@@ -265,7 +265,7 @@ public sealed partial class OqlQueryParser
             }
             catch (JsonException)
             {
-                Error("OQL0004", "The numeric literal is invalid.", start);
+                Error("CD00004", ErrorMessages.OqlQueryParserParsePrimaryVoid3, start);
                 return new OqlLiteralExpression(null, Span(start, start));
             }
         }
@@ -285,14 +285,14 @@ public sealed partial class OqlQueryParser
                 var definition = OqlFunctions.Find(function);
                 if (!Failed && definition is null)
                 {
-                    Error("OQL0008", $"Unknown OQL function '{name}'.", start);
+                    Error("CD00008", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid4, name), start);
                 }
                 else if (!Failed && (!definition!.AcceptsArity(arguments.Count) ||
                     function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)))
                 {
-                    Error("OQL0006", function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)
-                        ? $"Invalid argument for OQL function '{function}'; only COUNT accepts '*'."
-                        : $"Invalid argument count for OQL function '{function}'.", start);
+                    Error("CD00006", function != "COUNT" && arguments.Any(argument => argument is OqlStarExpression)
+                        ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid5, function)
+                        : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid6, function), start);
                 }
                 if (function == "META")
                 {
@@ -303,7 +303,7 @@ public sealed partial class OqlQueryParser
             }
             return ParsePath(start, name);
         }
-        Error("OQL0002", "Expected an expression.", start);
+        Error("CD00002", ErrorMessages.OqlQueryParserParsePrimaryVoid7, start);
         return new OqlLiteralExpression(null, Span(start, start));
     }
 
@@ -336,7 +336,7 @@ public sealed partial class OqlQueryParser
                 }
                 else
                 {
-                    Error("OQL0002", "Expected a nonnegative array index or quoted property name.", token);
+                    Error("CD00002", ErrorMessages.OqlQueryParserParsePathVoid, token);
                 }
 
                 Expect(TokenType.RightBracket, "']'");

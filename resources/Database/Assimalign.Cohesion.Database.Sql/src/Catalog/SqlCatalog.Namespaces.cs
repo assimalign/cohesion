@@ -104,7 +104,7 @@ public sealed partial class SqlCatalog
             if (!_namespaces.TryGetValue(name, out var schema))
             {
                 if (publication is not null) { CommitScriptAbsence(publication, SqlObjectIdentity.Schema(name)); return default; }
-                throw new SqlCatalogException("COHSQLE028", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceMissing, name));
+                throw new SqlCatalogException("CS01028", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, name));
             }
             var objects = ObjectsInNamespace(name);
             var ids = objects.Select(slot => slot.Table.ObjectId).ToHashSet();
@@ -119,7 +119,7 @@ public sealed partial class SqlCatalog
             if (!cascade && droppedViews.Count != 0) { RefuseViewDependency(droppedViews.Values.First().Value); }
             if (!cascade && objects.Length != 0)
             {
-                throw new SqlCatalogException("COHSQLE030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.NamespaceDependentObjects, schema.Value.Name));
+                throw new SqlCatalogException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, schema.Value.Name));
             }
             var identities = objects.Select(slot => slot.Table.ObjectId).ToHashSet();
             bool ReferencesDropped(SqlCatalogConstraint constraint) => constraint.Kind == SqlCatalogConstraintKind.Reference &&
@@ -177,12 +177,12 @@ public sealed partial class SqlCatalog
             var value = JsonSerializer.Deserialize(json, SqlCatalogJsonContext.Default.SqlCatalogNamespace);
             if (value is null || !_namespaces.TryAdd(value.Name, new DefinitionSlot<SqlCatalogNamespace>(value, location)))
             {
-                throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed);
+                throw new SqlCatalogException("CS06059", ErrorMessages.NamespaceRecordMalformed);
             }
         }
         catch (Exception failure) when (failure is JsonException or ArgumentException)
         {
-            throw new SqlCatalogException(ErrorMessages.NamespaceRecordMalformed);
+            throw new SqlCatalogException("CS06059", ErrorMessages.NamespaceRecordMalformed);
         }
     }
 }

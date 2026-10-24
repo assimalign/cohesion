@@ -50,7 +50,7 @@ public sealed class JournalTests
                 break;
             }
         }
-        long next = await System.Threading.Tasks.Task.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
+        long next = await DedicatedTestTask.Run(() => journal.AppendCommit(2)).WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
         next.ShouldBe(3);

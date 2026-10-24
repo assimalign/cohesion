@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// <summary>
 /// Keyword disposition (#1101): every word the SQL profile lexes as a keyword, and every
 /// entry of the recognized-unsupported table, either parses inside a supported clause or is
-/// rejected with exactly one <c>COHDBL001</c> naming its construct. A word added to either list
+/// rejected with exactly one <c>CK00001</c> naming its construct. A word added to either list
 /// without a case here fails the coverage test.
 /// </summary>
 public sealed class SqlKeywordDispositionTests
@@ -212,7 +212,7 @@ public sealed class SqlKeywordDispositionTests
             .Message.ShouldContain("FUTUREWORD", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Keyword disposition: each word parses in a supported clause or reports one COHDBL001 naming its construct")]
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Keyword disposition: each word parses in a supported clause or reports one CK00001 naming its construct")]
     public void Parse_EveryCase_ShouldMatchItsDisposition()
     {
         // Arrange
@@ -237,10 +237,10 @@ public sealed class SqlKeywordDispositionTests
                     failures.Add($"{word}: expected a supported parse of '{keywordCase.Sql}' but found {found}");
                 }
             }
-            else if (errors.Length != 1 || errors[0].Code != "COHDBL001" ||
+            else if (errors.Length != 1 || errors[0].Code != "CK00001" ||
                      errors[0].Message?.Contains(keywordCase.Construct, StringComparison.Ordinal) != true)
             {
-                failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Sql}' but found {found}");
+                failures.Add($"{word}: expected one CK00001 naming '{keywordCase.Construct}' for '{keywordCase.Sql}' but found {found}");
             }
             else if (TableConstruct(word) is { } construct &&
                      !errors[0].Message!.Contains(construct, StringComparison.Ordinal))

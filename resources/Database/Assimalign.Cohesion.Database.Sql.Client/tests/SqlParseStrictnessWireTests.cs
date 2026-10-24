@@ -16,13 +16,13 @@ public sealed class SqlParseStrictnessWireTests
     /// <param name="statement">A statement with a stray character or with ~.</param>
     /// <param name="code">The diagnostic code the failure carries.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Strictness: stray characters and ~ are parse failures over the wire")]
-    [InlineData("SELECT * FROM users ?", "SQL0003")]
-    [InlineData("SELECT id FROM users WHERE score = ?", "SQL0003")]
-    [InlineData("DELETE FROM users ?", "SQL0003")]
-    [InlineData("UPDATE users SET score = 0 #", "SQL0003")]
-    [InlineData("SELECT ~score FROM users", "COHDBL001")]
-    [InlineData("SELECT ~NULL", "COHDBL001")]
-    [InlineData("DELETE FROM users WHERE name ~ 'a'", "COHDBL001")]
+    [InlineData("SELECT * FROM users ?", "CS00003")]
+    [InlineData("SELECT id FROM users WHERE score = ?", "CS00003")]
+    [InlineData("DELETE FROM users ?", "CS00003")]
+    [InlineData("UPDATE users SET score = 0 #", "CS00003")]
+    [InlineData("SELECT ~score FROM users", "CK00001")]
+    [InlineData("SELECT ~NULL", "CK00001")]
+    [InlineData("DELETE FROM users WHERE name ~ 'a'", "CK00001")]
     public async Task ExecuteAsync_StrictnessViolation_ShouldReportParseFailureWithoutMutation(string statement, string code)
     {
         // Arrange

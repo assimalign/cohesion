@@ -3,6 +3,8 @@ using System.Text;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>PostgreSQL text aggregation, also used by ISO LISTAGG.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlStringAggregateFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStringAggregateFunction.DebugView))]
 internal sealed class SqlStringAggregateFunction : SqlAggregateFunction
 {
     internal SqlStringAggregateFunction(string name, bool delimiter)
@@ -14,6 +16,8 @@ internal sealed class SqlStringAggregateFunction : SqlAggregateFunction
 
     protected override SqlAggregateAccumulator CreateAccumulatorCore(scoped in SqlFunctionContext context) => new Accumulator();
 
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStringAggregateFunction.Accumulator.DebugView))]
     private sealed class Accumulator : SqlAggregateAccumulator
     {
         private StringBuilder? _text;
@@ -31,5 +35,31 @@ internal sealed class SqlStringAggregateFunction : SqlAggregateFunction
         }
 
         protected override SqlValue FinishCore() => SqlValue.FromObject(_text?.ToString());
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStringAggregateFunction.Accumulator value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlStringAggregateFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStringAggregateFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

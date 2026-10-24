@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// each statement exactly one refreshed view; under <c>Snapshot</c> isolation
 /// the same capture returns the begin-time snapshot for every statement.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlStatementContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.DebugView))]
 internal readonly struct SqlStatementContext
 {
     private readonly long _transactionStartTicks;
@@ -99,7 +101,7 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Requires binding to have supplied the catalog image before execution, including empty inputs.</summary>
     internal SqlCatalogSnapshot RequireCatalogSnapshot()
-        => CatalogSnapshot ?? throw new DatabaseException("Internal invariant: a bound system relation requires a captured catalog snapshot.");
+        => CatalogSnapshot ?? throw new DatabaseException(ErrorMessages.ContextRequireCatalogSnapshotDatabase);
 
     /// <summary>Captures lazily in the existing shared statement state; context copies use the same image.</summary>
     internal void CaptureCatalogSnapshot(SqlCatalog catalog) => Metrics.CaptureCatalogSnapshot(catalog);
@@ -108,6 +110,8 @@ internal readonly struct SqlStatementContext
     internal ValueTask<DatabaseResult> PrepareResultAsync(DatabaseResult result, CancellationToken cancellationToken)
         => Metrics.ResultPreparation is { } preparation ? preparation.PrepareAsync(result, cancellationToken) : ValueTask.FromResult(result);
 
+    [global::System.Diagnostics.DebuggerDisplay("ProvisioningNames")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames.DebugView))]
     private sealed class ProvisioningNames
     {
         internal ProvisioningNames(string schema, string database)
@@ -118,5 +122,21 @@ internal readonly struct SqlStatementContext
 
         internal string Schema { get; }
         internal string Database { get; }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext value)
+        {
+            _ = value;
+        }
     }
 }

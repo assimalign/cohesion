@@ -44,12 +44,12 @@ public abstract class SqlAggregateFunction : SqlFunction
     /// <summary>Creates the accumulator of one group.</summary>
     /// <remarks>
     /// The context's token governs cancellation during creation. With the
-    /// default context, cancellation thrown by application code is a function failure (<c>COHSQLE007</c>).
+    /// default context, cancellation thrown by application code is a function failure (<c>CS05007</c>).
     /// </remarks>
     /// <param name="context">The context of the statement and the aggregate call.</param>
     /// <returns>A new accumulator, owned by the caller and used by one thread at a time.</returns>
     /// <exception cref="DatabaseException">
-    /// The function failed (<c>COHSQLE007</c>): it threw, returned no accumulator, or returned one
+    /// The function failed (<c>CS05007</c>): it threw, returned no accumulator, or returned one
     /// that was already in use.
     /// </exception>
     /// <exception cref="OperationCanceledException">The core threw cancellation and the context's token is canceled.</exception>
@@ -68,13 +68,13 @@ public abstract class SqlAggregateFunction : SqlFunction
         if (accumulator is null)
         {
             throw SqlEvaluationException.FunctionFailed(Name,
-                new InvalidOperationException($"Aggregate '{Name}' returned no accumulator."));
+                new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionCreateAccumulatorFailure, Name)));
         }
 
         if (!accumulator.TryAttach(this))
         {
             throw SqlEvaluationException.FunctionFailed(Name,
-                new InvalidOperationException($"Aggregate '{Name}' returned an accumulator that is already in use; create a new one for every group."));
+                new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionCreateAccumulatorFailure2, Name)));
         }
 
         return accumulator;

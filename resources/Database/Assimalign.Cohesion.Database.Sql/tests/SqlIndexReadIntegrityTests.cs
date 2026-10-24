@@ -34,7 +34,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlIndexReadIntegrityTests
 {
-    private const string Seek = "SELECT id FROM t WHERE val = 20";
+    private const string seek = "SELECT id FROM t WHERE val = 20";
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: storage read failures abort transactions and keep the wire session (#1364)")]
     [InlineData(0, false, false)]
@@ -99,8 +99,8 @@ public sealed class SqlIndexReadIntegrityTests
 
             // Assert
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Message.ShouldStartWith(failureKind == 0 ? "COHDBS003: " : "COHSQLE041: ", Case.Sensitive);
-            error.Message.ShouldNotContain("COHDBS003: COHDBS003:", Case.Sensitive);
+            error.Message.ShouldStartWith(failureKind == 0 ? "CK06003: " : "CS06041: ", Case.Sensitive);
+            error.Message.ShouldNotContain("CK06003: CK06003:", Case.Sensitive);
             if (failureKind == 0)
             {
                 error.Message.ShouldContain("page " + (long)pageId, Case.Sensitive);
@@ -111,9 +111,9 @@ public sealed class SqlIndexReadIntegrityTests
                 transaction.State.ShouldBe(TransactionState.Faulted);
                 var refusal = await Should.ThrowAsync<DatabaseException>(async () =>
                     await engineSession.ExecuteAsync("SELECT 1", cancellationToken: CancellationToken.None));
-                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLT005");
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04005");
                 refusal.InnerException.ShouldNotBeNull().ShouldBeAssignableTo<DatabaseException>().Diagnostics.ShouldHaveSingleItem().Code
-                    .ShouldBe(failureKind == 0 ? "COHDBS003" : "COHSQLE041");
+                    .ShouldBe(failureKind == 0 ? "CK06003" : "CS06041");
             }
         }
         finally { faults.Clear(); }
@@ -124,7 +124,7 @@ public sealed class SqlIndexReadIntegrityTests
                 await client.SendAsync(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("COMMIT").Encode());
                 var commit = ProtocolErrorMessage.Decode((await client.ExpectAsync(ProtocolMessageType.Error)).Payload.Span);
                 commit.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-                commit.Message.ShouldStartWith("COHSQLT005: ", Case.Sensitive);
+                commit.Message.ShouldStartWith("CS04005: ", Case.Sensitive);
                 engineSession.CurrentTransaction.ShouldBeNull();
             }
             else { await transaction.RollbackAsync(CancellationToken.None); }
@@ -139,10 +139,10 @@ public sealed class SqlIndexReadIntegrityTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Conformance: corrupt pages fail scans and seeks with the database and page (#1160)")]
-    [InlineData(Seek, 0)]
+    [InlineData(seek, 0)]
     [InlineData("SELECT id FROM t", 0)]
-    [InlineData(Seek, 1)]
-    [InlineData(Seek, 2)]
+    [InlineData(seek, 1)]
+    [InlineData(seek, 2)]
     public async Task Select_ReadsRottenRowPage_ShouldFailWithCodedDatabaseCorruption(string statement, int wrapper)
     {
         // Arrange: three rows on one page behind an index, read once through the seek, then the
@@ -154,7 +154,7 @@ public sealed class SqlIndexReadIntegrityTests
         await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await session.ExecuteAsync("CREATE INDEX ix_val ON t (val)");
         await session.ExecuteAsync("INSERT INTO t (id, val) VALUES (1, 10), (2, 20), (3, 30)");
-        (await Ids(session, Seek)).ShouldBe([2]);
+        (await Ids(session, seek)).ShouldBe([2]);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_val");
         var rowPage = database.DataStorage.GetOwnerPages(Table(database, "t").ObjectId).ShouldHaveSingleItem();
         Evict(database, rowPage);
@@ -167,7 +167,7 @@ public sealed class SqlIndexReadIntegrityTests
             faults.WrapCorruption = corruption =>
             {
                 var coded = new DatabaseException("Storage read failed.", [new Diagnostic
-                { Code = "COHSQLT004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
+                { Code = "CS04004", Message = "Storage read failed.", Severity = DiagnosticSeverity.Error }], corruption);
                 return wrapper == 1 ? coded : new AggregateException(new InvalidOperationException("Cleanup failed."), coded);
             };
         }
@@ -175,13 +175,13 @@ public sealed class SqlIndexReadIntegrityTests
         long rottenReads = faults.RottenPageReads;
         faults.RottenPage = null;
         await using var next = await database.CreateSessionAsync();
-        var healed = await Ids(next, Seek);
+        var healed = await Ids(next, seek);
 
         // Assert: the statement failed with the page's checksum error. The failed read was not
         // cached, so once the device returns the page whole the same seek finds its row.
         failure.PageId.ShouldBe(rowPage);
         failure.Database.ShouldBe((DatabaseName)"rot-db");
-        failure.Code.ShouldBe("COHDBS003");
+        failure.Code.ShouldBe("CK06003");
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failure.Code);
         failure.InnerException.ShouldBeOfType<StorageCorruptionException>().PageId.ShouldBe(rowPage);
         failure.Message.ShouldContain("rot-db", Case.Sensitive);
@@ -207,7 +207,7 @@ public sealed class SqlIndexReadIntegrityTests
         DeleteBeneathIndex(database, reclaimed);
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert: the stale entry was examined and skipped; its page still holds the other rows.
         ids.Order().ShouldBe([1, 3]);
@@ -231,7 +231,7 @@ public sealed class SqlIndexReadIntegrityTests
         database.DataStorage.FreeSpaceMap.IsAllocated(reclaimed.PageId).ShouldBeFalse();
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert
         ids.ShouldBeEmpty();
@@ -260,7 +260,7 @@ public sealed class SqlIndexReadIntegrityTests
         }
 
         // Act
-        var ids = await Ids(session, Seek);
+        var ids = await Ids(session, seek);
 
         // Assert
         ids.ShouldBeEmpty();
@@ -302,7 +302,7 @@ public sealed class SqlIndexReadIntegrityTests
             // Assert
             aborts.ShouldBe(1);
             faults.RottenPageReads.ShouldBeGreaterThan(0);
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "COHDBS003" : "COHSQLE041");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(corruptRead ? "CK06003" : "CS06041");
             if (corruptRead) { failure.ShouldBeOfType<DatabaseCorruptionException>(); }
             transaction.CreateStatementRefusal().InnerException.ShouldBeSameAs(failure);
             var cleanup = recorder.Events.Where(item => item.EventId == 25).ShouldHaveSingleItem();

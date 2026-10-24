@@ -128,7 +128,7 @@ internal sealed class StudioState : IAsyncDisposable
             host = text[..separator];
             if (!int.TryParse(text[(separator + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out port) || port is <= 0 or > 65535)
             {
-                throw new FormatException($"Invalid port in '{text}'.");
+                throw new FormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PortInvalid, text));
             }
         }
 

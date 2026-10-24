@@ -25,12 +25,12 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// </summary>
 public sealed class DocumentStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// The commit's journal fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, a read, a write, a query, BEGIN, COMMIT and ROLLBACK of an
-    /// open transaction — is refused with COHDBD002, and nothing reaches the file set, through the
+    /// open transaction — is refused with CD06102, and nothing reaches the file set, through the
     /// workers' passes and the sessions' close included. The root bases' checks come first
     /// (concrete-types plan §6.4): BEGIN on the session holding the open transaction is refused as
     /// already active, a canceled token is refused before the offline refusal of a new session,
@@ -92,7 +92,7 @@ public sealed class DocumentStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session, both execute seams and
-        // BEGIN. Before the bases, each of these was refused with COHDBD002. The collection and
+        // BEGIN. Before the bases, each of these was refused with CD06102. The collection and
         // document operations do not pass the session's execute seams, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync());
         using var canceled = new CancellationTokenSource();
@@ -134,13 +134,14 @@ public sealed class DocumentStorageOperationsTests
         var ids = await IdsAsync(observer);
 
         // Assert
-        unconfirmed.Message.ShouldStartWith("COHDBD002: Database 'test' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CD06102");
+        unconfirmed.Message.ShouldStartWith("Database 'test' went offline while a transaction was committing", Case.Sensitive);
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002" && refusal.Message.StartsWith("COHDBD002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CD06102" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CD06102" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        collectionRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBD002");
+        collectionRefusals.ShouldAllBe(refusal => refusal.Code == "CD06102");
         nullRequest.ParamName.ShouldBe("request");
         blankStatement.ParamName.ShouldBe("statement");
         closedState.ShouldBe(TransactionState.Faulted);
@@ -216,8 +217,10 @@ public sealed class DocumentStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         await using var engine = DocumentDatabaseEngine.Create("document-engine", new()
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -228,21 +231,21 @@ public sealed class DocumentStorageOperationsTests
         }
 
         using var stop = new CancellationTokenSource();
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
             var collection = await session.GetCollectionAsync("items");
-            for (int i = 0; !stop.IsCancellationRequested; i++)
+            for (int i = 0; !stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size; i++)
             {
                 await collection.PutAsync(session, $"{writer}-{i}", Doc($"{writer}-{i}", "\"payload\":\"" + new string('x', 5000) + "\""));
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -291,7 +294,7 @@ public sealed class DocumentStorageOperationsTests
         // The engine handed the coordinator its first retry delay: the retry is due within it.
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
-        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(Timeout);
+        await otherItems.PutAsync(other, "other", Doc("other")).AsTask().WaitAsync(_timeout);
         watch.Stop();
 
         // Assert

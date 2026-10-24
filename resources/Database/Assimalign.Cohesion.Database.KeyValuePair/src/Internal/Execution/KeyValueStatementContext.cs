@@ -11,6 +11,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// each command exactly one refreshed view; under <c>Snapshot</c> isolation the
 /// same capture returns the begin-time snapshot for every command.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueStatementContext")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueStatementContext.DebugView))]
 internal readonly struct KeyValueStatementContext
 {
     internal KeyValueStatementContext(TransactionContext transaction, TransactionCoordinator coordinator)
@@ -34,4 +36,12 @@ internal readonly struct KeyValueStatementContext
     /// Gets the visibility snapshot for the whole command.
     /// </summary>
     internal TransactionSnapshot Snapshot { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueStatementContext value)
+        {
+            _ = value;
+        }
+    }
 }

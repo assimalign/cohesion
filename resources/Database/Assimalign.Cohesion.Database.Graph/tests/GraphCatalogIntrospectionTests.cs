@@ -142,9 +142,9 @@ public sealed class GraphCatalogIntrospectionTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"SHOW {subject} {mutation}"));
 
         // Assert
-        error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.");
+        error.Message.ShouldContain("CG00007: Graph catalog introspection is read-only.");
         var parsedDiagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        parsedDiagnostic.Code.ShouldBe("GQL0007");
+        parsedDiagnostic.Code.ShouldBe("CG00007");
         parsedDiagnostic.Start.ShouldNotBeNull();
         parsedDiagnostic.End.ShouldNotBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();
@@ -160,7 +160,7 @@ public sealed class GraphCatalogIntrospectionTests
         // Assert
         direct.Message.ShouldBe("Graph catalog introspection is read-only.");
         var diagnostic = direct.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("GQL0007");
+        diagnostic.Code.ShouldBe("CG00007");
         diagnostic.Start.ShouldBeNull();
         diagnostic.End.ShouldBeNull();
         (await Rows(session, "SHOW LABELS")).ShouldBeEmpty();

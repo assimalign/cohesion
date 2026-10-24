@@ -21,7 +21,7 @@ public sealed class SqlPersistedExpressionTests
         var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.LoadQuery(text, "view 'dbo.v'"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06058");
         failure.Diagnostics[0].Start.ShouldBeNull();
     }
 
@@ -37,7 +37,7 @@ public sealed class SqlPersistedExpressionTests
         var failure = Should.Throw<DatabaseException>(() => SqlPersistedExpression.Bind(expression, evaluator));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06058");
         failure.InnerException.ShouldNotBeNull();
     }
 
@@ -69,7 +69,7 @@ public sealed class SqlPersistedExpressionTests
 
         // Assert
         failure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.t' cannot be stored:", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE059");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03059");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted expressions: text that is not exactly one expression does not load")]
@@ -88,7 +88,7 @@ public sealed class SqlPersistedExpressionTests
         // Assert
         failure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.t' cannot be loaded:", Case.Sensitive);
         failure.Message.ShouldContain(SqlPersistedExpression.DamagedCatalogHint, Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE058");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06058");
         failure.Diagnostics[0].Start.ShouldBeNull();
     }
 

@@ -3,6 +3,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Language;
 
 /// <summary>Represents an IS [NOT] TRUE, FALSE or UNKNOWN test.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBooleanTestExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlBooleanTestExpression.DebugView))]
 public sealed class SqlBooleanTestExpression : SqlExpression
 {
     /// <summary>Initializes an IS [NOT] TRUE, FALSE or UNKNOWN test.</summary>
@@ -27,4 +29,18 @@ public sealed class SqlBooleanTestExpression : SqlExpression
 
     /// <summary>Gets whether the predicate includes NOT.</summary>
     public bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlBooleanTestExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlBooleanTestExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlTruthValue TruthValue => _target.TruthValue;
+        public bool IsNegated => _target.IsNegated;
+    }
 }

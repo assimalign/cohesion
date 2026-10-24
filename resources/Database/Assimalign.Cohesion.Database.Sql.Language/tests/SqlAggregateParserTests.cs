@@ -62,11 +62,11 @@ public class SqlAggregateParserTests
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "CK00001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message!.ShouldContain("SQL");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
-        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: quantifiers and input ordering survive rendering")]
@@ -115,7 +115,7 @@ public class SqlAggregateParserTests
         SqlTreeDump.Dump(reloaded.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression).ShouldBe(SqlTreeDump.Dump(call));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: malformed modifiers report SQL0003")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: malformed modifiers report CS00003")]
     [InlineData("SELECT COUNT(DISTINCT *) FROM t;")]
     [InlineData("SELECT COUNT(ALL *) FROM t;")]
     [InlineData("SELECT COUNT(* ORDER BY id) FROM t;")]
@@ -129,7 +129,7 @@ public class SqlAggregateParserTests
         // Arrange / Act
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - LISTAGG: ON OVERFLOW is one contextual refusal")]
@@ -143,7 +143,7 @@ public class SqlAggregateParserTests
         var statement = new SqlQueryParser().Parse(sql);
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         sql[error.Start!.Value..error.End!.Value].ShouldBe("ON OVERFLOW");
     }
 
@@ -159,7 +159,7 @@ public class SqlAggregateParserTests
         // Assert
         atLimit.Diagnostics.ShouldBeEmpty();
         atLimit.ExpressionNestingDepth.ShouldBe(32);
-        pastLimit.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0006");
+        pastLimit.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00006");
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Grouping: Rejects missing BY or grouping expressions")]
@@ -179,7 +179,7 @@ public class SqlAggregateParserTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         statement.Diagnostics.ShouldContain(item =>
-            item.Code == "SQL0003" && item.Severity == DiagnosticSeverity.Error && item.Message!.Contains(message));
+            item.Code == "CS00003" && item.Severity == DiagnosticSeverity.Error && item.Message!.Contains(message));
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Leaves ordinary identifiers and literals available")]

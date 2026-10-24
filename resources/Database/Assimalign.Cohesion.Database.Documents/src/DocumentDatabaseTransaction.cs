@@ -19,15 +19,15 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <para>
 /// <b>The end state machine is the root base's</b> (<see cref="DatabaseTransaction"/>, the
 /// #1188, #1225 and #1226 contracts): until the caller ends an aborted transaction, the session
-/// refuses every statement and BEGIN with <c>COHDBD001</c>; a rollback ends it, and a commit ends
-/// it with <c>COHDBD001</c> and commits nothing, as every later commit does. A transaction that
+/// refuses every statement and BEGIN with <c>CD04101</c>; a rollback ends it, and a commit ends
+/// it with <c>CD04101</c> and commits nothing, as every later commit does. A transaction that
 /// did not commit accepts any number of rollbacks, a token is observed only before a commit or
 /// rollback starts, and a commit is refused while a statement of the transaction still runs. A
 /// commit or rollback that started always ends the context: the transaction kernel completes a
 /// started rollback whatever fails or is canceled, and aborts a commit it cannot complete (#1226).
 /// This type supplies the model's vocabulary only: the kernel state, the kernel commit and
-/// rollback with the engine's exception translation, the offline refusal (<c>COHDBD002</c>,
-/// #1243) and the <c>COHDBD001</c> aborted error. Documents DESIGN.md, "Failed statements in
+/// rollback with the engine's exception translation, the offline refusal (<c>CD06102</c>,
+/// #1243) and the <c>CD04101</c> aborted error. Documents DESIGN.md, "Failed statements in
 /// explicit transactions", records the contract and the reference engines it follows.
 /// </para>
 /// <para>
@@ -36,6 +36,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// the model's internal transaction, which carried its own copy of the end state machine.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction.DebugView))]
 public sealed class DocumentDatabaseTransaction : DatabaseTransaction
 {
     private readonly TransactionCoordinator _coordinator;
@@ -162,7 +164,7 @@ public sealed class DocumentDatabaseTransaction : DatabaseTransaction
             ? ErrorMessages.TransactionCommitAborted + reason
             : ErrorMessages.TransactionOperationsAborted + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHDBD001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CD04101", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // A failure the offline storage caused is the database's coded refusal (#1243); any other
@@ -171,5 +173,18 @@ public sealed class DocumentDatabaseTransaction : DatabaseTransaction
     {
         var offline = _database.TranslateOffline(error);
         return ReferenceEquals(offline, error) ? _database.TranslateKernelFailure(error) : offline;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
     }
 }

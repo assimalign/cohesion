@@ -55,7 +55,7 @@ public sealed record GraphProtocolExecuteMessage(string Statement, IReadOnlyDict
 
         if (count < 0 || count > (payload.Length - position) / 8)
         {
-            throw new ProtocolException("Malformed payload: invalid parameter count.");
+            throw new ProtocolException(ErrorMessages.ProtocolExecuteMessageDecodeProtocol);
         }
 
         var parameters = new Dictionary<string, byte[]>(count);
@@ -67,7 +67,7 @@ public sealed record GraphProtocolExecuteMessage(string Statement, IReadOnlyDict
 
             if (length < 0 || length > payload.Length - position)
             {
-                throw new ProtocolException("Malformed payload: invalid parameter length.");
+                throw new ProtocolException(ErrorMessages.ProtocolExecuteMessageDecodeProtocol2);
             }
 
             parameters[name] = payload.Slice(position, length).ToArray();

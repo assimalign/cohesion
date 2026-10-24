@@ -34,7 +34,7 @@ public sealed class SqlTypeModifierTests
                 // A domain name resolves, but nested domains retain their existing refusal.
                 var error = await Should.ThrowAsync<DatabaseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03301");
                 error.Message.ShouldBe("Domain 'bounded' must have a built-in base type.");
                 continue;
             }
@@ -61,13 +61,13 @@ public sealed class SqlTypeModifierTests
             // Act / Assert
             var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
                 await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-            error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            error.Message.ShouldContain("CK00001", Case.Sensitive);
             error.ShouldContainMessage(subject, Case.Sensitive);
             error.ShouldContainMessage(type, Case.Sensitive);
             var builder = SqlDatabaseEngine.CreateBuilder("script");
             builder.AddDatabase("app", declaration => declaration.Script("001", sql));
             var scriptError = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
-            scriptError.Message.ShouldContain("COHDBL001", Case.Sensitive);
+            scriptError.Message.ShouldContain("CK00001", Case.Sensitive);
             scriptError.ShouldContainMessage(subject, Case.Sensitive);
             scriptError.ShouldContainMessage(type, Case.Sensitive);
         }
@@ -75,7 +75,7 @@ public sealed class SqlTypeModifierTests
         // Assert: typed declaration is refused before Build, and failed DDL left no objects.
         var typedError = Should.Throw<SqlSchemaValidationException>(() => SqlSchema.Compile("app", schema =>
             schema.Table<SqlTypeModifierCases.Row>("typed", table => table.Column(SqlTypeModifierCases.Selector(member), type))));
-        typedError.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        typedError.Message.ShouldContain("CK00001", Case.Sensitive);
         typedError.Message.ShouldContain($"typed.{member}", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "created", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "added", out var added).ShouldBeTrue();
@@ -193,7 +193,7 @@ public sealed class SqlTypeModifierTests
             {
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () =>
                     await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
-                error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                error.Message.ShouldContain("CS00005", Case.Sensitive);
                 error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }
@@ -223,7 +223,7 @@ public sealed class SqlTypeModifierTests
             else
             {
                 var error = await Should.ThrowAsync<DatabaseParseException>(async () => await builder.BuildAsync(CancellationToken.None));
-                error.Message.ShouldContain("SQL0005", Case.Sensitive);
+                error.Message.ShouldContain("CS00005", Case.Sensitive);
                 error.ShouldContainMessage(subject, Case.Sensitive);
             }
         }

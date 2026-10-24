@@ -13,6 +13,8 @@ namespace Assimalign.Cohesion.Database.Documents.Client;
 /// <summary>An authenticated Documents connection supporting one active operation at a time.</summary>
 /// <remarks>Results own their data and are materialized before returning. Dispose returns a healthy
 /// session to the shared pool. Explicit transactions over the wire are not supported.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentConnection {Database,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.DocumentConnection.DebugView))]
 public sealed class DocumentConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
@@ -227,5 +229,17 @@ public sealed class DocumentConnection : IAsyncDisposable
             DocumentClientEventSource.Log.QueryEnded(this, operation, started, failure,
                 result is null ? -1 : result.Result.Count + result.Collections.Count + (result.Document.HasValue ? 1 : 0), timestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Client.DocumentConnection _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Client.DocumentConnection value)
+        {
+            _target = value;
+        }
+
+        public string Database => _target.Database;
     }
 }

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Language;
 /// clauses its parser accepts. A clause outside the profile is reported as unsupported by that
 /// model rather than failing as a generic syntax error.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("QueryLanguageProfile {Language,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile.DebugView))]
 public sealed class QueryLanguageProfile
 {
     private readonly string[] _keywords;
@@ -84,4 +86,18 @@ public sealed class QueryLanguageProfile
         Functions = _functions,
         IsCaseSensitive = IsCaseSensitive,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Language.QueryLanguageProfile value)
+        {
+            _target = value;
+        }
+
+        public string Language => _target.Language;
+        public global::System.Collections.Generic.IReadOnlyCollection<string> Clauses => _target.Clauses;
+        public bool IsCaseSensitive => _target.IsCaseSensitive;
+    }
 }

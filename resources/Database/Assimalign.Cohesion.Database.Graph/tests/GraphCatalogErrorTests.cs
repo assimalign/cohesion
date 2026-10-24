@@ -52,8 +52,8 @@ public sealed class GraphCatalogErrorTests
 
         // Assert
         failure.ShouldNotBeAssignableTo<DatabaseTransactionAbortedException>();
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
-        failure.Message.ShouldNotStartWith("COHDBG003:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        failure.Message.ShouldNotStartWith("CG03003:", Case.Sensitive);
         var cause = failure.InnerException.ShouldBeOfType<GraphCatalogException>();
         cause.IsConflict.ShouldBeFalse();
         cause.IsCallerError.ShouldBeTrue();
@@ -77,8 +77,8 @@ public sealed class GraphCatalogErrorTests
             await GraphSchema.Open(database, second).SaveLabelAsync(label, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG007");
-        failure.Message.ShouldNotStartWith("COHDBG007:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04007");
+        failure.Message.ShouldNotStartWith("CG04007:", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<GraphCatalogException>().IsConflict.ShouldBeTrue();
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync(CancellationToken.None);

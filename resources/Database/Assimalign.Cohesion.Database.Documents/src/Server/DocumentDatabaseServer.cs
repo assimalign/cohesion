@@ -19,6 +19,8 @@ namespace Assimalign.Cohesion.Database.Documents;
 /// <remarks>The composition root owns the engine. The server owns its listener, binds on StartAsync,
 /// drains on StopAsync, and cannot restart. Every operation uses an automatic transaction;
 /// transactions over the wire are unsupported. Options are copied at creation.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseServer")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer.DebugView))]
 public sealed class DocumentDatabaseServer : DatabaseServer
 {
     private readonly DocumentDatabaseEngine _engine;
@@ -42,26 +44,11 @@ public sealed class DocumentDatabaseServer : DatabaseServer
         // The server keeps a copy, checked here, as the engine keeps a copy of its options (B3 of
         // the engine extensibility design): the sessions read the limits and timeouts live.
         options = options.Snapshot();
-        if (options.Listener is null)
-        {
-            throw new ArgumentException(ErrorMessages.ListenerMissing, nameof(options));
-        }
-        if (options.MaxSessions <= 0)
-        {
-            throw new ArgumentException(ErrorMessages.SessionLimitInvalid, nameof(options));
-        }
-
-        if (!ValidTimeout(options.AuthenticationTimeout) || !ValidTimeout(options.IdleTimeout))
-        {
-            throw new ArgumentException(ErrorMessages.TimeoutInvalid, nameof(options));
-        }
-
-        ValidateDrainTimeout(options.ShutdownDrainTimeout, nameof(options.ShutdownDrainTimeout));
-        ValidateDrainTimeout(options.TerminalDrainLinger, nameof(options.TerminalDrainLinger));
+        options.ValidateFor(engine.Name);
 
         _engine = engine;
         _options = options;
-        _listener = options.Listener;
+        _listener = options.Listener!;
         _authenticator = options.Authenticator ?? DatabaseAuthenticator.AllowAll;
     }
 
@@ -301,20 +288,23 @@ public sealed class DocumentDatabaseServer : DatabaseServer
         }
     }
 
-    private static bool ValidTimeout(TimeSpan value)
-        => value == Timeout.InfiniteTimeSpan || (value >= TimeSpan.Zero && value.TotalMilliseconds <= uint.MaxValue - 1);
-
-    private static void ValidateDrainTimeout(TimeSpan value, string name)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero, name);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(uint.MaxValue - 1), name);
-    }
-
     internal void OnSessionCompleted(DocumentDatabaseServerSession session)
     {
         if (_sessions.TryRemove(session.Id, out _))
         {
             DocumentDatabaseEventSource.Log.SessionClosed(session, session.CloseReason, session.AcceptedTimestamp);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseServer value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseEngine Engine => _target.Engine;
     }
 }

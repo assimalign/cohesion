@@ -12,9 +12,9 @@ internal sealed partial class SqlPlanner
     /// Checks every function call in the statement, in every expression position, before binding
     /// reads the catalog or execution reads a row. A name the engine's function catalog does not hold
     /// is unknown (#1068) unless it is an evaluator form or the SQL dialect declares it. Recognized
-    /// non-executing names such as <c>RANK</c> reject at parse time with <c>COHDBL001</c> (#1103);
+    /// non-executing names such as <c>RANK</c> reject at parse time with <c>CK00001</c> (#1103);
     /// a call whose argument count, or <c>*</c>, no overload
-    /// of its function accepts fails with <c>COHSQLE006</c> (#1189): <c>ABS(1, 2)</c>, <c>UPPER()</c>,
+    /// of its function accepts fails with <c>CS01006</c> (#1189): <c>ABS(1, 2)</c>, <c>UPPER()</c>,
     /// <c>COALESCE()</c>, <c>COUNT(a, b)</c>, <c>SUM(*)</c>. The evaluator used to find an unknown name
     /// per row, and to evaluate a call's argument only when it had exactly one, so a wrong-arity call
     /// returned NULL and a CHECK built on one never fired. The overload a call executes is chosen by
@@ -30,7 +30,7 @@ internal sealed partial class SqlPlanner
     /// <param name="statement">The statement about to be planned.</param>
     /// <exception cref="DatabaseException">The statement calls an unknown function.</exception>
     /// <exception cref="SqlEvaluationException">
-    /// The statement calls a function with a number of arguments no overload accepts (<c>COHSQLE006</c>).
+    /// The statement calls a function with a number of arguments no overload accepts (<c>CS01006</c>).
     /// </exception>
     private void ValidateFunctionCalls(SqlQueryExpression statement)
     {
@@ -194,12 +194,12 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Checks every call of an expression no statement carries yet, a compiled schema's declared
     /// CHECK, as the planner checks a statement's calls: an unknown name, and a count no overload
-    /// accepts (<c>COHSQLE006</c>), fail here, so the engine's build reports them as the DDL would.
+    /// accepts (<c>CS01006</c>), fail here, so the engine's build reports them as the DDL would.
     /// </summary>
     /// <param name="expression">The expression.</param>
     /// <param name="catalog">The engine's function catalog.</param>
     /// <exception cref="DatabaseException">The expression calls an unknown function.</exception>
-    /// <exception cref="SqlEvaluationException">A call's argument count matches no overload (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">A call's argument count matches no overload (<c>CS01006</c>).</exception>
     internal static void ValidateDeclaredCalls(SqlExpression expression, SqlFunctionCatalog catalog)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -214,8 +214,8 @@ internal sealed partial class SqlPlanner
                 !SqlStandardLibrary.IsDeclaredName(call.FunctionName))
             {
                 // The likeliest cause in a declared schema: the function was not registered on this engine.
-                throw new SqlPlanningException("COHSQLE016",
-                    $"Unknown function '{call.FunctionName}'. Register it on the engine's builder (SqlDatabaseEngineBuilder.Functions) before Build.", call.Location);
+                throw new SqlPlanningException("CS01016",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateDeclaredCallsSqlPlanning, call.FunctionName), call.Location);
             }
 
             CheckCall(call, catalog);
@@ -226,7 +226,7 @@ internal sealed partial class SqlPlanner
     /// <param name="call">The call.</param>
     /// <param name="catalog">The engine's function catalog.</param>
     /// <exception cref="DatabaseException">The name is unknown.</exception>
-    /// <exception cref="SqlEvaluationException">No overload accepts the call's argument count (<c>COHSQLE006</c>).</exception>
+    /// <exception cref="SqlEvaluationException">No overload accepts the call's argument count (<c>CS01006</c>).</exception>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void CheckCall(SqlFunctionCallExpression call, SqlFunctionCatalog catalog)
     {
@@ -244,7 +244,7 @@ internal sealed partial class SqlPlanner
     {
         if ((call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0) && !catalog.IsAggregate(call.FunctionName))
         {
-            throw new SqlPlanningException("COHSQLE032", string.Format(CultureInfo.CurrentCulture, ErrorMessages.AggregateModifiersOnScalar, call.FunctionName), call.Location);
+            throw new SqlPlanningException("CS05032", string.Format(CultureInfo.CurrentCulture, ErrorMessages.AggregateModifiersOnScalar, call.FunctionName), call.Location);
         }
     }
 
@@ -260,7 +260,7 @@ internal sealed partial class SqlPlanner
         }
         else if (!SqlStandardLibrary.IsDeclaredName(call.FunctionName))
         {
-            throw new SqlPlanningException("COHSQLE016", $"Unknown function '{call.FunctionName}'.", call.Location);
+            throw new SqlPlanningException("CS01016", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerCheckCallCoreSqlPlanning, call.FunctionName), call.Location);
         }
         ValidateCallModifiers(call, catalog);
     }

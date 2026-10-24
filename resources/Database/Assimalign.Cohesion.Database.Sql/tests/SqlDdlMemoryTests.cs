@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +12,7 @@ using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
+using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -36,7 +40,7 @@ public sealed class SqlDdlMemoryTests
     public async Task ExecuteAsync_TableLargerThanPool_ShouldBoundRetainedWorkspace(string operation)
     {
         // Arrange: file-backed rows exceed the fixed 1 MiB pool; a full row/key set
-        // is observable after full collections during row validation, tree construction
+        // is observable through weak references after collections during row validation, tree construction
         // and the unique-validation cursor walk, before its workspace is released.
         string root = Path.Combine(Path.GetTempPath(), "cohesion-ddl-memory", Guid.NewGuid().ToString("N"));
         long minimum = long.MaxValue;
@@ -54,7 +58,26 @@ public sealed class SqlDdlMemoryTests
                 var database = await engine.CreateDatabaseAsync("db" + round.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
                 await using var session = await database.CreateSessionAsync(CancellationToken.None);
                 await SeedAsync(session);
-                long baseline = GC.GetTotalMemory(forceFullCollection: true);
+                var workspace = new List<(WeakReference<object> Reference, long Bytes)>();
+                int observedRows = 0;
+                int observedKeys = 0;
+                // Deliberate unrelated retention: a process-heap delta must not decide
+                // whether this statement retains its rows or keys.
+                byte[]? unrelated = null;
+                SqlPlanExecutor.RowDecoded = row =>
+                {
+                    if (row.Length < 2 || row[1] is not string text || text.Length != keyLength) { return; }
+                    observedRows++;
+                    workspace.Add((new(row), 4 * IntPtr.Size + row.Length * IntPtr.Size));
+                    workspace.Add((new(text), 4 * IntPtr.Size + text.Length * sizeof(char)));
+                };
+                SqlPlanExecutor.IndexKeyBuilt = key =>
+                {
+                    if (key.Length < keyLength) { return; }
+                    MemoryMarshal.TryGetArray(key.Encoded, out var bytes).ShouldBeTrue();
+                    observedKeys++;
+                    workspace.Add((new(bytes.Array!), 4 * IntPtr.Size + bytes.Array!.Length));
+                };
                 long peak = 0;
                 int samples = 0;
                 int cursorEntries = 0;
@@ -93,20 +116,29 @@ public sealed class SqlDdlMemoryTests
                 finally
                 {
                     SqlPlanExecutor.UniqueIndexEntryValidated = null;
+                    SqlPlanExecutor.RowDecoded = null;
+                    SqlPlanExecutor.IndexKeyBuilt = null;
                     session.ProvisioningProgress = null;
                 }
+                GC.KeepAlive(unrelated);
                 minimum = Math.Min(minimum, peak);
                 _output.WriteLine($"{operation} round {round}: retained workspace={peak:N0} bytes; samples={samples}; cursor entries={cursorEntries}; cursor samples={cursorSamples}");
 
                 // Assert: prove sampling occurs inside the cursor walk, including its
                 // midpoint and final key, while an accidentally retained key list is live.
                 samples.ShouldBeGreaterThanOrEqualTo(2);
+                observedRows.ShouldBeGreaterThanOrEqualTo(rows);
+                observedKeys.ShouldBeGreaterThanOrEqualTo(uniqueBuild ? rows * 2 : 0);
                 cursorEntries.ShouldBe(uniqueBuild ? rows : 0);
                 cursorSamples.ShouldBe(uniqueBuild ? 3 : 0);
+                peak.ShouldBeLessThan((long)rows * keyLength * sizeof(char) / 4);
 
                 void Sample()
                 {
-                    peak = Math.Max(peak, GC.GetTotalMemory(forceFullCollection: true) - baseline);
+                    unrelated ??= new byte[8 * 1024 * 1024];
+                    GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+                    // Charge the whole configured pool, including bytes present before DDL.
+                    peak = Math.Max(peak, 1024 * 1024 + RetainedBytes(workspace));
                     samples++;
                 }
             }
@@ -114,7 +146,7 @@ public sealed class SqlDdlMemoryTests
             long decodedTableBytes = (long)rows * keyLength * sizeof(char);
             _output.WriteLine($"{operation} minimum of 3: {minimum:N0} / {decodedTableBytes:N0} bytes ({(double)minimum / decodedTableBytes:P2})");
             minimum.ShouldBeLessThan(decodedTableBytes / 4,
-                "retained workspace must fit below one quarter of the decoded table, including pool and storage bookkeeping");
+                "retained workspace must fit below one quarter of the decoded table, including the entire configured buffer pool");
         }
         finally
         {
@@ -122,6 +154,7 @@ public sealed class SqlDdlMemoryTests
         }
     }
 
+#if !DEBUG
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Unique builds: allocation overhead fits one bounded cursor pass instead of hex keys (#1444)")]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -172,6 +205,20 @@ public sealed class SqlDdlMemoryTests
             await session.ExecuteAsync(sql, cancellationToken: TestTimeout.Token(300));
             return GC.GetTotalAllocatedBytes(precise: true) - before;
         }
+    }
+
+#endif
+
+    // Keep TryGetTarget's temporary strong references out of the next collection's stack.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long RetainedBytes(List<(WeakReference<object> Reference, long Bytes)> workspace)
+    {
+        long retained = 0;
+        foreach (var allocation in workspace)
+        {
+            if (allocation.Reference.TryGetTarget(out _)) { retained += allocation.Bytes; }
+        }
+        return retained;
     }
 
     private static async Task SeedAsync(SqlDatabaseSession session)

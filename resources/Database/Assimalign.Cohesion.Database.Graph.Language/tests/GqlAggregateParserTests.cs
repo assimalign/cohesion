@@ -66,7 +66,7 @@ public sealed class GqlAggregateParserTests
         var statement = new GqlQueryParser().Parse($"RETURN [{name} IN [1,2] | {name}]");
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("COHDBL001");
+        error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain("LIST COMPREHENSION", Case.Sensitive);
     }
 
@@ -92,7 +92,7 @@ public sealed class GqlAggregateParserTests
     public void Parse_InvalidAggregate_ShouldReportSyntaxDiagnostic(string expression)
     {
         // Arrange / Act / Assert
-        new GqlQueryParser().Parse("RETURN " + expression).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "GQL0002");
+        new GqlQueryParser().Parse("RETURN " + expression).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CG00002");
     }
 
     [Fact(DisplayName = "Cohesion Test [GQL] - Aggregates: WITH count composes with RETURN")]

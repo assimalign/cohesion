@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Language;
 /// Every other operator builds one binary node per link, so <c>1 + 1 + 1</c> is two nodes, each
 /// a level of the expression tree.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBinaryExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlBinaryExpression.DebugView))]
 public sealed class SqlBinaryExpression : SqlExpression
 {
     /// <summary>
@@ -42,4 +44,18 @@ public sealed class SqlBinaryExpression : SqlExpression
     /// Gets the right operand.
     /// </summary>
     public SqlExpression Right { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlBinaryExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlBinaryExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Left => _target.Left;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlBinaryOperator Operator => _target.Operator;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Right => _target.Right;
+    }
 }

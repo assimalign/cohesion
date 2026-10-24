@@ -207,6 +207,8 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         string rootPath = Path.Combine(_rootPath, "unused-root");
         var options = new GraphDatabaseEngineOptions
         {
+            QueryMemoryBudget = 80L * 1024 * 1024,
+            QueryWorkBudget = 2_000_000,
             RootPath = rootPath,
             StorageStrategy = strategy,
             Durability = Assimalign.Cohesion.Database.Storage.StorageCommitDurability.None,
@@ -231,6 +233,8 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         // Assert
         engine.Name.ShouldBe("every-option");
         copy.ShouldNotBeSameAs(options);
+        copy.QueryMemoryBudget.ShouldBe(options.QueryMemoryBudget);
+        copy.QueryWorkBudget.ShouldBe(options.QueryWorkBudget);
         copy.Durability.ShouldBe(options.Durability);
         copy.GroupCommitWindow.ShouldBe(options.GroupCommitWindow);
         copy.CheckpointInterval.ShouldBe(options.CheckpointInterval);
@@ -250,10 +254,10 @@ public sealed class GraphEngineDeclarationTests : IDisposable
 
         // Every property, the internal ones included: an option added to either set fails here
         // until Snapshot copies it and this test checks it.
-        typeof(GraphDatabaseEngineOptions).GetProperties().Length.ShouldBe(12);
+        typeof(GraphDatabaseEngineOptions).GetProperties().Length.ShouldBe(14);
         typeof(GraphDatabaseEngineOptions)
             .GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
-            .Length.ShouldBe(15);
+            .Length.ShouldBe(17);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Declarations: AddServer with options creates a graph server over the engine, and a server it cannot create fails the build")]
@@ -275,7 +279,8 @@ public sealed class GraphEngineDeclarationTests : IDisposable
         // Assert
         var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<GraphDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
-        failure.Message.ShouldStartWith("A connection listener is required.", Case.Sensitive);
+        failure.ParamName.ShouldBe(nameof(GraphDatabaseServerOptions.Listener));
+        failure.Message.ShouldStartWith("CK08001: Graph server for engine 'unserved': Listener is required.", Case.Sensitive);
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 

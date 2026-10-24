@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// the hold it keeps on the session and its admission into the explicit transaction, until it
 /// completes or is aborted. Every statement has a session (owner decision 32 of 2026-10-06).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("DocumentOperation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentOperation.DebugView))]
 internal sealed class DocumentOperation
 {
     private readonly DocumentDatabase _database;
@@ -67,7 +69,7 @@ internal sealed class DocumentOperation
         _session.ThrowIfNotOpen();
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
-            throw new DatabaseException("The document operation's transaction is no longer active.");
+            throw DatabaseException.CreateDocumentsFailure("CK04002", ErrorMessages.DocumentOperationEnsureActiveDatabase);
         }
     }
 
@@ -157,6 +159,14 @@ internal sealed class DocumentOperation
         if (pin?.State == TransactionState.Active && !_database.IsOffline)
         {
             await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentOperation value)
+        {
+            _ = value;
         }
     }
 }

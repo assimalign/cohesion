@@ -46,6 +46,8 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// registered, before any factory runs; there is one registration path per kind of thing.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationBuilder")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder.DebugView))]
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
@@ -77,7 +79,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ResourceContext? resourceContext = null;
         if (resourceAssembly is not null && ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered database resource control-plane factory returned null.");
+            _controlPlane = controlPlane ?? throw new InvalidOperationException(ErrorMessages.DatabaseApplicationBuilderFailure);
             resourceContext = ResourceRuntime.Current;
             _resourceContext = resourceContext;
             _options.Environment = resourceContext.EnvironmentName;
@@ -268,8 +270,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// data-scaling SQL migration steps to the engine's worker. The parameterless root
     /// <see cref="IDatabaseApplicationBuilder.Build"/> forwards here without a token; callers that
     /// need cancellation retain the concrete builder. A factory's
-    /// exception, for example a SQL schema migration failure led by <c>COHSQLP001</c> to
-    /// <c>COHSQLP005</c>, propagates unchanged after the products built before it are disposed.
+    /// exception, for example a SQL schema migration failure led by <c>CS03101</c> to
+    /// <c>CS03105</c>, propagates unchanged after the products built before it are disposed.
     /// </remarks>
     public DatabaseApplication Build(CancellationToken cancellationToken = default)
     {
@@ -302,7 +304,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         if (Interlocked.Exchange(ref _buildAttempted, 1) != 0)
         {
-            throw new InvalidOperationException("The database application Build has already been attempted.");
+            throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure);
         }
 
         // The application owns the host-level pieces from here, the content root's file system and
@@ -362,23 +364,23 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 }
                 else
                 {
-                    engine = registration.Factory!(context) ?? throw new InvalidOperationException($"Engine factory '{registration.Name}' returned null.");
+                    engine = registration.Factory!(context) ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure2, registration.Name));
                     if (!products.Add(engine))
                     {
-                        throw new InvalidOperationException($"Engine factory '{registration.Name}' returned an already registered product.");
+                        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure3, registration.Name));
                     }
 
                     ownership.Engines.Add(engine);
                     AddProducts(products, engine);
                     if (!string.Equals(registration.Name, engine.Name, StringComparison.Ordinal))
                     {
-                        throw new InvalidOperationException($"Engine factory '{registration.Name}' returned engine '{engine.Name}'.");
+                        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure4, registration.Name, engine.Name));
                     }
                 }
 
                 if (engine.Model is not (EngineModel.Custom or EngineModel.Sql or EngineModel.Document or EngineModel.KeyValueStore or EngineModel.Blob or EngineModel.Graph))
                 {
-                    throw new InvalidOperationException($"Engine '{engine.Name}' has an unknown model.");
+                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildCompositionFailure5, engine.Name));
                 }
 
                 engines.Add(engine);
@@ -411,19 +413,19 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             foreach (var registration in _serviceRegistrations)
             {
                 IHostService service = registration.Instance ?? registration.Factory!(context)
-                    ?? throw new InvalidOperationException("A service factory returned null.");
+                    ?? throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure6);
                 if (registration.Instance is null)
                 {
                     if (!products.Add(service))
                     {
-                        throw new InvalidOperationException("A service factory returned an already registered product.");
+                        throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure7);
                     }
 
                     ownership.Services.Add(service);
                 }
                 if (!lifecycleProducts.Add(service))
                 {
-                    throw new InvalidOperationException("A lifecycle service was registered more than once.");
+                    throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
                 }
 
                 hostServices.Add(service);
@@ -461,7 +463,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentNullException.ThrowIfNull(options);
         if (options.StartServicesConcurrently || options.StopServicesConcurrently)
         {
-            throw new InvalidOperationException("Database applications require sequential service start and stop.");
+            throw new InvalidOperationException(ErrorMessages.BuilderSnapshotOptionsFailure);
         }
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.ReopenInitialDelay, TimeSpan.Zero, nameof(options.ReopenInitialDelay));
@@ -500,7 +502,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     {
         if (Volatile.Read(ref _buildAttempted) != 0)
         {
-            throw new InvalidOperationException("Registration is closed because application Build has begun.");
+            throw new InvalidOperationException(ErrorMessages.BuilderEnsureMutableFailure);
         }
     }
 
@@ -527,12 +529,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                     || descriptor.ServiceType == typeof(ILoggerFactory))
                 {
                     throw new InvalidOperationException(
-                        $"{descriptor.ServiceType.Name} is reserved for the application's own {Describe(descriptor.ServiceType)}.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BuilderBuildServiceProviderFailure, descriptor.ServiceType.Name, Describe(descriptor.ServiceType)));
                 }
 
                 if (descriptor.ImplementationType is not null || descriptor.ServiceType.ContainsGenericParameters)
                 {
-                    throw new InvalidOperationException("Database hosting requires closed factory or instance service registrations.");
+                    throw new InvalidOperationException(ErrorMessages.BuilderBuildServiceProviderFailure2);
                 }
             }
 
@@ -616,7 +618,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (_engines.Any(registration => string.Equals(registration.Name, name, StringComparison.Ordinal)))
         {
-            throw new InvalidOperationException($"Duplicate database engine name '{name}'.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationBuilderReserveNameFailure, name));
         }
     }
 
@@ -702,5 +704,21 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
 
 
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationOptions Options => _target.Options;
+        public global::Assimalign.Cohesion.Hosting.HostEnvironment Environment => _target.Environment;
+        public global::Assimalign.Cohesion.Configuration.ConfigurationManager Configuration => _target.Configuration;
+        public global::Assimalign.Cohesion.Logging.LoggerFactoryBuilder Logging => _target.Logging;
+        public global::Assimalign.Cohesion.DependencyInjection.ServiceProviderBuilder Services => _target.Services;
     }
 }

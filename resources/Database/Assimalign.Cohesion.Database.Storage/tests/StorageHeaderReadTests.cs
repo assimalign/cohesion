@@ -79,7 +79,7 @@ public sealed class StorageHeaderReadTests
 
         // Assert
         error.PageId.ShouldBe((PageId)0L);
-        error.Code.ShouldBe("COHDBS003");
+        error.Code.ShouldBe("CK06003");
         if (incompleteRead) { error.InnerException.ShouldBeOfType<StorageIOException>(); }
         else { error.InnerException.ShouldBeOfType<IOException>(); }
         StorageCorruptionException.Find(new AggregateException(error)).ShouldBeSameAs(error);

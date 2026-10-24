@@ -41,8 +41,15 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// its workers skip it, so the engine stays <see cref="EngineState.Running"/>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphDatabase {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.GraphDatabase.DebugView))]
 public sealed partial class GraphDatabase : DatabaseInstance
 {
+    // The callback runs only after database composition has attached its current index manager.
+    private ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => Store.PruneIndexesAsync(bound, cancellationToken);
+
+
     private readonly GraphDatabaseEngine _engine;
 
     // Per-database fault seam for the cleanup after a statement's commit.
@@ -54,7 +61,8 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         _engine = engine;
         DataStorage = storage;
-        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records,
+            PruneIndexesAsync);
 
         // A wait for the database writer lock ends when the database goes offline (#1268 review):
         // an offline database undoes nothing, so the writer that holds the lock keeps it until the
@@ -83,17 +91,16 @@ public sealed partial class GraphDatabase : DatabaseInstance
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
             Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            // Graph.Storage uses the existing storage exception with a coded message, so the
-            // engine can retain its diagnostic without adding a cross-assembly exception type.
-            const string formatCode = "COHDBG017";
-            if (exception.Message.StartsWith(formatCode + ": ", StringComparison.Ordinal))
+            // The decoder's format diagnostic survives physical context without parsing text.
+            const string formatCode = "CG06017";
+            if (exception.InnerException is GraphRecordFormatException { Diagnostics: [{ Code: formatCode }, ..] })
             {
                 string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
-                    name, exception.Message[(formatCode.Length + 2)..]);
+                    name, exception.Message);
                 throw new DatabaseException(message, [new Diagnostic
                 { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
             }
-            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused, name, exception.Message), exception);
         }
 
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
@@ -148,7 +155,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// The code that leads the message of every operation refused because the database is
     /// offline (#1243).
     /// </summary>
-    internal const string OfflineCode = "COHDBG012";
+    internal const string OfflineCode = "CG06012";
 
     /// <summary>
     /// Gets whether a failed durable flush took the database offline.
@@ -170,7 +177,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <returns>A new session.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public new async ValueTask<GraphDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
         => (GraphDatabaseSession)await base.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -227,7 +234,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         if (DatabaseFailure.Find<Assimalign.Cohesion.Database.Indexing.IndexCorruptionException>(error) is { } indexCorruption)
         {
             return DatabaseCorruptionException.Create(Name, indexCorruption, [new Types.Diagnostic
-            { Code = "COHDBG006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
+            { Code = "CG06006", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }]);
         }
 
         if (error is DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException or TransactionCommitUnconfirmedException
@@ -254,11 +261,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the write failed (a
-    /// property that does not match the graph definition, <c>COHDBG003</c>).
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the write failed (a
+    /// property that does not match the graph definition, <c>CG03003</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<GraphNode> CreateNodeAsync(GraphDatabaseSession session, IReadOnlyList<string> labels,
@@ -286,10 +293,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public ValueTask<GraphNode?> GetNodeAsync(GraphDatabaseSession session, GraphNodeId id, CancellationToken cancellationToken = default)
         => RunAsync(RequireOwnSession(session), operation => new ValueTask<GraphNode?>(
             Store.FindNode(id.Value, operation.Context.Snapshot) is { } node ? Materialize(node) : null), cancellationToken);
@@ -305,10 +312,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the delete failed.
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the delete failed.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The node or one of its relationships changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteNodeAsync(GraphDatabaseSession session, GraphNodeId id, CancellationToken cancellationToken = default)
@@ -336,10 +343,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// Either endpoint node does not exist, or a property does not match the graph definition
-    /// (both <c>COHDBG003</c>); the session belongs to another database (<c>COHDBG005</c>), it is
-    /// closed, another statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// (both <c>CG03003</c>); the session belongs to another database (<c>CG07005</c>), it is
+    /// closed, another statement holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The graph catalog or an endpoint changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<GraphRelationship> CreateRelationshipAsync(GraphDatabaseSession session, GraphNodeId from, GraphNodeId to,
@@ -362,10 +369,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
-    /// The session belongs to another database (<c>COHDBG005</c>), it is closed, another statement
-    /// holds it, its transaction refuses statements (<c>COHDBG007</c>), or the delete failed.
+    /// The session belongs to another database (<c>CG07005</c>), it is closed, another statement
+    /// holds it, its transaction refuses statements (<c>CG04007</c>), or the delete failed.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The relationship changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     public ValueTask<bool> DeleteRelationshipAsync(GraphDatabaseSession session, GraphRelationshipId id, CancellationToken cancellationToken = default)
@@ -392,23 +399,26 @@ public sealed partial class GraphDatabase : DatabaseInstance
     /// nodes are yielded.
     /// </exception>
     /// <exception cref="DatabaseException">
-    /// The traversal's depth or direction is invalid (<c>COHDBG001</c>); the session belongs to
-    /// another database (<c>COHDBG005</c>), it is closed (also while the nodes are yielded), another
-    /// statement holds it, or its transaction refuses statements (<c>COHDBG007</c>).
+    /// The traversal's depth or direction is invalid (<c>CG05001</c>); the session belongs to
+    /// another database (<c>CG07005</c>), it is closed (also while the nodes are yielded), another
+    /// statement holds it, or its transaction refuses statements (<c>CG04007</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBG012</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public async IAsyncEnumerable<GraphNode> TraverseAsync(GraphDatabaseSession session, GraphTraversal traversal,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         RequireOwnSession(session);
         if (traversal.MaxDepth < 0 || !Enum.IsDefined(traversal.Direction))
         {
-            throw new DatabaseException("COHDBG001: Traversal depth and direction must be valid.");
+            throw new DatabaseException(ErrorMessages.GraphDatabaseTraverseAsyncDatabase);
         }
         // Materialize in one statement snapshot, then release the transaction.
         // Each node is visited once; the start is seeded as visited and never emitted.
         var nodes = await RunAsync(session, async operation =>
         {
+            var budget = session.StartQueryBudget(operation, traversal.Limits);
+            using var memory = new GraphMemoryOwner(budget.Memory);
+            memory.Add(1024);
             var result = new List<GraphNode>();
             IReadOnlyCollection<Guid>? types = traversal.RelationshipType is { } name
                 ? Catalog.FindRelationshipType(name, operation.Context.Snapshot) is { } type ? new[] { type.Id } : [] : null;
@@ -420,6 +430,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             };
             var visited = new HashSet<ulong> { traversal.Start.Value };
             var queue = new Queue<(ulong Id, int Depth)>();
+            budget.Consume();
             if (Store.FindNode(traversal.Start.Value, operation.Context.Snapshot) is not null)
             {
                 queue.Enqueue((traversal.Start.Value, 0));
@@ -428,15 +439,23 @@ public sealed partial class GraphDatabase : DatabaseInstance
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (current.Depth >= traversal.MaxDepth) { continue; }
-                foreach (var relationship in await operation.Updates.GetIncidentAsync(current.Id, direction, types,
-                    cancellationToken).ConfigureAwait(false))
+                await foreach (var relationship in operation.Updates.StreamIncidentAsync(current.Id, direction, types,
+                    cancellationToken, budget).ConfigureAwait(false))
                 {
                     bool outgoing = relationship.SourceId == current.Id;
                     ulong next = outgoing ? relationship.TargetId : relationship.SourceId;
-                    if (visited.Add(next) && Store.FindNode(next, operation.Context.Snapshot) is { } node)
+                    if (visited.Add(next))
                     {
-                        result.Add(Materialize(node));
-                        queue.Enqueue((next, current.Depth + 1));
+                        memory.Add(80); // Identity set and queue capacity, including invisible targets.
+                        if (Store.FindNode(next, operation.Context.Snapshot) is { } node)
+                        {
+                            var materialized = Materialize(node);
+                            memory.Add(32);
+                            memory.RetainValue(materialized, cancellationToken);
+                            budget.ConsumeViable();
+                            result.Add(materialized);
+                            if (current.Depth + 1 < traversal.MaxDepth) { queue.Enqueue((next, current.Depth + 1)); }
+                        }
                     }
                 }
             }
@@ -465,7 +484,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         ArgumentNullException.ThrowIfNull(session);
         if (!ReferenceEquals(session.Database, this))
         {
-            throw new DatabaseException("COHDBG005: The session belongs to another database or engine.");
+            throw new DatabaseException(ErrorMessages.DatabaseRequireOwnSessionDatabase);
         }
         session.ThrowIfNotOpen();
         return session;
@@ -489,7 +508,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         foreach (string label in labels)
         {
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
-            if (metadata != Catalog.FindLabel(label, LatestSnapshot(operation.Context))) { ThrowConflict(); }
+            if (metadata != Catalog.FindLabel(label, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
             if (metadata is null)
             {
                 metadata = new GraphLabelMetadata(Guid.NewGuid(), label);
@@ -511,7 +530,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
-        if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { ThrowConflict(); }
+        if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
         if (metadata is null)
         {
             metadata = new GraphRelationshipTypeMetadata(Guid.NewGuid(), type);
@@ -528,14 +547,14 @@ public sealed partial class GraphDatabase : DatabaseInstance
     private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token)
     {
         var keys = Catalog.GetPropertyKeys(definition, operation.Context.Snapshot);
-        if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { ThrowConflict(); }
+        if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
         foreach (var key in keys)
         {
             object? value = null;
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
             if (key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
-                throw new DatabaseException($"COHDBG003: Property '{key.Name}' does not match the graph definition.");
+                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.
@@ -562,7 +581,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         byte or short => DatabaseType.Int16, ushort or int => DatabaseType.Int32, uint or long => DatabaseType.Int64,
         float => DatabaseType.Float32, double => DatabaseType.Float64, decimal or ulong => DatabaseType.Decimal,
         string => DatabaseType.String,
-        _ => throw new DatabaseException("COHDBG003: Unsupported graph property value."),
+        _ => throw new DatabaseException(ErrorMessages.GraphDatabaseTypeOfDatabase),
     };
 
     internal static bool SupportsPropertyType(DatabaseType type) => type is DatabaseType.Boolean or DatabaseType.Int8 or
@@ -574,5 +593,18 @@ public sealed partial class GraphDatabase : DatabaseInstance
     {
         ThrowIfOffline();
         return new ValueTask<DatabaseSession>(new GraphDatabaseSession(this));
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.GraphDatabase _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.GraphDatabase value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.GraphDatabaseEngine Engine => _target.Engine;
+        public global::Assimalign.Cohesion.Database.DatabaseName Name => _target.Name;
     }
 }

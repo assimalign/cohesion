@@ -24,8 +24,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// No count or depth limit applies (#1139 follow-up, as Neo4j: its n-ary
 /// <c>Conjunctions</c>/<c>Disjunctions</c> carry any number of children and only the stack bounds
 /// nesting). Genuine nesting, through parentheses and <c>!</c>, is bounded by the stack of the
-/// thread that parses or runs the statement: the parser reports <c>GQL0009</c> and the engine
-/// <c>COHDBG008</c> instead of overflowing it. Rendering, equality and hashing walk the tree with
+/// thread that parses or runs the statement: the parser reports <c>CG00009</c> and the engine
+/// <c>CG05008</c> instead of overflowing it. Rendering, equality and hashing walk the tree with
 /// an explicit stack, so they hold for a tree of any depth.
 /// </para>
 /// </remarks>

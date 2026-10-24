@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Sql.AotSample;
 /// A hand-written strict scalar leaf, the design's <c>clamp(BIGINT, BIGINT, BIGINT)</c>: it derives
 /// from the base the built-in <c>ABS</c> derives from and reads its arguments through the value ABI.
 /// <see cref="Math.Clamp(long, long, long)"/> throws when low exceeds high, which the engine codes as
-/// <c>COHSQLE007</c>.
+/// <c>CS05007</c>.
 /// </summary>
 internal sealed class ClampFunction : SqlScalarFunction
 {

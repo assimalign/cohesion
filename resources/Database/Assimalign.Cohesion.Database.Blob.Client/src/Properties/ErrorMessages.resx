@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="BlobClientCreateArgument" xml:space="preserve"><value>Connection settings and a connection factory are required.</value></data>
+  <data name="BlobConnectionUploadAsyncArgument" xml:space="preserve"><value>The source must be readable and the length must be nonnegative or -1.</value></data>
+  <data name="BlobConnectionUploadAsyncProtocol" xml:space="preserve"><value>The server did not acknowledge the uploaded Blob's publication and length.</value></data>
+  <data name="BlobConnectionDeleteAsyncProtocol" xml:space="preserve"><value>A Blob delete acknowledged more than one object.</value></data>
+  <data name="ConnectionGetPropertiesAsyncProtocol" xml:space="preserve"><value>Expected Blob properties or an empty completion.</value></data>
+  <data name="ConnectionGetPropertiesAsyncProtocol2" xml:space="preserve"><value>The Blob properties response disagrees with its request or completion.</value></data>
+  <data name="BlobConnectionListCoreAsyncProtocol" xml:space="preserve"><value>The Blob listing completion count is incorrect.</value></data>
+  <data name="BlobConnectionListCoreAsyncProtocol2" xml:space="preserve"><value>Expected a Blob listing item or completion.</value></data>
+  <data name="BlobConnectionListCoreAsyncProtocol3" xml:space="preserve"><value>A Blob listing item does not match the requested prefix.</value></data>
+  <data name="BlobConnectionReadCountAsyncProtocol" xml:space="preserve"><value>Expected a Blob operation completion.</value></data>
+  <data name="BlobConnectionExpectAsyncProtocol" xml:space="preserve"><value>The server closed the connection before completing the Blob exchange.</value></data>
+  <data name="ReadFrameCoreAsyncDatabaseClient" xml:space="preserve"><value>The connection closed while reading a Blob response.</value></data>
+  <data name="WriteFrameCoreAsyncDatabaseClient" xml:space="preserve"><value>The connection closed while sending a Blob request.</value></data>
+  <data name="WriterFlushCoreAsyncDatabaseClient" xml:space="preserve"><value>The connection closed while flushing a Blob request.</value></data>
+  <data name="DownloadExchangeOpenCoreAsyncProtocol" xml:space="preserve"><value>A Blob download must begin with TransferStart.</value></data>
+  <data name="ExchangeCopyToCoreAsyncFailure" xml:space="preserve"><value>The download metadata has not been read.</value></data>
+</root>

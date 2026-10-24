@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// <summary>Verifies grouping, aggregate values and metadata through the live SQL session pipeline.</summary>
 public sealed class SqlAggregateExecutionTests
 {
-    private const string CreateMetrics =
+    private const string createMetrics =
         "CREATE TABLE metrics (id INT, category TEXT, region TEXT, amount INT, empty_amount INT);";
 
-    private const string InsertMetrics =
+    private const string insertMetrics =
         "INSERT INTO metrics VALUES " +
         "(1, 'red', 'west', 4, NULL), (2, 'red', 'west', 10, NULL), (3, 'red', 'east', NULL, NULL), " +
         "(4, 'blue', 'west', 7, NULL), (5, 'blue', 'east', -3, NULL), (6, 'blue', 'east', NULL, NULL), " +
@@ -109,8 +109,8 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
-        if (filtered) { await ExecuteAsync(session, InsertMetrics); }
+        await ExecuteAsync(session, createMetrics);
+        if (filtered) { await ExecuteAsync(session, insertMetrics); }
         string where = filtered ? " WHERE id < 0" : string.Empty;
 
         // Act / Assert
@@ -262,7 +262,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
@@ -283,7 +283,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
@@ -318,7 +318,7 @@ public sealed class SqlAggregateExecutionTests
             }
             else
             {
-                (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
+                (await ExecuteAsync(session, createMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
             }
             var before = await SnapshotAsync(session);
 
@@ -346,7 +346,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {aggregate}(category) FROM metrics;"));
@@ -518,7 +518,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
         await ExecuteAsync(session, "CREATE TABLE categories (name TEXT, label TEXT);");
         var request = SqlQueryRequest.FromSql(
             "SELECT c.label, SUM(m.amount) FROM metrics m JOIN categories c ON m.category = c.name " +
@@ -549,7 +549,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
         await ExecuteAsync(session, "CREATE TABLE compact (id INT, name TEXT);");
 
         // Act / Assert
@@ -596,7 +596,7 @@ public sealed class SqlAggregateExecutionTests
 
         // Act / Assert
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT MIN(UPPER(amount)), MAX(LOWER(amount)) FROM metrics;"));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE006");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01006");
     }
 
     /// <summary>Alternative scalar branches with incompatible types fail before an empty input can conceal the mismatch.</summary>
@@ -610,7 +610,7 @@ public sealed class SqlAggregateExecutionTests
         await using var engine = CreateEngine();
         var database = await engine.CreateDatabaseAsync("aggregate");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, CreateMetrics);
+        await ExecuteAsync(session, createMetrics);
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT MIN({expression}) FROM metrics;"));
@@ -692,19 +692,19 @@ public sealed class SqlAggregateExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate shape: invalid modifiers and delimiters fail while planning")]
-    [InlineData("COUNT(DISTINCT x, id)", "COHSQLE006", "COUNT")]
-    [InlineData("STRING_AGG(name)", "COHSQLE006", "delimiter")]
-    [InlineData("STRING_AGG(name ORDER BY id, ',')", "COHSQLE006", "delimiter")]
-    [InlineData("STRING_AGG(name, name)", "COHDBL001", "delimiter")]
-    [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY id)", "COHSQLE032", "argument list")]
-    [InlineData("STRING_AGG(x, ',')", "COHSQLE006", "CAST")]
-    [InlineData("STRING_AGG(CAST(name AS JSON), ',')", "COHSQLE006", "CAST")]
-    [InlineData("UPPER(DISTINCT name)", "COHSQLE032", "not an aggregate")]
-    [InlineData("UPPER(ALL name)", "COHSQLE032", "not an aggregate")]
-    [InlineData("UPPER(name ORDER BY id)", "COHSQLE032", "not an aggregate")]
-    [InlineData("\"LISTAGG\"(name)", "SQL0003", "WITHIN GROUP")]
-    [InlineData("\"LISTAGG\"(name ORDER BY id)", "SQL0003", "WITHIN GROUP")]
-    [InlineData("STRING_AGG(name, ',' ORDER BY COUNT(*))", "COHSQLE017", "Nested")]
+    [InlineData("COUNT(DISTINCT x, id)", "CS01006", "COUNT")]
+    [InlineData("STRING_AGG(name)", "CS01006", "delimiter")]
+    [InlineData("STRING_AGG(name ORDER BY id, ',')", "CS01006", "delimiter")]
+    [InlineData("STRING_AGG(name, name)", "CK00001", "delimiter")]
+    [InlineData("STRING_AGG(DISTINCT name, ',' ORDER BY id)", "CS05032", "argument list")]
+    [InlineData("STRING_AGG(x, ',')", "CS01006", "CAST")]
+    [InlineData("STRING_AGG(CAST(name AS JSON), ',')", "CS01006", "CAST")]
+    [InlineData("UPPER(DISTINCT name)", "CS05032", "not an aggregate")]
+    [InlineData("UPPER(ALL name)", "CS05032", "not an aggregate")]
+    [InlineData("UPPER(name ORDER BY id)", "CS05032", "not an aggregate")]
+    [InlineData("\"LISTAGG\"(name)", "CS00003", "WITHIN GROUP")]
+    [InlineData("\"LISTAGG\"(name ORDER BY id)", "CS00003", "WITHIN GROUP")]
+    [InlineData("STRING_AGG(name, ',' ORDER BY COUNT(*))", "CS05017", "Nested")]
     public async Task Aggregates_InvalidShape_ShouldFailBeforeInput(string expression, string code, string message)
     {
         // Arrange
@@ -713,7 +713,7 @@ public sealed class SqlAggregateExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (x INT, id INT, name TEXT);");
         // Act
-        if (code == "COHDBL001")
+        if (code == "CK00001")
         {
             var result = await ExecuteAsync(session, $"SELECT {expression} FROM t;");
             // Assert: capability refusals use the statement-result carrier.
@@ -751,7 +751,7 @@ public sealed class SqlAggregateExecutionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT STRING_AGG(" + (distinct ? "DISTINCT " : "") + value + ", ',' ORDER BY " + key + ") FROM t" + (grouped ? " GROUP BY g" : "") + ";", parameters));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE002");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02002");
         error.Message.ShouldContain("1048576", Case.Sensitive);
     }
 
@@ -788,7 +788,7 @@ public sealed class SqlAggregateExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE032");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS05032");
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregate sorting: finish cancellation precedes expensive collated keys")]
@@ -863,8 +863,8 @@ public sealed class SqlAggregateExecutionTests
 
     private static async Task SeedAsync(SqlDatabaseSession session)
     {
-        (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
-        (await ExecuteAsync(session, InsertMetrics)).AffectedCount.ShouldBe(9);
+        (await ExecuteAsync(session, createMetrics)).Status.ShouldBe(DatabaseResultStatus.Success);
+        (await ExecuteAsync(session, insertMetrics)).AffectedCount.ShouldBe(9);
     }
 
     private static Task<DatabaseResult> ExecuteAsync(SqlDatabaseSession session, string statement, IReadOnlyDictionary<string, object?>? parameters = null)

@@ -23,7 +23,9 @@ using Assimalign.Cohesion.FileSystem;
 /// var stream = StorageStream.FromInMemory();
 /// </code>
 /// </example>
-public class StorageStream : Stream, IFileSystemFileHandle
+[global::System.Diagnostics.DebuggerDisplay("StorageStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StorageStream.DebugView))]
+public sealed class StorageStream : Stream, IFileSystemFileHandle
 {
     private readonly Stream _inner;
     private readonly IFileSystemFileHandle _handle;
@@ -43,6 +45,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
 
     /// <summary>Initializes storage over an explicitly durability-aware handle.</summary>
     /// <param name="handle">The owned backing handle.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="handle"/> is <c>null</c>.</exception>
     public StorageStream(IFileSystemFileHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);
@@ -52,6 +55,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
 
     /// <summary>Wraps storage while retaining its explicit handle contract.</summary>
     /// <param name="stream">The owned backing storage stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="stream"/> is <c>null</c>.</exception>
     public StorageStream(StorageStream stream) : this((IFileSystemFileHandle)stream) { }
 
     /// <inheritdoc />
@@ -92,7 +96,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
     {
         if (durable && !SupportsDurableFlush)
         {
-            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+            throw new NotSupportedException(ErrorMessages.StorageStreamFlushNotSupported);
         }
         _handle.Flush(durable);
     }
@@ -105,7 +109,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
     {
         if (durable && !SupportsDurableFlush)
         {
-            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+            throw new NotSupportedException(ErrorMessages.StorageStreamFlushNotSupported);
         }
         return _handle.FlushAsync(durable, cancellationToken);
     }
@@ -178,7 +182,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = _handle.Read(buffer.AsSpan(totalRead, Page.Size - totalRead), offset + totalRead);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }
@@ -211,7 +215,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = _handle.Read(buffer[totalRead..Page.HeaderSize], offset + totalRead);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading the header of page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageHeaderStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }
@@ -233,7 +237,7 @@ public class StorageStream : Stream, IFileSystemFileHandle
             int bytesRead = await _handle.ReadAsync(buffer.Slice(totalRead, Page.Size - totalRead), offset + totalRead, cancellationToken);
             if (bytesRead == 0)
             {
-                throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
+                throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStreamReadPageStorageIO, (long)pageId));
             }
             totalRead += bytesRead;
         }
@@ -304,5 +308,13 @@ public class StorageStream : Stream, IFileSystemFileHandle
     {
         await _inner.DisposeAsync().ConfigureAwait(false);
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StorageStream value)
+        {
+            _ = value;
+        }
     }
 }

@@ -116,7 +116,7 @@ public sealed class StorageTransactionOwnershipTests
         var elapsed = Stopwatch.StartNew();
 
         // Act
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {
@@ -178,8 +178,8 @@ public sealed class StorageTransactionOwnershipTests
             case 5: using (storage.AllocatePageForWrite(transaction, PageType.Index)) { } break;
             case 6: storage.FreeOwnerPages(transaction, 0); break;
             // Intentionally no write hold: ownership must be checked before latch enlistment too.
-            case 7: using (storage.OpenPageForWrite(transaction, pageId, StoragePageLatch.Create())) { } break;
-            case 8: using (storage.AllocatePageForWrite(transaction, PageType.Index, StoragePageLatch.Create())) { } break;
+            case 7: using (storage.OpenPageForWrite(transaction, pageId, new StoragePageLatch())) { } break;
+            case 8: using (storage.AllocatePageForWrite(transaction, PageType.Index, new StoragePageLatch())) { } break;
             default: throw new ArgumentOutOfRangeException(nameof(operation));
         }
     }

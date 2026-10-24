@@ -47,10 +47,10 @@ public sealed class SqlResultDeliveryWireConformanceTests
 
         // Assert: the failed QueryAsync returned no partial result, and the same session serves the next query.
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith("COHSQLE045:", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS05045:", Case.Sensitive);
         failure.Message.ShouldContain("17825928", Case.Sensitive);
         failure.Message.ShouldContain("16777216", Case.Sensitive);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE045");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05045");
         failure.ConnectionUsable.ShouldBeTrue();
         connection.IsOpen.ShouldBeTrue();
         after.Count.ShouldBe(explicitTransaction ? 3 : 2);
@@ -119,7 +119,7 @@ public sealed class SqlResultDeliveryWireConformanceTests
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith("COHSQLE045:", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS05045:", Case.Sensitive);
         failure.Message.ShouldContain("17825953", Case.Sensitive);
         failure.ConnectionUsable.ShouldBeTrue();
         connection.IsOpen.ShouldBeTrue();

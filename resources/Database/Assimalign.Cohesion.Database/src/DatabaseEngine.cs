@@ -494,7 +494,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
-    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (CK06003), naming the database and affected page.</exception>
     public ValueTask<DatabaseInstance> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => CreateDatabaseAsync(name, creationState: null, cancellationToken);
 
@@ -509,7 +509,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran.</exception>
     /// <exception cref="DatabaseException">A database with the same name already exists.</exception>
-    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (CK06003), naming the database and affected page.</exception>
     /// <remarks>
     /// The model validates its state before calling this member. The root owns the common guards
     /// and telemetry; it neither inspects nor stores the state. The default create passes null
@@ -546,7 +546,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     /// <exception cref="ObjectDisposedException">The engine has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the core ran, or while the open waited for a close.</exception>
     /// <exception cref="DatabaseNotFoundException">The database does not exist.</exception>
-    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (COHDBS003), naming the database and affected page.</exception>
+    /// <exception cref="DatabaseCorruptionException">Storage integrity validation failed (CK06003), naming the database and affected page.</exception>
     /// <remarks>
     /// A holder may close the database while the open runs. When the leaf's core hands back an
     /// instance whose close has started, the open waits for that close to end, after which the
@@ -775,7 +775,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
 
         if (failures is not null)
         {
-            throw new AggregateException($"One or more components of engine '{_name}' failed to close.", failures);
+            throw new AggregateException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineDisposeAsyncAggregate, _name), failures);
         }
     }
 
@@ -804,12 +804,12 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             {
                 if (ReferenceEquals(existing, worker))
                 {
-                    throw new InvalidOperationException("A composition product cannot be registered twice.");
+                    throw new InvalidOperationException(ErrorMessages.DatabaseEngineAttachWorkerFailure);
                 }
 
                 if (string.Equals(existing.Name, worker.Name, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException($"Worker name '{worker.Name}' is already registered.");
+                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineAttachWorkerFailure2, worker.Name));
                 }
             }
 
@@ -819,7 +819,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             if (!worker.TryClaim(this))
             {
                 throw new InvalidOperationException(
-                    $"Worker '{worker.Name}' belongs to one engine: another engine owns it, or it was released.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEngineAttachWorkerFailure3, worker.Name));
             }
 
             var thread = new Thread(() => Pump(worker))
@@ -890,14 +890,14 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
             ThrowIfComposed();
             if (!ReferenceEquals(server.Engine, this))
             {
-                throw new InvalidOperationException("A nested server must front its owning engine.");
+                throw new InvalidOperationException(ErrorMessages.DatabaseEngineAttachServerFailure);
             }
 
             foreach (var existing in _servers)
             {
                 if (ReferenceEquals(existing, server))
                 {
-                    throw new InvalidOperationException("A composition product cannot be registered twice.");
+                    throw new InvalidOperationException(ErrorMessages.DatabaseEngineAttachWorkerFailure);
                 }
             }
 
@@ -1219,7 +1219,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                 }
 
                 RecordWorkerRunFault(worker, new InvalidOperationException(
-                    $"Worker '{worker.Name}' returned from Run before its engine stopped it; the engine runs it again."));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseEnginePumpFailure, worker.Name)));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1463,7 +1463,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
                 // The leaf still tracks a database whose close ended: a leaf defect, reported
                 // rather than retried forever.
                 throw new InvalidOperationException(
-                    $"Engine '{_name}' still tracks database '{name}' after its close ended; the engine did not forget it.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EngineOpenUnclosedAsyncFailure, _name, name));
             }
         }
 
@@ -1512,7 +1512,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     {
         if (_composed)
         {
-            throw new InvalidOperationException("Engine composition is frozen; workers and servers attach only before it completes.");
+            throw new InvalidOperationException(ErrorMessages.DatabaseEngineThrowIfComposedFailure);
         }
     }
 
@@ -1520,7 +1520,7 @@ public abstract class DatabaseEngine : IAsyncDisposable, IDisposable
     {
         if (name.IsEmpty)
         {
-            throw new ArgumentException("A database name is required.", nameof(name));
+            throw new ArgumentException(ErrorMessages.DatabaseEngineThrowIfEmptyArgument, nameof(name));
         }
     }
 

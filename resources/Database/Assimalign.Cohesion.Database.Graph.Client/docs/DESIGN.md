@@ -45,8 +45,8 @@ sequenceDiagram
 SET and REMOVE execute through existing requests and ResultComplete affected counts (#1149).
 QueryAsync returns post-update values and the distinct mutation count. NULL optional targets
 count zero. Label removal is visible to subsequent reads. Schema/kind refusals arrive as
-ExecutionFailure with COHDBG003 before rows and preserve the authenticated session; ExecutePaths
-refuses either update stage with COHDBG001. No protocol, codec or capability changes are needed.
+ExecutionFailure with CG03003 before rows and preserve the authenticated session; ExecutePaths
+refuses either update stage with CG05001. No protocol, codec or capability changes are needed.
 
 GraphExecuteExchange derives from DatabaseProtocolExchange, whose run entry clears the completion
 evidence before each run. A successful ResultComplete certifies completion. A ParseFailure or
@@ -56,7 +56,7 @@ cancellation, or error after result output cannot certify completion.
 
 Rows require exactly the advertised number of value components. Columns preserve wire names
 and shared DatabaseType identities. The engine rejects duplicate final result column names
-ordinally with COHDBG015 before any result output or mutation, including implicit/explicit
+ordinally with CG01015 before any result output or mutation, including implicit/explicit
 collisions. The result container retains first-column lookup for manually constructed duplicate
 metadata. Scalar statements fully materialize before returning.
 Direct COUNT aggregate metadata is Int64, including empty input and values carried through WITH/NEXT. Other MATCH projection metadata remains the engine's DatabaseType.Null (unknown), because graph
@@ -73,7 +73,7 @@ errors"). GraphClientException keeps that code, and the core exception, which ke
 transport's exception, is its inner exception. A canceled dial throws OperationCanceledException
 unchanged (GraphClientDialFailureTests).
 
-WHERE scalar value errors (#1140) arrive as ExecutionFailure text `COHDBG013: message`
+WHERE scalar value errors (#1140) arrive as ExecutionFailure text `CG02013: message`
 before ResultHeader. GraphClientWireTests pins division by zero, overflow and invalid conditions,
 then reuse of the exact authenticated pooled session followed by SHOW LABELS. A combined
 OR/IN/string/arithmetic case compares wire rows with in-process rows. No wire fields change.
@@ -85,17 +85,17 @@ execute through the same QueryAsync exchange. Known function and CAST result typ
 in column metadata; dynamic math types remain unknown until values arrive. DateOnly and
 DateTimeOffset use existing scalar components. labels/keys/properties use existing composite
 negotiation and preserve list/map runtime types. Unnegotiated possible composites fail before
-writer admission with COHDBG016. No codec, capability or frame changes are introduced.
+writer admission with CG07016. No codec, capability or frame changes are introduced.
 
 The static Execute gate rejects nodes/edges/relationships/startNode/endNode entity outputs before
 mutations, including when wrapped in lists/CASE or accessed to an entity. Scalar fields through
 them are supported. A mandatory LET s=startNode(r) can be projected as a bare entity through
-QueryPathsAsync. Graph wire has no explicit transactions; datetime functions therefore share
+QueryPathsAsync. Graph wire explicit transactions preserve one datetime instant; autocommit functions share
 one captured UTC instant per statement. Their date/instant values sort without numeric coercion.
-Function and CAST value failures, including floating underflow, arrive as COHDBG013 ExecutionFailure
+Function and CAST value failures, including floating underflow, arrive as CG02013 ExecutionFailure
 before ResultHeader and retain the same authenticated pooled session. Proven incompatible kinds
 (non-integral toBoolean, Boolean numeric CAST and temporal property maps) arrive as plan-time
-COHDBG003 before writes. Unknown calls are GQL0010 ParseFailure. GraphFunctionWireTests
+CG03003 before writes. Unknown calls are CG00010 ParseFailure. GraphFunctionWireTests
 pins exact values, types, raw-frame ordering, entity rejection before mutation, capability
 refusal and pooled-session reuse over InMemory and TCP.
 
@@ -108,9 +108,9 @@ Scalar Decimal columns receive the existing marked-column framing after material
 Unnegotiated scalar tuples keep the shared numeric encoding. Mixed integer/floating
 sums preserve the integral total before promotion. COLLECT_LIST (Cypher collect) uses the negotiated
 graph.composite-values list encoding. GROUP BY and implicit grouping run before ordering,
-including aggregate aliases. Aggregate overflow is COHDBG013 before ResultHeader; terminal
+including aggregate aliases. Aggregate overflow is CG02013 before ResultHeader; terminal
 failure permits reuse of the exact authenticated pooled session. ExecutePaths retains the
-existing COHDBG001 projection diagnostic. GraphAggregateWireTests verifies both transports,
+existing CG05001 projection diagnostic. GraphAggregateWireTests verifies both transports,
 recorded types and names, empty input, capability refusal and session reuse.
 
 ## Quantified paths (#1144)
@@ -120,8 +120,8 @@ returns the complete source-ordered trail in the existing Path frame, including 
 nodes, stored relationship directions and zero-length paths. Right index anchors preserve that
 order. Group lists flow through FOR/UNWIND with their entity kinds; scalar projections after
 expansion use the existing result codec. Unnegotiated possible composite final projections
-fail statically with COHDBG016. Negotiated lists containing entities keep the existing Execute
-entity-result rejection with COHDBG001 naming lists of nodes or relationships, as collect(entity)
+fail statically with CG07016. Negotiated lists containing entities keep the existing Execute
+entity-result rejection with CG05001 naming lists of nodes or relationships, as collect(entity)
 does. A provably empty Max=0 group projects as `[]` on a negotiated session. No new wire tag or capability is introduced.
 Malformed bounds and adjacent comments hiding Cypher ranges return ParseFailure and keep the authenticated session; the protocol suite
 also pins the following Ping/Pong. GraphQuantifiedPathWireTests exercises rows, paths, aliases,
@@ -136,8 +136,8 @@ each path's nodes and relationships. Row-sequence assertions use an explicit ORD
 
 QueryAsync and QueryPathsAsync preserve the engine's ORDER BY, OFFSET/SKIP and LIMIT sequence,
 including RETURN aliases and paging parameters with either named sigil. The server validates
-counts before emitting rows or paths; invalid graph counts retain COHDBG013, while non-finite
-or unsupported CLR inputs retain COHDBG003. OFFSET/SKIP precedes LIMIT. Terminal completion
+counts before emitting rows or paths; invalid graph counts retain CG02013, while non-finite
+or unsupported CLR inputs retain CG03003. OFFSET/SKIP precedes LIMIT. Terminal completion
 allows reuse of the authenticated session. GraphOrderPagingWireTests compares ordered rows and
 paths with in-process execution over InMemory and TCP. No wire bytes or capabilities change.
 
@@ -157,7 +157,7 @@ The [Graph codec contract](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.
 defines depth 64, 65536 values and 16777216 bytes, checked before allocations while decoding.
 Malformed result components or row lengths are ProtocolViolation and discard the connection.
 The server rejects unnegotiated possible composite projections statically before writer locking
-with COHDBG016. Constructors and materialized row sizes enforce bounds inside the transaction,
+with CG07016. Constructors and materialized row sizes enforce bounds inside the transaction,
 so refusals roll back writes and permit pooled-session reuse. Scalar results have no encoding
 preflight or additional value framing. Pattern property maps remain scalar-only. Protocol 2.0 and 2.1 without
 the capability retain legacy scalar bytes. Both halves ship now that #1105 has landed.
@@ -167,7 +167,7 @@ the capability retain legacy scalar bytes. Both halves ship now that #1105 has l
 QueryAsync, ExecuteAsync and QueryPathsAsync send the existing named scalar map unchanged.
 The server now binds `$name` and `@name` in node/relationship property maps, WHERE operands and RETURN expressions
 using exact bare names after removing one sigil. Values keep their runtime scalar types.
-An unbound parameter returns ExecutionFailure carrying COHDBG001; materialized statement
+An unbound parameter returns ExecutionFailure carrying CG05001; materialized statement
 rejections and terminal path rejections before any path output complete the exchange and allow
 reuse of that authenticated session. Later path failures
 retain the streaming lifetime rules below. No frame or codec change is needed on wire 2.0.
@@ -221,7 +221,7 @@ ExecutePaths accepts exactly one bound path, node, or relationship projection fr
 MATCH. A node becomes a singleton path; a relationship includes its stored-direction endpoints;
 a named path retains traversal order. DISTINCT compares the projected binding's identity before
 path conversion. RETURN * is accepted with exactly one named binding. Computed or multiple
-projections, star over several bindings and mutations are rejected with COHDBG001,
+projections, star over several bindings and mutations are rejected with CG05001,
 so no path is reconstructed from scalar results. Execute serves scalar projection rows and
 mutations; its gate uses static planned projection kinds before reads or writes. Computed
 scalar expressions, parameters, aliases and standalone RETURN pass; possible entity/path results
@@ -234,16 +234,16 @@ no protocol 2.1 frame or GraphPathResult shape changes.
 
 OPTIONAL MATCH scalar null extension uses the existing scalar NULL encoding. ExecutePaths
 rejects an optional-only projected node, relationship or named path during planning with
-ExecutionFailure carrying COHDBG001, even when the data would match. Terminal rejection completes
+ExecutionFailure carrying CG05001, even when the data would match. Terminal rejection completes
 before any path output and preserves the authenticated pooled session. A mandatory projection
 alongside an optional remains valid; unknown optional labels/types still deliver their warnings
 on scalar results or GraphPathResult completion. GraphOptionalMatchWireTests covers these cases
 through GraphDatabaseServer over Connections.InMemory without a codec change.
 
-GraphResultSet.Diagnostics exposes negotiated success warnings, including COHDBG010 and COHDBG011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
+GraphResultSet.Diagnostics exposes negotiated success warnings, including CG01010 and CG01011 for unknown names. QueryPathsAsync returns a sealed GraphPathResult implementing IAsyncEnumerable<GraphPath>. Its Diagnostics property exposes the same ProtocolDiagnostic values as scalar results, finalized after EOF. Each result permits one enumeration. Terminal statement rejections before path output preserve diagnostics on GraphClientException and retain the rental after EOF; later stream failures discard it.
 
-Graph transactions remain a deliberate limit: there are no connection transaction members;
-BEGIN, COMMIT, ROLLBACK, and the reserved Transaction message are unsupported. Mutations retain
+Graph transaction control uses Execute text START TRANSACTION, COMMIT and ROLLBACK;
+BEGIN and the reserved Transaction message remain unsupported. Mutations retain
 the engine's existing execution and validation semantics. Database binding remains fixed at
 handshake and catalog SHOW keeps its existing read-only and scoping diagnostics.
 
@@ -341,20 +341,57 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00100, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
 GraphClientException copies the underlying database diagnostics carrier; GraphResultSet.Diagnostics exposes negotiated ProtocolDiagnostic values. GraphPathResult.Diagnostics exposes path completion warnings. Terminal path statement rejections before path output retain the connection after EOF; later failures discard it.
 The #1230 wire regression sends 500,000 nested label negations through QueryPathsAsync over
-InMemory and TCP, checks ExecutionFailure/COHDBG008, then queries on the same rental and rents
+InMemory and TCP, checks ExecutionFailure/CG05008, then queries on the same rental and rents
 again, verifying the exact server session survives both.
 
 Path completion diagnostics follow Neo4j's completion metadata model
 (community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/response/metadata/DefaultMetadataHandler.java:206).
 The concrete result stream preserves bounded streaming and adds no public interface.
-COHDBP001 reports diagnostic overflow without turning successful reads into failures.
+CK07001 reports diagnostic overflow without turning successful reads into failures.
 
 ## Linear composition (#1145)
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.
+
+## Explicit transaction text (#1540, D5)
+
+START TRANSACTION, COMMIT and ROLLBACK are standalone ISO statements on Execute, using the
+existing session transaction objects. START uses Snapshot. BEGIN, savepoints, transaction options,
+statement composition and EXPLAIN of transaction controls remain outside this profile.
+A failed statement aborts the transaction; subsequent work is refused with CG04007 until
+ROLLBACK. Failed COMMIT rolls back and reports failure, never silently commits. Duplicate START
+uses CG04022 and aborts the existing transaction; COMMIT/ROLLBACK without an open transaction
+uses CG04023. ExecutePaths refuses controls with CG05001 before any control takes effect.
+Disconnect and session teardown roll back. The shared negotiated transaction-status postamble
+also resets unfinished transactions before pool reuse; legacy peers are discarded on return.
+
+The parser exposes GqlQueryExpression.TransactionCommand (GqlTransactionCommand None/Start/Commit/Rollback).
+The server owns the connection's existing transaction, following Neo4j's
+community/bolt/src/main/java/org/neo4j/bolt/protocol/common/fsm/transition/ready/CreateTransactionStateTransition.java:63-81
+(local Neo4j clone). No code is copied, and no transaction wire message is added.
+
+The twenty-path TCP allocation ceiling remains 386,699 bytes per operation and is enforced only
+in Release, per the allocation-budget convention. Debug still executes the fixture and verifies
+all twenty path results and their digest; its allocation samples are recorded only.
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Client debugger views expose the captured database name, owned-row counts and stored result/diagnostic references. They omit live connection state, transport settings and row-value buffers. Inspecting a path result never enumerates its single-use stream or completes the exchange.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

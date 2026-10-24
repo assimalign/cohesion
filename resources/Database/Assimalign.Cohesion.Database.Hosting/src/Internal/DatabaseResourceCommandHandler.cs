@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabaseResourceCommandHandler {Kind,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler.DebugView))]
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {
     private readonly IDatabaseApplicationContext _context;
@@ -56,24 +58,24 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         {
             string principal = Required(payload, "name");
             throw new ResourceCommandRejectedException(
-                $"database.add-principal cannot create principal '{principal}' in database '{database}': the database runtime has no principal mutation seam for this command.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure, principal, database));
         }
         if (database.Contains('/'))
         {
-            throw new ResourceCommandRejectedException($"database.add-database database name '{database}' must not contain '/'; the final slash separates the engine from the database.");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure2, database));
         }
         string expectedKey = payload.TryGetProperty("engine", out JsonElement engineName) && engineName.ValueKind is not JsonValueKind.Null
             ? Required(payload, "engine") + "/" + database : database;
         if (!string.Equals(command.Key, expectedKey, StringComparison.OrdinalIgnoreCase))
         {
-            throw new ResourceCommandRejectedException($"database.add-database key '{command.Key}' must match database key '{expectedKey}'.");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure3, command.Key, expectedKey));
         }
         DatabaseEngine engine = ResolveEngine(payload);
         if (_createdDatabases.TryGetValue(command.Key, out DatabaseEngine? originalEngine))
         {
             if (!ReferenceEquals(engine, originalEngine))
             {
-                throw new ResourceCommandRejectedException($"database.add-database cannot move owned database '{database}' from engine '{originalEngine.Name}' to '{engine.Name}'; delete its declaration before changing engines.");
+                throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure4, database, originalEngine.Name, engine.Name));
             }
             if (engine.TryGetDatabase(database, out _))
             {
@@ -82,7 +84,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         if (engine.TryGetDatabase(database, out _))
         {
-            throw new ResourceCommandRejectedException($"database.add-database cannot claim existing database '{database}' on engine '{engine.Name}'; it was not created by this declaration.");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure5, database, engine.Name));
         }
         try
         {
@@ -94,7 +96,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             // An ArgumentException is the engine's refusal of a name that breaks the area's name
             // rule (#1392); its message states the rule, so it reaches the gateway as a rejection
             // with that detail, not as a bare BadRequest.
-            throw new ResourceCommandRejectedException($"database.add-database '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerExecuteCoreAsyncFailure6, database, engine.Name, exception.Message));
         }
         return ReadOnlyMemory<byte>.Empty;
     }
@@ -127,7 +129,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         string database = Required(document.RootElement, "database");
         if (Kind != "database.add-database")
         {
-            throw new ResourceCommandRejectedException($"{Kind} cannot be deleted: the database runtime has no principal mutation seam.");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerDeleteCoreAsyncFailure, Kind));
         }
         DatabaseEngine engine = ResolveEngine(document.RootElement);
         try
@@ -140,7 +142,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         }
         catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
-            throw new ResourceCommandRejectedException($"database.add-database deletion of '{database}' on engine '{engine.Name}' was refused: {exception.Message}");
+            throw new ResourceCommandRejectedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerDeleteCoreAsyncFailure2, database, engine.Name, exception.Message));
         }
         return ReadOnlyMemory<byte>.Empty;
     }
@@ -160,7 +162,7 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
             ? Required(payload, "engine") : null;
         DatabaseEngine[] candidates = engines.Where(engine => name is null || string.Equals(engine.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
         return candidates.Length == 1 ? candidates[0] : throw new ResourceCommandRejectedException(
-            $"database.add-database requires exactly one matching engine; engine '{name ?? "(unspecified)"}' matched {candidates.Length}. Specify a registered engine name.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CommandHandlerResolveEngineFailure, name ?? "(unspecified)", candidates.Length));
     }
 
     private static string Required(JsonElement payload, string property)
@@ -168,8 +170,20 @@ internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
         if (payload.ValueKind is not JsonValueKind.Object || !payload.TryGetProperty(property, out JsonElement value) ||
             value.ValueKind is not JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
         {
-            throw new JsonException($"The database command payload requires a nonblank '{property}'.");
+            throw new JsonException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ResourceCommandHandlerRequiredJson, property));
         }
         return value.GetString()!;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseResourceCommandHandler value)
+        {
+            _target = value;
+        }
+
+        public string Kind => _target.Kind;
     }
 }

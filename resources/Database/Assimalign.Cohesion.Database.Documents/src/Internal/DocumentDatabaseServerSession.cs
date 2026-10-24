@@ -32,6 +32,8 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 /// which the handshake records once each; the engine session is re-exposed typed by a covariant
 /// override.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DocumentDatabaseServerSession Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession.DebugView))]
 internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
 {
     private static readonly string _shutdownMessage = ErrorMessages.ServerShuttingDown;
@@ -310,7 +312,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             {
                 // The database went offline after a failed durable flush (#1243): every session is
                 // refused, with the coded reason, until it is reopened.
-                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, exception.Message, startup.Database, startup.Principal).ConfigureAwait(false);
+                await RefuseHandshakeAsync(ProtocolErrorCode.Unavailable, $"{exception.Code}: {exception.Message}", startup.Database, startup.Principal).ConfigureAwait(false);
                 return false;
             }
 
@@ -407,7 +409,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
                 {
                     if (!parameters.TryAdd(property.Name, property.Value.Clone()))
                     {
-                        throw new DatabaseException(ErrorMessages.ParameterNameDuplicate);
+                        throw DatabaseException.CreateDocumentsFailure("CD01009", ErrorMessages.ParameterNameDuplicate);
                     }
                 }
                 var result = await _databaseSession!.ExecuteStatementAsync(() =>
@@ -447,7 +449,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             }
             var diagnostic = diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
             string errorText = diagnostic?.Code is { } diagnosticCode && !exception.Message.Contains(diagnosticCode + ":", StringComparison.Ordinal)
-                ? $"{diagnosticCode}: {exception.Message}" : exception.Message;
+                ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ServerSessionExecuteAsyncFailure, diagnosticCode, exception.Message) : exception.Message;
             await WriteFrameAsync((ProtocolMessageType)DocumentProtocolMessageType.Failure,
                 CreateFailure(code, errorText, diagnostics).Encode(), cancellationToken).ConfigureAwait(false);
             return;
@@ -516,7 +518,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         if (command.Operation != DocumentProtocolOperation.ListCollections && string.IsNullOrWhiteSpace(command.Collection))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing);
         }
         var session = _databaseSession!;
         long count = 0;
@@ -611,7 +613,7 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
     {
         if ((uint)payload.Length > ProtocolFrameHeader.MaxPayloadLength)
         {
-            throw new DatabaseException(ErrorMessages.ResultTooLarge);
+            throw DatabaseException.CreateDocumentsFailure("CD05016", ErrorMessages.ResultTooLarge);
         }
         return new ProtocolFrame((ProtocolMessageType)type, payload);
     }
@@ -803,5 +805,18 @@ internal sealed class DocumentDatabaseServerSession : DatabaseServerSession
             _lifetimeSource.Dispose();
             _server.OnSessionCompleted(this);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentDatabaseServerSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.DocumentDatabaseSession? DatabaseSession => _target.DatabaseSession;
+        public global::System.Guid Id => _target.Id;
     }
 }

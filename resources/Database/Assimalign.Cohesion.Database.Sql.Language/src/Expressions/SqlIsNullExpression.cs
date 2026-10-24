@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents an <c>IS NULL</c> or <c>IS NOT NULL</c> predicate.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlIsNullExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlIsNullExpression.DebugView))]
 public sealed class SqlIsNullExpression : SqlExpression
 {
     /// <summary>
@@ -30,4 +32,17 @@ public sealed class SqlIsNullExpression : SqlExpression
     /// Gets whether the predicate is negated (<c>IS NOT NULL</c>).
     /// </summary>
     public bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlIsNullExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlIsNullExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public bool IsNegated => _target.IsNegated;
+    }
 }

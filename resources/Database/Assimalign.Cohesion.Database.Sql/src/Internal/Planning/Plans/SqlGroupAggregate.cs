@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// record's <c>with</c> would copy it beside a replaced <see cref="Targets"/>, so the one-argument
 /// add would convert to the old target while the buffered add used the new one.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlGroupAggregate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlGroupAggregate.DebugView))]
 internal sealed class SqlGroupAggregate
 {
     /// <summary>Initializes a bound aggregate call.</summary>
@@ -69,4 +71,12 @@ internal sealed class SqlGroupAggregate
 
     /// <summary>Gets the database whose statement runs the aggregate.</summary>
     internal DatabaseName Database { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlGroupAggregate value)
+        {
+            _ = value;
+        }
+    }
 }

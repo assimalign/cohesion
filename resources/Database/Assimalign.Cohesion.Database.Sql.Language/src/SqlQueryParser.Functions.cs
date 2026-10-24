@@ -18,9 +18,9 @@ public sealed partial class SqlQueryParser
                 !name.Equals("CURRENT_DATE", StringComparison.OrdinalIgnoreCase))
             {
                 AddUnsupportedSurfaceDiagnostic(position, next.Current.Position + next.Current.Value.Length,
-                    $"The precision argument of {name.ToUpperInvariant()} is not supported.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseNiladicVoid, name.ToUpperInvariant()));
             }
-            else { AddSyntaxDiagnostic(ref lexer, $"{name.ToUpperInvariant()} is written without parentheses."); }
+            else { AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseNiladicVoid2, name.ToUpperInvariant())); }
             SkipParenthesized(ref lexer);
         }
         return new SqlFunctionCallExpression(name, [], Location.Create(1, 1, position, position + name.Length));
@@ -36,7 +36,7 @@ public sealed partial class SqlQueryParser
             string field = CurrentText(ref lexer).ToUpperInvariant();
             if (field is not ("YEAR" or "QUARTER" or "MONTH" or "WEEK" or "DAY" or "DOW" or "DOY" or "HOUR" or "MINUTE" or "SECOND" or "EPOCH"))
             {
-                AddSyntaxDiagnostic(ref lexer, $"Unknown EXTRACT field '{field}'.");
+                AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserParseStandardFormVoid, field));
             }
             arguments.Add(new SqlLiteralExpression(field, SqlLiteralType.String, Location.Create(1, 1, lexer.Current.Position, CurrentTokenEnd(ref lexer))));
             Advance(ref lexer);
@@ -113,13 +113,13 @@ public sealed partial class SqlQueryParser
             }
             if (characters is not null) { arguments.Add(characters); }
         }
-        Expect(ref lexer, TokenType.RightParen, $"')' after {name}");
+        Expect(ref lexer, TokenType.RightParen, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorFunctionClosingParenthesisExpected, name));
         return new SqlFunctionCallExpression(name, arguments, Location.Create(1, 1, position, position + name.Length));
     }
 
     private void ExpectWord(ref TokenLexer lexer, string word)
     {
         if (IsWord(ref lexer, word)) { Advance(ref lexer); }
-        else { AddSyntaxDiagnostic(ref lexer, $"Expected {word} in the function form."); }
+        else { AddSyntaxDiagnostic(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserExpectWordVoid, word)); }
     }
 }

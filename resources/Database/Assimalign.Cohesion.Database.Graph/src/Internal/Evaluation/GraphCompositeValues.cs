@@ -18,7 +18,7 @@ internal static class GraphCompositeValues
         int count = 0;
         try { var copy = Copy(value, 0, ref count); GraphCompositeEncoding.Measure(copy); return copy; }
         catch (Assimalign.Cohesion.Database.Types.DatabaseTypeException error)
-        { throw new GraphPlanningException("COHDBG003", error.Message, location, error); }
+        { throw new GraphPlanningException("CG03003", error.Message, location, error); }
         catch (GraphPlanningException error) when (location is not null)
         { throw error.At(location); }
     }
@@ -26,13 +26,13 @@ internal static class GraphCompositeValues
     private static object? Copy(object? value, int depth, ref int count)
     {
         if (depth > GraphValueCodec.MaxDepth || ++count > GraphValueCodec.MaxValueCount)
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.CompositeLimit); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.CompositeLimit); }
         if (value is Array array && (array.Rank != 1 || array.GetLowerBound(0) != 0))
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.CompositeRequired); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.CompositeRequired); }
         if (value is IReadOnlyDictionary<string, object?> map)
         {
             if (map.Count > GraphValueCodec.MaxValueCount - count)
-            { throw new GraphPlanningException("COHDBG003", ErrorMessages.CompositeLimit); }
+            { throw new GraphPlanningException("CG03003", ErrorMessages.CompositeLimit); }
             var copy = new Dictionary<string, object?>(map.Count, StringComparer.Ordinal);
             foreach (var entry in map) { copy.Add(entry.Key, Copy(entry.Value, depth + 1, ref count)); }
             return new ReadOnlyDictionary<string, object?>(copy);
@@ -40,16 +40,16 @@ internal static class GraphCompositeValues
         if (value is IList list && value is not byte[])
         {
             if (list.Count > GraphValueCodec.MaxValueCount - count)
-            { throw new GraphPlanningException("COHDBG003", ErrorMessages.CompositeLimit); }
+            { throw new GraphPlanningException("CG03003", ErrorMessages.CompositeLimit); }
             var copy = new object?[list.Count];
             for (int i = 0; i < copy.Length; i++) { copy[i] = Copy(list[i], depth + 1, ref count); }
             return copy;
         }
         try { GraphDatabase.TypeOf(value); }
         catch (DatabaseException error)
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired, null, error); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.ParameterScalarRequired, null, error); }
         if (value is double number && !double.IsFinite(number) || value is float single && !float.IsFinite(single))
-        { throw new GraphPlanningException("COHDBG003", ErrorMessages.ParameterScalarRequired); }
+        { throw new GraphPlanningException("CG03003", ErrorMessages.ParameterScalarRequired); }
         return value;
     }
 

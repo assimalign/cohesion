@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph.Storage;
 
 public sealed partial class GraphStore
 {
+    private static readonly string _errorGraphStoreDropIndexAsyncFailure2 = ErrorMessages.GraphStoreDropIndexAsyncFailure2;
+
     private const ulong adjacencyId = ulong.MaxValue;
     private const string treeName = "graph";
     private static readonly Guid _maximumTypeId = new("ffffffff-ffff-ffff-ffff-ffffffffffff");
@@ -62,7 +64,7 @@ public sealed partial class GraphStore
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
         var latest = Latest(context);
-        if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException($"A node-property index already exists for '{label}.{propertyKey}'."); }
+        if (Definition(label, propertyKey, latest) is not null) { throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreCreateIndexAsyncFailure, label, propertyKey)); }
         ulong id = (ulong)_storage.ReserveTransactionSequence();
         var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
@@ -94,10 +96,10 @@ public sealed partial class GraphStore
         using var mutation = await EnterMutationAsync(context, cancellationToken).ConfigureAwait(false);
         context = mutation.RefreshSnapshot(context);
         var definition = Definition(label, propertyKey, context.Snapshot)
-            ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
+            ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreDropIndexAsyncFailure, label, propertyKey));
         if (Definition(label, propertyKey, Latest(context))?.Id != definition.Id)
         {
-            throw new TransactionAbortedException("Graph write conflict: the index changed after the transaction snapshot.");
+            throw new TransactionAbortedException(_errorGraphStoreDropIndexAsyncFailure2);
         }
         var found = Find(3, definition.Id, context.Snapshot)!.Value;
         await ApplyAsync(context, bracket =>
@@ -117,26 +119,32 @@ public sealed partial class GraphStore
     public async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string propertyKey, object? value,
         TransactionSnapshot snapshot, CancellationToken cancellationToken = default)
     {
-        // Checked here, not only per definition: a store without index definitions never reads one.
+        var result = new List<StoredGraphNode>();
+        await foreach (var node in StreamIndexAsync(label, propertyKey, value, snapshot, cancellationToken).ConfigureAwait(false))
+        { result.Add(node); }
+        return result;
+    }
+
+    internal async IAsyncEnumerable<StoredGraphNode> StreamIndexAsync(string label, string propertyKey, object? value,
+        TransactionSnapshot snapshot, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken,
+        Action? visit = null, Action<long>? reserve = null)
+    {
         ArgumentNullException.ThrowIfNull(snapshot);
         var definition = Definition(label, propertyKey, snapshot)
-            ?? throw new InvalidOperationException($"No visible node-property index exists for '{label}.{propertyKey}'.");
-        // Every write and backfill refuses a value whose key does not fit, so no entry, and no
-        // indexed node, holds one: the search matches nothing rather than failing the query.
-        if (!GraphRecordCodec.TryKey(value, out var key)) { return []; }
-        var result = new List<StoredGraphNode>();
+            ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreDropIndexAsyncFailure, label, propertyKey));
+        if (!GraphRecordCodec.TryKey(value, out var key)) { yield break; }
+        // Exact-key postings contain the scalar key and one identity suffix. Bound a full 64-entry cursor batch.
+        reserve?.Invoke(4096L + 64L * (key.Length + 72));
         await using var cursor = ResolveIndex(definition.Id).OpenCursor(snapshot,
             new IndexKeyRange(Composite(key, 0), Composite(key, ulong.MaxValue), true, true), cancellationToken: cancellationToken);
         while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
         {
+            visit?.Invoke();
             if (ReadAt(cursor.CurrentEntryReference, snapshot)?.Record.Node is { } node
                 && node.Labels.Contains(label, StringComparer.Ordinal) && node.Properties.TryGetValue(propertyKey, out var actual)
                 && GraphRecordCodec.ScalarEquals(actual, value) && cursor.CurrentKey.Equals(Composite(key, node.Id)))
-            {
-                result.Add(node);
-            }
+            { yield return node; }
         }
-        return result;
     }
 
     /// <summary>Scrubs unproven index writers after coordinator record recovery and before checkpoint.</summary>
@@ -173,7 +181,7 @@ public sealed partial class GraphStore
     }
 
     private BTreeIndex ResolveIndex(ulong id) => _indexes.TryGetIndex(id, treeName, out var index)
-        ? index : throw new StorageCorruptionException($"Missing graph B+Tree registration '{id}'.");
+        ? index : throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphStoreResolveIndexFailure, id));
 
     private static IndexKey AdjacencyKey(ulong nodeId, GraphIncidentDirection direction, Guid typeId, ulong relationshipId)
     {
@@ -212,6 +220,9 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, new IndexUndo(this, id), key.Encoded, location);
     }
 
+    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexes.PruneAsync(bound, cancellationToken);
+
     private void OpenIndexes()
     {
         _registrations.Clear();
@@ -225,6 +236,7 @@ public sealed partial class GraphStore
         {
             Storage = _storage,
             TransactionSource = ResolveStatementBracket,
+            PruneBound = () => _coordinator.PruneBound,
             ExistingIndexes = registrations
         });
         // Labeled records require their persisted postings; never silently reopen a graph
@@ -240,17 +252,17 @@ public sealed partial class GraphStore
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            if (unit.Data.Length != 34) { throw new StorageCorruptionException("Invalid graph B+Tree registration length."); }
+            if (unit.Data.Length != 34) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationLengthInvalid); }
             using var stream = new MemoryStream(unit.Data.ToArray(), false);
             using var reader = new BinaryReader(stream);
             if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 4)
             {
-                throw new StorageCorruptionException("Invalid graph B+Tree registration header.");
+                throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationHeaderInvalid);
             }
-            if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw new StorageCorruptionException(ErrorMessages.RecordFormatUnsupported); }
+            if (reader.ReadByte() != GraphRecordCodec.FormatVersion) { throw GraphRecordCodec.UnsupportedFormat(unit.PageId, unit.SlotIndex); }
             ulong id = reader.ReadUInt64();
             long root = reader.ReadInt64();
-            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException("Invalid graph B+Tree registration identity."); }
+            if (id == 0 || root <= 0 || !ids.Add(id)) { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.RegistrationIdentityInvalid); }
             registrations.Add((new BTreeIndexRegistration(id, new IndexDefinition(treeName), root), unit.PageId, unit.SlotIndex));
         }
         return registrations;
@@ -281,8 +293,10 @@ public sealed partial class GraphStore
     // The index manager's storage transaction for a context: the shared statement bracket the
     // coordinator owns, or this store's own error when there is none.
     private StorageTransaction ResolveStatementBracket(TransactionContext context) => _coordinator.TryGetStorageTransaction(context, out var bracket)
-        ? bracket : throw new InvalidOperationException("Graph index mutation requires a shared statement bracket.");
+        ? bracket : throw new InvalidOperationException(ErrorMessages.StoreResolveStatementBracketFailure);
 
+    [global::System.Diagnostics.DebuggerDisplay("IndexUndo")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.IndexUndo.DebugView))]
     private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly GraphStore _store;
@@ -305,5 +319,13 @@ public sealed partial class GraphStore
             TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, treeName, out var index)
                 ? index.ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken) : default;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Storage.GraphStore.IndexUndo value)
+            {
+                _ = value;
+            }
+        }
     }
 }

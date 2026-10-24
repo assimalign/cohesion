@@ -17,21 +17,28 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// release it by calling <see cref="Dispose"/>. While a handle is alive, the underlying page
 /// buffer is guaranteed to remain valid. Page access sits on the per-page hot path, so the type
 /// is sealed and every call on it is direct.
+/// A handle obtained with <see cref="Storage.OpenPageForWrite(StorageTransaction, PageId)"/>
+/// is a mutable scope: dispose it promptly after the writes, and never mutate it after the
+/// transaction completes. A handle obtained with <see cref="StoragePageManager.GetPage"/>
+/// is a read pin; its native page view must not be used to bypass transactional writes.
 ///
 /// <example>
 /// <code>
-/// using var handle = pageManager.GetPage(pageId);
+/// using var handle = storage.OpenPageForWrite(transaction, pageId);
 /// var page = handle.Page;
-/// // Read or write through the page...
+/// // Change the page inside the active transaction...
 /// handle.MarkDirty(); // Signal that the page was modified
 /// </code>
 /// </example>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StoragePageHandle")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.StoragePageHandle.DebugView))]
 public sealed class StoragePageHandle : IDisposable
 {
     private readonly StorageBufferPool _pool;
     internal readonly StorageBufferPool.BufferEntry Entry;
     private int _disposed;
+    private int _writeEpoch;
 
     internal StoragePageHandle(PageId pageId, StorageBufferPool.BufferEntry entry, StorageBufferPool pool)
     {
@@ -84,6 +91,14 @@ public sealed class StoragePageHandle : IDisposable
     /// </summary>
     public void MarkDirty() => Entry.MarkDirty();
 
+    // A writable handle owns an epoch until disposal. An allocating handle starts
+    // with itself as owner, then adopts its physical bracket after first touch.
+    internal void BeginWrite(object owner)
+    {
+        if (_writeEpoch == 0) { _writeEpoch = Entry.BeginWrite(owner); }
+        else { Entry.AdoptWriter(_writeEpoch, this, owner); }
+    }
+
     /// <summary>
     /// Releases the pin. Exactly one release happens per handle, even when two threads dispose
     /// it at once.
@@ -93,7 +108,22 @@ public sealed class StoragePageHandle : IDisposable
         // Exactly one release per handle, even when two threads dispose it at once.
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
+            if (_writeEpoch != 0) { Entry.EndWrite(_writeEpoch); }
             _pool.Unpin(Entry);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.StoragePageHandle _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.StoragePageHandle value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Storage.PageId Id => _target.Id;
+        public bool IsDirty => _target.IsDirty;
+        public int PinCount => _target.PinCount;
     }
 }

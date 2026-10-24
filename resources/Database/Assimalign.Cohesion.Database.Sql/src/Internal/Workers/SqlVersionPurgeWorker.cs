@@ -55,6 +55,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// a backoff, not only on its coordinator's doubling schedule.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlVersionPurgeWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlVersionPurgeWorker.DebugView))]
 internal sealed class SqlVersionPurgeWorker : DatabaseVersionPurgeWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
@@ -81,4 +83,20 @@ internal sealed class SqlVersionPurgeWorker : DatabaseVersionPurgeWorker<SqlData
     protected override void RequestReclamation(SqlDatabase database) => database.TableReclamation.Request();
     protected override void Reclaim(SqlDatabase database, CancellationToken cancellationToken)
         => database.TableReclamation.RunBatch(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlVersionPurgeWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlVersionPurgeWorker value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabasePurgeResult> Lanes => _target.Lanes;
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

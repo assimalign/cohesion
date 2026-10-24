@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// </summary>
 public sealed class GqlLabelExpressionParserTests
 {
-    /// <summary>The ISO forms #1101 pinned as COHDBL001 and the precedence cases, with their trees.</summary>
+    /// <summary>The ISO forms #1101 pinned as CK00001 and the precedence cases, with their trees.</summary>
     public static TheoryData<string, GqlLabelExpression, string[]> NodeExpressions => new()
     {
         { "MATCH (n:A|B) RETURN n", Or(Name("A"), Name("B")), [] },
@@ -173,7 +173,7 @@ public sealed class GqlLabelExpressionParserTests
     }
 
     /// <param name="gql">A malformed label expression.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Label expressions: malformed expressions report one GQL0002 in range")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Label expressions: malformed expressions report one CG00002 in range")]
     [InlineData("MATCH (n:A:B|C) RETURN n")]
     [InlineData("MATCH (n:A|B:C) RETURN n")]
     [InlineData("MATCH (n:!A:B) RETURN n")]
@@ -207,7 +207,7 @@ public sealed class GqlLabelExpressionParserTests
 
         // Assert
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0002");
+        error.Code.ShouldBe("CG00002");
         int start = error.Start.ShouldNotBeNull();
         start.ShouldBeInRange(0, gql.Length);
         error.End.ShouldNotBeNull().ShouldBeInRange(start, gql.Length);

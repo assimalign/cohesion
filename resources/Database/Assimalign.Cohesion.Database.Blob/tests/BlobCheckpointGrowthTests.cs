@@ -11,6 +11,8 @@ using Xunit.Abstractions;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Blob.Tests;
 
 /// <summary>
@@ -66,7 +68,7 @@ public sealed class BlobCheckpointGrowthTests
                     Thread.SpinWait(4096);
                 }
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
-            var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+            var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
             {
                 await ready.Task;
                 await using var session = await database.CreateSessionAsync(ceiling.Token);

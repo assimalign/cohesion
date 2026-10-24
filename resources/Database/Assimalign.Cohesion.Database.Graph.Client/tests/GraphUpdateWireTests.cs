@@ -33,7 +33,7 @@ public sealed class GraphUpdateWireTests
         var failure = await Should.ThrowAsync<GraphClientException>(async () =>
             await connection.ExecuteAsync("MATCH ()-[r:R]->() SET r:X", cancellationToken: harness.Token));
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldContain("COHDBG003", Case.Sensitive);
+        failure.Message.ShouldContain("CG03003", Case.Sensitive);
         (await connection.QueryAsync("MATCH (a:P) RETURN a.x", cancellationToken: harness.Token)).Count.ShouldBe(2);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
     }

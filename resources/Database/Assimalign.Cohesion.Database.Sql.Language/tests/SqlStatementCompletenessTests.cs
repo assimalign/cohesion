@@ -218,10 +218,10 @@ public sealed class SqlStatementCompletenessTests
         failures.ShouldBeEmpty("Each statement must report an error at or after the end of its complete form.");
     }
 
-    /// <summary>The issue's regression cases: each is one SQL0003 at the dropped text.</summary>
+    /// <summary>The issue's regression cases: each is one CS00003 at the dropped text.</summary>
     /// <param name="marked">A statement whose tail the parser used to drop; '^' marks where the diagnostic starts.</param>
     /// <param name="located">The source text the diagnostic covers.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report SQL0003 where they start")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report CS00003 where they start")]
     [InlineData("DELETE FROM t WHRE ^id = 1;", "id")]
     [InlineData("UPDATE t SET a = 1 ^WHRE id = 1;", "WHRE")]
     [InlineData("UPDATE t SET a = 1 ^FROM u WHERE t.id = u.id;", "FROM")]
@@ -249,7 +249,7 @@ public sealed class SqlStatementCompletenessTests
     /// </summary>
     /// <param name="marked">A malformed statement; '^' marks where the diagnostic starts.</param>
     /// <param name="located">The source text the diagnostic covers.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: missing tokens, keywords and names report one SQL0003 where expected")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: missing tokens, keywords and names report one CS00003 where expected")]
     [InlineData("DELETE FROM t WHERE (id = 1^;", ";")]
     [InlineData("DELETE FROM t WHERE id IN (1, 2^;", ";")]
     [InlineData("DELETE FROM t WHERE id IN ^1;", "1")]
@@ -297,7 +297,7 @@ public sealed class SqlStatementCompletenessTests
     public void Parse_MissingToken_ShouldReportOneSyntaxErrorWhereExpected(string marked, string located)
         => AssertOneSyntaxErrorAt(marked, located);
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: malformed modifiers report SQL0005 at the offending token")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: malformed modifiers report CS00005 at the offending token")]
     [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
     [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
     [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
@@ -314,7 +314,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0005");
+        error.Code.ShouldBe("CS00005");
         error.Start.ShouldBe(position);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -365,7 +365,7 @@ public sealed class SqlStatementCompletenessTests
         var errors = Errors(Parse(sql));
 
         // Assert
-        errors.Where(error => error.Code == "SQL0003").ShouldHaveSingleItem().Message!.ShouldStartWith(message, Case.Sensitive);
+        errors.Where(error => error.Code == "CS00003").ShouldHaveSingleItem().Message!.ShouldStartWith(message, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: a sign applies to a signed operand")]
@@ -384,20 +384,20 @@ public sealed class SqlStatementCompletenessTests
             .Operator.ShouldBe(SqlUnaryOperator.Negate);
 
         // ~ is outside the dialect since #1101; its signed operand still leaves no text behind.
-        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
+        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
     }
 
     /// <summary>
-    /// A recognized clause outside the profile reports COHDBL001, and text from that clause
+    /// A recognized clause outside the profile reports CK00001, and text from that clause
     /// on adds no second diagnostic. Text the parser stopped at before reaching the clause
-    /// still reports SQL0003, so fixing the clause does not reveal a new error.
+    /// still reports CS00003, so fixing the clause does not reveal a new error.
     /// </summary>
     /// <param name="sql">A statement with a clause outside the profile.</param>
     /// <param name="expected">The error codes, in order.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: excluded and restored clauses retain precise boundaries")]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "COHDBL001" })]
-    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "SQL0003", "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS ();", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 WINDOW w AS (); DELETE FROM t;", new[] { "CK00001" })]
+    [InlineData("DELETE FROM t WHRE id = 1 WINDOW w AS ();", new[] { "CS00003", "CK00001" })]
     // Derived output ordering is classified by the planner; its execution test verifies resolved output ordering.
     [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new string[0])]
     [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new string[0])]
@@ -421,7 +421,7 @@ public sealed class SqlStatementCompletenessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Start.ShouldBe(start);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -449,7 +449,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain("after ';'. A request accepts exactly one statement.", Case.Sensitive);
         error.Start!.Value.ShouldBeGreaterThan(sql.IndexOf(';', StringComparison.Ordinal));
     }
@@ -466,7 +466,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message.ShouldBe(message);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }
@@ -483,12 +483,12 @@ public sealed class SqlStatementCompletenessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain($"'{action}'", Case.Sensitive);
         sql[error.Start!.Value..error.End!.Value].ToUpperInvariant().ShouldBe(action);
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Alter);
         statement.SqlExpression.ShouldNotBeOfType<SqlAlterTableExpression>();
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "SQL0002");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CS00002");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: ALTER TABLE without a complete action is an error")]
@@ -502,7 +502,7 @@ public sealed class SqlStatementCompletenessTests
         var error = Errors(Parse(sql)).ShouldHaveSingleItem();
 
         // Assert
-        error.Code.ShouldBe("SQL0003");
+        error.Code.ShouldBe("CS00003");
         error.Message!.ShouldContain(message, Case.Sensitive);
     }
 

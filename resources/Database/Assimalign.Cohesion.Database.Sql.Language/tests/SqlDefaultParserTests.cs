@@ -79,7 +79,7 @@ public sealed class SqlDefaultParserTests
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003" && diagnostic.Severity == DiagnosticSeverity.Error);
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003" && diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - DEFAULT: bare scalar uses report a located syntax error")]
@@ -98,7 +98,7 @@ public sealed class SqlDefaultParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Code.ShouldBe("CS00003");
         diagnostic.Message.ShouldBe("DEFAULT is not allowed in this context.");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("DEFAULT");
     }

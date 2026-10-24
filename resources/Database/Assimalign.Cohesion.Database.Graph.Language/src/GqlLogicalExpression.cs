@@ -16,15 +16,17 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// operator merges into it: <c>(p AND q) AND r</c> is the same node as <c>p AND q AND r</c>. A
 /// parenthesized chain in a later position stays a nested node, <c>p AND (q AND r)</c>; the meaning
 /// is the same, and merging it would cost a copy of its operands per enclosing group. Nesting
-/// through parentheses is bounded only by the stack: the parser reports <c>GQL0009</c> and the
-/// engine <c>COHDBG008</c> instead of overflowing it.
+/// through parentheses is bounded only by the stack: the parser reports <c>CG00009</c> and the
+/// engine <c>CG05008</c> instead of overflowing it.
 /// </para>
 /// <para>
 /// The engine evaluates operands first to last: AND stops at false, OR at true, and XOR propagates unknown. A hand-built
 /// node with an undefined operator, a null operand list, a null operand or fewer than two operands
-/// is rejected by the planner with <c>COHDBG001</c>.
+/// is rejected by the planner with <c>CG05001</c>.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlLogicalExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression.DebugView))]
 public sealed class GqlLogicalExpression : GqlExpression
 {
     private readonly List<GqlExpression>? _operands;
@@ -67,4 +69,19 @@ public sealed class GqlLogicalExpression : GqlExpression
     /// </summary>
     /// <returns>The operand list, which the caller now owns.</returns>
     internal List<GqlExpression> DetachOperands() => _operands!;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlLogicalOperator Operator => _target.Operator;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression> Operands => _target.Operands;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

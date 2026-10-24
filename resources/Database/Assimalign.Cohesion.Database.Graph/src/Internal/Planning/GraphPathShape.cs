@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("GraphPathShape")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPathShape.DebugView))]
 internal sealed class GraphPathShape
 {
     internal List<List<GqlNodePattern>> Nodes { get; } = [[]];
@@ -139,5 +141,13 @@ internal sealed class GraphPathShape
             quantifier.Min > 64 || quantifier.Max > 64) { throw Invalid(); }
     }
 
-    private static GraphPlanningException Invalid() => new("COHDBG001", ErrorMessages.PathShapeInvalid);
+    private static GraphPlanningException Invalid() => new("CG05001", ErrorMessages.PathShapeInvalid);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphPathShape value)
+        {
+            _ = value;
+        }
+    }
 }

@@ -68,9 +68,11 @@ node identifiers and a null parent for the root. The fixed column order is:
 | `estimated_rows` | Int64 | Yes |
 | `actual_rows` | Int64 | Yes |
 
-All eight fields are present: nullable values are NULL, never SQL++ MISSING. Both count
-columns are null in every Tier 1 row: the planners have no statistics and EXPLAIN
-never executes the described statement. A successful description changes zero records, reports
+All eight fields are present: nullable values are NULL, never SQL++ MISSING. DatabasePlanNode.EstimatedRows and ActualRows supply the two optional count columns.
+Models without measurements retain NULL. SQL bounded probes can populate estimated_rows; plain
+EXPLAIN never executes the described statement and leaves actual_rows NULL. SELECT-only SQL
+EXPLAIN ANALYZE populates measured candidate work before residuals (#1522), not final output
+cardinality. Details identify exact probes, incomplete lower bounds and heuristic join estimates. A successful description changes zero records, reports
 the ordinary row-result affected count of -1, and carries
 parser/planner diagnostics. It uses the ordinary SQL and Graph result frames. Documents encodes
 each row as a JSON document with these eight member names in its existing document stream.
@@ -118,3 +120,12 @@ KeyValuePair's command parser is an internal wire entry, not a public language c
 
 Abstract request/result contracts, a sealed column descriptor and ordinary generic session
 bases require no reflection, expression trees, runtime code generation or generic virtual method.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

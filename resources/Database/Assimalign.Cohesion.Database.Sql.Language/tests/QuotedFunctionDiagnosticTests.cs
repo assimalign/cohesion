@@ -20,7 +20,7 @@ public sealed class QuotedFunctionDiagnosticTests
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBL001", diagnostic.Message);
+        diagnostic.Code.ShouldBe("CK00001", diagnostic.Message);
         diagnostic.Start.ShouldBe(7);
         diagnostic.End.ShouldBe(9 + name.Length);
     }

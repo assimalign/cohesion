@@ -24,8 +24,12 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// sorted with a stable ORDER BY; without ORDER BY their order is unspecified
 /// and may change with the chosen access path.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlPlanExecutor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.DebugView))]
 internal sealed partial class SqlPlanExecutor
 {
+    private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
     // Test seam: after the final INSERT effect, while its statement apply is still admitted.
     internal static Action? AfterInsertApplied { get; set; }
     internal static Action? AfterSelfCommit { get; set; }
@@ -76,7 +80,31 @@ internal sealed partial class SqlPlanExecutor
         => SqlExpressionEvaluator.ForExecution(subqueryValues,
             _containsLike || containsLike || _definitions.Functions.RunsApplicationCode ? cancellationToken : default, sharedColumns, transactionTimestamp ?? ViewTransactionStart);
 
-    internal async Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
+            : ExecuteCoreAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecuteAnalyzedAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var metrics = statement.Metrics;
+        var frame = metrics.BeginAnalysisFrame();
+        try
+        {
+            var result = await ExecuteCoreAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+            if (plan is SqlSelectPlan)
+            {
+                metrics.Analysis(plan)!.Candidates += metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords;
+            }
+            else if (plan is SqlJoinPlan)
+            {
+                metrics.Analysis(plan)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs;
+            }
+            return result;
+        }
+        finally { metrics.EndAnalysisFrame(frame); }
+    }
+
+    private async Task<DatabaseResult> ExecuteCoreAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;
@@ -635,91 +663,122 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, outgoing: false).ConfigureAwait(false);
-        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
-        var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
-        foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+        var locks = statement.Coordinator.LockManager;
+        var statementMark = locks.MarkStatement(statement.Transaction.Sequence);
+        var retryMark = statementMark;
+        bool applyStarted = false;
+        try
         {
-            await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
-            if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
-        }
-
-        // Lock the directly targeted rows as one sorted batch before the cascade
-        // walk reads any child table: a parent row must be exclusively locked
-        // before its incoming references are read in latest state. The walk locks
-        // each row it discovers the same way, in discovery order — a transitive
-        // closure cannot be pre-sorted, so referential waits rely on the lock
-        // manager's deadlock detection rather than on a global ordering.
-        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken).ConfigureAwait(false);
-
-        var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
-        var returningTargets = plan.Returning is null ? null : targets.Select(target =>
-            SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();
-        var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
-        var scannedTables = new HashSet<ulong>();
-        var released = new List<SqlParentReference>();
-        foreach (var target in targets)
-        {
-            await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
-                statement, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Every deleted row releases the references it held; the shared locks are
-        // what make a concurrent parent delete wait for this transaction to decide
-        // instead of reading the tombstones as absence.
-        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
-
-        var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
-        ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
-        await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
-        return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
-        {
-            // Revalidate every target before applying anything. The bracket makes all
-            // tombstones, versions and index changes one rollback unit.
-            foreach (var update in updates.Values)
+            while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
-            }
-            int applied = 0;
-            foreach (var deletion in deletions.Values)
-            {
-                if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
-                EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
-                TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
-                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
-                    SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
-                    returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
-                {
-                    returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));
-                }
-            }
-            foreach (var update in updates.Values)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
-                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.OldValues,
-                    SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-            }
-            foreach (var update in updates.Values)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
-                statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                 try
                 {
-                    await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
-                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                    await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken, outgoing: false, cascade: true).ConfigureAwait(false);
+                    var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+                    var targets = new List<((PageId PageId, int SlotIndex) Location, object?[] Values)>();
+                    foreach (var row in EnumerateRows(plan.Table, plan.Access, statement, cancellationToken))
+                    {
+                        await PrepareSubqueriesAsync(plan.Where, row.Values, statement, cancellationToken).ConfigureAwait(false);
+                        if (evaluator.Matches(plan.Where, row.Values)) { targets.Add(row); }
+                    }
+
+                    // Lock the directly targeted rows as one sorted batch before the cascade
+                    // walk reads any child table: a parent row must be exclusively locked
+                    // before its incoming references are read in latest state. The walk locks
+                    // each row it discovers the same way, in discovery order — a transitive
+                    // closure cannot be pre-sorted, so referential waits rely on the lock
+                    // manager's deadlock detection rather than on a global ordering.
+                    await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken, cascade: true).ConfigureAwait(false);
+
+                    var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
+                    var returningTargets = plan.Returning is null ? null : targets.Select(target =>
+                        SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();
+                    var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
+                    var scannedTables = new HashSet<ulong>();
+                    var released = new List<SqlParentReference>();
+                    foreach (var target in targets)
+                    {
+                        await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
+                            statement, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    // Every deleted row releases the references it held; the shared locks are
+                    // what make a concurrent parent delete wait for this transaction to decide
+                    // instead of reading the tombstones as absence.
+                    await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
+
+                    var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
+                    ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
+                    await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
+                    applyStarted = true;
+                    return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
+                    {
+                        // Revalidate every target before applying anything. The bracket makes all
+                        // tombstones, versions and index changes one rollback unit.
+                        foreach (var update in updates.Values)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            EnsureLatestVersion(update.Table, update.Location.PageId, update.Location.SlotIndex, statement.Transaction.Sequence);
+                        }
+                        int applied = 0;
+                        foreach (var deletion in deletions.Values)
+                        {
+                            if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
+                            EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
+                            TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
+                            await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
+                                SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                            if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                                returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                            {
+                                returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));
+                            }
+                        }
+                        foreach (var update in updates.Values)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            TombstoneVersion(statement, bracket, update.Location.PageId, update.Location.SlotIndex);
+                            await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.OldValues,
+                                SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                        }
+                        foreach (var update in updates.Values)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
+                            statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
+                            try
+                            {
+                                await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                                    SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (IndexUniqueViolationException exception)
+                            {
+                                throw TranslateUniqueViolation(update.Table, exception);
+                            }
+                        }
+                        return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
+                            : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
+                    }, durable: false, cancellationToken).ConfigureAwait(false);
                 }
-                catch (IndexUniqueViolationException exception)
+                catch (SqlCascadeLockRetry refused)
                 {
-                    throw TranslateUniqueViolation(update.Table, exception);
+                    locks.ReleaseSince(retryMark);
+                    await locks.AcquireAsync(statement.Transaction.Sequence, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
+                    // Keep every waited grant across future back-offs. Releasing it permits
+                    // contenders to hand the same row back and forth forever (#1668).
+                    retryMark = locks.MarkStatement(statement.Transaction.Sequence);
+                    statement.References.ClearAfterCascadeRetry();
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
             }
-            return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, targets.Count)
-                : MaterializeProjected(plan.Returning!, returned, targets.Count), cancellationToken).ConfigureAwait(false);
-        }, durable: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch when (!applyStarted && !_storage.IsOffline)
+        {
+            // Unwritten failures release even the retained wait grants. Previous
+            // statements and their upgrades survive; an offline owner keeps all locks.
+            locks.ReleaseSince(statementMark);
+            throw;
+        }
     }
 
     /// <summary>
@@ -733,19 +792,16 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement,
         ulong objectId,
         List<(PageId PageId, int SlotIndex)> targets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool cascade = false)
     {
-        var locks = statement.Coordinator.LockManager;
-        var owner = statement.Transaction.Sequence;
-
-        await locks.AcquireAsync(owner, LockResource.Object(objectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+        await AcquirePreparationLockAsync(statement, LockResource.Object(objectId), LockMode.IntentExclusive, cascade, cancellationToken).ConfigureAwait(false);
 
         var keys = targets.ConvertAll(target => SqlRecordLocation.Pack(target.PageId, target.SlotIndex));
         keys.Sort();
 
         foreach (ulong key in keys)
         {
-            await locks.AcquireAsync(owner, LockResource.Entry(objectId, key), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            await AcquirePreparationLockAsync(statement, LockResource.Entry(objectId, key), LockMode.Exclusive, cascade, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -791,7 +847,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        throw new SqlExecutionException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
+        throw new SqlExecutionException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnNameMissing, table.Schema, table.Name, columnName));
     }
 
     /// <summary>
@@ -839,7 +895,9 @@ internal sealed partial class SqlPlanExecutor
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
-        return IndexKey.From(writer);
+        var key = IndexKey.From(writer);
+        IndexKeyBuilt?.Invoke(key);
+        return key;
     }
 
     /// <summary>
@@ -892,7 +950,7 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement,
         ulong objectId,
         List<ulong> keyHashes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool cascade = false)
     {
         if (keyHashes.Count == 0)
         {
@@ -910,8 +968,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             previous = hash;
-            await statement.Coordinator.LockManager.AcquireAsync(
-                statement.Transaction.Sequence, LockResource.Entry(objectId, hash), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            await AcquirePreparationLockAsync(statement, LockResource.Entry(objectId, hash), LockMode.Exclusive, cascade, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -994,7 +1051,7 @@ internal sealed partial class SqlPlanExecutor
         if (deleter != TransactionSequence.None && deleter != self)
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': the row was modified by concurrently committed transaction {deleter} (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure, table.Schema, table.Name, deleter));
         }
     }
 
@@ -1014,8 +1071,7 @@ internal sealed partial class SqlPlanExecutor
         {
             throw new StorageCorruptionException(
                 pageId,
-                $"The row record in slot {slotIndex} of page {(long)pageId} of table '{table.Schema}.{table.Name}' holds " +
-                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsureSnapshotSeesCascadeRowFailure2, slotIndex, (long)pageId, table.Schema, table.Name, record.Length, SqlRowCodec.StampHeaderSize));
         }
 
         return SqlRowCodec.ReadStamps(record.Span);
@@ -1132,7 +1188,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(plan.Schema, plan.Name, out var before))
         {
-            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
         await statement.Coordinator.LockManager.AcquireAsync(
@@ -1182,7 +1238,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionTableMissing, plan.Schema, plan.Name));
+            throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
@@ -1261,7 +1317,7 @@ internal sealed partial class SqlPlanExecutor
             return;
         }
 
-        throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LookupTableMissing, schema, name));
+        throw new SqlCatalogException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, name));
     }
 
     /// <summary>
@@ -1408,7 +1464,7 @@ internal sealed partial class SqlPlanExecutor
                 return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
             }
 
-            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentIndexMissing, plan.IndexName, currentTable.Schema, currentTable.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedObjectCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionIndexMissing, plan.IndexName, currentTable.Schema, currentTable.Name));
         }
 
         EnsureCanChange(metadata.Owner, metadata.Name, metadata.OwningSchema, "DROP INDEX", statement);
@@ -1453,7 +1509,7 @@ internal sealed partial class SqlPlanExecutor
     {
         if (!_catalog.TryGetTable(expected.Schema, expected.Name, out SqlCatalogTable current))
         {
-            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CurrentTableMissing, expected.Schema, expected.Name));
+            throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, expected.Schema, expected.Name));
         }
 
         return current;
@@ -1848,7 +1904,7 @@ internal sealed partial class SqlPlanExecutor
             // ISO store assignment: a value the numeric column cannot hold is a numeric
             // value out of range (SQLSTATE 22003), the same fault as an overflowing result.
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutorCoerceForColumnSqlEvaluation, Convert.ToString(value, CultureInfo.InvariantCulture), column.Name, column.Type.Type), exception);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException or ArgumentOutOfRangeException)
         {
@@ -1857,4 +1913,12 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor value)
+        {
+            _ = value;
+        }
+    }
 }

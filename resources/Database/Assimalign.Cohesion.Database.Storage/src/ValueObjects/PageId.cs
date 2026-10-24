@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// <summary>
 /// A strongly-typed identifier for a page within a storage file.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("PageId")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.PageId.DebugView))]
 public readonly struct PageId : IEquatable<PageId>, IComparable<PageId>
 {
     private readonly long _value;
@@ -53,4 +55,16 @@ public readonly struct PageId : IEquatable<PageId>, IComparable<PageId>
 
     /// <summary>Inequality operator.</summary>
     public static bool operator !=(PageId left, PageId right) => left._value != right._value;
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Storage.PageId _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.PageId value)
+        {
+            _target = value;
+        }
+
+        public long Value => _target.Value;
+    }
 }

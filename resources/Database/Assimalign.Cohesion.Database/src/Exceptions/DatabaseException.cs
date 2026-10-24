@@ -45,4 +45,7 @@ public class DatabaseException : Exception
         ArgumentNullException.ThrowIfNull(diagnostics);
         Diagnostics = Array.AsReadOnly(diagnostics.OrderBy(diagnostic => diagnostic.Start is null).ThenBy(diagnostic => diagnostic.Start).ToArray());
     }
+
+    internal static DatabaseException CreateRootFailure(string code, string message)
+        => new(message, [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
 }

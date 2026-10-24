@@ -16,7 +16,7 @@ public readonly record struct BlobTransferCompleteMessage(long Length)
     {
         if (Length < 0)
         {
-            throw new ProtocolException("A completed Blob transfer length must be nonnegative.");
+            throw new ProtocolException(ErrorMessages.TransferCompleteMessageEncodeProtocol);
         }
         var payload = new byte[sizeof(long)];
         BinaryPrimitives.WriteInt64BigEndian(payload, Length);
@@ -34,7 +34,7 @@ public readonly record struct BlobTransferCompleteMessage(long Length)
         BlobProtocolPayload.RequireEnd(payload, position);
         if (length < 0)
         {
-            throw new ProtocolException("A completed Blob transfer length must be nonnegative.");
+            throw new ProtocolException(ErrorMessages.TransferCompleteMessageEncodeProtocol);
         }
         return new(length);
     }

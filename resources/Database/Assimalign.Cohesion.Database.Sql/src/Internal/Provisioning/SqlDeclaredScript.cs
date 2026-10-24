@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SqlDeclaredScript")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredScript.DebugView))]
 internal sealed class SqlDeclaredScript
 {
     internal SqlDeclaredScript(string name, string sql, SqlQueryParserOptions options)
@@ -38,7 +40,7 @@ internal sealed class SqlDeclaredScript
             var request = SqlQueryRequest.FromSql(text, null, options);
             if (request.Statement.SqlExpression is SqlTransactionExpression)
             {
-                throw new DatabaseException("COHSQLS003: Declared scripts own statement transactions; transaction-control statements are not allowed.");
+                throw new DatabaseException(ErrorMessages.SqlDeclaredScriptDatabase);
             }
             statements.Add(request);
         }
@@ -68,5 +70,13 @@ internal sealed class SqlDeclaredScript
         var text = new StringBuilder();
         foreach (var script in scripts) { text.Append(script.Name.Length).Append(':').Append(script.Name).Append(script.ContentHash); }
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeclaredScript value)
+        {
+            _ = value;
+        }
     }
 }

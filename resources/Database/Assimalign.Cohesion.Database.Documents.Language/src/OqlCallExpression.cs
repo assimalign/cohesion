@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A supported scalar or aggregate function call.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlCallExpression {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlCallExpression.DebugView))]
 public sealed class OqlCallExpression : OqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="OqlCallExpression"/> class.</summary>
@@ -20,4 +22,19 @@ public sealed class OqlCallExpression : OqlExpression
     public string Name { get; }
     /// <summary>Gets the function arguments.</summary>
     public IReadOnlyList<OqlExpression> Arguments { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlCallExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlCallExpression value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> Arguments => _target.Arguments;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Indexing.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 /// <summary>Continuation, cancellation, ownership and concurrency regressions for incremental cursors.</summary>
@@ -61,7 +63,7 @@ public sealed class BTreeCursorTests
             resumeWriter.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
         };
         var writer = await harness.BeginAsync();
-        var rewrite = Task.Run(async () =>
+        var rewrite = DedicatedTestTask.Run(async () =>
         {
             for (int i = 100; i < 400; i++) { await attached.InsertAsync(writer, IndexKey.FromInt64(i), (ulong)i); }
             await harness.CommitAsync(writer);
@@ -71,7 +73,7 @@ public sealed class BTreeCursorTests
         {
             cleared.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             // Act: the root is cleared but has not been stamped as a node yet.
-            move = Task.Run(async () => { readerStarted.Set(); return await cursor.MoveNextAsync(); });
+            move = DedicatedTestTask.Run(async () => { readerStarted.Set(); return await cursor.MoveNextAsync(); });
             readerStarted.Wait(TimeSpan.FromSeconds(30)).ShouldBeTrue();
             if (!ReferenceEquals(index.Latch, attached.Latch))
             {
@@ -185,7 +187,7 @@ public sealed class BTreeCursorTests
         long purges = 0;
         long scans = 0;
         long overlaps = 0;
-        var writer = Task.Run(async () =>
+        var writer = DedicatedTestTask.Run(async () =>
         {
             try
             {
@@ -216,7 +218,7 @@ public sealed class BTreeCursorTests
             }
             catch (Exception exception) { Interlocked.CompareExchange(ref failure, exception, null); }
         });
-        var scanner = Task.Run(async () =>
+        var scanner = DedicatedTestTask.Run(async () =>
         {
             try
             {
@@ -396,7 +398,7 @@ public sealed class BTreeCursorTests
         index.Latch.EnterWrite();
         try
         {
-            move = Task.Run(async () =>
+            move = DedicatedTestTask.Run(async () =>
             {
                 started.Set();
                 await Should.ThrowAsync<OperationCanceledException>(async () => await cursor.MoveNextAsync(moving.Token));

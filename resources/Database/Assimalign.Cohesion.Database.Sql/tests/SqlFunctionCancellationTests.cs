@@ -39,7 +39,7 @@ public sealed class SqlFunctionCancellationTests
         }
         else
         {
-            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE007");
+            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05007");
             failure.Message.ShouldContain("Function 'cancel_scalar'", Case.Sensitive);
             failure.InnerException.ShouldBeSameAs(original);
         }
@@ -80,7 +80,7 @@ public sealed class SqlFunctionCancellationTests
         }
         else
         {
-            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE007");
+            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05007");
             failure.Message.ShouldContain("Function 'cancel_aggregate'", Case.Sensitive);
             failure.InnerException.ShouldBeSameAs(original);
         }
@@ -101,7 +101,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = Should.Throw<DatabaseException>(() => accumulator.Finish());
 
         // Assert
-        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'direct_finish' failed:", Case.Sensitive);
+        failure.DiagnosticDetail("CS05007").ShouldStartWith("Function 'direct_finish' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(original);
     }
 
@@ -116,7 +116,7 @@ public sealed class SqlFunctionCancellationTests
         var failure = Should.Throw<DatabaseException>(() => function.Invoke(new SqlArguments([SqlValue.FromInt32(1)])));
 
         // Assert
-        failure.DiagnosticDetail("COHSQLE007").ShouldStartWith("Function 'direct_cancel' failed:", Case.Sensitive);
+        failure.DiagnosticDetail("CS05007").ShouldStartWith("Function 'direct_cancel' failed:", Case.Sensitive);
         failure.InnerException.ShouldBeSameAs(original);
     }
 
@@ -165,7 +165,7 @@ public sealed class SqlFunctionCancellationTests
         }
         else
         {
-            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE007");
+            failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05007");
             failure.Message.ShouldContain("Function 'domain_cancel'", Case.Sensitive);
             failure.InnerException.ShouldBeSameAs(original);
         }

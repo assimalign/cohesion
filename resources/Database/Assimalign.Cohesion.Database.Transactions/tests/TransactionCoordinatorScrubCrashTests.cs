@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// </summary>
 public sealed class TransactionCoordinatorScrubCrashTests
 {
-    private const int WriterCount = 150;
+    private const int writerCount = 150;
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Recovery scrub: its deltas chain onto the LSNs recovery stamped, with no new page image")]
     public async Task AnalyzeAndScrub_AfterRedo_ShouldChainDeltasOntoRecoveredLsns()
@@ -45,7 +45,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
 
         // Assert: the scrub changed pages recovery rebuilt, journaling deltas (or committed images)
         // whose bases are the LSNs recovery stamped, and no full page image.
-        plan.Aborted.Count.ShouldBeGreaterThanOrEqualTo(WriterCount);
+        plan.Aborted.Count.ShouldBeGreaterThanOrEqualTo(writerCount);
         var changes = scrubRecords.Where(record => record.Type is JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage).ToArray();
         changes.ShouldNotBeEmpty();
         scrubRecords.ShouldNotContain(record => record.Type == JournalRecordType.FullPageImage);
@@ -109,7 +109,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
     private ulong Committed { get; set; }
 
     /// <summary>
-    /// One committed version and <see cref="WriterCount"/> writers whose versions were stolen to
+    /// One committed version and <see cref="writerCount"/> writers whose versions were stolen to
     /// the data file before power was lost, over a three-page pool.
     /// </summary>
     private async Task<(byte[] Data, byte[] Journal)> CrashedAsync()
@@ -123,7 +123,7 @@ public sealed class TransactionCoordinatorScrubCrashTests
         storage.Checkpoint();
 
         Writers.Clear();
-        for (int i = 0; i < WriterCount; i++)
+        for (int i = 0; i < writerCount; i++)
         {
             var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
             await InsertAsync(coordinator, storage, writer);

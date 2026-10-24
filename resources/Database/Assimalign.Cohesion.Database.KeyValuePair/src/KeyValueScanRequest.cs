@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// result set with the columns <c>key</c> (binary), <c>value</c> (binary), and
 /// <c>etag</c> (int64).
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueScanRequest Operation={Operation}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest.DebugView))]
 public sealed class KeyValueScanRequest : KeyValueRequest
 {
     /// <summary>
@@ -28,12 +30,12 @@ public sealed class KeyValueScanRequest : KeyValueRequest
             End = options.End is { IsEmpty: true } ? null : options.End;
             if (Prefix is not null && (Start is not null || End is not null))
             {
-                throw new ArgumentException("A prefix scan cannot combine with explicit start/end bounds.", nameof(options));
+                throw new ArgumentException(ErrorMessages.KeyValueScanRequestArgument, nameof(options));
             }
 
             if (options.Limit is < 0)
             {
-                throw new ArgumentException("The scan limit cannot be negative.", nameof(options));
+                throw new ArgumentException(ErrorMessages.KeyValueScanRequestArgument2, nameof(options));
             }
 
             Limit = options.Limit;
@@ -62,4 +64,20 @@ public sealed class KeyValueScanRequest : KeyValueRequest
     /// Gets the maximum number of entries to return, or null for no limit.
     /// </summary>
     public int? Limit { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueScanRequest value)
+        {
+            _target = value;
+        }
+
+        public global::System.ReadOnlyMemory<byte>? Prefix => _target.Prefix;
+        public global::System.ReadOnlyMemory<byte>? Start => _target.Start;
+        public global::System.ReadOnlyMemory<byte>? End => _target.End;
+        public int? Limit => _target.Limit;
+        public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueOperation Operation => _target.Operation;
+    }
 }

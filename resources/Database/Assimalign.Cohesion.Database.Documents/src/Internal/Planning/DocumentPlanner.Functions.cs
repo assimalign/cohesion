@@ -47,7 +47,7 @@ internal sealed partial class DocumentPlanner
         };
         if (kind is not (JsonValueKind.Null or JsonValueKind.Undefined) && !function.AcceptsArgument(index, kind))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentKindInvalid, argument.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentKindInvalid, argument.Location);
         }
     }
 }

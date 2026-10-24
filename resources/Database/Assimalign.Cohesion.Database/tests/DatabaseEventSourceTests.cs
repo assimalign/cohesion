@@ -21,6 +21,8 @@ using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
@@ -95,7 +97,7 @@ public sealed class DatabaseEventSourceTests
                     {
                         binary = sameThread
                             ? engine.CreateDatabaseAsync("binary", CancellationToken.None).GetAwaiter().GetResult()
-                            : Task.Run(async () => await engine.CreateDatabaseAsync("binary", CancellationToken.None))
+                            : DedicatedTestTask.Run(async () => await engine.CreateDatabaseAsync("binary", CancellationToken.None))
                                 .WaitAsync(_wait).GetAwaiter().GetResult();
                     }
                     catch (Exception exception)
@@ -520,7 +522,7 @@ public sealed class DatabaseEventSourceTests
         thrown.Level.ShouldBe(EventLevel.Error);
         thrown.PayloadNames.ShouldBe(["database", "sessionNumber", "requestKind", "code", "exceptionType", "durationMilliseconds"]);
         Payload(thrown, "exceptionType").ShouldBe(typeof(DatabaseParseException).FullName);
-        Payload(thrown, "code").ShouldBe(string.Empty);
+        Payload(thrown, "code").ShouldBe(((DatabaseException)parseFailure!).Diagnostics.First(d => d.Severity == DiagnosticSeverity.Error).Code);
         Payload(thrown, "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
         Payload(sessionEvents[7], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
         Payload(sessionEvents[7], "affectedCount").ShouldBe(-1L);
@@ -529,7 +531,7 @@ public sealed class DatabaseEventSourceTests
         var coded = sessionEvents[9];
         var diagnostic = failed.Diagnostics!.First(d => d.Severity == DiagnosticSeverity.Error);
         coded.EventId.ShouldBe(28);
-        diagnostic.Code.ShouldBe("COHSQLT002");
+        diagnostic.Code.ShouldBe("CS04002");
         Payload(coded, "code").ShouldBe(diagnostic.Code);
         Payload(coded, "exceptionType").ShouldBe(string.Empty);
         Payload(sessionEvents[11], "status").ShouldBe(nameof(DatabaseResultStatus.Error));
@@ -598,6 +600,51 @@ public sealed class DatabaseEventSourceTests
         Payload(events[2], "affectedCount").ShouldBe(-1L);
         Payload(events[3], "requestKind").ShouldBe(DatabaseEventSource.TextRequestKind);
         Payload(events[4], "status").ShouldBe(nameof(DatabaseResultStatus.Cancelled));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: thrown division by zero reports its structured code (#1350)")]
+    public async Task StatementFailed_ThrownDivisionByZero_ShouldReportDiagnosticCode()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("event-code-" + Guid.NewGuid().ToString("N"), new());
+        var database = await engine.CreateDatabaseAsync("codes");
+        await using var session = await database.CreateSessionAsync();
+        using var recorder = new DatabaseEventRecorder(EventLevel.Error);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT 1 / 0"));
+
+        // Assert
+        failure.Diagnostics.ShouldContain(d => d.Code == "CS02001");
+        var failed = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldHaveSingleItem();
+        Payload(failed, "code").ShouldBe("CS02001");
+        Payload(failed, "exceptionType").ShouldBe(failure.GetType().FullName);
+        failed.Payload!.ShouldNotContain(failure.Message);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: thrown failures use the first error then the first diagnostic (#1350)")]
+    [InlineData(true, "TESTE001")]
+    [InlineData(false, "TESTW001")]
+    public async Task StatementFailed_ThrownDiagnostics_ShouldPreferFirstError(bool hasError, string expected)
+    {
+        // Arrange
+        await using var engine = new TestEngine("event-code-" + Guid.NewGuid().ToString("N"));
+        await using var session = new TestSession(new TestDatabase("codes", engine));
+        var diagnostics = new List<Diagnostic> { new("TESTW001", "private warning", 0, 1, DiagnosticSeverity.Warning) };
+        if (hasError) { diagnostics.Add(new("TESTE001", "private error", 2, 3, DiagnosticSeverity.Error)); }
+        var failure = new DatabaseException("private statement", diagnostics);
+        session.ExecuteFailure = failure;
+        using var recorder = new DatabaseEventRecorder(EventLevel.Error);
+
+        // Act
+        (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new TestRequest()))).ShouldBeSameAs(failure);
+
+        // Assert
+        var failed = recorder.Events.Where(e => e.EventId == 28 && Equals(Payload(e, "sessionNumber"), session.SessionNumber)).ShouldHaveSingleItem();
+        Payload(failed, "code").ShouldBe(expected);
+        failed.Payload!.ShouldNotContain(failure.Message);
+        failed.Payload!.ShouldNotContain("private warning");
+        failed.Payload!.ShouldNotContain("private error");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database] - DatabaseEventSource: Should write a failed result's first error diagnostic code, or an empty code when it has none")]

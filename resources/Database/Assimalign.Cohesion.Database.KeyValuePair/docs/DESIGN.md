@@ -64,9 +64,9 @@ empty when there is nothing to report (#1264). Supplied command diagnostics rema
 ## Wrapped child failures and abort evidence (#1364)
 
 Otherwise unclassified `StorageException` subclasses and ordinary I/O, including wrapped
-and aggregate causes, use `COHDBK005`. Offline and format refusals retain their specific codes.
-Attached-index damage leads with `COHDBS003` and retains `COHDBI002` and `COHDBK005`;
-other index failures use `COHDBK005`. Begin, command, commit and rollback share classification.
+and aggregate causes, use `CV06105`. Offline and format refusals retain their specific codes.
+Attached-index damage leads with `CK06003` and retains `CK06102` and `CV06105`;
+other index failures use `CV06105`. Begin, command, commit and rollback share classification.
 Create and open also code child failures before publication. Known format refusals retain their
 authored messages, source diagnostics and inner causes. A failed command aborts an explicit
 transaction after releasing admission. If that abort also fails, the exact coded exception
@@ -185,7 +185,7 @@ and explicit-transaction cases are regression guards, not proof of that session 
   it. **Behind the marker, the index manager checks the tree itself**: it reads
   the root page's B-tree page format when the instance attaches the
   registration, and a tree the marker does not describe is refused with
-  `DatabaseException` "Database 'x' cannot be opened. COHDBI001: Index … uses
+  `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
   B-tree page format 1, but this engine supports only format 2 …", the index
   manager's `IndexFormatException` as its inner exception. A cleanly closed
   database is left byte-identical by either refusal; a crashed one has had only
@@ -194,13 +194,13 @@ and explicit-transaction cases are regression guards, not proof of that session 
   refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
   **Below both, each file set has its own storage format (#1251):** the storage refuses
   a data or catalog file set in another storage format with `StorageFormatException`
-  (`COHDBS001`) before its journal is read, and the engine names the database and the
+  (`CK06001`) before its journal is read, and the engine names the database and the
   file set: `DatabaseException` "Database 'x' cannot be opened: its catalog file set
-  'x/catalog' was refused. COHDBS001: …" (or its data file set 'x'), the files left
+  'x/catalog' was refused. CK06001: …" (or its data file set 'x'), the files left
   byte-identical (`KeyValueEngineLifecycleTests`).
   With entries ordered by location, a PUT's tombstone of the key's previous
   version descends to it instead of walking the key's dead versions; the unique
-  check still reads them until version pruning (#1195).
+  insert prunes safely dead entries during its single cached descent (#1195, #1239).
 - **Writes are two-phase, key-grain.** Phase one: acquire the key's Exclusive
   lock (`LockResource.Entry(keySpace, IndexKey.Hash())` — the same identity the
   B+Tree's unique enforcement locks internally, so its in-gate re-acquisition is
@@ -273,10 +273,10 @@ a different contract from Graph, Documents and Blob, deliberately:
   surfaces as the retryable `DatabaseTransactionAbortedException`; under Snapshot isolation a
   retry inside the same transaction meets the same conflict, so the caller rolls back and retries
   the transaction, as the MVCC tests do.
-- **The transaction's own end follows the #1188 contract**, with the code `COHDBK001`, and since
+- **The transaction's own end follows the #1188 contract**, with the code `CV04101`, and since
   the concrete-types plan's phase 4 (#1260) the state machine is the root `DatabaseTransaction`'s
   (below, "Concrete types"): the model supplies only its kernel calls, its exception translation,
-  its offline refusal and its `COHDBK001` error. A
+  its offline refusal and its `CV04101` error. A
   transaction that did not commit accepts any number of rollbacks (a catch-block rollback after a
   kernel-aborted commit raises nothing); a committed one refuses a rollback. A commit or rollback
   observes its cancellation token only before it starts, and one that started runs to completion:
@@ -288,7 +288,7 @@ a different contract from Graph, Documents and Blob, deliberately:
   transaction but keeps the key locks of what it wrote until the version-purge pass completes
   the undo. So the end-failure state #1225 first gave this engine, where a commit or rollback
   that failed with the context still active left the transaction `Faulted` and refusing work
-  with `COHDBK001` until a later rollback completed, is gone, as it is in Graph. The kernel still
+  with `CV04101` until a later rollback completed, is gone, as it is in Graph. The kernel still
   refuses a rollback before it starts while the database closes (`ObjectDisposedException`: the
   manager's disposal flags itself before it claims any end); the session then refuses commands
   in the ended transaction ("The session's transaction is being committed or rolled back; start
@@ -298,18 +298,18 @@ a different contract from Graph, Documents and Blob, deliberately:
   closes, or reports the `Faulted` state once disposal's abort ended the context. A commit whose
   record was written but could not be made durable throws
   `DatabaseTransactionCommitUnconfirmedException` and leaves the transaction `Committed`
-  (`Database.Transactions` DESIGN.md). Its message leads with the model's code on every path,
+  (`Database.Transactions` DESIGN.md). Its Diagnostics carry the model's code on every path,
   the explicit commit and an autocommit command's own commit alike (owner decision 24 of
-  2026-10-06, #1272): `COHDBK002: Database '{name}' went offline while a transaction was
+  2026-10-06, #1272): `Database '{name}' went offline while a transaction was
   committing: ...`, built by `KeyValueDatabase.CreateUnconfirmedCommit` through the root's
   `DatabaseTransactionCommitUnconfirmedException.Create(code, database, cause)`, with the kernel's
   `TransactionCommitUnconfirmedException` as its inner exception; before #1272 these paths carried
   the kernel's message alone. A transaction the kernel ended under its caller (disposal's abort, or a
   commit the kernel aborted) reports `Faulted` and refuses commands (typed and text, the text
-  before it is parsed) and BEGIN with `COHDBK001` until the caller ends it. `CurrentTransaction`
+  before it is parsed) and BEGIN with `CV04101` until the caller ends it. `CurrentTransaction`
   returns the transaction until the caller ends it, and null after a commit, rollback or disposal
   (it used to return the ended transaction). Disposing the session rolls back an open
-  transaction, and a commit of that transaction afterwards fails with `COHDBK001` naming the
+  transaction, and a commit of that transaction afterwards fails with `CV04101` naming the
   closure ("The session closed before the transaction ended.").
 - **A rollback leaves no write behind, even under a running command.** The transaction can end on
   another thread while one of its commands runs: the caller's rollback, the session closing, or a
@@ -341,7 +341,7 @@ a different contract from Graph, Documents and Blob, deliberately:
   (`KeyValueTransactionFailureWireTests`, `KeyValueTransactionFailureClientTests`). A connection
   that ends disposes its engine session and so rolls the transaction back; the host's rollback
   afterwards, or racing the teardown, raises nothing, and its commit afterwards fails with
-  `COHDBK001`. A host rollback while a wire command waits for a key lock fails that command with
+  `CV04101`. A host rollback while a wire command waits for a key lock fails that command with
   `ExecutionFailure`, and nothing of it is written.
 
 `KeyValueTransactionFailureTests` covers the in-process cases, and `KeyValueLifecycleTests` the
@@ -577,10 +577,10 @@ changed — a backstop, since the B+Tree keeps its root page fixed through split
 #1159),
 **version purge — live** (the KV MVCC binding is real from the first cut, so the
 purge duty is real: aborted-undo retries + reclamation below the minimum
-snapshot floor), and the index-maintenance **stub** (the index layer has no
-compaction yet — the stub matters more here than in SQL, since every delete
-accrues a tombstone in the primary structure; the seam is kept stable for the
-compaction feature). Cadence knobs live on `KeyValueDatabaseEngineOptions`.
+snapshot floor, followed by bounded B-tree dead-entry pruning under the apply
+gate since #1195), and the separate index-maintenance inventory/test-hook seam
+for future empty-page reclamation. It does not repeat the coordinator's prune.
+Cadence knobs live on `KeyValueDatabaseEngineOptions`.
 
 The checkpointer and the purge worker follow the SQL engine's (#1254, #1226; Sql DESIGN.md,
 "Engine-owned background workers"): a file set is checkpointed when its journal reaches
@@ -614,7 +614,7 @@ no-fault checkpoints as a secondary signal; a smaller worker-wide slowdown can p
 deterministic signal that would catch it is required follow-up work, the SQL engine's DESIGN.md,
 "Engine-owned background workers"),
 and a writer queued for a key lock when the database goes offline (by any of the three device
-faults): it gets `COHDBK002` at once instead of waiting for the
+faults): it gets `CV06102` at once instead of waiting for the
 reopen, because the coordinator ends every lock wait of an offline database
 (`TransactionCoordinator.AbandonLockWaits`, wired to the data file set's offline hook), while
 the writer that holds the lock keeps it, since an offline database undoes nothing.
@@ -639,7 +639,7 @@ default, means four times `CheckpointJournalSize`, 1 GiB at its default) takes i
 `JournalSizeLimit`; one failure of a journal that reached the cap with no failure at all (#1283)
 is retried like any other. Either way the database goes offline through the #1243 machinery:
 the catalog file set follows through the data set's hook, every operation is refused with
-`COHDBK002`, its lock waits end, nothing more is written to it, and the engine lists it in
+`CV06102`, its lock waits end, nothing more is written to it, and the engine lists it in
 `OfflineDatabases` until `OpenDatabaseAsync` reopens it (a hosted engine's application reopens it
 with backoff, owner decision 22). The engine takes it offline on a thread-pool thread, never the worker's,
 so a give-up that waits for a hung fsync of that database holds back none of the others, and it
@@ -731,10 +731,10 @@ failure — PostgreSQL's `PANIC` on a failed WAL fsync
 section in `RecordTransactionCommit`, `src/backend/access/transam/xact.c:1470-1583`; and
 `data_sync_retry` off, `src/backend/storage/file/fd.c:3966-3987`), without stopping the process.
 The command whose commit flush failed gets `DatabaseTransactionCommitUnconfirmedException`, its
-message leading with `COHDBK002` (owner decision 24); every later operation — a new session, a
+message leading with `CV06102` (owner decision 24); every later operation — a new session, a
 typed or text command, `BeginTransactionAsync`, and the `CommitAsync` or `RollbackAsync` of a transaction open at the failure —
 is refused with `DatabaseOfflineException`, code
-`COHDBK002`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
+`CV06102`, carrying the storage's `StorageOfflineException`. `KeyValueDatabaseServer` answers a
 command on an existing session, and a handshake for the database, with `Unavailable` and the
 coded message. The workers skip the database, and closing its sessions writes nothing. A
 storage bracket whose commit record was written before its flush failed is reported as
@@ -839,7 +839,7 @@ the invariant lower case of its name:
   `<name>.catalog`, so a database named `sales.catalog` was the catalog of `sales`;
   now it is `catalog.*` inside the database's own directory, and a drop deletes the
   directory, both sets at once. An open whose data set exists without a catalog set
-  is refused with `COHDBK006` before either set is opened (#1238). Following Documents,
+  is refused with `CV06106` before either set is opened (#1238). Following Documents,
   file-system data of at most one page means creation stopped before both initial
   pages were flushed: the remedy is `DropDatabaseAsync`, then `CreateDatabaseAsync`.
   Longer data with no catalog requires preserving storage and restoring the complete
@@ -871,7 +871,7 @@ leak), repaired by re-bootstrapping on the next open.
 ## Error model
 
 Storage I/O failures (StorageIOException or IOException) are DatabaseException with an Error
-diagnostic COHDBK005 (#1364); corruption keeps DatabaseCorruptionException / COHDBS003.
+diagnostic CV06105 (#1364); corruption keeps DatabaseCorruptionException / CK06003.
 Aborted-transaction refusals keep their own structured diagnostic and the original coded cause.
 The documented SQLSTATE mappings are 58030 for I/O and XX001 for corruption; no new carrier
 member is introduced. These failures abort an explicit transaction, retain the coded cause,
@@ -885,7 +885,7 @@ and its report/transaction-abort/session-loop path in src/backend/tcop/postgres.
 The implementation uses static type checks and the existing transaction abort mechanism.
 
 
-Storage corruption is `COHDBS003` (#1160). The engine translates a
+Storage corruption is `CK06003` (#1160). The engine translates a
 `StorageCorruptionException` into `DatabaseCorruptionException`, retaining the storage
 cause and page id, naming the database and page, and advising restoration from a verified
 backup. Its structured diagnostic crosses the existing wire execution-failure path; a
@@ -898,8 +898,8 @@ Corruption translation searches coded inner exceptions and every aggregate branc
 `StorageCorruptionException.Find`; an existing `DatabaseCorruptionException` is retained.
 This applies to read/statement and transaction failures as well as synchronous and deferred
 create/open failures. A refused open retains any existing model diagnostics in addition to the
-outer `COHDBS003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
-(`COHDBG018`, `COHDBD003` and `COHDBB004` respectively). The original storage exception remains
+outer `CK06003`; Graph, Documents and Blob also carry their unrecoverable-files diagnostic
+(`CG06018`, `CD06103` and `CB06004` respectively). The original storage exception remains
 the inner cause, preserving its page context. Graph abort messages prefix a cause's code only
 when the message does not already contain that prefix.
 
@@ -910,14 +910,14 @@ when the message does not already contain that prefix.
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model
 boundary, never leaked raw; `DatabaseTransactionCommitUnconfirmedException` (not
 retryable) for a commit whose record was written but whose fsync failed, and
-`DatabaseOfflineException` (`COHDBK002`, → `Unavailable` on the wire) for every operation
+`DatabaseOfflineException` (`CV06102`, → `Unavailable` on the wire) for every operation
 after it ("Storage operations").
 
 An entry page the command cannot read fails the command. Storage reports
 StorageCorruptionException (with the page id) for checksum or slot geometry damage,
 StorageIOException for a cut-short page or a pool whose frames are all pinned, and
 IOException for device failures. The engine translates corruption to DatabaseCorruptionException
-(COHDBS003), and I/O to DatabaseException with COHDBK005. Every command resolves its key by a
+(CK06003), and I/O to DatabaseException with CV06105. Every command resolves its key by a
 primary-index seek, and the seek fetches the
 entry record with `Storage.TryReadRecord` and the key space's owner id (#1342): an index
 entry whose record was reclaimed beneath it (its slot deleted or reverted, its page freed
@@ -930,17 +930,12 @@ raise on a malformed record; before, the key read as missing. Get, Exists, Scan 
 resolution a Put or Delete starts with all fetch through the same read, so each fails this way
 (#1362). `KeyValueRecordCodec.Decode` throws `DatabaseTypeException` for a record too short for its
 stamps, a malformed or truncated key or value component, and bytes past the value; it has no
-`false` result a caller could read as an absent key. The read holds a pin, not a latch, so it can
-copy a slot while a writer reclaims it (the purge freeing and clearing it; a failed command's
-bracket rollback restoring the page did too until #1371, when the storage read began confirming
-itself against the restore), and that copy is torn rather than damaged: a failed decode is
-confirmed by reading the slot again, with the same owner check, before it is reported. A slot
-reclaimed by then reads as absence, and a re-read that decodes is the entry. A re-read that still
-does not decode is corrupt when its bytes equal the read before it, because damage is stable;
-when they differ the slot is read once more, up to two re-reads. The confirmation narrows the
-torn-copy window and does not close it: a writer descheduled half-way through rewriting the page
-leaves the same torn bytes for every read (the SQL DESIGN's "Error model" measures the race and
-names the follow-up that would close it).
+`false` result a caller could read as an absent key.
+Storage now confirms the owned copy against every forward write and rollback restore using
+the D1 frame seqlock (#1365, #1372). A malformed confirmed copy fails immediately, retaining
+the original DatabaseTypeException and its page/slot context. The earlier same-byte comparison
+and speculative extra reads are removed. A genuinely reclaimed slot is still absence at the
+storage read, before decoding.
 The latest-version check under the key lock makes the same split: a reclaimed version is the
 retryable write-write conflict, and a page it cannot read, or a live slot whose record is too
 short for its stamps (#1362), is the storage error. Unlike SQL's, the key-value short-record
@@ -978,7 +973,7 @@ snapshot-based safe prune bound as the extracted copies.
 - Named key spaces (multiple ordered key spaces per database) — the catalog
   reserves the concept; the engine currently owns one implicit key space.
 - Multi-key atomic batches, `Serializable` isolation, secondary value indexes,
-  index compaction (the stub worker's future body).
+  empty-leaf reclamation and index merges. Safe dead entries are pruned (#1195).
 
 ## Database scope conformance (A5)
 
@@ -1146,7 +1141,7 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   the databases); the database base owns the disposed flag; the session base owns the
   session state, the session's transaction and the "already active" check; the
   transaction base owns the whole end state machine; the server base owns the
-  lifecycle. The model supplies its vocabulary: `COHDBK001` and `COHDBK002`, the
+  lifecycle. The model supplies its vocabulary: `CV04101` and `CV06102`, the
   kernel calls and the translation of the kernel's exceptions. It keeps its
   per-command rule for ordinary errors (the owner's 2026-10-04 decision); storage corruption
   and I/O failures abort through the base's `AbortAsync` (#1364). Commands do
@@ -1155,9 +1150,9 @@ are sealed leaves; it has no public interface left, and no `Abstractions/` folde
   "A transaction or operation is already active on this session." (was "A transaction
   is already active on this session."), and fails that way before the Serializable and
   offline refusals; BEGIN refuses a transaction the kernel ended under its caller
-  (`COHDBK001`) before it checks the token, where a canceled token was reported first; a
+  (`CV04101`) before it checks the token, where a canceled token was reported first; a
   canceled token is refused by `CreateSessionAsync` and both execute seams before the
-  offline (`COHDBK002`) and refusing-transaction (`COHDBK001`) refusals, which were
+  offline (`CV06102`) and refusing-transaction (`CV04101`) refusals, which were
   reported first; a transaction whose session closed while its database was offline
   reports `Faulted` (was `Active`), and refuses everything either way; a closed session
   fails with "The session is closed." (was "Session is not open. Current state:
@@ -1302,20 +1297,20 @@ Model statement, parameter-name and result-header strings use that same shared s
 
 ## Shared startup negotiation (#1105)
 
-The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes COHKV001–018 and fallback COHKV019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.
+The endpoint participates in protocol 2.1: Startup may carry capability names and Ready returns the agreed version with an empty capability list. Negotiated 2.0 still sends empty Ready. Different majors are refused. This model does not register the core Diagnostics capability and its channel rejects that frame in both directions. ParseFailure and ExecutionFailure keep the existing Error layout, with CODE: message text. Parser codes CV00001–018 and fallback CV04019 are published in COMMANDS.md. Structured Diagnostics adoption can register the core capability in a follow-up.
 
 ## Interrupted drop and missing sidecars (#1158)
 
 Drop explicitly deletes keyvalue.dat, then the remaining *.dat files, before recursively
 removing the directory. Open requires each existing file set's original journal and backup;
-missing sidecars receive structured COHDBK004 and no replacement files are created. Preserve
+missing sidecars receive structured CV06104 and no replacement files are created. Preserve
 all files and restore the complete backup, since a lost journal may hold acknowledged commits.
-An entirely missing catalog receives `COHDBK006` at the engine's earlier existence gate (#1238).
-Before either storage opens, file-system data of at most one page also receives `COHDBK006`,
+An entirely missing catalog receives `CV06106` at the engine's earlier existence gate (#1238).
+Before either storage opens, file-system data of at most one page also receives `CV06106`,
 with `DropDatabaseAsync` then `CreateDatabaseAsync` as the interrupted-creation remedy
 (Documents' `DocumentDatabaseEngine` creation check). Longer data with a missing catalog
 retains the restore-from-backup remedy; a missing journal or backup on longer data retains
-`COHDBK004`. The messages are storage-neutral, including on in-memory engines.
+`CV06104`. The messages are storage-neutral, including on in-memory engines.
 As with PostgreSQL's refusal of a missing database directory
 (`src/backend/utils/init/postinit.c:1198-1212`), open reports the missing durable identity
 instead of creating it. The model-specific two-file-set gate follows SQL's catalog-first open.
@@ -1498,3 +1493,179 @@ worker completions and bounded recorded trigger/lane waits; statement-completed 
 not supply its progress count. The observation remains internal and opt-in; see the
 [root worker design](../../Assimalign.Cohesion.Database/docs/DESIGN.md#why-this-not-that-decisions)
 for publication scope, callback isolation and the limits of the wait budgets.
+
+## Structured failure codes (#1350)
+
+The root statement-failure event reads `DatabaseException.Diagnostics`, preferring the first
+Error diagnostic and then the first entry. Offline refusals and unconfirmed commits carry the
+model's existing code there, with unprefixed Message detail and the original cause. The wire
+writer supplies the legacy error prefix once; negotiated peers also receive the existing
+structured diagnostics. No public signature, on-disk format, protocol version, event schema
+or counter changes. See the root DESIGN, structured failure-event codes, for selection and
+its PostgreSQL `src/backend/utils/error/elog.c:875-884` precedent; no reference code is copied.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Shared B-tree pruning (#1195, #1239)
+
+This model supplies the coordinator's safe `PruneBound` to its B-tree manager and binds
+the current manager to the coordinator's version-purge pass. Record reclamation and a bounded
+index batch therefore share the existing worker schedule; index pruning runs under the apply
+gate, at most 64 leaf pages per pass, with one leaf's tree write latch held at a time.
+Catalog/store manager replacement is observed by the callback. Unique insertion prunes safely
+dead versions during its single cached descent, while pinned snapshots retain their visible
+history. Exact horizon equality retains the entry. Cancellation rolls back the unfinished page
+and retries it on a later pass. Empty leaves and their separator fences remain allocated.
+
+The independent index-maintenance worker inventory remains stable; it does not schedule this
+prune a second time. No language syntax, diagnostic code, wire bytes, model/storage/index format
+or transaction semantics change. The shared Indexing DESIGN records PostgreSQL references,
+split-path invariants, deterministic mutants and before/after measurements. Root integration
+tests exercise this model's real coordinator and current index manager, including catalog/store
+reattachment for Documents and Graph.
+
+## Confirmed record decoding (D1, #1372)
+
+Entry decoding uses a storage-confirmed copy, preserving the original
+DatabaseTypeException as its location-bearing corruption cause. Catalog Load reports both
+invalid record kinds and key-reader failures with the physical page and slot, preserving
+KeyValueCatalogException. Iterator I/O stays outside the decoding catch.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+## Shared server options and TCP composition (#1391, D7 B)
+
+The five sealed model server-options types derive from root DatabaseServerOptions. The base owns
+Listener, Authenticator, MaxSessions, AuthenticationTimeout, IdleTimeout and ShutdownDrainTimeout.
+Defaults stay 100 sessions, ten seconds for authentication, thirty minutes idle and thirty seconds
+for shutdown. TerminalDrainLinger remains on the model leaves, default two seconds. Each model
+still snapshots every value before validation and owns the transferred listener through stop.
+No public Database interface is added; the count remains five.
+
+Database.Tcp replaces Database.Sql.Tcp. Its root-namespace extension
+Listen<TOptions>(this TOptions options, Uri endpoint) where TOptions : DatabaseServerOptions
+returns that same concrete options instance. AddServer(configure) and AddServer(factory) retain
+their existing ownership rules. Engines still reference generic Connections, never the TCP
+integration. App.Database publicly carries Database.Tcp; Connections.Tcp stays runtime-private.
+Consumer source migrates its package reference and imports Assimalign.Cohesion.Database.
+
+Binding preserves the previous SQL helper: Uri.IdnHost, literal IPv4/IPv6, localhost -> IPv4
+loopback, wildcard -> Any; DNS names are refused synchronously with CK07101. Endpoint URIs
+must be absolute, have a host and explicit positive port, and have no user information, query or
+fragment. Port zero remains invalid for a resolved endpoint URI; transport-level ephemeral binds
+remain available through the generic listener option. The old Sql.Tcp design's port-zero claim
+was inconsistent with Uri.ThrowIfNotEndpoint and is not carried forward.
+
+Missing Listener, invalid MaxSessions and invalid timers report model, engine and the exact
+option as ParamName, with kernel resx codes CK08001, CK08002 and CK08003. Existing timer
+policies are retained: Documents permits zero authentication/idle values; Blob requires positive
+values; both accept InfiniteTimeSpan. SQL/Graph/KeyValue retain their existing authentication/
+idle policy. All models require positive finite shutdown/linger values no greater than
+4,294,967,294 milliseconds. Configuration ArgumentExceptions have no SQLSTATE. No wire,
+protocol, storage format, event or counter changes.
+
+The TCP address setup was compared with PostgreSQL src/backend/libpq/pqcomm.c:442-470
+(AI_PASSIVE and pg_getaddrinfo_all) in the local clone. Cohesion deliberately keeps its existing
+literal-only bind policy instead of copying hostname resolution. No reference-engine code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Internal convention maintenance
+
+The file-system refusal for an existing database uses the generated `FileStorageAlreadyExists` resource and current-culture formatting. It preserves the previous text, exception type and diagnostics. Assembly-local Engine resource bindings live under `src/Internal/` while retaining the shared module's marked namespace exception. Private field and constant names change without changing their values or storage behavior.
+
+## Direct catalog diagnostic carriers
+
+`KeyValueCatalogException` retains its existing `DatabaseException` ancestry and inherited non-null
+`Diagnostics` collection. Catalog producers attach `CV06105` for malformed catalog data.
+Exception types, message text, locations and inner causes remain intact. Engine boundaries
+retain these diagnostics while applying their existing corruption/I/O translation. No catalog
+format, protocol layout or version changes.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+An orphan directory without its data file refuses creation with CK06004 and the unchanged remedy.
+A directly opened missing physical data/catalog set carries CK06005. In-memory and file-backed
+strategies share the same condition identities. The orphan-directory format text is resourced
+through this assembly's existing Engine binding; no new public helper or reference is required.
+
+## Model failure producer completion
+
+Previously uncoded engine refusals now attach an Error diagnostic at their producer. Exception
+types and message detail are preserved; the code stays in Diagnostics. These refusals have no
+statement span, so Start and End remain absent. Existing argument, disposal and cancellation
+exceptions retain their identity, and transaction disposal retains its original abort cause.
+
+| Code | Failure |
+| --- | --- |
+| `CV06107` | Unsupported entry-space format; opening refuses it with the existing recreate/restore remedy |
+| `CV07001` | Session belongs to a different database |
+| `CV05001` | A completed put returned no outcome row |
+| `CV05002` | No executor exists for the request type |
+| `CK04001` | Unsupported transaction isolation |
+| `CK04003` | The transaction has no active applying statement bracket |
+| `CK02001` | Result field does not support the requested byte accessor |
+| `CK02002` | Required result field is NULL |
+
+The normal successful paths add no diagnostic allocation, counter or process-wide atomic.
+There is no storage-format or protocol-version change and no new SQLSTATE mapping.
+The existing wire formatter prefers an engine diagnostic over the `CV04019` fallback and
+emits its prefix once. The entry-space format remains unchanged; the refusal only gains its
+own structured identity.
+Handshake refusal descriptions resolve through resources with their existing text and numeric
+protocol error categories. Authentication/version negotiation and refusal control flow are unchanged.
+
+## Debugger inspection (#1470)
+
+Key-value debugger views expose fixed operation kinds, stored request/result metadata and reviewed identities. Existing public memory values are returned without reading or copying their contents; private buffers, parameters, synchronized current-transaction getters and engine/session snapshots are omitted. Internal helpers with no safe public or protected data have empty views.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

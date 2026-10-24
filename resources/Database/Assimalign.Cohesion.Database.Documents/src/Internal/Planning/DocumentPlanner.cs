@@ -15,12 +15,15 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentPlanner")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.DebugView))]
 internal sealed partial class DocumentPlanner
 {
     private readonly DocumentCatalog _catalog;
     private readonly CancellationToken _cancellationToken;
     private readonly TransactionSnapshot _snapshot;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly bool _estimateSinglePath;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentPlanner"/> class.
@@ -29,12 +32,15 @@ internal sealed partial class DocumentPlanner
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
-    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default)
+    /// <param name="estimateSinglePath">Whether a description also needs estimates for an uncontested input.</param>
+    public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters,
+        CancellationToken cancellationToken = default, bool estimateSinglePath = false)
     {
         _catalog = catalog;
         _cancellationToken = cancellationToken;
         _snapshot = snapshot;
         _parameters = parameters;
+        _estimateSinglePath = estimateSinglePath;
     }
 
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
@@ -50,7 +56,7 @@ internal sealed partial class DocumentPlanner
         OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
-        _ => throw new DocumentPlanningException("COHDOC001", "The OQL statement is not supported by the document executor.", expression.Location),
+        _ => throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanFailure, expression.Location),
     };
 
     internal DocumentPlan Plan(OqlSelectExpression query)
@@ -93,7 +99,7 @@ internal sealed partial class DocumentPlanner
                 }
             }
         }
-        throw new DocumentPlanningException("COHDOC001", ErrorMessages.CollectionNameMissing, location);
+        throw new DocumentPlanningException("CD05001", ErrorMessages.CollectionNameMissing, location);
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
@@ -101,15 +107,15 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollections.EnsureReadOnly(create.Collection, create.Location);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
-            throw new DocumentPlanningException("COHDOC001", "CREATE INDEX requires an index name.", create.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanCreateIndexFailure, create.Location);
         }
 
         if (create.Paths.Count is < 1 or > 32)
-        { throw new DocumentPlanningException("COHDOC022", ErrorMessages.IndexPathCount, create.Location); }
+        { throw new DocumentPlanningException("CD03022", ErrorMessages.IndexPathCount, create.Location); }
         var paths = create.Paths.Select(path => IndexPath(path, alias: null)
-            ?? throw new DocumentPlanningException("COHDOC001", $"CREATE INDEX '{create.IndexName}' requires a representable document path.", path.Location)).ToArray();
+            ?? throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DocumentPlannerPlanCreateIndexFailure2, create.IndexName), path.Location)).ToArray();
         if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Length)
-        { throw new DocumentPlanningException("COHDOC001", ErrorMessages.IndexPathsDuplicate, create.Location); }
+        { throw new DocumentPlanningException("CD05001", ErrorMessages.IndexPathsDuplicate, create.Location); }
         return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, paths, create.IsUnique, create.IfNotExists);
     }
 
@@ -118,7 +124,7 @@ internal sealed partial class DocumentPlanner
         DocumentSystemCollections.EnsureReadOnly(drop.Collection, drop.Location);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
-            throw new DocumentPlanningException("COHDOC001", "DROP INDEX requires an index name.", drop.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanDropIndexFailure, drop.Location);
         }
 
         return new DocumentDropIndexPlan(ResolveCollection(drop.Collection, drop.Location), drop.IndexName, drop.IfExists);
@@ -128,11 +134,11 @@ internal sealed partial class DocumentPlanner
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new DocumentPlanningException("COHDOC001", "An OQL statement requires a collection name.", location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerResolveCollectionFailure, location);
         }
 
         return _catalog.FindCollection(name, _snapshot)
-            ?? throw new DocumentPlanningException("COHDOC002", $"Collection '{name}' does not exist.", location);
+            ?? throw new DocumentPlanningException("CD01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CollectionDoesNotExist, name), location);
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default,
@@ -146,9 +152,9 @@ internal sealed partial class DocumentPlanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(binding.Variable))
-            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameMissing, binding.Location); }
+            { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, binding.Location); }
             if (!variables!.Add(binding.Variable))
-            { throw new DocumentPlanningException("COHDOC023", ErrorMessages.BindingNameDuplicate, binding.Location); }
+            { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameDuplicate, binding.Location); }
             Validate(binding.Collection, allowAggregate: false);
             ValidateMetadata(binding.Collection, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
@@ -158,11 +164,11 @@ internal sealed partial class DocumentPlanner
             cancellationToken.ThrowIfCancellationRequested();
             ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
         }
-        if (query.Projections.Count == 0) { throw new DocumentPlanningException("COHDOC001", "OQL SELECT requires a projection.", query.Location); }
+        if (query.Projections.Count == 0) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure, query.Location); }
         if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
             query.Projections[0].Expression is OqlStarExpression))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.ValueProjectionInvalid, query.Location);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.ValueProjectionInvalid, query.Location);
         }
         // An explicit projection alias is visible to ORDER BY. Other paths
         // continue to address source documents, including unprojected fields.
@@ -181,7 +187,7 @@ internal sealed partial class DocumentPlanner
             Validate(query.Predicate, allowAggregate: false);
         }
         foreach (var key in query.GroupBy) { Validate(key, allowAggregate: false); }
-        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("COHDOC001", "OQL HAVING requires grouping or an aggregate.", query.Having.Location); }
+        if (query.Having is not null && !grouped) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure2, query.Having.Location); }
         var projections = new List<DocumentProjection>();
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var projection in query.Projections)
@@ -199,7 +205,7 @@ internal sealed partial class DocumentPlanner
             };
             if (!names.Add(name))
             {
-                throw new DocumentPlanningException("COHDOC003", $"OQL projection name '{name}' occurs more than once; specify unique aliases.", projection.Expression.Location);
+                throw new DocumentPlanningException("CD01003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerCreateLogicalPlanFailure3, name), projection.Expression.Location);
             }
             projections.Add(new DocumentProjection(name, projection.Expression, StaticType(projection.Expression)));
         }
@@ -213,7 +219,7 @@ internal sealed partial class DocumentPlanner
             if (query.IsDistinct && !query.Projections.Any(projection =>
                 EquivalentExpression(projection.Expression, order.Expression, query.Alias, unnestVariables, scopes!)))
             {
-                throw new DocumentPlanningException("COHDOC014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
+                throw new DocumentPlanningException("CD01014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
             Validate(order.Expression, allowAggregate: true);
             if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!); }
@@ -235,6 +241,8 @@ internal sealed partial class DocumentPlanner
         DocumentIndexPath? best = null;
         int bestPrefix = -1;
         bool bestRange = false;
+        long bestCost = long.MaxValue;
+        var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -257,17 +265,53 @@ internal sealed partial class DocumentPlanner
             }
             bool range = lower is not null || upper is not null;
             if (prefix.Count == 0 && !range) { continue; }
-            bool better = best is null || prefix.Count > bestPrefix || prefix.Count == bestPrefix &&
-                (range && !bestRange || range == bestRange && index.IsUnique && !best.Index.IsUnique);
-            if (!better) { continue; }
-            bestPrefix = prefix.Count;
-            bestRange = range;
             // Keep the single-path plan's scalar bound shape for callers inspecting it.
+            DocumentIndexPath candidate;
             if (index.Paths.Count == 1 && prefix.Count == 1)
-            { best = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
-            else { best = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
+            { candidate = new DocumentIndexPath(index, new DocumentSeekBound(prefix[0], true), new DocumentSeekBound(prefix[0], true)); }
+            else { candidate = new DocumentIndexPath(index, lower, upper, prefix.AsReadOnly()); }
+            candidates.Add((candidate, prefix.Count, range));
         }
-        return (DocumentAccessPath?)best ?? new DocumentScanPath();
+        if (candidates.Count == 0) { return new DocumentScanPath(); }
+        if (candidates.Count == 1 && !_estimateSinglePath) { return candidates[0].Path; }
+        var probed = new List<DocumentIndexPath>(candidates.Count);
+        foreach (var (path, prefix, range) in candidates)
+        {
+            var index = path.Index;
+            var estimate = _catalog.CountIndexRange(index, path.EqualityPrefix ?? [], path.Lower?.Value,
+                path.Lower?.Inclusive ?? false, path.Upper?.Value, path.Upper?.Inclusive ?? false,
+                _snapshot, _cancellationToken);
+            var candidate = path with { Estimate = estimate };
+            probed.Add(candidate);
+            long cost = estimate.IsComplete ? estimate.Count : Math.Max(1024, estimate.Count * 2);
+            bool better = best is null || cost < bestCost || cost == bestCost &&
+                (prefix > bestPrefix || prefix == bestPrefix &&
+                    (range && !bestRange || range == bestRange && index.IsUnique && !best.Index.IsUnique));
+            if (!better) { continue; }
+            best = candidate;
+            bestCost = cost;
+            bestPrefix = prefix;
+            bestRange = range;
+        }
+        // Exact, comparable inputs bound the extra index work. Tiny selective inputs
+        // are cheaper to filter directly; incomplete probes retain a single driver.
+        var selected = best!;
+        if (selected.Estimate is not { IsComplete: true, Count: >= 16 }) { return selected; }
+        var inputs = new List<DocumentIndexPath> { selected };
+        var covered = new HashSet<string>(ConstrainedPaths(selected), StringComparer.Ordinal);
+        foreach (var candidate in probed.OrderBy(path => path.Estimate!.Value.Count)
+            .ThenBy(path => path.Index.Name, StringComparer.Ordinal))
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (ReferenceEquals(candidate, selected) || candidate.Estimate is not { IsComplete: true } count ||
+                count.Count > bestCost * 2) { continue; }
+            var paths = ConstrainedPaths(candidate).ToArray();
+            if (paths.All(covered.Contains)) { continue; }
+            inputs.Add(candidate);
+            covered.UnionWith(paths);
+            if (inputs.Count == 4) { break; }
+        }
+        return inputs.Count == 1 ? selected : new DocumentIntersectionPath(inputs.AsReadOnly());
 
         void Collect(OqlExpression expression)
         {
@@ -308,6 +352,13 @@ internal sealed partial class DocumentPlanner
                 predicates.Add((pathName, LegacyIndexPath(path, alias), operation, value));
             }
         }
+    }
+
+    private static IEnumerable<string> ConstrainedPaths(DocumentIndexPath path)
+    {
+        int count = path.EqualityPrefix?.Count ?? 0;
+        if (path.Lower is not null || path.Upper is not null) { count++; }
+        for (int i = 0; i < count; i++) { yield return path.Index.Paths[i]; }
     }
 
     private static DocumentSeekBound Tighter(DocumentSeekBound? current, DocumentSeekBound candidate, bool isLower)
@@ -429,7 +480,7 @@ internal sealed partial class DocumentPlanner
                 (!function.IsAggregate || allowAggregate):
                 if (!function.AcceptsArity(call.Arguments.Count))
                 {
-                    throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid, call.Location);
+                    throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid, call.Location);
                 }
                 for (int i = 0; i < call.Arguments.Count; i++)
                 {
@@ -438,7 +489,7 @@ internal sealed partial class DocumentPlanner
                 }
                 return;
             default:
-                throw new DocumentPlanningException("COHDOC001", "The expression is not valid in this OQL planning context.", expression.Location);
+                throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateFailure, expression.Location);
         }
     }
 
@@ -485,7 +536,7 @@ internal sealed partial class DocumentPlanner
             return;
         }
         if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query, variables, scopes, bound); return; }
-        throw new DocumentPlanningException("COHDOC001", "An OQL grouped query may only read grouping expressions outside aggregate calls.", expression.Location);
+        throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateGroupedFailure, expression.Location);
     }
 
     private static bool IsVariablePath(OqlPathExpression path, IReadOnlySet<string>? variables)
@@ -553,5 +604,13 @@ internal sealed partial class DocumentPlanner
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
         return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner value)
+        {
+            _ = value;
+        }
     }
 }

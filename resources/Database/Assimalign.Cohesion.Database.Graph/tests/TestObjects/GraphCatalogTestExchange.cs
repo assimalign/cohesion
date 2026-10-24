@@ -20,7 +20,7 @@ internal sealed class GraphCatalogTestExchange : DatabaseProtocolExchange<GraphC
     /// </summary>
     /// <param name="statement">The catalog statement sent in the Graph execute message.</param>
     public GraphCatalogTestExchange(string statement)
-        : base(GraphProtocol.Family)
+        : base(GraphProtocol.Family, transactionStatus: true)
     {
         _statement = statement;
     }

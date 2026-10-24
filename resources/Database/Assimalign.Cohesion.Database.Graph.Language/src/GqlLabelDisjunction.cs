@@ -13,8 +13,10 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// merges into it: <c>(A|B)|C</c> is the same node as <c>A|B|C</c>. One in a later position stays a
 /// nested node, <c>A|(B|C)</c>; the meaning is the same, and merging it would cost a copy of its
 /// operands per enclosing group. A hand-built node with a null operand list, a null operand or
-/// fewer than two operands is rejected by the planner with <c>COHDBG001</c>.
+/// fewer than two operands is rejected by the planner with <c>CG05001</c>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlLabelDisjunction")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelDisjunction.DebugView))]
 public sealed record GqlLabelDisjunction : GqlLabelExpression
 {
     private readonly List<GqlLabelExpression>? _operands;
@@ -55,4 +57,16 @@ public sealed record GqlLabelDisjunction : GqlLabelExpression
 
     /// <inheritdoc />
     public override int GetHashCode() => StructuralHash(this);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelDisjunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelDisjunction value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlLabelExpression> Operands => _target.Operands;
+    }
 }

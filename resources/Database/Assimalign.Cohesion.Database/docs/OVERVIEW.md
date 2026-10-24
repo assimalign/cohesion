@@ -20,6 +20,15 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
 
 ## Scope
 
+Plan descriptions share the eight-column Database.Execution result contract across SQL,
+Documents and Graph. SQL's SELECT-only EXPLAIN ANALYZE can populate actual candidate counts;
+plain EXPLAIN stays nonexecuting, and the other models retain their documented syntax (#1522).
+
+Model packages compile the root's internal `Engine` shared-source module. Other Database-owned
+modules are `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults`; each consumer declares
+both its owning project and `Module` in `CohesionSharedSource` (#1705). The project file identifies
+the source boundary while the existing public construction and execution APIs remain intact.
+
 - **Root bases (concrete-types plan, phases 3 and 6, #1259 and #1262)** — `DatabaseEngine`,
   `DatabaseInstance`, `DatabaseSession`, `DatabaseTransaction`, `DatabaseServer`,
   `DatabaseServerSession` and `DatabaseEngineWorker` are the abstract bases of the area's
@@ -77,11 +86,11 @@ Database instances expose a nullable immutable `Provisioning` observation for mo
 - **Error root** — `DatabaseException` for the contract root and everything built above it;
   `DatabaseNotFoundException` for the exact missing-database outcome of
   `DatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for statement text a session's
-  language rejects; `DatabaseOfflineException` (with a model `Code`) for every operation on a
+  language rejects; `DatabaseOfflineException` (with its model code in `Diagnostics` and the existing `Code` getter) for every operation on a
   database whose journal or data fsync (#1243), journal drain (#1252) or header slot write
   (#1268) failed, or whose engine gave up on it (owner decision 25), until it is reopened, and
   `DatabaseTransactionCommitUnconfirmedException` for work that may have committed when it did.
-  `DatabaseCorruptionException` (`COHDBS003`) reports storage damage with the database,
+  `DatabaseCorruptionException` (`CK06003`) reports storage damage with the database,
   affected page and original storage cause; corruption never reads as absence.
   `DatabaseEngine.OfflineDatabases` lists the offline databases for health, and
   `DatabaseEngine.GetOfflineError` says what took one offline. Child roots own independent
@@ -112,3 +121,74 @@ disposal ownership. Named engine operations use `DatabaseName`. `IDatabaseApplic
 asynchronously disposable, its context includes all engines and ordinal `GetEngine(name)`, and its
 builder exposes AddEngine(instance) and AddEngine(name, factory) plus one-shot Build without a
 mutable registry or Use stage.
+
+Thrown statement failures report the first error diagnostic's code, or the first diagnostic
+when none is an error. Events never recover codes from exception messages. Offline and
+unconfirmed-commit exceptions now carry structured model diagnostics and unprefixed detail;
+legacy wire error text keeps its single code prefix. See DESIGN, structured failure-event codes.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Shared index maintenance conformance (#1195)
+
+Root integration tests cover all four B-tree model engines' coordinator purge bindings and
+the current manager after catalog/store reattachment. No new root public API is introduced;
+the shared Indexing and Transactions packages own bounded pruning and its safe horizon.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+The [error-code registry](ERROR-CODES.md) assigns two-character model prefixes and five decimal digits. Existing SQLSTATE classifications are preserved. PostgreSQL `src/backend/utils/errcodes.txt:52-62` informs the separation of stable classes from detailed conditions; no code is copied.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+The [convention audit](CONVENTIONS.md) records the reusable-throw migration, retained local
+guards and shared-source resource ownership.
+
+## Lifecycle diagnostic completion
+
+Duplicate and absent logical databases now carry CK03001 and CK03002 across every model.
+Root session/transaction state refusals carry the shared CK04004–CK04007 and CK07003–CK07004
+conditions described in DESIGN. Messages, exception types, original causes and state behavior
+remain unchanged. DatabaseNotFoundException adds a diagnostics-bearing constructor whose third
+inner-exception argument is required; existing constructors and null-inner calls retain their
+contracts. Physical SQL/KeyValuePair refusals use CK06004/CK06005. No disk or wire version changes.
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+
+## TCP delivery completion (#1391)
+
+The shared abstract DatabaseServerOptions carries the concrete-first deviation marker because it
+represents the five sealed model options. The release inventory, Database CI project matrix and
+solution entries name Database.Tcp. SDK smoke watches its source, and the Linux NativeAOT job
+publishes and runs its five-model handshake/Ping guard with compiler and trimming warnings refused.
+The installed-SDK acceptance fixture compiles without explicit model or transport references and
+serves KeyValuePair, Graph and Blob through the framework-public Listen(Uri) extension. Public
+signatures, option defaults, coded refusals, protocol layouts and storage formats remain unchanged.

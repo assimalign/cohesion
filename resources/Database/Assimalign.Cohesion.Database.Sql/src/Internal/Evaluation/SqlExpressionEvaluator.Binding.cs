@@ -28,7 +28,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// Missing parameters are the exception: the request contract rejects them during planning
     /// and binding, before a data row is read or written (#1102).
     /// The walk checks the stack before it descends (#1151), as every expression walker does, so a
-    /// tree the thread cannot walk fails the statement with <c>COHSQLE004</c>.
+    /// tree the thread cannot walk fails the statement with <c>CS05004</c>.
     /// </para>
     /// <para>
     /// Each node's collation candidate is computed from its operands' as the walk returns, so a
@@ -241,7 +241,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (type is not (DatabaseType.Boolean or DatabaseType.Null) && !TryBooleanLiteral(test.Operand, out _)
             && operand is not (SqlBoundCase { ResultType: DatabaseType.Boolean } or SqlBoundCoalesce { ResultType: DatabaseType.Boolean }))
         {
-            throw new SqlPlanningException("COHSQLE003", ErrorMessages.BooleanTestOperand, test.Location);
+            throw new SqlPlanningException("CS02003", ErrorMessages.BooleanTestOperand, test.Location);
         }
         collation = CollationOf(test, [operandCollation]);
         return new SqlBoundBooleanTest(operand, test.TruthValue, test.IsNegated, test.Location);
@@ -412,7 +412,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// The literal is parsed once, here. One its type cannot hold (an integer beyond BIGINT, a
     /// numeric that DECIMAL cannot represent exactly) binds as a failure that parses it again when
     /// evaluated, so the evaluator still raises the literal's own overflow: coded at the evaluation
-    /// boundary as <c>COHSQLE002</c>, and reported by an enclosing CAST as a conversion failure.
+    /// boundary as <c>CS02002</c>, and reported by an enclosing CAST as a conversion failure.
     /// </remarks>
     private static SqlBoundExpression BindLiteral(SqlLiteralExpression literal)
     {
@@ -476,7 +476,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (unary.Operator == SqlUnaryOperator.Negate
             && unary.Operand is SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } magnitude
             && ulong.TryParse(magnitude.Value, NumberStyles.None, CultureInfo.InvariantCulture, out ulong digits)
-            && digits == BigIntMinimumMagnitude)
+            && digits == bigIntMinimumMagnitude)
         {
             collation = CollationOf(unary, [FindCollation(magnitude, bound: true)]);
             return new SqlBoundConstant(long.MinValue);
@@ -648,7 +648,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <summary>
     /// Binds a call to the overload it resolves to in the engine's function catalog: once, here,
     /// instead of for every row. A call the evaluator does not compute binds as the failure it raises
-    /// when it is reached — <c>COHSQLE006</c> for arguments no overload accepts, <c>COHSQLE008</c> for
+    /// when it is reached — <c>CS01006</c> for arguments no overload accepts, <c>CS01008</c> for
     /// arguments several accept equally well, "not supported by the executor yet" for a name outside
     /// the catalog or an aggregate outside the grouping plan that binds it to a slot — and its
     /// arguments, which never run, are not bound. <c>COALESCE</c> is a special form, evaluated lazily.
@@ -834,25 +834,25 @@ internal sealed partial class SqlExpressionEvaluator
     // closure captures its factory's argument, so it is allocated when the factory runs.
 
     private static SqlBoundFailure NotMaterialized(Location? location)
-        => new(() => throw new SqlPlanningException("COHSQLE013", "A subquery must be materialized by its plan before scalar evaluation.", location));
+        => new(() => throw new SqlPlanningException("CS05013", ErrorMessages.EvaluatorNotMaterializedSqlPlanning, location));
 
     private static SqlBoundFailure MissingInValues(Location? location)
-        => new(() => throw new SqlPlanningException("COHSQLE013", "An IN query requires a value list or a subquery.", location));
+        => new(() => throw new SqlPlanningException("CS05013", ErrorMessages.EvaluatorMissingInValuesSqlPlanning, location));
 
     private static SqlBoundFailure Unsupported(string type, Location? location)
-        => new(() => throw new SqlPlanningException("COHSQLE013", $"Expression '{type}' is not supported by the executor yet.", location));
+        => new(() => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorUnsupportedSqlPlanning, type), location));
 
     private static SqlBoundFailure LiteralFailure(SqlLiteralExpression literal) => new(() => EvaluateLiteral(literal));
 
     private SqlBoundFailure ColumnFailure(SqlColumnReferenceExpression column) => new(() => ResolveColumn(column));
 
     private static SqlBoundExpression MissingParameter(string parameterName, Location? location)
-        => throw new SqlPlanningException("COHSQLE020", $"No value was supplied for parameter '{ParameterBindings.BareName(parameterName)}'.", location);
+        => throw new SqlPlanningException("CS01020", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorMissingParameterSqlPlanning, ParameterBindings.BareName(parameterName)), location);
 
     private static SqlBoundFailure ResolutionFailure(SqlEvaluationException exception) => new(() => throw exception.Duplicate());
 
     private static SqlBoundFailure UnsupportedFunction(string name, Location? location)
-        => new(() => throw new SqlPlanningException("COHDBL001", $"Function '{name}' is not supported by the executor yet.", location));
+        => new(() => throw new SqlPlanningException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnsupportedFunctionSqlPlanning, name), location));
 
     private static SqlBoundFailure CastTargetFailure(SqlCastExpression cast, SqlTypeCatalog types)
         => new(() => SqlPlanner.ResolveCastTarget(cast, types));

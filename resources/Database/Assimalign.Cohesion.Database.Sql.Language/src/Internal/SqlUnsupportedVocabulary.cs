@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Internal;
 /// <summary>
 /// The SQL recognized-unsupported table (#1101): every word or operator outside the profile's
 /// keyword list that the parser recognizes as an unsupported construct and rejects with
-/// <c>COHDBL001</c>, plus the clause keywords the preflight scan matches through this table,
+/// <c>CK00001</c>, plus the clause keywords the preflight scan matches through this table,
 /// each with the construct its diagnostic names.
 /// </summary>
 /// <remarks>

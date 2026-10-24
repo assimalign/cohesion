@@ -203,7 +203,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             int ordinal = checked((latest?.Ordinal ?? 0) + 1);
             if (ordinal > 9999)
             {
-                throw new InvalidOperationException("Database migration ordinals cannot exceed 9999.");
+                throw new InvalidOperationException(ErrorMessages.MigrationOrdinalLimit);
             }
 
             string prefix = $"{ordinal.ToString("D4", CultureInfo.InvariantCulture)}_{migrationName}";
@@ -343,7 +343,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     {
                         throw Unsupported(
                             operation,
-                            "adding a non-nullable column requires a non-null literal default or a backfill");
+                            ErrorMessages.RequiredColumnDefaultMissing);
                     }
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" ADD COLUMN ");
@@ -351,7 +351,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     builder.Append(";\n");
                     break;
                 case SqlSchemaMigrationOperationKind.AlterColumn:
-                    throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
+                    throw Unsupported(operation, ErrorMessages.AlterMetadataUnsupported);
                 case SqlSchemaMigrationOperationKind.DropColumn:
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" DROP COLUMN ").Append(Identifier(operation.ObjectName)).Append(";\n");
@@ -364,7 +364,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                         .Append(" ON ").Append(QualifiedTable(Required(operation.ParentName, operation))).Append(";\n");
                     break;
                 case SqlSchemaMigrationOperationKind.AlterTable:
-                    throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
+                    throw Unsupported(operation, ErrorMessages.AlterMetadataUnsupported);
                 case SqlSchemaMigrationOperationKind.AddDomain or SqlSchemaMigrationOperationKind.DropDomain:
                     // A SQL engine's domains are registered on the engine, not stored in the database
                     // (phase E3): the step has no statement, and the engine that declares the database
@@ -373,7 +373,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                         .Append(Identifier(operation.ObjectName)).Append(" (registered by the SQL engine; no statement)\n");
                     break;
                 default:
-                    throw Unsupported(operation, "the operation kind is unknown");
+                    throw Unsupported(operation, ErrorMessages.MigrationKindUnknown);
             }
         }
 
@@ -382,7 +382,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             if (table.Constraints.Count > 0)
             {
                 throw new InvalidOperationException(
-                    $"Table '{table.Name}' declares constraints that the SQL DDL executor does not support yet.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationConstraintsUnsupported, table.Name));
             }
 
             builder.Append("CREATE TABLE IF NOT EXISTS ").Append(QualifiedTable(table.Name)).Append(" (");
@@ -453,7 +453,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 select.GroupBy.Count > 0 || select.Having is not null ||
                 select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
             {
-                throw new InvalidOperationException($"DEFAULT '{text}' must be exactly one supported SQL literal.");
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLiteralInvalid, text));
             }
 
             return literal;
@@ -496,7 +496,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 DatabaseType.Guid => "UUID",
                 DatabaseType.Json => "JSON",
                 DatabaseType.JsonBinary => "JSONB",
-                _ => throw new InvalidOperationException($"Database type '{column.Type}' has no SQL migration representation.")
+                _ => throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationTypeUnsupported, column.Type))
             };
         }
 
@@ -505,7 +505,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             if (column.Scale is not null && column.Precision is null)
             {
                 throw new InvalidOperationException(
-                    $"Column '{column.Name}' declares a decimal scale without a precision.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DecimalPrecisionMissing, column.Name));
             }
 
             if (column.Precision is null)
@@ -537,14 +537,14 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             ArgumentException.ThrowIfNullOrWhiteSpace(value);
             if (!(char.IsLetter(value[0]) || value[0] == '_'))
             {
-                throw new InvalidOperationException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaIdentifierUnsupported, value));
             }
 
             for (int index = 1; index < value.Length; index++)
             {
                 if (!(char.IsLetterOrDigit(value[index]) || value[index] == '_'))
                 {
-                    throw new InvalidOperationException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaIdentifierUnsupported, value));
                 }
             }
 
@@ -552,7 +552,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         }
 
         private static InvalidOperationException Unsupported(SqlSchemaMigrationOperation operation, string reason)
-            => new($"SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}' is unsupported: {reason}.");
+            => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationOperationUnsupported, operation.Kind, QualifiedName(operation), reason));
 
         private static string QualifiedName(SqlSchemaMigrationOperation operation)
             => operation.ParentName is null
@@ -560,10 +560,10 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                 : $"{operation.ParentName}.{operation.ObjectName}";
 
         private static T Required<T>(T? value, SqlSchemaMigrationOperation operation) where T : class
-            => value ?? throw new InvalidOperationException($"Migration operation '{operation.Kind}' for '{operation.ObjectName}' omitted required data.");
+            => value ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationDataMissing, operation.Kind, operation.ObjectName));
 
         private static string Required(string? value, SqlSchemaMigrationOperation operation)
-            => value ?? throw new InvalidOperationException($"Migration operation '{operation.Kind}' for '{operation.ObjectName}' omitted its parent name.");
+            => value ?? throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationParentMissing, operation.Kind, operation.ObjectName));
 
     }
 }

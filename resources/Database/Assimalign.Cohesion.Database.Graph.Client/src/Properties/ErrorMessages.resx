@@ -13,4 +13,13 @@
   <data name="PathResultAlreadyEnumerated" xml:space="preserve"><value>A graph path result can be enumerated only once.</value></data>
   <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite parameters require the graph.composite-values capability.</value></data>
   <data name="CompositeRowMalformed" xml:space="preserve"><value>Malformed Graph composite result row.</value></data>
+  <data name="GraphClientCreateArgument" xml:space="preserve"><value>Connection settings and a connection factory are required.</value></data>
+  <data name="ExecuteCoreAsyncDatabaseClient" xml:space="preserve"><value>The server closed the graph exchange before completion.</value></data>
+  <data name="ExchangeExecuteCoreAsyncProtocol" xml:space="preserve"><value>A graph result cannot have multiple headers.</value></data>
+  <data name="ExchangeExecuteCoreAsyncProtocol2" xml:space="preserve"><value>A graph row requires a result header.</value></data>
+  <data name="ExchangeExecuteCoreAsyncProtocol3" xml:space="preserve"><value>Malformed graph result completion.</value></data>
+  <data name="ExchangeExecuteCoreAsyncProtocol4" xml:space="preserve"><value>Unexpected {0} frame in a graph execute exchange.</value></data>
+  <data name="GraphExecuteExchangeDecodeRowProtocol" xml:space="preserve"><value>A graph result row has too many values.</value></data>
+  <data name="PathsExchangeConsumeFrameProtocol" xml:space="preserve"><value>The graph path completion count does not match the received paths.</value></data>
+  <data name="PathsExchangeConsumeFrameProtocol2" xml:space="preserve"><value>Expected a graph path or path completion.</value></data>
 </root>

@@ -225,14 +225,14 @@ public sealed partial class SqlQueryParser
     {
         var values = new List<SqlExpression>();
 
-        if (!Expect(ref lexer, TokenType.LeftParen, "'(' before the VALUES row"))
+        if (!Expect(ref lexer, TokenType.LeftParen, _errorValuesRowOpeningExpected))
         {
             return values;
         }
 
         if (lexer.Current.Type == TokenType.RightParen)
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected a value in the VALUES row; an empty row is not allowed.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSingleValueRowVoid);
         }
         else
         {
@@ -244,7 +244,7 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        Expect(ref lexer, TokenType.RightParen, "')' after the VALUES row");
+        Expect(ref lexer, TokenType.RightParen, _errorValuesRowClosingExpected);
         return values;
     }
 

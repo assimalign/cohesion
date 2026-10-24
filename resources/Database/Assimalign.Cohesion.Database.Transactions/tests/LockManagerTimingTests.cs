@@ -49,7 +49,7 @@ public sealed class LockManagerTimingTests
 
     private static LockManager CreateTable(int count)
     {
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         for (ulong index = 0; index < (ulong)count; index++)
         {
             locks.TryAcquire(new TransactionSequence(1), LockResource.Entry(1, index), LockMode.Exclusive).ShouldBeTrue();

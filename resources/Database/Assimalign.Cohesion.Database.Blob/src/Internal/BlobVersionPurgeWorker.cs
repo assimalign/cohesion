@@ -56,6 +56,8 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 /// a backoff, not only on its coordinator's doubling schedule.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobVersionPurgeWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Internal.BlobVersionPurgeWorker.DebugView))]
 internal sealed class BlobVersionPurgeWorker : DatabaseVersionPurgeWorker<BlobDatabase>
 {
     private readonly BlobDatabaseEngine _engine;
@@ -75,4 +77,19 @@ internal sealed class BlobVersionPurgeWorker : DatabaseVersionPurgeWorker<BlobDa
     protected override TransactionCoordinator GetCoordinator(BlobDatabase database) => database.Coordinator;
     protected override void Purge(BlobDatabase database, CancellationToken cancellationToken)
         => database.Catalog.RunVersionPurgePass(cancellationToken);
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.Internal.BlobVersionPurgeWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Internal.BlobVersionPurgeWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
+    }
 }

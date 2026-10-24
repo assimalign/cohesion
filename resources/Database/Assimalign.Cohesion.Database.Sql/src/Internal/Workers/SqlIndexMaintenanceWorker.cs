@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// host mapping built on it — is stable: when index compaction lands, the throttled
 /// maintenance body fills in here without changing the seam or any host.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlIndexMaintenanceWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexMaintenanceWorker.DebugView))]
 internal sealed class SqlIndexMaintenanceWorker : DatabaseWriteWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
@@ -42,5 +44,21 @@ internal sealed class SqlIndexMaintenanceWorker : DatabaseWriteWorker<SqlDatabas
         DatabaseWriteResult failures = default;
         // The index layer has no compaction yet; its future body already has database isolation.
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexMaintenanceWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexMaintenanceWorker value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<global::Assimalign.Cohesion.Database.DatabaseWriteResult> Lanes => _target.Lanes;
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

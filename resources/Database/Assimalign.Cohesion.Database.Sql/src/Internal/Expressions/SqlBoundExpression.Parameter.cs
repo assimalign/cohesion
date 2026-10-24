@@ -5,6 +5,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// values are fixed before it is planned, so the name is looked up once, not per row; a parameter
 /// with no supplied value binds as a <see cref="SqlBoundFailure"/> that reports it when evaluated.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundParameter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundParameter.DebugView))]
 internal sealed class SqlBoundParameter : SqlBoundExpression
 {
     /// <summary>Initializes a bound parameter.</summary>
@@ -22,4 +24,12 @@ internal sealed class SqlBoundParameter : SqlBoundExpression
 
     /// <summary>Gets the supplied value.</summary>
     internal object? Value { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundParameter value)
+        {
+            _ = value;
+        }
+    }
 }

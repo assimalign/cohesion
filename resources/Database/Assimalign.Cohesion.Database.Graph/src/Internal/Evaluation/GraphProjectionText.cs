@@ -46,7 +46,7 @@ internal static class GraphProjectionText
             GqlStringPredicateExpression predicate => Describe(predicate.Left) + " " + (predicate.Operator switch
                 { GqlStringPredicateOperator.StartsWith => "STARTS WITH", GqlStringPredicateOperator.EndsWith => "ENDS WITH", _ => "CONTAINS" }) + " " + Describe(predicate.Right),
             GqlLabeledPredicate labeled => Name(labeled.Variable) + (labeled.IsNegated ? " IS NOT LABELED " : " IS LABELED ") + labeled.LabelExpression,
-            _ => throw new GraphPlanningException("COHDBG001", ErrorMessages.ProjectionUnsupported, expression.Location),
+            _ => throw new GraphPlanningException("CG05001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
     }
 

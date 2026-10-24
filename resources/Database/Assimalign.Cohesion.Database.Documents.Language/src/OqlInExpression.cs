@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A structural membership predicate over an explicit list or an array value.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlInExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlInExpression.DebugView))]
 public sealed class OqlInExpression : OqlExpression
 {
     /// <summary>Initializes an IN predicate.</summary>
@@ -39,4 +41,21 @@ public sealed class OqlInExpression : OqlExpression
     public OqlExpression? Array { get; }
     /// <summary>Gets whether the result is negated.</summary>
     public bool Negated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlInExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlInExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Operand => _target.Operand;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression> Values => _target.Values;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression? Array => _target.Array;
+        public bool Negated => _target.Negated;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

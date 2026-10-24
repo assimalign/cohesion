@@ -82,7 +82,7 @@ public sealed class SqlTransactionControlTests
         harness.Server.Sessions.ShouldAllBe(session => session.DatabaseSession!.CurrentTransaction == null);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: malformed START returns SQL0003 without opening a transaction and the connection recovers")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: malformed START returns CS00003 without opening a transaction and the connection recovers")]
     public async Task ExecuteAsync_WireMalformedStartTransaction_ShouldReportParseFailureAndKeepConnectionUsable()
     {
         // Arrange
@@ -99,7 +99,7 @@ public sealed class SqlTransactionControlTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        error.Message.ShouldContain("CS00003", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
         (await CountAsync(client)).ShouldBe(2);
         session.CurrentTransaction.ShouldBeNull();
@@ -193,7 +193,7 @@ public sealed class SqlTransactionControlTests
         {
             var result = await session.ExecuteAsync(command);
             result.Status.ShouldBe(DatabaseResultStatus.Error);
-            result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT002");
+            result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("CS04002");
         }
 
         (await session.ExecuteAsync("BEGIN")).Status.ShouldBe(DatabaseResultStatus.Success);
@@ -201,7 +201,7 @@ public sealed class SqlTransactionControlTests
         transaction.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
         var nested = await session.ExecuteAsync("BEGIN TRANSACTION");
         nested.Status.ShouldBe(DatabaseResultStatus.Error);
-        nested.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT001");
+        nested.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("CS04001");
         session.CurrentTransaction.ShouldBeSameAs(transaction);
         await session.ExecuteAsync("ROLLBACK");
         session.CurrentTransaction.ShouldBeNull();
@@ -238,7 +238,7 @@ public sealed class SqlTransactionControlTests
         await session.ExecuteAsync("BEGIN");
         var result = await session.ExecuteAsync("DROP TABLE t");
         result.Status.ShouldBe(DatabaseResultStatus.Error);
-        result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("COHSQLT003");
+        result.Diagnostics.ShouldNotBeNull().ShouldHaveSingleItem().Code.ShouldBe("CS04003");
         (await session.ExecuteAsync("INSERT INTO t VALUES (1)")).AffectedCount.ShouldBe(1);
         await session.ExecuteAsync("ROLLBACK");
         (await session.ExecuteAsync("INSERT INTO t VALUES (2)")).AffectedCount.ShouldBe(1);
@@ -251,9 +251,9 @@ public sealed class SqlTransactionControlTests
         await using var client = await harness.DialAsync();
         await client.HandshakeAsync();
 
-        await ExpectDiagnosticAsync(client, "COMMIT", "COHSQLT002");
+        await ExpectDiagnosticAsync(client, "COMMIT", "CS04002");
         await ExecuteAsync(client, "BEGIN");
-        await ExpectDiagnosticAsync(client, "BEGIN", "COHSQLT001");
+        await ExpectDiagnosticAsync(client, "BEGIN", "CS04001");
         await ExecuteAsync(client, "INSERT INTO users VALUES (3, 'lin')");
         await ExecuteAsync(client, "COMMIT");
         (await CountAsync(client)).ShouldBe(3);
@@ -262,12 +262,12 @@ public sealed class SqlTransactionControlTests
     /// <summary>
     /// Over the wire, a transaction the kernel ended under its caller (the served database was
     /// dropped while the connection held it) refuses the connection's statements and its COMMIT with
-    /// <c>COHSQLT005</c> as execution failures, the COMMIT ends it, and the connection stays usable
+    /// <c>CS04005</c> as execution failures, the COMMIT ends it, and the connection stays usable
     /// (concrete-types plan §6.4, "Sql at P4"). Before the root bases the session dropped such a
     /// transaction, so the statement ran in auto-commit against the dropped database and the COMMIT
-    /// answered <c>COHSQLT002</c>.
+    /// answered <c>CS04002</c>.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Wire transaction: one the kernel ended refuses work and COMMIT with COHSQLT005")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Wire transaction: one the kernel ended refuses work and COMMIT with CS04005")]
     public async Task ExecuteAsync_WireTransactionEndedByTheKernel_ShouldCarryCohsqlt005AndKeepConnectionUsable()
     {
         // Arrange
@@ -287,8 +287,8 @@ public sealed class SqlTransactionControlTests
 
         // Assert
         await client.ExpectAsync(ProtocolMessageType.Pong);
-        statement.ShouldStartWith("COHSQLT005: The session's transaction is aborted; statements are refused until it is rolled back.", Case.Sensitive);
-        commit.ShouldStartWith("COHSQLT005: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
+        statement.ShouldStartWith("CS04005: The session's transaction is aborted; statements are refused until it is rolled back.", Case.Sensitive);
+        commit.ShouldStartWith("CS04005: The session's transaction is aborted and cannot commit; nothing was committed.", Case.Sensitive);
         transaction.State.ShouldNotBe(TransactionState.Committed);
         session.CurrentTransaction.ShouldBeNull();
     }

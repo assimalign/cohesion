@@ -13,4 +13,81 @@
   <data name="TransactionOperationsAborted" xml:space="preserve"><value>The session's transaction is aborted; operations are refused until it is rolled back.</value></data>
   <data name="TransactionFailureCause" xml:space="preserve"><value> Cause: {0}</value></data>
   <data name="OperationTransactionInactive" xml:space="preserve"><value>The blob operation's transaction is no longer active.</value></data>
+  <data name="ChunkHeaderInvalid" xml:space="preserve"><value>Invalid blob chunk header.</value></data>
+  <data name="ChunkLengthInvalid" xml:space="preserve"><value>Blob chunk length or next location disagrees with catalog length.</value></data>
+  <data name="CatalogFormatRefusalLocation" xml:space="preserve"><value>{2} (page {0}, slot {1})</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Unsupported blob catalog format version {0}.</value></data>
+  <data name="DeclarationsAlreadyDeclaredFailure" xml:space="preserve"><value>{0} engine '{1}' already declares database '{2}'.</value></data>
+  <data name="DatabaseDeclarationsRefuseDropFailure" xml:space="preserve"><value>{0} engine '{1}' declares database '{2}' ({3}.AddDatabase), so DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.</value></data>
+  <data name="DatabaseDeclarationsDeclareFailure" xml:space="preserve"><value>Engine '{0}' already declares its databases.</value></data>
+  <data name="BuilderStateEnsureMutableFailure" xml:space="preserve"><value>{0} engine '{1}': composition is frozen after a build attempt.</value></data>
+  <data name="EngineBuilderStateBeginBuildFailure" xml:space="preserve"><value>{0} engine '{1}': the builder supports one build attempt.</value></data>
+  <data name="EngineBuilderStateCompleteFailure" xml:space="preserve"><value>The compose method returned before it attached every product.</value></data>
+  <data name="EngineBuilderStateProduceFailure" xml:space="preserve"><value>The compose method read a product sequence twice.</value></data>
+  <data name="EngineBuilderStateProduceFailure2" xml:space="preserve"><value>The compose method requested a server before it attached every worker.</value></data>
+  <data name="StateThrowIfPendingUnattachedFailure" xml:space="preserve"><value>The compose method read past a product it did not attach.</value></data>
+  <data name="EngineOptionChecksRefuseFailure" xml:space="preserve"><value>{0}: {1} {2}</value></data>
+  <data name="FileNamesThrowIfInvalidArgument" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="DatabaseMemoryFilesTryOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' was opened or created again while an open copied it.</value></data>
+  <data name="DatabaseMemoryFilesThrowIfOpenFailure" xml:space="preserve"><value>The in-memory file set '{0}' is still open: its database's storage has not closed, so it cannot be opened again.</value></data>
+  <data name="BlobContainerOpenWriteAsyncDatabase" xml:space="preserve"><value>Blob '{0}' already exists.</value></data>
+  <data name="BlobContainerOpenReadAsyncDatabase" xml:space="preserve"><value>Blob '{0}' does not exist.</value></data>
+  <data name="BlobContainerEnsureContainerDatabase" xml:space="preserve"><value>Container '{0}' is no longer available in this transaction.</value></data>
+  <data name="DatabaseCreateContainerAsyncDatabase" xml:space="preserve"><value>Container '{0}' already exists.</value></data>
+  <data name="BlobDatabaseGetContainerAsyncDatabase" xml:space="preserve"><value>Container '{0}' does not exist.</value></data>
+  <data name="BlobDatabaseLockWriterAsyncDatabase" xml:space="preserve"><value>The blob operation's transaction ended while waiting for the writer lock.</value></data>
+  <data name="BlobDatabaseThrowConflictFailure" xml:space="preserve"><value>The blob catalog changed since this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="EngineDropDatabaseCoreAsyncFailure" xml:space="preserve"><value>Database '{0}' does not exist.</value></data>
+  <data name="EngineDisposeAsyncCoreAggregate" xml:space="preserve"><value>One or more blob databases failed to close.</value></data>
+  <data name="BlobDatabaseEngineGetDatabaseDatabase" xml:space="preserve"><value>Database '{0}' already exists.</value></data>
+  <data name="BlobDatabaseEngineGetDatabaseFailure" xml:space="preserve"><value>The storage strategy returned null.</value></data>
+  <data name="BlobDatabaseEngineGetDatabaseDatabase2" xml:space="preserve"><value>Database '{0}' cannot be opened. {1}</value></data>
+  <data name="DatabaseSessionEnterOperationDatabase" xml:space="preserve"><value>Dispose the active blob stream before starting another operation on this session.</value></data>
+  <data name="BeginTransactionCoreAsyncDatabase" xml:space="preserve"><value>The blob engine supports Snapshot and ReadCommitted isolation.</value></data>
+  <data name="SessionDisposeAsyncCoreDatabase" xml:space="preserve"><value>The blob session closed while the operation was running.</value></data>
+  <data name="BlobCatalogSaveContainerAsyncArgument" xml:space="preserve"><value>A container must have a nonempty identity.</value></data>
+  <data name="BlobCatalogSaveContainerAsyncArgument2" xml:space="preserve"><value>A schema-owned container must name its owning schema.</value></data>
+  <data name="BlobCatalogSaveBlobAsyncArgument" xml:space="preserve"><value>Blob metadata requires a container identity and a head for nonempty content.</value></data>
+  <data name="BlobCatalogEnsureActiveFailure" xml:space="preserve"><value>Catalog mutations require an active transaction.</value></data>
+  <data name="BlobDatabaseServerSessionAbortFailure" xml:space="preserve"><value>The server is shutting down.</value></data>
+  <data name="ServerSessionUploadAsyncProtocol" xml:space="preserve"><value>A Blob upload must begin with TransferStart.</value></data>
+  <data name="ServerSessionRunAsyncValueTask" xml:space="preserve"><value>An unexpected server error terminated the session.</value></data>
+  <data name="ServerSessionReadyLoopAsyncValueTask" xml:space="preserve"><value>The session was closed after exceeding the idle timeout.</value></data>
+  <data name="DatabaseServerSessionExecuteAsyncTask" xml:space="preserve"><value>The Blob engine is {0}.</value></data>
+  <data name="ServerSessionExecuteAsyncValueTask" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="RejectUnexpectedFrameAsyncValueTask" xml:space="preserve"><value>Unexpected {0} frame in the ready state.</value></data>
+  <data name="StreamCheckReadableNotSupported" xml:space="preserve"><value>The blob stream does not support reading.</value></data>
+  <data name="DatabaseServerStartCoreAsyncDatabase" xml:space="preserve"><value>The Blob engine is {0} and cannot accept sessions.</value></data>
+  <data name="StorageTombstoneContentAsyncFailure" xml:space="preserve"><value>Blob chain ends before its catalog length.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog" xml:space="preserve"><value>Truncated blob catalog identity.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog2" xml:space="preserve"><value>A catalog name cannot be null.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog3" xml:space="preserve"><value>Invalid container ownership metadata.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog4" xml:space="preserve"><value>Invalid blob content length or head reference.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog5" xml:space="preserve"><value>Unexpected blob metadata record kind {0}.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog6" xml:space="preserve"><value>Invalid or trailing blob catalog metadata.</value></data>
+  <data name="BlobCatalogCodecDecodeBlobCatalog7" xml:space="preserve"><value>Malformed blob catalog metadata.</value></data>
+  <data name="BlobCatalogCodecReadStringBlobCatalog" xml:space="preserve"><value>Invalid catalog string length.</value></data>
+  <data name="BlobReadStreamFailure" xml:space="preserve"><value>Invalid blob content reference.</value></data>
+  <data name="BlobReadStreamReadFailure" xml:space="preserve"><value>Blob content checksum disagrees with its catalog metadata.</value></data>
+  <data name="EngineDescription" xml:space="preserve"><value>{0} engine '{1}'</value></data>
+  <data name="OptionPositiveRequirement" xml:space="preserve"><value>must be positive.</value></data>
+  <data name="OptionNonnegativeRequirement" xml:space="preserve"><value>must not be negative.</value></data>
+  <data name="OptionMaximumRequirement" xml:space="preserve"><value>must be at most {0}.</value></data>
+  <data name="BufferPoolCapacityRequirement" xml:space="preserve"><value>must be a whole number of {0}-byte pages, at least {1} bytes ({2} pages) and at most {3} bytes.</value></data>
+  <data name="JournalCheckpointMinimum" xml:space="preserve"><value>must be zero (the default) or at least the checkpoint journal size ({0} bytes): a journal would otherwise pass it before it is due for a checkpoint.</value></data>
+  <data name="DatabaseNameRule" xml:space="preserve"><value>A database name must be 1 to 128 ASCII letters, digits, underscores, hyphens and dots, must not start or end with a dot or hold two dots in a row, and must not be a Windows device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9) on its own or before a dot.</value></data>
+  <data name="DatabaseNameEmpty" xml:space="preserve"><value>The name is empty.</value></data>
+  <data name="DatabaseNameTooLong" xml:space="preserve"><value>The name is {0} characters long.</value></data>
+  <data name="DatabaseNameCharacterInvalid" xml:space="preserve"><value>The name holds {0} at position {1}.</value></data>
+  <data name="DatabaseNameLeadingDot" xml:space="preserve"><value>The name starts with a dot.</value></data>
+  <data name="DatabaseNameTrailingDot" xml:space="preserve"><value>The name ends with a dot.</value></data>
+  <data name="DatabaseNameConsecutiveDots" xml:space="preserve"><value>The name holds two dots in a row.</value></data>
+  <data name="DatabaseNameDeviceReserved" xml:space="preserve"><value>'{0}' is a Windows device name.</value></data>
+  <data name="FileNamesOrphanDirectory" xml:space="preserve"><value>Database '{0}' cannot be created: its directory '{1}' is already there without a database in it, left by an interrupted create or drop. Delete the directory, or drop the database, which deletes it, and create the database again.</value></data>
+  <data name="WorkerFailureRefusal" xml:space="preserve"><value>{0}: Database '{1}' is unavailable while its engine's background work on it keeps failing; it is served again once that work succeeds, and refused as offline ({2}) if its engine gives up on it.</value></data>
+  <data name="StartupExpected" xml:space="preserve"><value>Expected a startup frame but received {0}.</value></data>
+  <data name="ProtocolVersionUnsupported" xml:space="preserve"><value>Protocol major version {0} is not supported; the server speaks {1}.</value></data>
+  <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
+  <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
+  <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
 </root>

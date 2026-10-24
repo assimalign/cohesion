@@ -84,7 +84,7 @@ public sealed class SqlBooleanPredicateTests
 
             // Assert
             var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("COHSQLE003");
+            diagnostic.Code.ShouldBe("CS02003");
             diagnostic.Start.ShouldNotBeNull();
             failure.Message.ShouldContain(clause, Case.Sensitive);
             session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
@@ -196,7 +196,7 @@ public sealed class SqlBooleanPredicateTests
         filtered.Count.ShouldBe(expected ? 1 : 0);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - CHECK: all non-Boolean roots use COHSQLE003 (#1190)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - CHECK: all non-Boolean roots use CS02003 (#1190)")]
     [InlineData("CREATE TABLE t (a INT CHECK (a))")]
     [InlineData("CREATE TABLE t (a INT CHECK (a AND TRUE))")]
     [InlineData("CREATE TABLE t (a INT CHECK (NOT a))")]
@@ -215,7 +215,7 @@ public sealed class SqlBooleanPredicateTests
             await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
         failure.Diagnostics[0].Start.ShouldNotBeNull();
     }
 
@@ -242,7 +242,7 @@ public sealed class SqlBooleanPredicateTests
         var failure = Should.Throw<DatabaseException>(() => evaluator.Matches(expression, []));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE003");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02003");
         failure.Message.ShouldContain(position, Case.Sensitive);
         if (position != "predicate") { failure.Diagnostics[0].Start.ShouldBe(location.Start); }
     }

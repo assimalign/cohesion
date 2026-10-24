@@ -19,9 +19,9 @@ using Assimalign.Cohesion.Database.Transactions;
 /// observed only before a commit or rollback starts, a commit while a command of the transaction
 /// still runs is refused and leaves it active, and a transaction the kernel ended under its caller
 /// reports <see cref="TransactionState.Faulted"/> and refuses commands, BEGIN and COMMIT with
-/// <c>COHDBK001</c> until the caller ends it. This type supplies the model's vocabulary only: the
+/// <c>CV04101</c> until the caller ends it. This type supplies the model's vocabulary only: the
 /// kernel state, the kernel commit and rollback with the engine's exception translation, the
-/// offline refusal (<c>COHDBK002</c>, #1243) and the <c>COHDBK001</c> aborted error.
+/// offline refusal (<c>CV06102</c>, #1243) and the <c>CV04101</c> aborted error.
 /// </para>
 /// <para>
 /// <b>A command is statement-atomic</b>, so a failed command leaves the transaction active
@@ -37,6 +37,8 @@ using Assimalign.Cohesion.Database.Transactions;
 /// an internal constructor; the session that began it is the only way to create one.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueDatabaseTransaction Id={Id}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction.DebugView))]
 public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
 {
     // Aborted refusals are created on a normal path, so their messages are read once.
@@ -158,7 +160,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
         string reason = cause is null ? string.Empty : string.Format(CultureInfo.CurrentCulture, _failureCause, cause.Message);
         string message = (commit ? _commitAborted : _operationsAborted) + reason;
         return new DatabaseException(message, [new Types.Diagnostic
-        { Code = "COHDBK001", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
+        { Code = "CV04101", Message = message, Severity = Types.DiagnosticSeverity.Error }], cause);
     }
 
     // The area error policy: the engine translates the transaction kernel's independent exception
@@ -173,4 +175,17 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,
     };
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseTransaction value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionId Id => _target.Id;
+        public global::Assimalign.Cohesion.Database.Transactions.IsolationLevel IsolationLevel => _target.IsolationLevel;
+    }
 }

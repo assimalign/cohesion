@@ -36,7 +36,7 @@ public sealed class SqlProgramLimitReviewTests
             await session.ExecuteAsync($"ALTER TABLE t ADD CONSTRAINT k {kind} (v)", cancellationToken: timeout.Token));
 
         // Assert
-        failure.Code.ShouldBe("COHSQLE042");
+        failure.Code.ShouldBe("CS05042");
         database.Catalog.TryGetTable("dbo", "t", out table).ShouldBeTrue();
         table.Constraints.ShouldBeEmpty();
         database.Catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();
@@ -66,7 +66,7 @@ public sealed class SqlProgramLimitReviewTests
             await session.ExecuteAsync($"ALTER TABLE t ADD COLUMN v TEXT DEFAULT '{new string('x', 2000)}' UNIQUE", cancellationToken: timeout.Token));
 
         // Assert
-        failure.Code.ShouldBe("COHSQLE042");
+        failure.Code.ShouldBe("CS05042");
         database.Catalog.TryGetTable("dbo", "t", out table).ShouldBeTrue();
         table.Columns.Select(column => column.Name).ShouldBe(["id"]);
         table.Constraints.ShouldBeEmpty();
@@ -103,7 +103,7 @@ public sealed class SqlProgramLimitReviewTests
             await session.ExecuteAsync(sql, Parameters(value + (folded ? "é" : "x")), timeout.Token));
 
         // Assert
-        failure.Code.ShouldBe("COHSQLE042");
+        failure.Code.ShouldBe("CS05042");
         failure.Message.ShouldContain("size 1025 bytes, maximum size 1024 bytes", Case.Sensitive);
         (await ReadAsync(session, "SELECT v FROM t", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(value);
     }
@@ -128,7 +128,7 @@ public sealed class SqlProgramLimitReviewTests
             await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: timeout.Token));
 
         // Assert: the old logical row remains readable and can be updated to a fitting row.
-        failure.Code.ShouldBe("COHSQLE042");
+        failure.Code.ShouldBe("CS05042");
         transaction.State.ShouldBe(TransactionState.Active);
         (await ReadAsync(session, "SELECT id FROM p", timeout.Token)).ShouldHaveSingleItem()[0].ShouldBe(1);
         (await ReadAsync(session, "SELECT pid, LENGTH(v), LENGTH(tail) FROM c", timeout.Token)).ShouldHaveSingleItem()

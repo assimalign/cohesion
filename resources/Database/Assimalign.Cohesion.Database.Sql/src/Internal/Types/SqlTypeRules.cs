@@ -34,14 +34,14 @@ internal static class SqlTypeRules
     {
         if (name.Length == 0 || !(char.IsAsciiLetter(name[0]) || name[0] == '_'))
         {
-            throw new ArgumentException($"Domain name '{name}' is not an identifier: it must start with an ASCII letter or an underscore.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TypeRulesValidateDomainNameArgument, name), nameof(name));
         }
         foreach (char character in name)
         {
             if (!(char.IsAsciiLetterOrDigit(character) || character == '_'))
             {
                 throw new ArgumentException(
-                    $"Domain name '{name}' is not an identifier: it may hold only ASCII letters, digits and underscores.", nameof(name));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TypeRulesValidateDomainNameArgument2, name), nameof(name));
             }
         }
         ValidateSqlDomainName(name);
@@ -60,26 +60,26 @@ internal static class SqlTypeRules
         {
             if (string.Equals(keyword, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is a SQL keyword and cannot name a domain.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RulesValidateSqlDomainNameArgument, name), nameof(name));
             }
         }
         foreach (string reserved in _reservedWords)
         {
             if (string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is reserved by the SQL dialect and cannot name a domain.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RulesValidateSqlDomainNameArgument2, name), nameof(name));
             }
         }
         foreach (string pseudo in _pseudoNames)
         {
             if (string.Equals(pseudo, name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"'{name}' is a pseudo-type's name and cannot name a domain.", nameof(name));
+                throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RulesValidateSqlDomainNameArgument3, name), nameof(name));
             }
         }
         if (SqlTypeNames.TryResolve(name, out _) || SqlTypeModifiers.Rejection(name) is not null)
         {
-            throw new ArgumentException($"'{name}' is a built-in SQL type name and cannot name a domain.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RulesValidateSqlDomainNameArgument4, name), nameof(name));
         }
     }
 

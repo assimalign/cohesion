@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// An <c>IN (subquery)</c> node: when the subquery returned rows, its values' collation (priority 2);
 /// when it returned none, the collation of the IN's operand.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCollationSubqueryTerm")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationSubqueryTerm.DebugView))]
 internal sealed class SqlCollationSubqueryTerm : SqlCollationTerm
 {
     private readonly int _slot;
@@ -28,4 +30,12 @@ internal sealed class SqlCollationSubqueryTerm : SqlCollationTerm
         => subqueries is not null && subqueries.TryGet(_slot, out var values) && values.Length > 0
             ? new SqlCollationCandidate(_collation, 2)
             : _empty.Resolve(subqueries);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCollationSubqueryTerm value)
+        {
+            _ = value;
+        }
+    }
 }

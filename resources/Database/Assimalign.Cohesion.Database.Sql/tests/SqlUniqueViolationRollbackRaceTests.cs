@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 using Assimalign.Cohesion.Database.Execution;
@@ -27,14 +29,14 @@ using Assimalign.Cohesion.Database.Execution;
 [Collection(SqlUniqueViolationRaceCollection.Name)]
 public sealed class SqlUniqueViolationRollbackRaceTests
 {
-    private const int SeededRows = 200;
-    private const int RecentKeyBase = 2_000_000;
+    private const int seededRows = 200;
+    private const int recentKeyBase = 2_000_000;
 
     /// <summary>The shortest time a race runs.</summary>
-    private static readonly TimeSpan RaceMinimum = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan _raceMinimum = TimeSpan.FromSeconds(3);
 
     /// <summary>The longest a race waits past its minimum for the work it needs.</summary>
-    private static readonly TimeSpan RaceCeiling = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _raceCeiling = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Two writers insert 40 fresh keys and then a committed one, which fails each statement after
@@ -56,16 +58,16 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         for (int writer = 0; writer < 2; writer++)
         {
             int seed = writer + 1;
-            tasks.Add(Task.Run(() => race.WriteFailingAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.WriteFailingAsync(database, seed)));
         }
 
         for (int reader = 0; reader < 4; reader++)
         {
             int seed = reader + 101;
-            tasks.Add(Task.Run(() => race.ReadSeededAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.ReadSeededAsync(database, seed)));
         }
 
-        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
+        await race.RunUntilExercisedAsync(_raceMinimum, _raceCeiling, () => race.Rollbacks >= 20 && race.Reads >= 50);
         await Task.WhenAll(tasks);
 
         // Assert: no seek failed or missed its key, and the race ran on both sides.
@@ -92,20 +94,20 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         var race = new Race(stop, batchRows: 10);
 
         // Act
-        var tasks = new List<Task> { Task.Run(() => race.CommitRecentAsync(database)) };
+        var tasks = new List<Task> { DedicatedTestTask.Run(() => race.CommitRecentAsync(database)) };
         for (int writer = 0; writer < 2; writer++)
         {
             int seed = writer + 1;
-            tasks.Add(Task.Run(() => race.WriteFailingAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.WriteFailingAsync(database, seed)));
         }
 
         for (int reader = 0; reader < 4; reader++)
         {
             int seed = reader + 101;
-            tasks.Add(Task.Run(() => race.ReadRecentAsync(database, seed)));
+            tasks.Add(DedicatedTestTask.Run(() => race.ReadRecentAsync(database, seed)));
         }
 
-        await race.RunUntilExercisedAsync(RaceMinimum, RaceCeiling, () => race.Rollbacks >= 20 && race.Commits >= 20 && race.Reads >= 50);
+        await race.RunUntilExercisedAsync(_raceMinimum, _raceCeiling, () => race.Rollbacks >= 20 && race.Commits >= 20 && race.Reads >= 50);
         await Task.WhenAll(tasks);
 
         // Assert
@@ -129,7 +131,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
         await using var setup = await database.CreateSessionAsync();
         await setup.ExecuteAsync("CREATE TABLE t (id INT NOT NULL, val INT NOT NULL)");
         await setup.ExecuteAsync("CREATE UNIQUE INDEX ux_val ON t (val)");
-        for (int block = 0; block < SeededRows / 50; block++)
+        for (int block = 0; block < seededRows / 50; block++)
         {
             var values = Enumerable.Range(block * 50, 50).Select(value => $"({value}, {value})");
             await setup.ExecuteAsync($"INSERT INTO t (id, val) VALUES {string.Join(", ", values)}");
@@ -207,7 +209,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             while (Running)
             {
                 int first = Interlocked.Add(ref _nextKey, _batchRows) - _batchRows;
-                int duplicate = random.Next(SeededRows);
+                int duplicate = random.Next(seededRows);
                 var rows = Enumerable.Range(first, _batchRows).Select(value => $"({value}, {value})").Append($"({duplicate}, {duplicate})");
                 try
                 {
@@ -232,7 +234,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             await using var session = await database.CreateSessionAsync();
             while (Running)
             {
-                int key = RecentKeyBase + Volatile.Read(ref _committed);
+                int key = recentKeyBase + Volatile.Read(ref _committed);
                 try
                 {
                     await session.ExecuteAsync($"INSERT INTO t (id, val) VALUES ({key}, {key})", cancellationToken: TestTimeout.Token());
@@ -253,7 +255,7 @@ public sealed class SqlUniqueViolationRollbackRaceTests
             var random = new Random(seed);
             while (Running)
             {
-                int key = random.Next(SeededRows);
+                int key = random.Next(seededRows);
                 try
                 {
                     var values = await ValuesAsync(session, $"SELECT id FROM t WHERE val = {key}");
@@ -289,8 +291,8 @@ public sealed class SqlUniqueViolationRollbackRaceTests
                     continue;
                 }
 
-                int low = RecentKeyBase + Math.Max(0, committed - 64) + random.Next(Math.Min(committed, 64));
-                int high = random.Next(2) == 0 ? low : Math.Min(low + random.Next(1, 16), RecentKeyBase + committed - 1);
+                int low = recentKeyBase + Math.Max(0, committed - 64) + random.Next(Math.Min(committed, 64));
+                int high = random.Next(2) == 0 ? low : Math.Min(low + random.Next(1, 16), recentKeyBase + committed - 1);
                 try
                 {
                     var values = await ValuesAsync(session, $"SELECT val FROM t WHERE val >= {low} AND val <= {high}");

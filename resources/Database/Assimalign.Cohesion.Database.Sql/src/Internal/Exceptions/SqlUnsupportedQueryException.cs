@@ -19,7 +19,7 @@ internal sealed class SqlUnsupportedQueryException : DatabaseException
     public SqlUnsupportedQueryException(string message, Exception? innerException = null, Location? location = null)
         : base(message, [new Diagnostic
         {
-            Code = "COHDBL001", Message = message, Severity = DiagnosticSeverity.Error,
+            Code = "CK00001", Message = message, Severity = DiagnosticSeverity.Error,
             Start = location?.Start, End = location?.End, Line = location?.StartLine ?? 1,
             Location = location is null ? null : DiagnosticLocation.Absolute,
         }], innerException)

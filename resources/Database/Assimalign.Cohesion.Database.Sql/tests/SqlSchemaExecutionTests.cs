@@ -53,25 +53,25 @@ public sealed partial class SqlSchemaExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema existence failures use creation versus relation diagnostics")]
-    [InlineData("CREATE TABLE missing.t(id INT)", "COHSQLE028")]
-    [InlineData("CREATE TABLE IF NOT EXISTS missing.t(id INT)", "COHSQLE028")]
-    [InlineData("DROP TABLE missing.t", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t ADD COLUMN c INT", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t DROP COLUMN c", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t ADD CONSTRAINT ck CHECK (id > 0)", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t DROP CONSTRAINT ck", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t RENAME TO renamed", "COHSQLE028")]
-    [InlineData("ALTER TABLE missing.t ALTER COLUMN id SET DEFAULT 1", "COHSQLE028")]
-    [InlineData("CREATE INDEX ix ON missing.t(id)", "COHSQLE028")]
-    [InlineData("DROP INDEX ix ON missing.t", "COHSQLE028")]
-    [InlineData("DROP INDEX IF EXISTS ix ON missing.t", "COHSQLE028")]
-    [InlineData("SELECT * FROM missing.t", "COHSQLE014")]
-    [InlineData("INSERT INTO missing.t VALUES (1)", "COHSQLE014")]
-    [InlineData("UPDATE missing.t SET id = 1", "COHSQLE014")]
-    [InlineData("DELETE FROM missing.t", "COHSQLE014")]
-    [InlineData("DROP SCHEMA missing", "COHSQLE028")]
-    [InlineData("DROP SCHEMA dbo CASCADE", "COHSQLE031")]
-    [InlineData("DROP SCHEMA IF EXISTS DBO", "COHSQLE031")]
+    [InlineData("CREATE TABLE missing.t(id INT)", "CS01028")]
+    [InlineData("CREATE TABLE IF NOT EXISTS missing.t(id INT)", "CS01028")]
+    [InlineData("DROP TABLE missing.t", "CS01028")]
+    [InlineData("ALTER TABLE missing.t ADD COLUMN c INT", "CS01028")]
+    [InlineData("ALTER TABLE missing.t DROP COLUMN c", "CS01028")]
+    [InlineData("ALTER TABLE missing.t ADD CONSTRAINT ck CHECK (id > 0)", "CS01028")]
+    [InlineData("ALTER TABLE missing.t DROP CONSTRAINT ck", "CS01028")]
+    [InlineData("ALTER TABLE missing.t RENAME TO renamed", "CS01028")]
+    [InlineData("ALTER TABLE missing.t ALTER COLUMN id SET DEFAULT 1", "CS01028")]
+    [InlineData("CREATE INDEX ix ON missing.t(id)", "CS01028")]
+    [InlineData("DROP INDEX ix ON missing.t", "CS01028")]
+    [InlineData("DROP INDEX IF EXISTS ix ON missing.t", "CS01028")]
+    [InlineData("SELECT * FROM missing.t", "CS01014")]
+    [InlineData("INSERT INTO missing.t VALUES (1)", "CS01014")]
+    [InlineData("UPDATE missing.t SET id = 1", "CS01014")]
+    [InlineData("DELETE FROM missing.t", "CS01014")]
+    [InlineData("DROP SCHEMA missing", "CS01028")]
+    [InlineData("DROP SCHEMA dbo CASCADE", "CS03031")]
+    [InlineData("DROP SCHEMA IF EXISTS DBO", "CS03031")]
     public async Task ExecuteAsync_MissingOrProtectedNamespace_ShouldFailWithoutPublication(string sql, string code)
     {
         // Arrange
@@ -107,7 +107,7 @@ public sealed partial class SqlSchemaExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE021");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS04021");
         database.Catalog.Tables.ShouldBeEmpty();
     }
 
@@ -127,7 +127,7 @@ public sealed partial class SqlSchemaExecutionTests
         await ExecuteAsync(session, "DROP SCHEMA IF EXISTS absent CASCADE");
         database.Catalog.DdlGeneration.ShouldBe(generation);
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE SCHEMA SALES")))
-            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE029");
+            .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03029");
         await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, "DROP SCHEMA;"));
         database.Catalog.TryGetTable("dbo", "schema", out _).ShouldBeTrue();
         await ExecuteAsync(session, "DROP SCHEMA sales");
@@ -151,7 +151,7 @@ public sealed partial class SqlSchemaExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "DROP SCHEMA sales" + suffix));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE030");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03030");
         failure.Message.ShouldContain("because other objects depend on it", Case.Sensitive);
         database.Catalog.DdlGeneration.ShouldBe(generation);
         database.Catalog.Tables.Count.ShouldBe(4);
@@ -308,7 +308,7 @@ public sealed partial class SqlSchemaExecutionTests
 
         // Assert
         failure.Status.ShouldNotBe(DatabaseResultStatus.Success);
-        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "COHSQLT003");
+        failure.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "CS04003");
         await transaction.RollbackAsync(CancellationToken.None);
         database.Catalog.Namespaces.ShouldContain(schema => schema.Name == "sales");
     }

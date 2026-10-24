@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A key projection bound to exactly one immutable table version.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundConstraintKey")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundConstraintKey.DebugView))]
 internal sealed class SqlBoundConstraintKey
 {
     internal SqlBoundConstraintKey(SqlCatalogTable table, int[] ordinals, Collation[] collations)
@@ -22,5 +24,13 @@ internal sealed class SqlBoundConstraintKey
         var key = new object?[Ordinals.Length];
         for (int index = 0; index < key.Length; index++) { key[index] = row[Ordinals[index]]; }
         return key;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundConstraintKey value)
+        {
+            _ = value;
+        }
     }
 }

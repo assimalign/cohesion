@@ -11,6 +11,8 @@ using Assimalign.Cohesion.Database.KeyValuePair.Protocol;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("KeyValueExecuteExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Client.Internal.KeyValueExecuteExchange.DebugView))]
 internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValueProtocolResult>
 {
     private readonly ProtocolExecuteMessage _request;
@@ -44,7 +46,7 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
         while (true)
         {
             ProtocolFrame frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false)
-                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, "The server closed the connection mid-exchange.");
+                ?? throw new DatabaseClientException(ProtocolErrorCode.Internal, ErrorMessages.ExecuteCoreAsyncDatabaseClient);
             switch ((byte)frame.Type)
             {
                 case (byte)KeyValueProtocolMessageType.ResultHeader:
@@ -82,7 +84,7 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
                     throw new DatabaseClientException(error.Code, error.Message);
                 }
                 default:
-                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in a KeyValue execute exchange.");
+                    throw new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteCoreAsyncDatabaseClient2, frame.Type));
             }
         }
     }
@@ -96,6 +98,14 @@ internal sealed class KeyValueExecuteExchange : DatabaseProtocolExchange<KeyValu
             values.Add(DatabaseValueCodec.Read(ref reader));
         }
         return [.. values];
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Client.Internal.KeyValueExecuteExchange value)
+        {
+            _ = value;
+        }
     }
 }
 

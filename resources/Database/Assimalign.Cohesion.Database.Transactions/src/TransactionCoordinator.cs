@@ -53,6 +53,8 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 /// record space at open).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("TransactionCoordinator")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.DebugView))]
 public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly Storage _storage;
@@ -62,6 +64,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly Func<TransactionSequence, CancellationToken, ValueTask<long>>? _indexPruner;
 
     // True in the async flow of a statement apply that holds the apply gate, which is not
     // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
@@ -94,20 +97,39 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     {
     }
 
+    /// <summary>Creates the composition with index maintenance run under its apply gate.</summary>
+    /// <param name="storage">The storage owning physical brackets and sequence allocation.</param>
+    /// <param name="journal">The same storage's journal.</param>
+    /// <param name="records">The model's stamped record access.</param>
+    /// <param name="indexPruner">Prunes a bounded index batch below the supplied safe horizon.</param>
+    /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
+        Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)
+        : this(storage, journal, records, TimeProvider.System, indexPruner ?? throw new ArgumentNullException(nameof(indexPruner)))
+    {
+    }
+
     /// <summary>
     /// Creates the composition with the clock the deferred-undo retry schedule reads (tests).
     /// </summary>
     internal TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records, TimeProvider time)
+        : this(storage, journal, records, time, null)
+    {
+    }
+
+    private TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records, TimeProvider time,
+        Func<TransactionSequence, CancellationToken, ValueTask<long>>? indexPruner)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
         _journal = journal;
+        _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
-        // factory class name inside this scope.
-        var locks = Transactions.LockManager.Create();
+        // type name inside this scope.
+        var locks = new Transactions.LockManager();
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
 
@@ -826,14 +848,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             // A storage bracket outside the apply gate is open; the next statement to end, or
             // the worker's next look, retries.
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointBracketOpen);
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointBracketOpen);
         }
         catch (StorageOfflineException)
         {
             // A durable flush failed and took the storage offline (#1243): nothing more is
             // written, and every later operation on the database is refused.
             Volatile.Write(ref _checkpointDeferred, 0);
-            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, DeferredCheckpointStorageOffline);
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, deferredCheckpointStorageOffline);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -844,8 +866,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     }
 
     // The reasons a deferred checkpoint did not run, as the DeferredCheckpointSkipped event names them.
-    private const string DeferredCheckpointBracketOpen = "BracketOpen";
-    private const string DeferredCheckpointStorageOffline = "StorageOffline";
+    private const string deferredCheckpointBracketOpen = "BracketOpen";
+    private const string deferredCheckpointStorageOffline = "StorageOffline";
 
     /// <summary>
     /// Refuses a checkpoint asked for from inside one of this coordinator's statement applies:
@@ -856,14 +878,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         if (_insideApply.Value)
         {
             throw new StorageTransactionException(
-                "A checkpoint cannot run inside a statement apply: the statement holds the apply gate the checkpoint waits for. " +
-                "Checkpoint after the statement completes.");
+                ErrorMessages.CoordinatorThrowIfInsideApplyFailure);
         }
     }
 
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
-    /// aborted writer whose undo previously failed, then prunes versions below
+    /// aborted writer whose undo previously failed, then prunes record and index versions below
     /// the safe bound — the minimum snapshot floor of every active transaction
     /// (a long-running snapshot pins its view), or the next sequence when idle.
     /// </summary>
@@ -871,7 +892,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// Cancels the pass between writers and prune batches; a rolled-back writer's
     /// undo, once started, runs to completion.
     /// </param>
-    /// <returns>The number of versions physically reclaimed or undone.</returns>
+    /// <returns>The number of record versions and index entries physically reclaimed or undone.</returns>
     /// <remarks>
     /// A rollback whose undo failed ended its transaction but left the writer in
     /// flight, holding its locks. The pass retries that undo through the manager,
@@ -929,8 +950,36 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        total += _versionStore.PruneAsync(GetSafePruneBound(), cancellationToken)
-            .AsTask().GetAwaiter().GetResult();
+        var bound = GetSafePruneBound();
+        try
+        {
+            total += _versionStore.PruneAsync(bound, cancellationToken).AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+            && !cancellationToken.IsCancellationRequested)
+        {
+            // A damaged record page must not prevent independent index reclamation.
+            deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+        }
+
+        if (_indexPruner is not null)
+        {
+            try
+            {
+                _applyGate.Wait(cancellationToken);
+                try
+                {
+                    var pending = _indexPruner(bound, cancellationToken);
+                    total += pending.IsCompletedSuccessfully ? pending.Result : pending.AsTask().GetAwaiter().GetResult();
+                }
+                finally { _applyGate.Release(); }
+            }
+            catch (Exception exception) when (exception is not (ObjectDisposedException or OperationCanceledException or OutOfMemoryException)
+                && !cancellationToken.IsCancellationRequested)
+            {
+                deferredFailure ??= ExceptionDispatchInfo.Capture(exception);
+            }
+        }
 
         if (timed)
         {
@@ -940,6 +989,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         deferredFailure?.Throw();
         return total;
     }
+
+    /// <summary>Gets a conservative exclusive bound below which committed tombstones are no longer visible to any live or future snapshot.</summary>
+    /// <remarks>Includes snapshots still pinned by a statement whose manager transaction ended.</remarks>
+    public TransactionSequence PruneBound => GetSafePruneBound();
 
     /// <summary>
     /// Computes the prune bound no live or future snapshot can see below: the
@@ -970,13 +1023,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             bound = _recoveredSequenceFloor;
         }
 
-        foreach (var context in GetOpenContexts())
+        lock (_sync)
         {
-            var minimum = context.Snapshot.Minimum;
-
-            if (minimum < bound)
+            foreach (var context in _openContexts.Values)
             {
-                bound = minimum;
+                var minimum = context.Snapshot.Minimum;
+                if (minimum < bound) { bound = minimum; }
             }
         }
 
@@ -1100,6 +1152,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// no second begin: the journal or the checkpoint anchor keeps naming the writer.
     /// </para>
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("GatedJournalLog")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.GatedJournalLog.DebugView))]
     private sealed class GatedJournalLog : TransactionLog
     {
         private readonly TransactionCoordinator _coordinator;
@@ -1265,5 +1319,27 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         {
             _writers.TryRemove(sequence, out _);
         }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator.GatedJournalLog value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.TransactionCoordinator value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Transactions.TransactionManager Manager => _target.Manager;
+        public global::Assimalign.Cohesion.Database.Transactions.LockManager LockManager => _target.LockManager;
+        public global::Assimalign.Cohesion.Database.Transactions.RecordSpaceVersionStore VersionStore => _target.VersionStore;
     }
 }

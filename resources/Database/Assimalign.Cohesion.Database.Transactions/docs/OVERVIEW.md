@@ -10,8 +10,8 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 - `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `DatabaseTransaction` base consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `LockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
-  (sealed; `LockManager.Create` for a standalone table); `LockStatementMark` preserves earlier
-  grants while an unwritten statement releases its new locks and retries arbitration
+  (sealed; `new LockManager()` for a standalone table); `LockStatementMark` preserves earlier
+  grants while unwritten upserts and cascades release new locks and retry preparation
 - the transaction log — the WAL binding, an internal seam since #1257 (storage owns the physical journal)
 - `VersionStore` — the version-chain base; its two leaves, `RecordSpaceVersionStore` and the
   in-memory store (`VersionStore.CreateInMemory`), both live here
@@ -58,3 +58,56 @@ substrate stays independently consumable.
 ## Consumers
 
 Every model engine (`Sql`, `Documents`, `Graph`, `Blob`, `KeyValuePair`) composes a transaction manager; execution operators carry `TransactionContext` into storage, index, and catalog operations.
+
+The statement-mark/re-grant zero-allocation contract is verified in optimized Release tests
+with tiered compilation disabled. Functional mark and arbitration tests also run in Debug.
+See DESIGN, unwritten statement marks, for the platform-measurement regression after #1689.
+
+Exact allocation guards also run with background GC disabled in this test host: an upstream
+runtime accounting defect can report unused context bytes as allocations during an empty
+interval. A runtime-configuration guard and a real-allocation positive control verify the
+measurement. Product GC policy and runner parallelism are unaffected. DESIGN records the
+controlled reproduction found during #1288 and its relation to the statement-mark guard.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Shared index purge (#1195)
+
+The coordinator overload accepting `Func<TransactionSequence, CancellationToken, ValueTask<long>>`
+runs a bounded index batch under the apply gate after record pruning. Its public `PruneBound`
+also supplies safe opportunistic unique-insert pruning. SQL, KeyValuePair, Documents and Graph
+bind their current managers; the existing purge count/event includes reclaimed index entries.
+The original constructor and physical statement rollback remain supported.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Soft deadlocks (#1420)
+
+Detected cycles first try consistent resource-queue reordering. The repair preserves actual
+holder conflicts and original waiter cancellation/timeout ownership; a hard held-lock cycle
+still chooses a victim. Ordinary queues retain FIFO/holder placement. The SQL cascade uses the
+existing statement marks to release new grants before a wait, retain the waited grant and
+restart its unapplied closure. No key-share mode or public locking signature is added.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`LockManager()` is public; the parameterless `Create()` factory is removed. FIFO grant order, statement marks and deadlock handling are unchanged.
+
+## Debugger inspection convention
+
+Transaction debugger views filter private/internal coordination state. Reviewed public identity, sequence, isolation and state values may be projected; snapshot capture, prune-bound work, oldest-active scans, lock-taking counts and retry-clock/provider calls are omitted. The views do not enter a transaction, acquire a lock, refresh a snapshot or expose internal-only counters.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

@@ -63,8 +63,11 @@ public sealed class KeyValueRecordDecodeIntegrityTests
 
         // Assert: the failure names the record; the page itself reads, so the key beside it does.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith(
-            $"The key-value entry record in slot {damaged.SlotIndex} of page {(long)damaged.PageId} does not decode: ", Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.InnerException.ShouldBeOfType<DatabaseTypeException>();
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Key-value entry does not decode: ", Case.Sensitive);
         Text(neighbour.ShouldNotBeNull().Value).ShouldBe("value-alpha");
     }
 
@@ -89,7 +92,10 @@ public sealed class KeyValueRecordDecodeIntegrityTests
 
         // Assert: a range that stops short of the damaged key still reads.
         failure.PageId.ShouldBe(damaged.PageId);
-        failure.Message.ShouldContain($"slot {damaged.SlotIndex} of page {(long)damaged.PageId} does not decode", Case.Sensitive);
+        var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+        corruption.SlotIndex.ShouldBe(damaged.SlotIndex);
+        corruption.Message.ShouldStartWith(
+            $"Corrupt record at page {(long)damaged.PageId}, slot {damaged.SlotIndex}: Key-value entry does not decode: ", Case.Sensitive);
         beforeTheDamage.ShouldBe(["alpha"]);
     }
 

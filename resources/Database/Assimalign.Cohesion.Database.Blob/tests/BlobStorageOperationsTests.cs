@@ -28,13 +28,13 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 /// </summary>
 public sealed class BlobStorageOperationsTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// An upload's commit fsync fails: the caller gets the unconfirmed commit, and from then on
     /// every operation — a new session, an upload, a download, a read of a download stream opened
     /// before the failure, BEGIN, COMMIT and ROLLBACK of an open transaction, over the wire too —
-    /// is refused with COHDBB002, and nothing reaches the file set, through the workers' passes
+    /// is refused with CB06002, and nothing reaches the file set, through the workers' passes
     /// and the sessions' close included. The root bases' checks come first (concrete-types plan
     /// §6.4): BEGIN on the session holding the open transaction is refused as already active, a
     /// canceled token is refused before the offline refusal of a new session and BEGIN, and the
@@ -108,7 +108,7 @@ public sealed class BlobStorageOperationsTests
         // The root bases' order (concrete-types plan §6.4): BEGIN on the session that holds the
         // open transaction is refused as already active before the offline refusal, and a canceled
         // token is refused before the offline refusal of a new session and BEGIN. Before the bases,
-        // each of these was refused with COHDBB002. A blob session has no execute member; the
+        // each of these was refused with CB06002. A blob session has no execute member; the
         // container and blob operations check the database first, so their order holds.
         var activeBegin = await Should.ThrowAsync<DatabaseException>(async () => await other.BeginTransactionAsync(token));
         using var canceled = new CancellationTokenSource();
@@ -153,17 +153,18 @@ public sealed class BlobStorageOperationsTests
 
         // Assert
         unconfirmed.InnerException.ShouldBeOfType<TransactionCommitUnconfirmedException>();
-        unconfirmed.Message.ShouldStartWith("COHDBB002: Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
+        unconfirmed.Diagnostics.ShouldContain(d => d.Code == "CB06002");
+        unconfirmed.Message.ShouldStartWith("Database 'blobs' went offline while a transaction was committing", Case.Sensitive);
         StorageOfflineException.Find(unconfirmed).ShouldNotBeNull();
-        refusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002" && refusal.Message.StartsWith("COHDBB002", StringComparison.Ordinal));
+        refusals.ShouldAllBe(refusal => refusal.Code == "CB06002" && refusal.Diagnostics.Count == 1 && refusal.Diagnostics[0].Code == "CB06002" && refusal.Message.StartsWith("Database", StringComparison.Ordinal));
         activeBegin.Message.ShouldBe("A transaction or operation is already active on this session.");
         canceledCalls.ShouldAllBe(refusal => refusal.CancellationToken == canceled.Token);
-        containerRefusals.ShouldAllBe(refusal => refusal.Code == "COHDBB002");
+        containerRefusals.ShouldAllBe(refusal => refusal.Code == "CB06002");
         closedState.ShouldBe(TransactionState.Faulted);
         operationError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        operationError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        operationError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         handshakeError.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        handshakeError.Message.ShouldStartWith("COHDBB002", Case.Sensitive);
+        handshakeError.Message.ShouldStartWith("CB06002", Case.Sensitive);
         engine.State.ShouldBe(EngineState.Running);
         beforeTheReopen.Data.ShouldBe(atTheFailure.Data);
         beforeTheReopen.Journal.ShouldBe(atTheFailure.Journal);
@@ -244,8 +245,10 @@ public sealed class BlobStorageOperationsTests
     {
         // Arrange: a time backstop far out of the way, so only the size can trigger.
         const long size = 4 * 1024 * 1024;
+        var strategy = new FaultInjectingJournalStorageStrategy();
         await using var engine = BlobDatabaseEngine.Create("blob-engine", new()
         {
+            StorageStrategy = strategy,
             CheckpointJournalSize = size,
             CheckpointInterval = TimeSpan.FromHours(1),
         });
@@ -256,22 +259,22 @@ public sealed class BlobStorageOperationsTests
         Random.Shared.NextBytes(payload);
 
         // Each writer overwrites its own blob, so the writers never conflict.
-        var writers = Enumerable.Range(0, 4).Select(writer => Task.Run(async () =>
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
         {
             await using var session = await database.CreateSessionAsync();
             var files = await session.GetContainerAsync("files");
-            while (!stop.IsCancellationRequested)
+            while (!stop.IsCancellationRequested && strategy.JournalCounters(database.Name.ToString()).Written < 40 * size)
             {
                 await using var stream = await files.OpenWriteAsync($"writer-{writer}");
                 await stream.WriteAsync(payload);
             }
         })).ToArray();
 
-        // Act: sample the journal while the writers push well past the size many times over,
+        // Act: read exact stream counters while writers stop at forty journal sizes,
         // counting the checkpoints that truncated it.
-        var journal = await JournalSamples.CollectAsync(() => database.DataStorage.JournalLength, 40 * size, Task.WhenAll(writers));
+        var journal = await JournalSamples.CollectAsync(() => strategy.JournalCounters(database.Name.ToString()), 40 * size, Task.WhenAll(writers));
         stop.Cancel();
-        await Task.WhenAll(writers).WaitAsync(Timeout);
+        await Task.WhenAll(writers).WaitAsync(_timeout);
 
         // Assert: tens of journal sizes were written, and checkpoints truncated the journal before
         // it held four sizes on average.
@@ -323,7 +326,7 @@ public sealed class BlobStorageOperationsTests
         // The engine handed the coordinator its first retry delay: the retry is due within it.
         var firstRetry = database.Coordinator.NextDeferredUndoRetry;
 
-        await WriteAsync(otherFiles, "other", "other").WaitAsync(Timeout);
+        await WriteAsync(otherFiles, "other", "other").WaitAsync(_timeout);
         watch.Stop();
 
         // Assert

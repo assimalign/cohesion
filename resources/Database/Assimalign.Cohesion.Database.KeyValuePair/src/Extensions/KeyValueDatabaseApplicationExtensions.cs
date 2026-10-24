@@ -3,7 +3,7 @@ using System;
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>Registers deferred key-value composition through the dependency-free Database root contract.</summary>
-public static class KeyValueDatabaseApplicationExtensions
+public static partial class KeyValueDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {

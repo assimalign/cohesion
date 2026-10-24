@@ -73,7 +73,7 @@ internal sealed class StudioSettings
     }
 }
 
-internal static class StudioModelExtensions
+internal static partial class StudioModelExtensions
 {
     extension(StudioModel model)
     {

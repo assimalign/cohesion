@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/> otherwise —
 /// a mismatch that cannot be converted surfaces as a <see cref="SqlClientException"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlRow")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlRow.DebugView))]
 public sealed class SqlRow
 {
     private readonly object?[] _values;
@@ -60,7 +62,7 @@ public sealed class SqlRow
 
         if (!_ordinals.TryGetValue(name, out int ordinal))
         {
-            throw new ArgumentException($"The result set has no column named '{name}'.", nameof(name));
+            throw new ArgumentException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowGetOrdinalArgument, name), nameof(name));
         }
 
         return ordinal;
@@ -220,7 +222,7 @@ public sealed class SqlRow
 
         if (value is null)
         {
-            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, $"The value at ordinal {ordinal} is null; use IsNull to guard nullable columns.");
+            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowFieldSqlClient, ordinal));
         }
 
         if (value is T typed)
@@ -236,7 +238,19 @@ public sealed class SqlRow
         }
         catch (Exception exception) when (exception is InvalidCastException or FormatException or OverflowException)
         {
-            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, $"The value at ordinal {ordinal} of runtime type {value.GetType()} cannot be read as {typeof(T)}.", exception);
+            throw new SqlClientException(SqlClientErrorKind.InvalidCast, ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlRowFieldSqlClient2, ordinal, value.GetType(), typeof(T)), exception);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Client.SqlRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Client.SqlRow value)
+        {
+            _target = value;
+        }
+
+        public int FieldCount => _target.FieldCount;
     }
 }

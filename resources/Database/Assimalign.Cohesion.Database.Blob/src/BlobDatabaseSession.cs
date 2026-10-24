@@ -36,7 +36,7 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// <para>
 /// <b>A failed operation aborts the explicit transaction (#1225, the contract #1188 set for
 /// Graph).</b> The transaction stays the session's transaction until the caller commits, rolls back
-/// or disposes it; the session then refuses every operation and BEGIN with <c>COHDBB001</c> until
+/// or disposes it; the session then refuses every operation and BEGIN with <c>CB04001</c> until
 /// the caller rolls back. A failure never turns later operations into autocommit writes. An
 /// operation (a container operation of the session, or a blob operation of a
 /// <see cref="BlobContainer"/> bound to the session) holds the session (the base's operation hold)
@@ -65,8 +65,12 @@ namespace Assimalign.Cohesion.Database.Blob;
 /// members.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobDatabaseSession")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession.DebugView))]
 public sealed class BlobDatabaseSession : DatabaseSession
 {
+    private static readonly string _errorSessionDisposeAsyncCoreDatabase = ErrorMessages.SessionDisposeAsyncCoreDatabase;
+
     private readonly BlobDatabase _database;
     private readonly object _sync = new();
 
@@ -114,9 +118,9 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; or the session's
-    /// transaction refuses work (<c>COHDBB001</c>).
+    /// transaction refuses work (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     public new async ValueTask<BlobDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         => (BlobDatabaseTransaction)await base.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
@@ -136,10 +140,10 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// </exception>
     /// <exception cref="DatabaseException">
     /// The session is closed; a transaction or operation is already active on it; the session's
-    /// transaction refuses work (<c>COHDBB001</c>); or the blob engine does not support
+    /// transaction refuses work (<c>CB04001</c>); or the blob engine does not support
     /// <paramref name="isolationLevel"/>.
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <remarks>
     /// The base refuses a closed session and an active transaction or operation before the
     /// isolation level, the disposed database and the offline database are checked.
@@ -159,9 +163,9 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// A container with the same name already exists; the session is closed, another operation
-    /// holds it, or its transaction refuses operations (<c>COHDBB001</c>).
+    /// holds it, or its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit operation's commit record could not be confirmed durable.</exception>
     public ValueTask<BlobContainer> CreateContainerAsync(string name, CancellationToken cancellationToken = default)
@@ -178,9 +182,9 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The container does not exist in the operation's snapshot; the session is closed, another
-    /// operation holds it, or its transaction refuses operations (<c>COHDBB001</c>).
+    /// operation holds it, or its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit operation's commit record could not be confirmed durable.</exception>
     public ValueTask<BlobContainer> GetContainerAsync(string name, CancellationToken cancellationToken = default)
         => _database.GetContainerAsync(name, this, cancellationToken);
@@ -197,9 +201,9 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// <exception cref="DatabaseObjectLockedException">The container is owned by a schema.</exception>
     /// <exception cref="DatabaseException">
     /// The container does not exist; the session is closed, another operation holds it, or its
-    /// transaction refuses operations (<c>COHDBB001</c>).
+    /// transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The container or its blobs changed since the transaction's snapshot (retryable).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit operation's commit record could not be confirmed durable.</exception>
     public ValueTask DropContainerAsync(string name, CancellationToken cancellationToken = default)
@@ -215,9 +219,9 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The session is closed (also while the containers are yielded), another operation holds it, or
-    /// its transaction refuses operations (<c>COHDBB001</c>).
+    /// its transaction refuses operations (<c>CB04001</c>).
     /// </exception>
-    /// <exception cref="DatabaseOfflineException">The database is offline (<c>COHDBB002</c>, #1243).</exception>
+    /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit operation's commit record could not be confirmed durable.</exception>
     public IAsyncEnumerable<BlobContainer> GetContainersAsync(CancellationToken cancellationToken = default)
         => _database.GetContainersAsync(this, cancellationToken);
@@ -230,13 +234,13 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// <returns>The explicit transaction the operation runs in, or null for autocommit.</returns>
     /// <exception cref="DatabaseException">
     /// The session is closed; another operation or a BEGIN holds it; or its transaction refuses
-    /// operations (<c>COHDBB001</c>).
+    /// operations (<c>CB04001</c>).
     /// </exception>
     internal BlobDatabaseTransaction? EnterOperation()
     {
         if (!TryEnterOperation())
         {
-            throw new DatabaseException("Dispose the active blob stream before starting another operation on this session.");
+            throw DatabaseException.CreateBlobFailure("CK07003", ErrorMessages.DatabaseSessionEnterOperationDatabase);
         }
 
         var transaction = CurrentTransaction;
@@ -298,7 +302,7 @@ public sealed class BlobDatabaseSession : DatabaseSession
     /// operation already aborted it. The wire server calls it before it reports a terminal failure,
     /// so a failure that came before an operation started (which leaves an in-process transaction
     /// unchanged) has aborted a host-opened transaction before the client sees the error, and the
-    /// host's commit fails with <c>COHDBB001</c> naming it whichever of the commit and the
+    /// host's commit fails with <c>CB04001</c> naming it whichever of the commit and the
     /// connection's teardown runs first. The server's pump runs one exchange at a time and its
     /// operations have ended by then, so no operation of the session races the abort.
     /// </summary>
@@ -317,7 +321,7 @@ public sealed class BlobDatabaseSession : DatabaseSession
     {
         if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted))
         {
-            throw new DatabaseException("The blob engine supports Snapshot and ReadCommitted isolation.");
+            throw DatabaseException.CreateBlobFailure("CK04001", ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
         _database.EnsureNotDisposed();
@@ -359,7 +363,19 @@ public sealed class BlobDatabaseSession : DatabaseSession
 
         if (operation is not null)
         {
-            await operation.AbortAsync(new DatabaseException("The blob session closed while the operation was running.")).ConfigureAwait(false);
+            await operation.AbortAsync(new DatabaseException(_errorSessionDisposeAsyncCoreDatabase)).ConfigureAwait(false);
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseSession value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Blob.BlobDatabase Database => _target.Database;
     }
 }

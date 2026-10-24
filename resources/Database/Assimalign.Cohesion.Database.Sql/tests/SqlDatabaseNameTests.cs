@@ -84,6 +84,41 @@ public sealed class SqlDatabaseNameTests : IDisposable
         AssertDirectories(onDisk: true, "sales");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Open: logical absence retains its precise exception and shared diagnostic")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenDatabaseAsync_AbsentName_ShouldCarryLogicalAbsenceDiagnostic(bool onDisk)
+    {
+        // Arrange
+        await using var engine = CreateEngine(onDisk);
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("absent", TestTimeout.Token()));
+        // Assert
+        failure.GetType().ShouldBe(typeof(DatabaseNotFoundException));
+        failure.InnerException.ShouldBeNull();
+        CheckDiagnostic(failure, "CK03002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Storage open: missing physical data or catalog sets retain text and shared diagnostic")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public void OpenStorage_AbsentFileSet_ShouldCarryPhysicalAbsenceDiagnostic(bool onDisk, bool catalog)
+    {
+        // Arrange
+        Internal.SqlStorageStrategy strategy = onDisk
+            ? new Internal.FileSystemSqlStorageStrategy(_rootPath)
+            : new Internal.InMemorySqlStorageStrategy();
+        // Act
+        var failure = Should.Throw<DatabaseException>(() => strategy.OpenStorage("absent", catalog));
+        // Assert
+        failure.GetType().ShouldBe(typeof(DatabaseException));
+        failure.InnerException.ShouldBeNull();
+        CheckDiagnostic(failure, "CK06005");
+        Directory.Exists(_rootPath).ShouldBeFalse();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql] - Names: a create of 'SALES' after 'sales' is refused as existing, open or not (#1392)")]
     [InlineData(true)]
     [InlineData(false)]
@@ -102,6 +137,8 @@ public sealed class SqlDatabaseNameTests : IDisposable
         // Assert: the refusals left the database as it was.
         whileOpen.ShouldNotBeOfType<DatabaseNotFoundException>();
         whileClosed.ShouldNotBeOfType<DatabaseNotFoundException>();
+        CheckDiagnostic(whileOpen, "CK03001");
+        CheckDiagnostic(whileClosed, "CK03001");
         AssertDirectories(onDisk, "sales");
         (await ReadAsync(await engine.OpenDatabaseAsync("sales", TestTimeout.Token()))).ShouldBe([11]);
         await engine.DisposeAsync();
@@ -218,6 +255,7 @@ public sealed class SqlDatabaseNameTests : IDisposable
         // then cleared by the drop.
         open.Message.ShouldBe("Database 'SALES' does not exist.");
         create.ShouldNotBeOfType<DatabaseNotFoundException>();
+        CheckDiagnostic(create, "CK06004");
         create.Message.ShouldContain("without a database in it", Case.Sensitive);
         afterCreate.ShouldBe(["catalog.dat"]);
         afterDrop.ShouldBeEmpty();
@@ -371,5 +409,15 @@ public sealed class SqlDatabaseNameTests : IDisposable
         }
 
         return [.. ids];
+    }
+    private static void CheckDiagnostic(DatabaseException failure, string code)
+    {
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+        failure.Message.StartsWith(code + ": ", StringComparison.Ordinal).ShouldBeFalse();
     }
 }

@@ -17,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Protocol.Internal;
 /// each wire frame is reported once. The core is already asynchronous, so the trace adds one
 /// enabled check per frame and nothing else while no listener takes it.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("ProtocolStreamFrameWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Protocol.Internal.ProtocolStreamFrameWriter.DebugView))]
 internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
 {
     private readonly Stream _stream;
@@ -161,5 +163,13 @@ internal sealed class ProtocolStreamFrameWriter : ProtocolFrameWriter
         }
 
         return default;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Protocol.Internal.ProtocolStreamFrameWriter value)
+        {
+            _ = value;
+        }
     }
 }

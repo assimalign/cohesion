@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 /// <summary>
@@ -79,9 +81,9 @@ internal sealed class SqlLockWaitProbe
     /// <summary>A wait this old is canceled, so a stuck wait cannot hang the run.</summary>
     internal static readonly TimeSpan CancelAfter = TimeSpan.FromSeconds(12);
 
-    private const string TransactionsSource = "Assimalign.Cohesion.Database.Transactions";
+    private const string transactionsSource = "Assimalign.Cohesion.Database.Transactions";
 
-    private static readonly AsyncLocal<int> CurrentWorker = new();
+    private static readonly AsyncLocal<int> _currentWorker = new();
 
     private readonly SqlDatabase _database;
     private readonly string _name;
@@ -142,7 +144,7 @@ internal sealed class SqlLockWaitProbe
         var probe = new SqlLockWaitProbe(database, name, parents, explicitOnly, deleters + childWriters);
         using var listener = new Listener(probe);
         using var stop = new CancellationTokenSource();
-        var workers = probe._workers.Select(worker => Task.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
+        var workers = probe._workers.Select(worker => DedicatedTestTask.Run(() => probe.RunWorkerAsync(worker, deleter: worker.Id < deleters, stop.Token))).ToArray();
 
         // The purge and the watchdog have threads of their own: on a small runner the workers hold
         // the pool's few threads, and a pooled loop could wait out the whole run.
@@ -185,7 +187,7 @@ internal sealed class SqlLockWaitProbe
 
     private async Task RunWorkerAsync(Worker worker, bool deleter, CancellationToken stop)
     {
-        CurrentWorker.Value = worker.Id + 1;
+        _currentWorker.Value = worker.Id + 1;
         var random = new Random(worker.Id * 7919 + 13);
         await using var session = await _database.CreateSessionAsync();
 
@@ -552,7 +554,7 @@ internal sealed class SqlLockWaitProbe
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == TransactionsSource)
+            if (eventSource.Name == transactionsSource)
             {
                 // Transactions | Locks, and the warnings; the threshold is the probe's slow wait.
                 EnableEvents(eventSource, EventLevel.Verbose, (EventKeywords)0x3, new Dictionary<string, string?>
@@ -572,7 +574,7 @@ internal sealed class SqlLockWaitProbe
             long sequence = (long)payload[1]!;
             switch (written.EventName)
             {
-                case "TransactionBegun" when CurrentWorker.Value is int worker and > 0:
+                case "TransactionBegun" when _currentWorker.Value is int worker and > 0:
                     probe._sequenceWorkers[sequence] = worker - 1;
                     break;
                 case "LockWaitStart":

@@ -52,7 +52,7 @@ public sealed class StorageOfflineException : StorageException
     /// durable flush of the data file or a write of the file header failed, or its engine gave up
     /// on it; see <see cref="Cause"/>).
     /// </summary>
-    public const string ErrorCode = "COHDBS002";
+    public const string ErrorCode = "CK06002";
 
     /// <summary>
     /// Initializes a new <see cref="StorageOfflineException"/>.
@@ -144,10 +144,7 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="cause">The failure.</param>
     internal static StorageOfflineException Create(StorageOfflineCause offlineCause, string what, Exception cause)
         => new(
-            $"{ErrorCode}: The storage is offline: {what} failed ({cause.Message}). Records written since the " +
-            "last successful durable flush may or may not have reached stable storage, and a retry could report success for " +
-            "writes the operating system already dropped, so nothing more is written to the journal or the data file. Reopen " +
-            "the storage: its recovery reads the journal and decides the outcome of every commit that was not confirmed.",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OfflineExceptionCreateStorageOffline, ErrorCode, what, cause.Message),
             offlineCause,
             cause);
 
@@ -160,10 +157,10 @@ public sealed class StorageOfflineException : StorageException
     /// <returns>The phrase, such as <c>a durable flush of the data file</c>.</returns>
     internal static string Describe(StorageOfflineCause offlineCause) => offlineCause switch
     {
-        StorageOfflineCause.JournalFlush => "a write or flush of the journal",
-        StorageOfflineCause.DataFlush => "a durable flush of the data file",
-        StorageOfflineCause.HeaderWrite => "a write of the file header",
-        _ => "a write",
+        StorageOfflineCause.JournalFlush => ErrorMessages.ExceptionDescribeStorageOffline,
+        StorageOfflineCause.DataFlush => ErrorMessages.ExceptionDescribeStorageOffline2,
+        StorageOfflineCause.HeaderWrite => ErrorMessages.ExceptionDescribeStorageOffline3,
+        _ => ErrorMessages.ExceptionDescribeStorageOffline4,
     };
 
     /// <summary>
@@ -186,9 +183,7 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="failure">The worker's last failure.</param>
     internal static StorageOfflineException EngineGaveUp(StorageOfflineCause offlineCause, string reason, Exception failure)
         => new(
-            $"{ErrorCode}: The storage is offline: {reason} (last failure: {failure.Message}). Its engine stopped retrying, so " +
-            "nothing more is written to the journal or the data file. Reopen the storage: its recovery reads the journal and " +
-            "decides the outcome of every commit that was not confirmed.",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExceptionEngineGaveUpStorageOffline, ErrorCode, reason, failure.Message),
             offlineCause,
             failure);
 
@@ -200,11 +195,7 @@ public sealed class StorageOfflineException : StorageException
     /// <param name="cause">The failure of the slot write or of the flush after it.</param>
     internal static StorageOfflineException HeaderWriteFailed(Exception cause)
         => new(
-            $"{ErrorCode}: The storage is offline: {Describe(StorageOfflineCause.HeaderWrite)} failed after its header slot write was issued " +
-            $"({cause.Message}). That slot may already be the newest generation on the media, so no header write may run " +
-            "again in this process, and without one no checkpoint can truncate the journal; nothing more is written to the " +
-            "journal or the data file. Reopen the storage: its recovery reads the journal and decides the outcome of every " +
-            "commit that was not confirmed.",
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.HeaderWriteFailedStorageOffline, ErrorCode, Describe(StorageOfflineCause.HeaderWrite), cause.Message),
             StorageOfflineCause.HeaderWrite,
             cause);
 

@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// A row over evaluated values with converting typed accessors.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueMaterializedRow FieldCount={FieldCount}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedRow.DebugView))]
 internal sealed class KeyValueMaterializedRow : DatabaseRow
 {
     private readonly object?[] _values;
@@ -28,7 +30,7 @@ internal sealed class KeyValueMaterializedRow : DatabaseRow
     {
         null => ReadOnlyMemory<byte>.Empty,
         byte[] bytes => bytes,
-        _ => throw new DatabaseException($"Field {ordinal} is not binary."),
+        _ => throw DatabaseException.CreateKeyValuePairFailure("CK02001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValueMaterializedRowGetBytesDatabase, ordinal)),
     };
 
     /// <inheritdoc />
@@ -55,5 +57,17 @@ internal sealed class KeyValueMaterializedRow : DatabaseRow
     public override object? GetValue(int ordinal) => _values[ordinal];
 
     private object RequireValue(int ordinal)
-        => _values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is NULL.");
+        => _values[ordinal] ?? throw DatabaseException.CreateKeyValuePairFailure("CK02002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MaterializedRowRequireValueDatabase, ordinal));
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedRow _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueMaterializedRow value)
+        {
+            _target = value;
+        }
+
+        public int FieldCount => _target.FieldCount;
+    }
 }

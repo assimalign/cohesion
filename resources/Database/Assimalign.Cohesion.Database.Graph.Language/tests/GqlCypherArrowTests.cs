@@ -9,14 +9,14 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// Cypher arrows fail loudly (#1139, R10). ISO/IEC 39075 reads <c>--</c> as a simple comment, and
 /// the shared lexer keeps that reading in every language, so <c>(a)-->(b)</c> is <c>(a)</c>
 /// followed by a comment that runs to the next line terminator. A <c>--</c> comment that begins
-/// exactly where a node's <c>)</c> or an edge's <c>]</c> ends is <c>GQL0008</c>, reported at the
+/// exactly where a node's <c>)</c> or an edge's <c>]</c> ends is <c>CG00008</c>, reported at the
 /// <c>--</c>; whichever terminator ends the comment (#1150), the statement no longer truncates.
 /// Under D3, <c>--&gt;</c>, <c>&lt;--</c>, <c>--</c> and <c>&lt;--&gt;</c> are never edges.
 /// </summary>
 public sealed class GqlCypherArrowTests
 {
     /// <param name="terminator">The line terminator, by name (see <see cref="Terminator"/>).</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: --> after a node is one GQL0008 at the -- at every terminator")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: --> after a node is one CG00008 at the -- at every terminator")]
     [InlineData("LF")]
     [InlineData("CR")]
     [InlineData("CRLF")]
@@ -41,7 +41,7 @@ public sealed class GqlCypherArrowTests
     }
 
     /// <param name="gql">A statement that writes a Cypher arrow after a pattern element.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: --, -->, ]-- and ]--> after a pattern element are GQL0008")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: --, -->, ]-- and ]--> after a pattern element are CG00008")]
     [InlineData("MATCH (a)--(b) RETURN a")]
     [InlineData("MATCH (a)-[r]--(b) RETURN a")]
     [InlineData("MATCH (a)-[r]-->(b) RETURN a")]
@@ -56,16 +56,16 @@ public sealed class GqlCypherArrowTests
     public void Parse_CypherArrowAfterElement_ShouldReportGql0008(string gql)
         => AssertGql0008(gql, Parse(gql), line: 1);
 
-    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: GQL0008 reports the line the -- starts on")]
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: CG00008 reports the line the -- starts on")]
     public void Parse_CypherArrowOnALaterLine_ShouldReportThatLine()
         => AssertGql0008("MATCH (a)\r\n-[r]->(b)-->(c)\r\nRETURN a", Parse("MATCH (a)\r\n-[r]->(b)-->(c)\r\nRETURN a"), line: 2);
 
     /// <param name="gql">A Cypher left arrow, which never lexes as a comment after the element.</param>
-    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: <-- and <--> keep GQL0002")]
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: <-- and <--> keep CG00002")]
     [InlineData("MATCH (a)<--(b) RETURN a")]
     [InlineData("MATCH (a)<-->(b) RETURN a")]
     public void Parse_CypherLeftArrow_ShouldReportGql0002(string gql)
-        => Parse(gql).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0002");
+        => Parse(gql).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG00002");
 
     /// <summary>
     /// A comment separated from the element by whitespace, or one after a predicate's ')', keeps
@@ -91,7 +91,7 @@ public sealed class GqlCypherArrowTests
     /// <summary>
     /// The documented residual: whitespace, or a block comment, between the element and the
     /// dashes leaves an ISO comment, so <c>(a) --&gt;(b)</c> still reads as <c>(a)</c> plus a
-    /// comment. GQL0008 keys on the exact offset, as ISO comments must keep working.
+    /// comment. CG00008 keys on the exact offset, as ISO comments must keep working.
     /// </summary>
     /// <param name="gql">A Cypher arrow separated from its element.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Cypher arrows: a separated --> is an ISO comment (documented residual)")]
@@ -110,7 +110,7 @@ public sealed class GqlCypherArrowTests
     private static void AssertGql0008(string gql, GqlQueryStatement statement, int line)
     {
         var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("GQL0008");
+        error.Code.ShouldBe("CG00008");
         int start = error.Start.ShouldNotBeNull();
         start.ShouldBe(gql.IndexOf("--", StringComparison.Ordinal));
         error.End.ShouldBe(start + 2);

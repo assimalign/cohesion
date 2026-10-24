@@ -54,6 +54,7 @@ public class DatabaseSessionTests
 
         // Assert
         error.Message.ShouldBe(alreadyActive);
+        CheckDiagnostic(error, "CK04004");
         session.BeginCores.ShouldBe(1);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
     }
@@ -95,6 +96,7 @@ public class DatabaseSessionTests
 
         // Assert
         error.Message.ShouldBe(alreadyActive);
+        CheckDiagnostic(error, "CK07003");
         second.ShouldBeFalse();
         session.CurrentTransaction.ShouldBeSameAs(transaction);
     }
@@ -117,6 +119,7 @@ public class DatabaseSessionTests
 
         // Assert
         error.Message.ShouldBe(alreadyActive);
+        CheckDiagnostic(error, "CK07003");
         operation.ShouldBeFalse();
         session.BeginCores.ShouldBe(1);
         session.CurrentTransaction.ShouldBeSameAs(transaction);
@@ -157,6 +160,7 @@ public class DatabaseSessionTests
         typed.Message.ShouldBe("The session is closed.");
         text.Message.ShouldBe("The session is closed.");
         hold.Message.ShouldBe("The session is closed.");
+        foreach (var failure in new[] { begin, typed, text, hold }) { CheckDiagnostic(failure, "CK07004"); }
         session.State.ShouldBe(SessionState.Closed);
         session.BeginCores.ShouldBe(0);
         session.Executions.ShouldBe(0);
@@ -314,4 +318,13 @@ public class DatabaseSessionTests
 
     private static TestSession CreateSession()
         => new(new TestDatabase("appdb", new TestEngine()));
+    private static void CheckDiagnostic(DatabaseException failure, string code)
+    {
+        var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe(code);
+        diagnostic.Message.ShouldBe(failure.Message);
+        diagnostic.Severity.ShouldBe(Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+        diagnostic.Start.ShouldBeNull();
+        diagnostic.End.ShouldBeNull();
+    }
 }

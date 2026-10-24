@@ -161,6 +161,7 @@ public sealed class TypedSchemaDefaultTests
 
         // Assert
         mismatched.ParamName.ShouldBe("value");
+        mismatched.Message.ShouldStartWith("The default value cannot be represented as a Int32 column literal.", Case.Sensitive);
         overflow.ParamName.ShouldBe("value");
         table.Build().ColumnDefinitions.ShouldBeEmpty();
     }

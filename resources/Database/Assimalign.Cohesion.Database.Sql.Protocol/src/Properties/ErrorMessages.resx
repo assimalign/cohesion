@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ProtocolExecuteMessageDecodeProtocol" xml:space="preserve"><value>Malformed payload: negative parameter count.</value></data>
+  <data name="ProtocolExecuteMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: invalid parameter length.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol" xml:space="preserve"><value>Unsupported SQL result-header format; rebuild the client and server together.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: invalid column count.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol3" xml:space="preserve"><value>Malformed payload: truncated column type.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol4" xml:space="preserve"><value>Malformed payload: invalid column length.</value></data>
+  <data name="ResultHeaderMessageDecodeProtocol5" xml:space="preserve"><value>Malformed payload: trailing result-header bytes.</value></data>
+</root>

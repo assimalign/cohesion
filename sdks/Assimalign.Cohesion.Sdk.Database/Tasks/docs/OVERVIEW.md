@@ -77,3 +77,36 @@ generated migration files cannot, so a project with `CohesionDatabaseProject` se
 declares the same database and runs once in Apply mode during deployment, then start the
 application in Verify mode ([DESIGN.md](DESIGN.md#e4-script-artifact-decision);
 [#1504](https://github.com/assimalign/cohesion/issues/1504) tracks script-aware migrations).
+
+
+## Shared defaults and diagnostic resources (#1470)
+
+The Defaults shared module resolves incompatible-value text through a consuming-assembly-local
+`SqlDefaultLiteralErrorMessages` binding to the generated internal resource accessor. SQL schema
+and SDK extraction therefore retain identical ArgumentException text and the `value` parameter,
+without a resource lookup on successful rendering. SQL explanatory message fragments also use
+resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
+for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
+`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+
+
+The shared Types module also binds modifier-refusal templates to each consumer's own generated
+resources through internal `SqlTypeModifierErrorMessages`. Unsupported type/modifier text and
+codes are preserved. Numeric modifier spelling remains invariant SQL text; message templates
+format with the current culture. Successful type validation adds no resource lookup.
+
+## Rules audit after main cleanup
+
+The migration-ordinal refusal uses the generated ErrorMessages accessor with its existing text
+and COHDBSDK206 reporting boundary. Assembly-local Defaults/Types bindings live under Internal
+and retain the linked owning namespaces. Private fixture constants use repository casing;
+compiler identifiers, generated artifact contents, schema format and extraction behavior are unchanged.
+
+SDK defaults and migration bookkeeping use separate item groups for each item type. This organization preserves the resource metadata and generated schema/migration artifacts.
+
+## Error message producers and catalog carriers
+
+Migration error factories and their refusal reasons, portable type-identity refusals, and
+compiled-schema source-writer refusals use generated ErrorMessages resources. Their original
+exception types/text and outer COHDBSDK compiler identities remain unchanged. Generated SQL,
+portable metadata identities and other artifact content keep their invariant spellings.

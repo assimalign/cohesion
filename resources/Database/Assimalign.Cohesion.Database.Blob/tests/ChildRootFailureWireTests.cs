@@ -84,7 +84,7 @@ public sealed class ChildRootFailureWireTests
 
             // Assert
             failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            failure.Message.ShouldStartWith(catalog ? "COHDBB006: " : "COHDBB005: ", Case.Sensitive);
+            failure.Message.ShouldStartWith(catalog ? "CB06006: " : "CB06005: ", Case.Sensitive);
             (await client.ReadAsync()).ShouldBeNull();
             if (!catalog) { faults.RottenPageReads.ShouldBeGreaterThan(0); }
         }
@@ -123,10 +123,10 @@ public sealed class ChildRootFailureWireTests
 
         // Assert
         attempts.ShouldBe(2);
-        embedded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBB005");
+        embedded.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB06005");
         embedded.InnerException.ShouldBeSameAs(cause);
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldStartWith("COHDBB005: ", Case.Sensitive);
+        failure.Message.ShouldStartWith("CB06005: ", Case.Sensitive);
         (await client.ReadAsync()).ShouldBeNull();
         (await session.GetContainerAsync(BlobServerHarness.ContainerName, CancellationToken.None)).Name.ShouldBe(BlobServerHarness.ContainerName);
     }

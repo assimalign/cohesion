@@ -6,6 +6,8 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DatabaseResourceDescriptor")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.ApplicationModel.Internal.DatabaseResourceDescriptor.DebugView))]
 internal sealed class DatabaseResourceDescriptor : IDatabaseResourceDescriptor
 {
     private readonly IResourceCommandDescriptor _inner;
@@ -14,7 +16,7 @@ internal sealed class DatabaseResourceDescriptor : IDatabaseResourceDescriptor
     {
         ArgumentNullException.ThrowIfNull(inner);
         _inner = inner as IResourceCommandDescriptor ?? throw new ArgumentException(
-            "The descriptor must support declarative command authoring.", nameof(inner));
+            ErrorMessages.DatabaseResourceDescriptorArgument, nameof(inner));
     }
 
     public IApplicationResource Resource => _inner.Resource;
@@ -40,4 +42,12 @@ internal sealed class DatabaseResourceDescriptor : IDatabaseResourceDescriptor
 
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(IApplicationResourceDescriptor resource) => DependsOn(resource);
     IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(params IApplicationResourceDescriptor[] resources) => DependsOn(resources);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.ApplicationModel.Internal.DatabaseResourceDescriptor value)
+        {
+            _ = value;
+        }
+    }
 }

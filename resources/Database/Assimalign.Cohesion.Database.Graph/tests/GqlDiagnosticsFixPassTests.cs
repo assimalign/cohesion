@@ -27,7 +27,7 @@ public sealed class GqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("GQL0007");
+        diagnostic.Code.ShouldBe("CG00007");
         diagnostic.Start.ShouldBe(query.Location!.Start);
         diagnostic.End.ShouldBe(query.Location.End);
         failure.Message.ShouldBe("Graph catalog introspection is read-only.");
@@ -48,7 +48,7 @@ public sealed class GqlDiagnosticsFixPassTests
 
         // Assert
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDBG001");
+        diagnostic.Code.ShouldBe("CG05001");
         diagnostic.Start.ShouldBe(request.Statement.GqlExpression.Location!.Start);
         diagnostic.End.ShouldBe(request.Statement.GqlExpression.Location.End);
     }

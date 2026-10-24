@@ -115,7 +115,7 @@ public sealed class GraphEngineTests
         await schema.SaveLabelAsync(label);
         await schema.SavePropertyKeyAsync(new(label.Id, "age", DatabaseType.Int64, true));
         var error = await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"]));
-        error.Message.ShouldContain("COHDBG003");
+        error.Message.ShouldContain("CG03003");
         await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = "old" }));
         (await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
@@ -151,7 +151,7 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with COHDBG017 before scrub, leaving every file unchanged (#1534)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Format: old records and registrations are refused with CG06017 before scrub, leaving every file unchanged (#1534)")]
     [InlineData(1, 2)]
     [InlineData(2, 2)]
     [InlineData(1, 3)]
@@ -203,13 +203,18 @@ public sealed class GraphEngineTests
 
             // Assert
             // EnsureIndexFormat wraps the storage failure in a coded engine exception.
-            failure.Code.ShouldBe("COHDBS003");
-            failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["COHDBS003", "COHDBG018", "COHDBG017"]);
+            failure.Code.ShouldBe("CK06003");
+            failure.Diagnostics.Select(diagnostic => diagnostic.Code).ShouldBe(["CK06003", "CG06018", "CG06017"]);
             failure.Diagnostics.ShouldAllBe(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
             failure.Diagnostics[0].Message.ShouldBe(failure.Message);
             failure.Diagnostics[2].Message.ShouldStartWith("Database 'legacy' cannot be opened. ", Case.Sensitive);
             failure.Message.ShouldContain("recreate the database", Case.Sensitive);
-            failure.InnerException.ShouldBeOfType<StorageCorruptionException>().Message.ShouldStartWith("COHDBG017: ", Case.Sensitive);
+            var corruption = failure.InnerException.ShouldBeOfType<StorageCorruptionException>();
+            corruption.PageId.ShouldNotBeNull();
+            corruption.SlotIndex.ShouldNotBeNull();
+            corruption.Message.ShouldNotContain("CG06017:");
+            corruption.InnerException.ShouldBeOfType<Internal.GraphRecordFormatException>().Diagnostics
+                .ShouldHaveSingleItem().Code.ShouldBe("CG06017");
             reopened.TryGetDatabase("legacy", out _).ShouldBeFalse();
             await reopened.DisposeAsync();
             Directory.GetFiles(directory).Order().ShouldBe(before.Keys.Order());
@@ -218,7 +223,7 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database whose indexes are in B-tree page format 1 is refused at open with COHDBI001, its files untouched (#1194)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database whose indexes are in B-tree page format 1 is refused at open with CK06101, its files untouched (#1194)")]
     public async Task Open_IndexPagesInFormatOne_ShouldBeRefused()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-format-" + Guid.NewGuid().ToString("N"));
@@ -257,7 +262,7 @@ public sealed class GraphEngineTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, true); } }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database in storage format 2 (the format before #1253) is refused at open with COHDBS001 naming it, its files untouched (#1251, #1253)")]
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Format: a database in storage format 2 (the format before #1253) is refused at open with CK06001 naming it, its files untouched (#1251, #1253)")]
     public async Task Open_StorageFormatTwo_ShouldBeRefusedNamingTheDatabase()
     {
         string root = Path.Combine(Path.GetTempPath(), "cohesion-graph-storage-format-" + Guid.NewGuid().ToString("N"));

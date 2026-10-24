@@ -93,3 +93,29 @@ Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect fol
 are disabled. No runtime Hosting or ApplicationModel dependency was added.
 
 Supply an `IDuplexConnectionFactory` through `DatabaseClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Pool return now rolls back unfinished SQL/Graph transactions using negotiated server status before reusing a session; uncertified sessions are discarded (#1540).
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Explicit pool-reset construction
+
+The internal pool-reset exchange uses an explicit constructor while retaining the same negotiated status and connection-reuse behavior; see [DESIGN.md](DESIGN.md).
+
+
+## Debugger inspection (#1470)
+
+Eligible concrete source types use private nested debugger views of reviewed public/protected
+state; existing inherited display/proxy pairs are reused. See the shared
+[debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
+Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
+Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.

@@ -29,7 +29,7 @@ internal static class GraphGrouping
                 bool inside = item.InsideAggregate;
                 if (item.Expression is GqlAggregateExpression aggregate)
                 {
-                    if (inside) { throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, aggregate.Location); }
+                    if (inside) { throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, aggregate.Location); }
                     aggregated = inside = true;
                     if (aggregates.Add(aggregate)) { aggregateList.Add(aggregate); }
                 }
@@ -41,24 +41,24 @@ internal static class GraphGrouping
         if (query.GroupBy is null && aggregateList.Count == 0) { return null; }
         foreach (var candidate in candidates)
         { token.ThrowIfCancellationRequested(); if (keys.Add(candidate)) { keyList.Add(candidate); } }
-        if (projections.Count == 0) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+        if (projections.Count == 0) { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
         if (query.GroupBy is not null)
         {
             var explicitKeys = new List<GqlExpression>();
             foreach (var key in query.GroupBy)
             {
                 token.ThrowIfCancellationRequested();
-                if (key is null) { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+                if (key is null) { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
                 GqlExpression resolved = key;
                 // Neo4j AggregationChecker.scala:117-144 exempts non-aggregate grouping
                 // aliases and diagnoses an aggregate alias. Expressions retain input scope.
                 if (key is GqlVariableExpression name && groupingNames.TryGetValue(name.Variable, out var item))
-                { resolved = item ?? throw new GraphPlanningException("COHDBG001", ErrorMessages.AggregatePlacement, key.Location); }
+                { resolved = item ?? throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, key.Location); }
                 validateKey?.Invoke(resolved);
                 explicitKeys.Add(resolved);
             }
             if (explicitKeys.Count != keys.Count || !keys.SetEquals(explicitKeys))
-            { throw new GraphPlanningException("COHDBG001", ErrorMessages.GroupByMismatch, query.Location); }
+            { throw new GraphPlanningException("CG05001", ErrorMessages.GroupByMismatch, query.Location); }
         }
         var scope = new GraphGroupingScope(keyList, aggregateList, shape, token);
         var plan = new GraphGroupingPlan(keyList.AsReadOnly(), aggregateList.AsReadOnly(), scope);
@@ -66,47 +66,87 @@ internal static class GraphGrouping
         return plan;
     }
 
-    internal static List<Dictionary<string, object?>> Apply(GraphGroupingPlan plan,
-        IReadOnlyList<Dictionary<string, object?>> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+    /// <summary>Consumes one borrowed binding at a time; groups retain keys and aggregate state only.</summary>
+    [global::System.Diagnostics.DebuggerDisplay("Accumulator")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGrouping.Accumulator.DebugView))]
+    internal sealed class Accumulator : IDisposable
     {
-        var groups = new Dictionary<object?[], Group>(GraphRowComparer.Instance);
-        var ordered = new List<Group>();
-        // An ungrouped aggregate has exactly one group even when MATCH produced no rows.
-        if (plan.Keys.Count == 0) { AddGroup([]); }
-        foreach (var binding in bindings)
+        private readonly GraphGroupingPlan _plan;
+        private readonly GraphEvaluationContext _context;
+        private readonly IReadOnlyDictionary<string, object?>? _parameters;
+        private readonly CancellationToken _token;
+        private readonly Dictionary<object?[], Group> _groups = new(GraphRowComparer.Instance);
+        private readonly List<Group> _ordered = [];
+        private readonly GraphMemoryOwner? _memory;
+
+        internal Accumulator(GraphGroupingPlan plan, GraphEvaluationContext context,
+            IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, GraphMemoryOwner? memory = null)
         {
-            token.ThrowIfCancellationRequested();
-            var key = new object?[plan.Keys.Count];
+            _plan = plan;
+            _context = context;
+            _parameters = parameters;
+            _token = token;
+            _memory = memory;
+            // An ungrouped aggregate has exactly one group even with no source rows.
+            if (plan.Keys.Count == 0) { AddGroup([]); }
+        }
+
+        internal void Add(IReadOnlyDictionary<string, object?> binding)
+        {
+            _token.ThrowIfCancellationRequested();
+            var key = new object?[_plan.Keys.Count];
             for (int i = 0; i < key.Length; i++)
-            { token.ThrowIfCancellationRequested(); key[i] = GraphExpressionEvaluator.Evaluate(plan.Keys[i], binding, context, parameters); }
-            if (!groups.TryGetValue(key, out var group)) { group = AddGroup(key); }
+            { _token.ThrowIfCancellationRequested(); key[i] = GraphExpressionEvaluator.Evaluate(_plan.Keys[i], binding, _context, _parameters); }
+            if (!_groups.TryGetValue(key, out var group)) { group = AddGroup(key); }
             for (int i = 0; i < group.Accumulators.Length; i++)
             {
-                token.ThrowIfCancellationRequested();
-                var aggregate = plan.Aggregates[i];
+                _token.ThrowIfCancellationRequested();
+                var aggregate = _plan.Aggregates[i];
                 group.Accumulators[i].Add(aggregate.Operand is null ? 1L
-                    : GraphExpressionEvaluator.Evaluate(aggregate.Operand, binding, context, parameters), token);
+                    : GraphExpressionEvaluator.Evaluate(aggregate.Operand, binding, _context, _parameters), _token);
             }
         }
-        var result = new List<Dictionary<string, object?>>(ordered.Count);
-        var shape = new GraphExpressionShape(token);
-        foreach (var group in ordered)
-        {
-            token.ThrowIfCancellationRequested();
-            var values = new Dictionary<GqlExpression, object?>(shape);
-            for (int i = 0; i < plan.Keys.Count; i++) { token.ThrowIfCancellationRequested(); values.Add(plan.Keys[i], group.Key[i]); }
-            for (int i = 0; i < plan.Aggregates.Count; i++)
-            { token.ThrowIfCancellationRequested(); values.Add(plan.Aggregates[i], group.Accumulators[i].Finish()); }
-            result.Add(new GraphGroupedBinding(values));
-        }
-        return result;
 
-        Group AddGroup(object?[] key)
+        internal List<Dictionary<string, object?>> Finish()
         {
-            var group = new Group(key, plan.Aggregates.Select(aggregate => new GraphAggregateAccumulator(aggregate)).ToArray());
-            groups.Add(key, group);
-            ordered.Add(group);
+            var result = new List<Dictionary<string, object?>>(_ordered.Count);
+            var shape = new GraphExpressionShape(_token);
+            foreach (var group in _ordered)
+            {
+                _token.ThrowIfCancellationRequested();
+                var values = new Dictionary<GqlExpression, object?>(shape);
+                for (int i = 0; i < _plan.Keys.Count; i++) { _token.ThrowIfCancellationRequested(); values.Add(_plan.Keys[i], group.Key[i]); }
+                for (int i = 0; i < _plan.Aggregates.Count; i++)
+                { _token.ThrowIfCancellationRequested(); values.Add(_plan.Aggregates[i], group.Accumulators[i].Finish()); }
+                _memory?.Add(128 + 80L * values.Count);
+                foreach (var value in values.Values) { _memory?.RetainValue(value, _token); }
+                result.Add(new GraphGroupedBinding(values));
+            }
+            return result;
+        }
+
+        private Group AddGroup(object?[] key)
+        {
+            _memory?.Add(256 + 512L * _plan.Aggregates.Count);
+            _memory?.RetainValue(key, _token);
+            var group = new Group(key, _plan.Aggregates.Select(aggregate => new GraphAggregateAccumulator(aggregate, _memory)).ToArray());
+            _groups.Add(key, group);
+            _ordered.Add(group);
             return group;
+        }
+
+        public void Dispose()
+        {
+            _groups.Clear();
+            _ordered.Clear();
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphGrouping.Accumulator value)
+            {
+                _ = value;
+            }
         }
     }
 

@@ -30,7 +30,7 @@ public sealed class SqlWireDiagnosticTests
         parsed.Length.ShouldBe(2);
         parse.Diagnostics.Select(Value).ShouldBe(parsed.Select(Value));
         parse.InnerException.ShouldBeOfType<DatabaseClientException>().Diagnostics.Select(Value).ShouldBe(parsed.Select(Value));
-        planning.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE015");
+        planning.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01015");
         planning.Diagnostics[0].Start.ShouldBe(7);
         (await connection.QueryAsync("SELECT id FROM users", cancellationToken: SqlClientTestHarness.Timeout())).Count.ShouldBe(2);
         harness.Server.Sessions.Count.ShouldBe(1);

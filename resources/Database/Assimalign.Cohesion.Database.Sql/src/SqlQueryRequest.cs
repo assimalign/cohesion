@@ -22,6 +22,8 @@ using Assimalign.Cohesion.Database.Types;
 /// normalized collisions and unbound references before data rows are read or written,
 /// and ignores unused keys. Numeric names bind their exact digits; null is a bound value.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlQueryRequest")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlQueryRequest.DebugView))]
 public sealed class SqlQueryRequest : DatabaseRequest
 {
     private readonly SqlQueryStatement _statement;
@@ -75,7 +77,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// <exception cref="DatabaseParseException">The text failed to parse.</exception>
     /// <exception cref="DatabaseException">
     /// The text is within the nesting limit, but the calling thread has too little stack left to
-    /// parse it: <c>COHSQLE004</c>, statement too complex (ISO SQLSTATE 54001), as for any other
+    /// parse it: <c>CS05004</c>, statement too complex (ISO SQLSTATE 54001), as for any other
     /// walk over a statement that runs out of stack (#1151).
     /// </exception>
     public static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters = null)
@@ -91,7 +93,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// </summary>
     /// <remarks>
     /// A limit above the engine's does not get a statement past it: the engine refuses a request
-    /// that nests deeper than its own limit with <c>SQL0006</c>
+    /// that nests deeper than its own limit with <c>CS00006</c>
     /// (<see cref="SqlQueryStatement.ExpressionNestingDepth"/>).
     /// </remarks>
     /// <param name="sql">The SQL statement text.</param>
@@ -107,7 +109,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
     /// <exception cref="DatabaseParseException">The text failed to parse.</exception>
     /// <exception cref="DatabaseException">
     /// The text is within the nesting limit, but the calling thread has too little stack left to
-    /// parse it: <c>COHSQLE004</c>, statement too complex (ISO SQLSTATE 54001).
+    /// parse it: <c>CS05004</c>, statement too complex (ISO SQLSTATE 54001).
     /// </exception>
     public static SqlQueryRequest FromSql(string sql, IReadOnlyDictionary<string, object?>? parameters, SqlQueryParserOptions? parserOptions)
         => FromSql(sql, parameters, parserOptions, database: null);
@@ -123,20 +125,20 @@ public sealed class SqlQueryRequest : DatabaseRequest
         var error = statement.Diagnostics.FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {
-            if (database is { } name && error.Code is "SQL0006" or ParserOutOfStackCode)
+            if (database is { } name && error.Code is "CS00006" or parserOutOfStackCode)
             {
                 SqlDatabaseEventSource.Log.StatementTooComplex(name, statement.ExpressionNestingDepth);
             }
-            if (error.Code == ParserOutOfStackCode)
+            if (error.Code == parserOutOfStackCode)
             {
                 // The text is within the dialect; the thread is too small for it. That is a
                 // statement too complex for the executing thread, the same failure a planner or
                 // evaluator walk out of stack reports, not a mistake in the text.
                 throw SqlEvaluationException.StatementTooComplex(new InsufficientExecutionStackException(
-                    $"SQL parse error {error.Code}: {error.Message}"));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, error.Code, error.Message)));
             }
 
-            throw new DatabaseParseException($"SQL parse error {error.Code}: {error.Message}", statement.Diagnostics);
+            throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, error.Code, error.Message), statement.Diagnostics);
         }
 
         return parameters is null
@@ -146,7 +148,7 @@ public sealed class SqlQueryRequest : DatabaseRequest
 
     // The parser's code for text within the nesting limit that the calling thread has too little
     // stack left to parse (#1151); the same text parses on a larger stack.
-    private const string ParserOutOfStackCode = "SQL0007";
+    private const string parserOutOfStackCode = "CS00007";
 
     /// <summary>
     /// Parser options at the highest nesting limit any engine can be configured with (#1151), for
@@ -158,4 +160,12 @@ public sealed class SqlQueryRequest : DatabaseRequest
     {
         ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit,
     };
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.SqlQueryRequest value)
+        {
+            _ = value;
+        }
+    }
 }

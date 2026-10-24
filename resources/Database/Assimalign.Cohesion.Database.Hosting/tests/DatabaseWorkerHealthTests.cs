@@ -130,7 +130,7 @@ public sealed class DatabaseWorkerHealthTests
     /// A worker failing on one database of a hosted Blob engine (owner decision 42 of 2026-10-07):
     /// health is Degraded and names the failing worker, as for any failing worker, while the
     /// engine's Blob server, which the application starts, serves the engine's healthy database
-    /// over the wire and refuses only the failing one, with <c>COHDBB003</c>. Before the decision
+    /// over the wire and refuses only the failing one, with <c>CB06003</c>. Before the decision
     /// the server refused every database while its engine was Faulted.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a Blob worker failing on one database is degraded and named while the server serves the other databases")]
@@ -179,7 +179,7 @@ public sealed class DatabaseWorkerHealthTests
         served.ShouldBe((ProtocolMessageType.Ready, (ProtocolErrorCode?)null, (string?)null, (long?)0));
         refused.Type.ShouldBe(ProtocolMessageType.Error);
         refused.Code.ShouldBe(ProtocolErrorCode.Unavailable);
-        refused.Message.ShouldNotBeNull().ShouldStartWith("COHDBB003", Case.Sensitive);
+        refused.Message.ShouldNotBeNull().ShouldStartWith("CB06003", Case.Sensitive);
         refused.Listed.ShouldBeNull();
     }
 

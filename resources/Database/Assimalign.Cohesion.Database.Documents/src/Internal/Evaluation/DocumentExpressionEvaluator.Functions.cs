@@ -25,11 +25,11 @@ internal sealed partial class DocumentExpressionEvaluator
         var function = OqlFunctions.Find(call.Name);
         if (function is null || call.Name == "META" || !function.AcceptsArity(call.Arguments.Count))
         {
-            throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid);
+            throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid);
         }
         if (function.IsAggregate)
         {
-            return Aggregate(call, group ?? throw new DocumentPlanningException("COHDOC001", ErrorMessages.AggregateContextMissing));
+            return Aggregate(call, group ?? throw new DocumentPlanningException("CD05001", ErrorMessages.AggregateContextMissing));
         }
         if (call.Name is "COALESCE" or "IFMISSING" or "IFNULL" or "IFMISSINGORNULL")
         {
@@ -48,7 +48,7 @@ internal sealed partial class DocumentExpressionEvaluator
         }
         if (call.Name is "NOW_STR" or "NOW_MILLIS")
         {
-            var instant = _transactionStart ?? throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionClockMissing);
+            var instant = _transactionStart ?? throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionClockMissing);
             return call.Name == "NOW_MILLIS" ? instant.ToUnixTimeMilliseconds() : DateString(instant);
         }
         var values = call.Arguments.Select(argument => Evaluate(argument, document, group)).ToArray();
@@ -111,7 +111,7 @@ internal sealed partial class DocumentExpressionEvaluator
             "ROUND" => Round(x, y, false), "TRUNC" => Round(x, y, true),
             "SQRT" => x < 0 ? throw Domain() : DecimalFromDouble(Math.Sqrt((double)x)),
             "POWER" => Power(x, y),
-            _ => throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid),
+            _ => throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid),
         };
     }
 
@@ -184,7 +184,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 string old = (string)values[1]!, replacement = (string)values[2]!;
                 decimal remaining = values.Length == 4 ? Number(values[3]!) : -1;
                 if (remaining != decimal.Truncate(remaining))
-                { throw new DocumentPlanningException("COHDOC008", ErrorMessages.ReplaceCountInvalid); }
+                { throw new DocumentPlanningException("CD02008", ErrorMessages.ReplaceCountInvalid); }
                 // Couchbase stringfun.html#replace: any negative count replaces all occurrences.
                 bool replaceAll = remaining < 0;
                 if (old.Length == 0 || remaining == 0) { return text; }
@@ -202,7 +202,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 }
                 Append(replaced, text.AsSpan(consumed));
                 return replaced.ToString();
-            default: throw new DocumentPlanningException("COHDOC001", ErrorMessages.FunctionArgumentsInvalid);
+            default: throw new DocumentPlanningException("CD05001", ErrorMessages.FunctionArgumentsInvalid);
         }
     }
 
@@ -297,7 +297,7 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private static void CheckStringLength(long length)
     {
-        if (length > maximumStringLength) { throw new DocumentPlanningException("COHDOC007", ErrorMessages.FunctionStringTooLarge); }
+        if (length > maximumStringLength) { throw new DocumentPlanningException("CD02007", ErrorMessages.FunctionStringTooLarge); }
     }
 
     private static decimal Round(decimal value, decimal scale, bool truncate)
@@ -352,5 +352,5 @@ internal sealed partial class DocumentExpressionEvaluator
         JsonElement json => json.ValueKind, null => JsonValueKind.Null, _ => JsonValueKind.Undefined,
     };
 
-    private static DocumentPlanningException Domain() => new("COHDOC019", ErrorMessages.FunctionOutsideDomain);
+    private static DocumentPlanningException Domain() => new("CD02019", ErrorMessages.FunctionOutsideDomain);
 }

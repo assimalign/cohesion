@@ -35,6 +35,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// as in the other models.
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphWriteAheadFlushWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphWriteAheadFlushWorker.DebugView))]
 internal sealed class GraphWriteAheadFlushWorker : DatabaseWriteWorker<GraphDatabase>
 {
     private readonly GraphDatabaseEngine _engine;
@@ -66,5 +68,20 @@ internal sealed class GraphWriteAheadFlushWorker : DatabaseWriteWorker<GraphData
         DatabaseWriteResult failures = default;
         TryWrite(() => database.DataStorage.FlushPendingCommits() ? 1 : 0, ref failures);
         return failures;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Internal.GraphWriteAheadFlushWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphWriteAheadFlushWorker value)
+        {
+            _target = value;
+        }
+
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

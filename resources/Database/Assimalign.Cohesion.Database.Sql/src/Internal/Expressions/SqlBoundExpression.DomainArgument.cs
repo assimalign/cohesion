@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A function argument's domain coercion, evaluated before the function's STRICT dispatch.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundDomainArgument")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundDomainArgument.DebugView))]
 internal sealed class SqlBoundDomainArgument : SqlBoundExpression
 {
     private readonly SqlType _domain;
@@ -48,5 +50,13 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
                 _domain.Name, string.Empty, "DOMAIN");
         }
         return value;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundDomainArgument value)
+        {
+            _ = value;
+        }
     }
 }

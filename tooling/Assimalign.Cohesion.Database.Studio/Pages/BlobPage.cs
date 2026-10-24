@@ -66,7 +66,7 @@ internal sealed class BlobPage : ContentPage
             if (args.CurrentSelection.FirstOrDefault() is string name)
             {
                 SetContainer(name);
-                await Guard(ListBlobsAsync);
+                await GuardAsync(ListBlobsAsync);
             }
         };
 
@@ -160,7 +160,7 @@ internal sealed class BlobPage : ContentPage
         _ = BindAsync();
     }
 
-    private async Task Guard(Func<Task> action)
+    private async Task GuardAsync(Func<Task> action)
     {
         try
         {
@@ -198,13 +198,13 @@ internal sealed class BlobPage : ContentPage
 
     private BlobWorkspace Workspace()
     {
-        BlobWorkspace workspace = _workspace ?? throw new InvalidOperationException("The Blob workspace is not ready (see the Workspace page).");
-        return workspace.CurrentDatabase is null ? throw new InvalidOperationException("Select or create a database first.") : workspace;
+        BlobWorkspace workspace = _workspace ?? throw new InvalidOperationException(ErrorMessages.BlobWorkspaceUnavailable);
+        return workspace.CurrentDatabase is null ? throw new InvalidOperationException(ErrorMessages.DatabaseSelectionMissing) : workspace;
     }
 
-    private string Container() => _container ?? throw new InvalidOperationException("Select a container first.");
+    private string Container() => _container ?? throw new InvalidOperationException(ErrorMessages.ContainerSelectionMissing);
 
-    private BlobItem Selected() => _selected ?? throw new InvalidOperationException("Select a blob first.");
+    private BlobItem Selected() => _selected ?? throw new InvalidOperationException(ErrorMessages.BlobSelectionMissing);
 
     private void SetContainer(string? name)
     {
@@ -235,7 +235,7 @@ internal sealed class BlobPage : ContentPage
     private async Task CreateContainerAsync()
     {
         BlobWorkspace workspace = Workspace();
-        string name = string.IsNullOrWhiteSpace(_newContainer.Text) ? throw new InvalidOperationException("Enter a container name.") : _newContainer.Text.Trim();
+        string name = string.IsNullOrWhiteSpace(_newContainer.Text) ? throw new InvalidOperationException(ErrorMessages.ContainerNameMissing) : _newContainer.Text.Trim();
         await Task.Run(() => workspace.CreateContainerAsync(name));
         _newContainer.Text = string.Empty;
         _messages.Add($"Container '{name}' created.", MessageKind.Success);
@@ -315,7 +315,7 @@ internal sealed class BlobPage : ContentPage
         BlobWorkspace workspace = Workspace();
         string container = Container();
         BlobItem blob = Selected();
-        string folder = string.IsNullOrWhiteSpace(_saveFolder.Text) ? throw new InvalidOperationException("Enter a download folder.") : _saveFolder.Text.Trim();
+        string folder = string.IsNullOrWhiteSpace(_saveFolder.Text) ? throw new InvalidOperationException(ErrorMessages.DownloadFolderMissing) : _saveFolder.Text.Trim();
         Directory.CreateDirectory(folder);
         string target = UniquePath(folder, blob.Name);
         long copied = await Task.Run(async () =>

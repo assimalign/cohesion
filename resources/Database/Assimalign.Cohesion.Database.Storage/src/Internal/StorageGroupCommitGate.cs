@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// <em>never</em> acknowledged before its records are durable — a missing or stalled
 /// worker only costs latency, never durability.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageGroupCommitGate")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageGroupCommitGate.DebugView))]
 internal sealed class StorageGroupCommitGate
 {
     private readonly object _syncRoot = new();
@@ -172,6 +174,14 @@ internal sealed class StorageGroupCommitGate
                 _durableLsn = lsn;
                 Monitor.PulseAll(_syncRoot);
             }
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageGroupCommitGate value)
+        {
+            _ = value;
         }
     }
 }

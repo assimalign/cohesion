@@ -309,7 +309,7 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including SQL0100, is never sent. Error and result payloads are unchanged.
+Information, including CS00100, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
@@ -348,7 +348,7 @@ translated by the endpoint/client to ProtocolViolation. Outbound overflow follow
 Outbound SQL and Graph diagnostics are preflighted before any result or Error output.
 If the filtered Warning/Error list exceeds 4,096 entries or 1,048,576 encoded bytes,
 the endpoint retains the longest leading prefix that fits both limits with a final
-Warning notice, code COHDBP001. The notice counts toward both limits and states the
+Warning notice, code CK07001. The notice counts toward both limits and states the
 retained count, original filtered count and omitted count. Once an entry does not fit,
 it and every following entry are omitted, even if a later entry would fit. Entries
 are never shortened. A 4,097-entry list of small diagnostics therefore keeps the first
@@ -388,3 +388,35 @@ replacement decoding in ProtocolPayload.
 SQL, Graph, KeyValuePair and Documents use it for model statement text and protocol identifiers.
 Blob already uses a strict bounded metadata reader and uses this reader in its shared handshake.
 Decoder failures become ProtocolException and the server sends fatal ProtocolViolation, then closes.
+
+## Execute transaction status (#1540, D5)
+
+SQL and Graph advertise the shared `transaction-status` capability in protocol 2.1. Startup Ready
+keeps its version/capability payload. When negotiated, each Execute (also Graph ExecutePaths)
+ends with an existing Ready frame (byte 4) after ResultComplete/PathsComplete or a statement Error.
+Its payload is exactly one ASCII byte: `I` idle, `T` explicit transaction active, `E` explicit
+transaction failed. No new message identifier, protocol version or on-disk format is introduced.
+Unnegotiated peers retain their original bytes. Ping/Pong and terminal connection errors have no
+postamble. Malformed status payloads use CK07002 and are protocol violations.
+
+The capability also defines parameterless reset: Execute byte 5 carries the usual length-prefixed
+UTF-8 `ROLLBACK` followed by a zero Int32 parameter count. Success is ResultComplete byte 8 with
+an Int64 affected count of zero, then Ready `I`. An error or any other completion/status discards
+the connector. Clients never determine transaction state by recognizing user command text.
+
+PostgreSQL reports the same idle/active/failed distinction after a command cycle in
+`src/backend/tcop/dest.c:268-281` and `src/backend/access/transam/xact.c:5058-5090` (local PostgreSQL
+clone). This copies the state contract only; no source code is copied.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Debugger inspection convention
+
+Protocol debugger views filter private framing/session machinery and project only reviewed public/protected names, versions, capability flags, already-materialized collections and relationships. They do not perform stream I/O, decode payloads, negotiate capabilities or materialize a new collection. Error/Exception subclasses and EventSource types remain excluded.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

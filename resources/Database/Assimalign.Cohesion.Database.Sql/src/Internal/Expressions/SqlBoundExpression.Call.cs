@@ -18,6 +18,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <see cref="SqlFunctionContext"/>. <c>COALESCE</c> is a special form, not a call: it binds as
 /// <see cref="SqlBoundCoalesce"/>.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlBoundCall")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCall.DebugView))]
 internal sealed class SqlBoundCall : SqlBoundExpression
 {
     /// <summary>Initializes a bound call.</summary>
@@ -70,4 +72,12 @@ internal sealed class SqlBoundCall : SqlBoundExpression
 
     /// <summary>Gets the database whose statement makes the call.</summary>
     internal DatabaseName Database { get; }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundCall value)
+        {
+            _ = value;
+        }
+    }
 }

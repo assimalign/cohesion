@@ -111,7 +111,7 @@ public sealed class DatabaseConnectionSettings
 
             if (separator <= 0 || separator == segment.Length - 1)
             {
-                throw new DatabaseClientException(ProtocolErrorCode.Internal, $"Malformed connection string segment '{segment}'; expected key=value.");
+                throw new DatabaseClientException(ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectionSettingsParseDatabaseClient, segment));
             }
 
             string key = segment[..separator].Trim();
@@ -134,14 +134,14 @@ public sealed class DatabaseConnectionSettings
                 case "maxpoolsize":
                     if (!int.TryParse(value, out int poolSize) || poolSize <= 0)
                     {
-                        throw new DatabaseClientException(ProtocolErrorCode.Internal, $"Invalid MaxPoolSize value '{value}'; expected a positive integer.");
+                        throw new DatabaseClientException(ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectionSettingsParseDatabaseClient2, value));
                     }
 
                     settings.MaxPoolSize = poolSize;
                     break;
 
                 default:
-                    throw new DatabaseClientException(ProtocolErrorCode.Internal, $"Unknown connection string key '{key}'.");
+                    throw new DatabaseClientException(ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConnectionSettingsParseDatabaseClient3, key));
             }
         }
 
@@ -174,7 +174,7 @@ public sealed class DatabaseConnectionSettings
 
             if (!int.TryParse(value[(portSeparator + 1)..], out port) || port is <= 0 or > ushort.MaxValue)
             {
-                throw new DatabaseClientException(ProtocolErrorCode.Internal, $"Invalid endpoint port in '{value}'.");
+                throw new DatabaseClientException(ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SettingsParseEndPointDatabaseClient, value));
             }
         }
         else
@@ -184,7 +184,7 @@ public sealed class DatabaseConnectionSettings
 
         if (host.Length == 0)
         {
-            throw new DatabaseClientException(ProtocolErrorCode.Internal, $"Invalid endpoint '{value}'; expected host or host:port.");
+            throw new DatabaseClientException(ProtocolErrorCode.Internal, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SettingsParseEndPointDatabaseClient2, value));
         }
 
         return new DnsEndPoint(host, port);

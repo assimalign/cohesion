@@ -69,7 +69,7 @@ internal sealed partial class SqlPlanner
         var projections = output.Projections;
         if (names.Count > 0 && names.Count != projections.Count)
         {
-            throw new SqlPlanningException("COHSQLE013",
+            throw new SqlPlanningException("CS05013",
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.DerivedColumnCount, relationName, projections.Count, names.Count), query.Location);
         }
         var columns = new SqlCatalogColumn[projections.Count];
@@ -117,7 +117,7 @@ internal sealed partial class SqlPlanner
             string name = names.Count == 0 ? projection.Name : names[i];
             if (string.IsNullOrWhiteSpace(name))
             {
-                throw new SqlPlanningException("COHSQLE013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? query.Location);
+                throw new SqlPlanningException("CS05013", ErrorMessages.DerivedColumnName, projection.Expression?.Location ?? query.Location);
             }
             columns[i] = new SqlCatalogColumn(name,
                 type, projection.IsNullable,
@@ -169,7 +169,7 @@ internal sealed partial class SqlPlanner
         }
         if (plan is not SqlRelationPlan relation)
         {
-            throw new SqlPlanningException("COHSQLE013", ErrorMessages.QuerySourceRequired);
+            throw new SqlPlanningException("CS05013", ErrorMessages.QuerySourceRequired);
         }
         return (relation.OutputProjections, relation.OutputColumns, relation.OutputBindings);
     }

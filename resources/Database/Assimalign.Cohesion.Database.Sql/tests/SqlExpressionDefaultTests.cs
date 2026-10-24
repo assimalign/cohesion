@@ -123,7 +123,7 @@ public sealed class SqlExpressionDefaultTests
 
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("ALTER TABLE t ADD uid UUID DEFAULT GEN_RANDOM_UUID()", cancellationToken: CancellationToken.None).AsTask());
-        error.Diagnostics.Single().Code.ShouldBe("COHSQLE027");
+        error.Diagnostics.Single().Code.ShouldBe("CS03027");
         error.Message.ShouldContain("uid", Case.Sensitive);
         database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         table.Columns.Count.ShouldBe(1);
@@ -134,13 +134,13 @@ public sealed class SqlExpressionDefaultTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - DEFAULT: invalid definitions retain their diagnostic through every DDL path")]
-    [InlineData("id + 1", "COHSQLE013")]
-    [InlineData("@p", "COHSQLE013")]
-    [InlineData("SUM(1)", "COHSQLE013")]
-    [InlineData("-'x'", "COHSQLE003")]
-    [InlineData("(1 / 0)", "COHSQLE001")]
-    [InlineData("CAST('x' AS INT)", "COHSQLE022")]
-    [InlineData("UPPER('x')", "COHSQLE013")]
+    [InlineData("id + 1", "CS05013")]
+    [InlineData("@p", "CS05013")]
+    [InlineData("SUM(1)", "CS05013")]
+    [InlineData("-'x'", "CS02003")]
+    [InlineData("(1 / 0)", "CS02001")]
+    [InlineData("CAST('x' AS INT)", "CS02022")]
+    [InlineData("UPPER('x')", "CS05013")]
     public async Task Declare_InvalidDefault_ShouldRejectEveryDdlPathBeforeMutation(string expression, string code)
     {
         // Arrange
@@ -156,7 +156,7 @@ public sealed class SqlExpressionDefaultTests
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
             failure.Diagnostics.Single().Code.ShouldBe(code);
             failure.Message.ShouldContain(sql.Contains("ADD COLUMN", StringComparison.Ordinal) ? "rejected" : "bad", Case.Sensitive);
-            if (code == "COHSQLE001")
+            if (code == "CS02001")
             {
                 failure.Message.ShouldContain("Division by zero", Case.Sensitive);
                 failure.Message.ShouldNotContain("cannot be stored", Case.Sensitive);
@@ -216,7 +216,7 @@ public sealed class SqlExpressionDefaultTests
             "INSERT INTO empty (id) VALUES (1)", $"ALTER TABLE t ADD rejected {type} NOT NULL DEFAULT {expression}" })
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE024");
+            failure.Diagnostics.Single().Code.ShouldBe("CS03024");
         }
         (await Rows(session, "SELECT n FROM t")).Count.ShouldBe(1);
         (await Rows(session, "SELECT id FROM empty")).ShouldBeEmpty();
@@ -270,7 +270,7 @@ public sealed class SqlExpressionDefaultTests
             await second.ExecuteAsync("INSERT INTO t VALUES (2, 'EXPLICIT')", cancellationToken: CancellationToken.None);
             calls.ShouldBe(0);
             var failure = await Should.ThrowAsync<DatabaseException>(() => second.ExecuteAsync("INSERT INTO t (id) VALUES (3)", cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe(overlong ? "COHSQLE012" : "COHSQLE007");
+            failure.Diagnostics.Single().Code.ShouldBe(overlong ? "CS02012" : "CS05007");
             calls.ShouldBe(1);
             (await Rows(second, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
         }
@@ -299,7 +299,7 @@ public sealed class SqlExpressionDefaultTests
                 $"ALTER TABLE t ADD rejected DOUBLE PRECISION DEFAULT {expression}", $"ALTER TABLE t ALTER n SET DEFAULT {expression}" })
             {
                 var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql, cancellationToken: CancellationToken.None).AsTask());
-                failure.Diagnostics.Single().Code.ShouldBe("COHSQLE002");
+                failure.Diagnostics.Single().Code.ShouldBe("CS02002");
                 failure.Message.ShouldContain("Floating-point defaults must be finite.", Case.Sensitive);
                 failure.Message.ShouldNotContain("must be a literal", Case.Sensitive);
             }
@@ -308,7 +308,7 @@ public sealed class SqlExpressionDefaultTests
         {
             if (table == "empty") { await session.ExecuteAsync("CREATE TABLE empty (id INT)", cancellationToken: CancellationToken.None); }
             var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync($"ALTER TABLE {table} ADD rejected DOUBLE PRECISION DEFAULT stable_nonfinite('x')", cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe("COHSQLE002");
+            failure.Diagnostics.Single().Code.ShouldBe("CS02002");
         }
         database.Catalog.TryGetTable("dbo", "rejected", out _).ShouldBeFalse();
         database.Catalog.TryGetTable("dbo", "t", out var original).ShouldBeTrue();

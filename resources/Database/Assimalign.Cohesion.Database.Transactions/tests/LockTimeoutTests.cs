@@ -10,6 +10,8 @@ using Xunit;
 using Assimalign.Cohesion.Database.Transactions.Internal;
 using Assimalign.Cohesion.Testing;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 [Collection(nameof(TransactionEventSourceCollection))]
@@ -107,7 +109,7 @@ public sealed class LockTimeoutTests
         var locks = Create(true);
         locks.TryAcquire(_holder, _row, LockMode.Exclusive).ShouldBeTrue();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var timed = Task.Run(async () =>
+        var timed = DedicatedTestTask.Run(async () =>
         {
             using var scope = locks.EnterLockTimeout(TimeSpan.FromMilliseconds(30));
             entered.SetResult();
@@ -153,7 +155,7 @@ public sealed class LockTimeoutTests
         locks.ReleaseAll(_holder);
         await waiting.WaitAsync(ceiling.Token);
         locks.ReleaseAll(_waiter);
-        var applying = LockManager.Create();
+        var applying = new LockManager();
         applying.EnterEngineMode(_ => false, () => true, "apply-refusal");
         using var applyTimeout = applying.EnterLockTimeout(TimeSpan.FromMilliseconds(1));
         applying.TryAcquire(_holder, _row, LockMode.Exclusive).ShouldBeTrue();
@@ -197,7 +199,7 @@ public sealed class LockTimeoutTests
                 switch (iterations % 3)
                 {
                     case 0:
-                        release = Task.Run(() => locks.ReleaseAll(_holder), ceiling.Token);
+                        release = DedicatedTestTask.Run(() => locks.ReleaseAll(_holder), ceiling.Token);
                         dequeued.Wait(ceiling.Token);
                         pending.IsCompleted.ShouldBeFalse();
                         caller.Cancel();
@@ -283,7 +285,7 @@ public sealed class LockTimeoutTests
 
     private static LockManager Create(bool engineMode)
     {
-        var locks = LockManager.Create();
+        var locks = new LockManager();
         if (engineMode) { locks.EnterEngineMode(_ => false, () => false, "timeout"); }
         return locks;
     }

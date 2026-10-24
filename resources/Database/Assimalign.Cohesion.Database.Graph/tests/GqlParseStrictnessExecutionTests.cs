@@ -17,30 +17,30 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// </summary>
 public sealed class GqlParseStrictnessExecutionTests
 {
-    private const string Seed = "INSERT (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person {name: 'Bob'})";
+    private const string seed = "INSERT (a:Person {name: 'Alice'})-[r:KNOWS]->(b:Person {name: 'Bob'})";
 
     /// <param name="gql">A statement with a stray character or an unsupported ISO construct.</param>
     /// <param name="code">The single error code it reports.</param>
     [Theory(DisplayName = "Cohesion Test [Graph] - Strictness: stray characters and ISO constructs fail at parse time and execute nothing")]
-    [InlineData("MATCH (a) RETURN a.x ?", "GQL0002")]
-    [InlineData("MATCH (a:Person) WHERE a.name = ? DELETE a", "GQL0002")]
-    [InlineData("MATCH (a:Person) DETACH DELETE a #", "GQL0002")]
-    [InlineData("MATCH (n:Person) NODETACH DELETE n", "COHDBL001")]
+    [InlineData("MATCH (a) RETURN a.x ?", "CG00002")]
+    [InlineData("MATCH (a:Person) WHERE a.name = ? DELETE a", "CG00002")]
+    [InlineData("MATCH (a:Person) DETACH DELETE a #", "CG00002")]
+    [InlineData("MATCH (n:Person) NODETACH DELETE n", "CK00001")]
     // #1139 made (n:Person|Robot) and (n IS Person) executable; their places go to the edges it
     // rejects: an undirected tilde edge and a Cypher arrow that used to truncate the statement.
-    [InlineData("MATCH (n:Person)~(m) DETACH DELETE n", "COHDBL001")]
-    [InlineData("MATCH (n:Person)-->(m)\nDETACH DELETE n", "GQL0008")]
-    [InlineData("MATCH TRAIL (a)-[r]->(b) DETACH DELETE a", "COHDBL001")]
-    [InlineData("MATCH p = ACYCLIC (a)-[r]->(b) RETURN p", "COHDBL001")]
-    [InlineData("MATCH ALL SHORTEST (a)-[r]->(b) DETACH DELETE b", "COHDBL001")]
-    [InlineData("MERGE (n:Person {name: 'Cara'})", "COHDBL001")]
+    [InlineData("MATCH (n:Person)~(m) DETACH DELETE n", "CK00001")]
+    [InlineData("MATCH (n:Person)-->(m)\nDETACH DELETE n", "CG00008")]
+    [InlineData("MATCH TRAIL (a)-[r]->(b) DETACH DELETE a", "CK00001")]
+    [InlineData("MATCH p = ACYCLIC (a)-[r]->(b) RETURN p", "CK00001")]
+    [InlineData("MATCH ALL SHORTEST (a)-[r]->(b) DETACH DELETE b", "CK00001")]
+    [InlineData("MERGE (n:Person {name: 'Cara'})", "CK00001")]
     public async Task Execute_StrictnessViolation_FailsAtParseTimeWithoutEffectAsync(string gql, string code)
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("graph-engine", new());
         var database = await engine.CreateDatabaseAsync("strictness", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await session.ExecuteAsync(Seed, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync(seed, cancellationToken: CancellationToken.None);
         var statement = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
 
         // Act

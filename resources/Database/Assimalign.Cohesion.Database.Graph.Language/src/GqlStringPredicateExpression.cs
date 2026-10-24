@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>An ordinal, case-sensitive string predicate.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GqlStringPredicateExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlStringPredicateExpression.DebugView))]
 public sealed class GqlStringPredicateExpression : GqlExpression
 {
     /// <summary>Initializes an expression.</summary>
@@ -23,4 +25,20 @@ public sealed class GqlStringPredicateExpression : GqlExpression
     public GqlStringPredicateOperator Operator { get; }
     /// <summary>Gets the search string.</summary>
     public GqlExpression Right { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Language.GqlStringPredicateExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlStringPredicateExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression Left => _target.Left;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlStringPredicateOperator Operator => _target.Operator;
+        public global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression Right => _target.Right;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

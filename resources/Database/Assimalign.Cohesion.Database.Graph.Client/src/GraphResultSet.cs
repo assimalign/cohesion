@@ -7,6 +7,8 @@ using Assimalign.Cohesion.Database.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Client;
 
 /// <summary>A materialized graph value result with column metadata and an affected count.</summary>
+[global::System.Diagnostics.DebuggerDisplay("GraphResultSet Count={Count}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphResultSet.DebugView))]
 public sealed class GraphResultSet : IReadOnlyList<GraphRow>
 {
     private readonly IReadOnlyList<GraphRow> _rows;
@@ -50,4 +52,19 @@ public sealed class GraphResultSet : IReadOnlyList<GraphRow>
     public IEnumerator<GraphRow> GetEnumerator() => _rows.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Graph.Client.GraphResultSet _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphResultSet value)
+        {
+            _target = value;
+        }
+
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Client.GraphColumn> Columns => _target.Columns;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolDiagnostic> Diagnostics => _target.Diagnostics;
+        public long AffectedCount => _target.AffectedCount;
+        public int Count => _target.Count;
+    }
 }

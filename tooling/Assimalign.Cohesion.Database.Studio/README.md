@@ -75,7 +75,7 @@ One engine per model runs in-process under `<data root>\<model>` (default
 | Wire (loopback) | The Studio starts that model's server on `127.0.0.1:<port>` (0 = OS-assigned) over the same engine and uses the real client (`Sql/Graph/KeyValuePair/Blob.Client`). Database list/create/drop, KEYSPACES and blob containers still go through the engine: the wire has no management verbs. |
 | Wire (external) | The real client against an already-running server (for example the SampleHost fixture). Type the database name; nothing can be listed or created. |
 
-The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields COHDBL001.
+The Documents diagnostics sample uses USE KEYS, which remains unsupported through T1 and yields CK00001.
 
 The Documents editor remains **embedded only**. Its smoke run separately exercises the shipped Documents server/client over TCP; editor connection-mode integration is a later UI task.
 
@@ -135,3 +135,17 @@ The Documents editor remains **embedded only**. Its smoke run separately exercis
   start/end bounds".
 - No KEYSPACES verb on `KeyValueConnection`; no container verbs on `BlobConnection`.
 - OQL `COUNT(*)` is typed `Decimal`, while SQL `COUNT(*)` is `Int64`.
+
+## Repository conventions audit
+
+Workspace refusals and smoke assertion templates use the build-generated internal ErrorMessages
+accessor from Properties/ErrorMessages.resx. Existing exception types, messages, model diagnostics
+and smoke pass/fail decisions are preserved. Extension containers are partial. The documented
+throw-away layout, documentation and MAUI dependency exceptions still apply; this tool is excluded
+from the repository debugger-proxy rule. No runtime Database error identity is added for a Studio
+assertion.
+
+The Studio project generates that accessor before WinUI's early C# XamlPreCompile pass. WinUI
+otherwise reaches that pass before ordinary resource generation, leaving the internal accessor
+unavailable. The local target runs PrepareResourceNames and ResGen directly, preserving the
+resource text and avoiding a cycle through PrepareResources.

@@ -79,6 +79,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     private readonly Dictionary<ulong, SortedSet<long>> _ownerPages = new();
     private readonly Dictionary<ulong, SortedSet<long>> _indexOwnerPages = new();
     private readonly Dictionary<ulong, PageId> _currentWritePages = new();
+    private readonly StorageRecordFreeBytes _recordFreeBytes = new();
     private readonly object _ownerLock = new();
 
     private StoragePageManager? _pageManager;
@@ -208,8 +209,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (capacityBytes < MinimumBufferPoolBytes || capacityBytes % Page.Size != 0 || capacityBytes / Page.Size > int.MaxValue)
         {
             throw new ArgumentOutOfRangeException(paramName, capacityBytes,
-                $"A buffer pool capacity must be a whole number of {Page.Size}-byte pages, at least {MinimumBufferPoolBytes} bytes " +
-                $"({MinimumBufferPoolBytes / Page.Size} pages) and at most {(long)int.MaxValue * Page.Size} bytes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageGetBufferPoolPageCountFailure, Page.Size, MinimumBufferPoolBytes, MinimumBufferPoolBytes / Page.Size, (long)int.MaxValue * Page.Size));
         }
 
         return (int)(capacityBytes / Page.Size);
@@ -291,20 +291,20 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// against the <see cref="Data"/> stream.
     /// </summary>
     public StoragePageManager PageManager =>
-        _pageManager ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _pageManager ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the buffer pool that caches pages in memory with pin-counting and LRU eviction.
     /// Only the storage itself and its own tests read it.
     /// </summary>
     internal StorageBufferPool BufferPool =>
-        _bufferPool ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _bufferPool ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the free space map that tracks allocated and free pages in the data file.
     /// </summary>
     public StorageFreeSpaceMap FreeSpaceMap =>
-        _freeSpaceMap ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _freeSpaceMap ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets or sets the number of pages the buffer pool may hold; 8 KiB each
@@ -461,7 +461,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (!StorageOfflineException.IsEngineCause(cause))
         {
             throw new ArgumentOutOfRangeException(nameof(cause), cause,
-                "An engine takes a storage offline only with a cause of its own: a worker whose work kept failing, or the journal size limit.");
+                ErrorMessages.StorageTakeOfflineFailure);
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -564,7 +564,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// page images directly.
     /// </remarks>
     protected StorageJournal WriteAheadLog =>
-        _journal ?? throw new InvalidOperationException("Storage has not been initialized.");
+        _journal ?? throw new InvalidOperationException(ErrorMessages.StorageFailure);
 
     /// <summary>
     /// Gets the logical transaction sequences the last checkpoint recorded as in flight,
@@ -820,7 +820,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             if (value is not (StorageCommitDurability.Synchronous or StorageCommitDurability.Grouped or StorageCommitDurability.None))
             {
-                throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown commit durability setting.");
+                throw new ArgumentOutOfRangeException(nameof(value), value, ErrorMessages.StorageFailure2);
             }
 
             lock (_transactionLock)
@@ -830,9 +830,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     && (current == StorageCommitDurability.None) != (value == StorageCommitDurability.None))
                 {
                     throw new InvalidOperationException(
-                        $"Storage '{_name}' cannot change CommitDurability from '{current}' to '{value}' once it is initialized: 'None' " +
-                        "checkpoints truncate the journal without flushing the data file durably, so a change into or out of 'None' " +
-                        "could make a truncation durable ahead of its pages. Reopen it with the new mode configured before the open.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageFailure3, _name, current, value));
                 }
 
                 Volatile.Write(ref _commitDurability, (int)value);
@@ -866,13 +864,13 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (resolved is not (StorageCommitDurability.Synchronous or StorageCommitDurability.Grouped or StorageCommitDurability.None))
         {
-            throw new ArgumentOutOfRangeException(nameof(durability), durability, "Unknown commit durability setting.");
+            throw new ArgumentOutOfRangeException(nameof(durability), durability, ErrorMessages.StorageFailure2);
         }
 
         if (resolved != StorageCommitDurability.None && !SupportsDurableFlush)
         {
             throw new NotSupportedException(
-                $"Storage '{storageName}' cannot provide Durability '{resolved}': its backing store does not support durable flush (SupportsDurableFlush = false).");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConfigureCommitDurabilityNotSupported, storageName, resolved));
         }
 
         CommitDurability = resolved;
@@ -897,7 +895,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         AwaitCommitDurable(lsn, CommitDurability);
@@ -925,7 +923,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 return;
             default:
                 // The setter accepts only defined values.
-                throw new InvalidOperationException($"Unknown commit durability setting '{durability}'.");
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageAwaitCommitDurableFailure, durability));
         }
     }
 
@@ -1015,7 +1013,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var slotted = new SlottedPage(dataHandle.Page);
         slotted.Initialize();
         dataHandle.MarkDirty();
-        RegisterOwnerPage(0, dataHandle.Id);
+        RegisterOwnerPage(0, dataHandle.Id, empty: true);
         dataHandle.Dispose();
 
         _pageManager.FlushAll();
@@ -1326,7 +1324,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1373,7 +1371,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     {
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1401,7 +1399,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (_journal is null)
         {
-            throw new InvalidOperationException("Storage has not been initialized.");
+            throw new InvalidOperationException(ErrorMessages.StorageFailure);
         }
 
         ThrowIfOffline();
@@ -1436,6 +1434,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// lock for the transaction and captures its pre-image on first touch, so the
     /// mutation is covered by the write-ahead log like any record operation. Used by
     /// subsystems that own their page layout (index structures, catalogs).
+    /// Dispose the handle promptly after mutation: its lifetime brackets the frame's write
+    /// sequence, so other threads' unlatched record readers wait until the scope closes.
+    /// Mutable access ends when the transaction completes, even if the pin remains alive.
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page to modify.</param>
@@ -1445,7 +1446,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     public StoragePageHandle OpenPageForWrite(StorageTransaction transaction, PageId pageId)
     {
         var owner = ValidateTransaction(transaction);
-        return TouchPage(owner, pageId);
+        var handle = TouchPage(owner, pageId);
+        InvalidateRecordFreeBytes(handle);
+        return handle;
     }
 
     /// <summary>
@@ -1467,6 +1470,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         EnlistLatch(owner, latch);
         var handle = TouchPage(owner, pageId);
         owner.MarkLatchedPage((long)pageId);
+        InvalidateRecordFreeBytes(handle);
         return handle;
     }
 
@@ -1520,7 +1524,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (!latch.IsWriteHeld)
         {
             throw new InvalidOperationException(
-                $"Storage transaction {transaction.Sequence} cannot change a page of a latched structure without holding the structure's latch exclusively.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageEnlistLatchFailure, transaction.Sequence));
         }
 
         transaction.EnlistLatch(latch);
@@ -1528,7 +1532,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     private StoragePageHandle AllocateTouchedPage(StorageTransaction owner, PageType type, ulong ownerId)
     {
-        var handle = _pageManager!.AllocatePage(type);
+        var handle = _pageManager!.AllocatePage(type, publish: false);
 
         try
         {
@@ -1539,6 +1543,8 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 RegisterIndexOwnerPage(ownerId, handle.Id);
             }
             RegisterTouch(owner, handle, allocationOwnerId: ownerId);
+            handle.BeginWrite(owner);
+            _freeSpaceMap.Publish(handle.Id);
             return handle;
         }
         catch
@@ -1611,7 +1617,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             if (_activeTransactionCount > 0)
             {
-                throw new StorageTransactionException("Checkpoint requires no active transactions.");
+                throw new StorageTransactionException(ErrorMessages.StorageCheckpointFailure);
             }
 
             // Zero unless the event source is listening. A refused checkpoint (above) changed
@@ -1772,7 +1778,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (data.Length > SlottedPage.MaxRecordSize)
         {
             throw new SlottedPageException(
-                $"Record of {data.Length} bytes exceeds the maximum record size of {SlottedPage.MaxRecordSize} bytes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageInsertRecordSlottedPage, data.Length, SlottedPage.MaxRecordSize));
         }
 
         StoragePageHandle handle;
@@ -1780,38 +1786,88 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         PageId? currentWritePage = null;
         long generation = 0;
+        // A later raw-writer invalidation remains unknown: Adjust never promotes it.
+        bool needsMeasurement = false;
         lock (_ownerLock)
         {
             if (_currentWritePages.TryGetValue(ownerId, out var current)
                 && _freeSpaceMap.TryGetAllocationGeneration(current, out generation))
             {
                 currentWritePage = current;
+                needsMeasurement = _recordFreeBytes.IsUnknown((long)current);
             }
         }
 
         OwnerPageIdsReadForWrite?.Invoke();
 
         // The current write page may have been freed since the last insert.
-        if (currentWritePage is null || !TryTouchPage(owner, currentWritePage.Value, out var currentHandle, generation))
+        HashSet<long>? excluded = null;
+        while (true)
         {
-            handle = AllocateDataPage(owner, ownerId, out slotted);
-        }
-        else
-        {
-            handle = currentHandle;
-            slotted = new SlottedPage(handle.Page);
-
-            if (handle.Page.Type != PageType.Data || handle.Page.OwnerId != ownerId || !slotted.CanFit(data.Length))
+            if (currentWritePage is not null && TryTouchPage(owner, currentWritePage.Value, out var currentHandle, generation))
             {
-                handle.Dispose();
-                handle = AllocateDataPage(owner, ownerId, out slotted);
+                handle = currentHandle;
+                try
+                {
+                    slotted = new SlottedPage(handle.Page);
+                    bool suitable = handle.Page.Type == PageType.Data && handle.Page.OwnerId == ownerId;
+                    bool skip = !suitable || handle.Entry.HasNestedWriter;
+                    if (suitable && !slotted.CanFit(data.Length))
+                    {
+                        // Preserve borrowed input before packing, or releasing this pin.
+                        if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
+                        suitable = slotted.TryCompactForInsert(data.Length, out int capacity);
+                        lock (_ownerLock) { _recordFreeBytes.Measure((long)handle.Id, capacity, handle.Entry.HasNestedWriter); }
+                        if (suitable)
+                        {
+                            handle.MarkDirty();
+                            RecordPageCompacted?.Invoke(handle.Id);
+                        }
+                    }
+                    else if (suitable && needsMeasurement) { MeasureRecordFreeBytes(handle, slotted); }
+                    if (suitable)
+                    {
+                        break;
+                    }
+                    if (skip) { (excluded ??= new()).Add((long)currentWritePage.Value); }
+                    handle.Dispose();
+                }
+                catch
+                {
+                    handle.Dispose();
+                    throw;
+                }
             }
+            else if (currentWritePage is not null) { (excluded ??= new()).Add((long)currentWritePage.Value); }
+
+            currentWritePage = null;
+            lock (_ownerLock)
+            {
+                while (_recordFreeBytes.TryGet(ownerId, data.Length, excluded, out long candidate))
+                {
+                    if (_freeSpaceMap.TryGetAllocationGeneration((PageId)candidate, out generation))
+                    {
+                        currentWritePage = (PageId)candidate;
+                        needsMeasurement = _recordFreeBytes.IsUnknown(candidate);
+                        break;
+                    }
+                    _recordFreeBytes.Remove(candidate);
+                }
+            }
+            if (currentWritePage is null) { handle = AllocateDataPage(owner, ownerId, out slotted); break; }
+            RecordPageSelectedForReuse?.Invoke(currentWritePage.Value);
         }
 
         using (handle)
         {
             int slotIndex = slotted.InsertSlot(data);
+            // A flusher may already have cleaned the intermediate compacted image.
             handle.MarkDirty();
+            lock (_ownerLock)
+            {
+                _recordFreeBytes.Adjust((long)handle.Id, -data.Length - sizeof(PageSlot), handle.Entry.HasNestedWriter);
+                _currentWritePages[ownerId] = handle.Id;
+            }
             return (handle.Id, slotIndex);
         }
     }
@@ -1847,10 +1903,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// <param name="slotIndex">The slot index within the page.</param>
     /// <returns>A copy of the record data.</returns>
     /// <remarks>
-    /// The read is confirmed against the page's restore sequence, as
-    /// <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>'s is: a read that
-    /// a failed bracket's rollback overlapped, and any failure it met, are repeated once the page
-    /// is whole, so the page's restore is never reported as a deleted slot or a malformed page (#1371).
+    /// The length and payload copy are confirmed together against the frame's sequence, as
+    /// <see cref="TryReadRecord(PageId, int, ulong, out ReadOnlyMemory{byte})"/>'s are. An overlapping
+    /// forward write or rollback, including an unconfirmed geometry failure, retries once the
+    /// frame is stable; confirmed failures retain their identity (D1, #1365).
     /// </remarks>
     protected unsafe ReadOnlyMemory<byte> ReadRecord(PageId pageId, int slotIndex)
     {
@@ -1858,7 +1914,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         var entry = handle.Entry;
         while (true)
         {
-            int restore = entry.BeginRead();
+            long restore = entry.BeginRead();
             try
             {
                 var slotted = new SlottedPage(handle.Page);
@@ -1960,7 +2016,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             var entry = handle.Entry;
             while (true)
             {
-                int restore = entry.BeginRead();
+                long restore = entry.BeginRead();
                 try
                 {
                     bool found = TryReadSlotOf(handle.Page, slotIndex, ownerId, out byte[] bytes);
@@ -2022,8 +2078,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
+        int oldLength = slotted.GetSlotLength(slotIndex);
         slotted.DeleteSlot(slotIndex);
         handle.MarkDirty();
+        lock (_ownerLock) { _recordFreeBytes.Adjust((long)pageId, oldLength, handle.Entry.HasNestedWriter); }
 
         for (int index = 0; index < slotted.SlotCount; index++)
         {
@@ -2043,6 +2101,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         page.OwnerId = 0;
         slotted.Initialize();
         owner.RegisterPendingFree((long)pageId, pageOwner);
+        lock (_ownerLock) { _recordFreeBytes.Remove((long)pageId); }
     }
 
     /// <summary>
@@ -2071,8 +2130,23 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         using var handle = TouchPage(owner, pageId);
         var slotted = new SlottedPage(handle.Page);
+        int oldLength = slotted.GetSlotLength(slotIndex);
+        if (data.Length > slotted.FreeSpace && data.Length > oldLength)
+        {
+            if (new ReadOnlySpan<byte>(handle.Page.Pointer, Page.Size).Overlaps(data)) { data = data.ToArray(); }
+            if (slotted.TryCompactForUpdate(slotIndex, data.Length))
+            {
+                handle.MarkDirty();
+                RecordPageCompacted?.Invoke(pageId);
+            }
+        }
         slotted.UpdateSlot(slotIndex, data);
+        // Publish dirtiness after the replacement even if compaction was marked earlier.
         handle.MarkDirty();
+        if (oldLength != data.Length || handle.Entry.HasNestedWriter)
+        {
+            lock (_ownerLock) { _recordFreeBytes.Adjust((long)pageId, oldLength - data.Length, handle.Entry.HasNestedWriter); }
+        }
     }
 
     /// <summary>
@@ -2262,6 +2336,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
                 handle.MarkDirty();
                 owner.RegisterPendingFree((long)pageId, ownerId);
+                lock (_ownerLock) { _recordFreeBytes.Remove((long)pageId); }
                 released++;
             }
         }
@@ -2273,7 +2348,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// Records a data page as belonging to an owner's chain and makes it the
     /// owner's current write page.
     /// </summary>
-    private void RegisterOwnerPage(ulong ownerId, PageId pageId)
+    private void RegisterOwnerPage(ulong ownerId, PageId pageId, bool empty = false)
     {
         lock (_ownerLock)
         {
@@ -2285,6 +2360,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
             pages.Add((long)pageId);
             _currentWritePages[ownerId] = pageId;
+            _recordFreeBytes.Register(ownerId, (long)pageId, empty ? SlottedPage.MaxRecordSize : null);
         }
     }
 
@@ -2343,6 +2419,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             foreach (var (pageId, ownerId) in pendingFrees)
             {
+                _recordFreeBytes.Remove(pageId);
                 if (_ownerPages.TryGetValue(ownerId, out var pages))
                 {
                     pages.Remove(pageId);
@@ -2401,9 +2478,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (awaitDurability && durability != StorageCommitDurability.None && !Journal.SupportsDurableFlush)
         {
             throw new NotSupportedException(
-                $"Storage transaction {transaction.Sequence} cannot commit with CommitDurability '{durability}': the journal's backing " +
-                "handle does not support a durable flush (SupportsDurableFlush = false). Nothing was journaled; the transaction is still " +
-                "active and can be rolled back.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageCommitTransactionNotSupported, transaction.Sequence, durability));
         }
 
         // Deterministic page order keeps the journal replayable and testable.
@@ -2453,6 +2528,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 long lsn = _journal!.AppendPageRecord(transaction.Sequence, (PageId)pageId, type, record, out _);
                 _consistency?.CommitRecordJournaled(transaction.Sequence, pageId, type, lsn, record, current);
 
+                handle.BeginWrite(transaction);
                 page.Lsn = lsn;
                 handle.MarkDirty();
             }
@@ -2573,7 +2649,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             // The runs were encoded by this process (or verified by their frame's checksum when
             // read back), so this is a defect, not damage on disk.
-            throw new InvalidOperationException($"A storage transaction's pre-image does not decode: {problem}.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageLoadPreImageFailure, problem));
         }
 
         BinaryPrimitives.WriteInt64LittleEndian(destination[Page.LsnFieldOffset..], preImage.BaseLsn);
@@ -2595,10 +2671,11 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// rewrote it run by run: a committed record on the page read as reclaimed meanwhile, and the
     /// models above skipped its row.
     /// </remarks>
+    /// <param name="transaction">The physical bracket restoring the page.</param>
     /// <param name="pageId">The page.</param>
     /// <param name="preImage">Its pre-image.</param>
     /// <param name="image">A scratch buffer of at least <see cref="Page.Size"/> bytes.</param>
-    private unsafe void RestorePage(long pageId, in StoragePreImage preImage, byte[] image)
+    private unsafe void RestorePage(StorageTransaction transaction, long pageId, in StoragePreImage preImage, byte[] image)
     {
         using var handle = _pageManager!.GetPage((PageId)pageId);
         var page = new Span<byte>(handle.Page.Pointer, Page.Size);
@@ -2610,7 +2687,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         LoadPreImage(preImage, restored);
 
         var entry = handle.Entry;
-        entry.BeginRestore();
+        entry.BeginRestore(transaction);
         try
         {
             restored.CopyTo(page);
@@ -2622,6 +2699,14 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         handle.MarkDirty();
         _consistency?.RolledBack(pageId, page);
+        lock (_ownerLock)
+        {
+            if (handle.Page.Type == PageType.Data && _ownerPages.TryGetValue(handle.Page.OwnerId, out var pages) && pages.Contains(pageId))
+            {
+                _recordFreeBytes.Register(handle.Page.OwnerId, pageId);
+            }
+            else { _recordFreeBytes.Remove(pageId); }
+        }
     }
 
     /// <summary>
@@ -2635,8 +2720,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (pageLsn != baseLsn)
         {
             throw new InvalidOperationException(
-                $"Page {pageId} carries LSN {pageLsn}, but its storage transaction found it at LSN {baseLsn}: the page was changed outside " +
-                "the transaction, and its changes cannot be journaled.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageThrowIfLsnMovedFailure, pageId, pageLsn, baseLsn));
         }
     }
 
@@ -2712,8 +2796,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             // always ends committed (CommitTransaction), because recovery redoes it. Rolling it back
             // would restore bases its deltas moved past and break the pages' chains (#1018).
             throw new InvalidOperationException(
-                $"Storage transaction {transaction.Sequence} cannot roll back: its commit record (LSN {transaction.CommitRecordLsn}) is in " +
-                "the journal, so recovery redoes its changes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRollbackTransactionFailure, transaction.Sequence, transaction.CommitRecordLsn));
         }
 
         byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
@@ -2731,7 +2814,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     continue;
                 }
 
-                RestorePage(pageId, preImage, image);
+                RestorePage(transaction, pageId, preImage, image);
             }
 
             if (latchedPages)
@@ -2743,7 +2826,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                     {
                         if (transaction.IsLatchedPage(pageId))
                         {
-                            RestorePage(pageId, preImage, image);
+                            RestorePage(transaction, pageId, preImage, image);
                         }
                     }
                 }
@@ -3037,7 +3120,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         if (!transaction.IsActive)
         {
-            throw new StorageTransactionException($"Storage transaction {transaction.Sequence} has already completed.");
+            throw new StorageTransactionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageValidateTransactionFailure, transaction.Sequence));
         }
 
         // A record change would extend the file or dirty a page that can never be written.
@@ -3067,6 +3150,22 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     // No map or pool monitor is held; a handler may complete a different bracket.
     internal Action<PageId>? PagePinnedForWrite;
 
+    // Cold-path test rendezvous while the compacted page still has its D1 mutable scope.
+    internal Action<PageId>? RecordPageCompacted;
+    internal Action<PageId>? RecordPageSelectedForReuse;
+
+    private void InvalidateRecordFreeBytes(StoragePageHandle handle)
+    {
+        if (handle.Page.Type != PageType.Data) { return; }
+        lock (_ownerLock) { _recordFreeBytes.MarkUnknown((long)handle.Id); }
+    }
+
+    private void MeasureRecordFreeBytes(StoragePageHandle handle, SlottedPage slotted)
+    {
+        int capacity = slotted.GetInsertionCapacity();
+        lock (_ownerLock) { _recordFreeBytes.Measure((long)handle.Id, capacity, handle.Entry.HasNestedWriter); }
+    }
+
     private bool TryTouchPage(StorageTransaction transaction, PageId pageId, [NotNullWhen(true)] out StoragePageHandle? handle, long? learnedGeneration = null)
     {
         handle = null;
@@ -3084,6 +3183,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 return false;
             }
 
+            pinned.BeginWrite(transaction);
             handle = pinned;
             return true;
         }
@@ -3102,7 +3202,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private StoragePageHandle AllocateDataPage(StorageTransaction transaction, ulong ownerId, out SlottedPage slotted)
     {
-        var handle = _pageManager!.AllocatePage(PageType.Data);
+        var handle = _pageManager!.AllocatePage(PageType.Data, publish: false);
 
         try
         {
@@ -3112,8 +3212,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             var page = handle.Page;
             page.OwnerId = ownerId;
 
-            RegisterOwnerPage(ownerId, handle.Id);
+            RegisterOwnerPage(ownerId, handle.Id, empty: true);
             RegisterTouch(transaction, handle, allocationOwnerId: ownerId);
+            handle.BeginWrite(transaction);
+            _freeSpaceMap.Publish(handle.Id);
             return handle;
         }
         catch
@@ -3132,6 +3234,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         lock (_ownerLock)
         {
             long pageId = (long)handle.Id;
+            _recordFreeBytes.Remove(pageId);
             if (_ownerPages.TryGetValue(ownerId, out var pages))
             {
                 pages.Remove(pageId);
@@ -3192,7 +3295,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 if (!alreadyLocked)
                 {
                     throw new StorageTransactionException(
-                        $"Page {pageId} is write-locked by transaction {owner!.Sequence}.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageRegisterTouchFailure, pageId, owner!.Sequence));
                 }
             }
             else
@@ -3240,6 +3343,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 // Stamp the page so the write-ahead gate makes the image durable before any stolen
                 // write of the page reaches the data file, and keep the stamp: a page evicted clean
                 // would reload with its older LSN, and the next delta would name the wrong base.
+                handle.BeginWrite(transaction);
                 page.Lsn = lsn;
                 handle.MarkDirty();
 
@@ -3675,7 +3779,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         if (Data.Length < Page.Size)
         {
             throw new StorageIOException(
-                $"Invalid storage file: it holds {Data.Length} bytes, less than its {Page.Size}-byte header page.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadHeaderStorageIO, Data.Length, Page.Size));
         }
 
         var page0 = new byte[Page.Size];
@@ -3748,11 +3852,10 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             if (newest is null)
             {
                 throw magic != StorageFileHeader.ExpectedMagic
-                    ? new StorageIOException("Invalid storage file: header magic number mismatch, and no header slot verifies.")
+                    ? new StorageIOException(ErrorMessages.StorageReadHeaderStorageIO2)
                     : new StorageCorruptionException(
                         (PageId)0L,
-                        "Invalid storage file: the identity block of page 0 failed checksum verification, and neither header slot " +
-                        "verifies to restore it from.");
+                        ErrorMessages.StorageReadHeaderFailure);
             }
 
             identity = StorageHeaderPage.SlotIdentity(page0.AsSpan(StorageHeaderPage.SlotOffset(newestSlot), StorageHeaderPage.SlotSize));
@@ -3761,8 +3864,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)0L,
-                    $"Invalid storage file: the identity block of page 0 does not verify, and neither does the copy header slot " +
-                    $"{newestSlot} (generation {newest.Generation}) carries.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadHeaderFailure2, newestSlot, newest.Generation));
             }
 
             if (copyVersion != StorageFileHeader.CurrentFormatVersion)
@@ -3776,8 +3878,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             throw new StorageCorruptionException(
                 (PageId)0L,
-                "Invalid storage file: neither header slot of page 0 verifies. Each header write leaves the other slot intact, " +
-                "so both failing means page 0 was damaged outside a header write.");
+                ErrorMessages.StorageReadHeaderFailure3);
         }
 
         _identity = identity.ToArray();
@@ -3873,8 +3974,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)pageId,
-                    $"Invalid storage file: header slot {slot} (generation {header.Generation}) chains checkpoint anchor page {pageId} " +
-                    $"at position {index}, which is not a page of the file or repeats one.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure, slot, header.Generation, pageId, index));
             }
 
             Data.ReadPage((PageId)pageId, buffer);
@@ -3888,7 +3988,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
             {
                 throw new StorageCorruptionException(
                     (PageId)pageId,
-                    $"Invalid storage file: checkpoint anchor page {pageId} of header slot {slot} (generation {header.Generation}) does not verify: {problem}.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure2, pageId, slot, header.Generation, problem));
             }
 
             StorageHeaderPage.ReadAnchorEntries(buffer, destination.Slice(read, count));
@@ -3901,8 +4001,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         {
             throw new StorageCorruptionException(
                 (PageId)0L,
-                $"Invalid storage file: header slot {slot} (generation {header.Generation}) records {destination.Length} anchor entries " +
-                $"on its chain, but the chain holds {read}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageReadAnchorChainFailure3, slot, header.Generation, destination.Length, read));
         }
 
         return chain;

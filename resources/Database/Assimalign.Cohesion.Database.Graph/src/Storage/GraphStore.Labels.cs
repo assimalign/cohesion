@@ -56,9 +56,9 @@ public sealed partial class GraphStore
         }
     }
 
-    private GraphRecord DecodeRead(ReadOnlyMemory<byte> bytes)
+    private GraphRecord DecodeRead(ReadOnlyMemory<byte> bytes, PageId page, int slot)
     {
-        var record = GraphRecordCodec.Decode(bytes);
+        var record = GraphRecordCodec.Decode(bytes, page, slot);
         if (record.Kind == 1) { Interlocked.Increment(ref _nodeRecordsDecoded); }
         return record;
     }
@@ -104,6 +104,10 @@ public sealed partial class GraphStore
     // selected labels. Conjunctions instead anchor on the cheapest required label and retain
     // the complete expression as a residual, so a common label adds no range work.
     internal IReadOnlyList<StoredGraphNode> ScanLabels(IReadOnlyList<string> labels, TransactionSnapshot snapshot, CancellationToken token)
+        => StreamLabels(labels, snapshot, token).ToArray();
+
+    internal IEnumerable<StoredGraphNode> StreamLabels(IReadOnlyList<string> labels, TransactionSnapshot snapshot,
+        CancellationToken token, Action? visit = null, Action<long>? reserve = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         token.ThrowIfCancellationRequested();
@@ -115,17 +119,18 @@ public sealed partial class GraphStore
         }
         // Lock order is established in EnterMutationAsync. Release directory _sync before any
         // tree latch; readers acquire only tree -> page latches, never the writer/apply gates.
-        if (tokens.Length == 0) { return []; }
+        if (tokens.Length == 0) { yield break; }
         var index = ResolveIndex(labelsId);
         var cursors = new List<BTreeCursor>(tokens.Length);
         var pending = new PriorityQueue<(BTreeCursor Cursor, Guid Label), ulong>();
-        var result = new List<StoredGraphNode>();
         ulong? returned = null;
         try
         {
             foreach (Guid label in tokens)
             {
                 token.ThrowIfCancellationRequested();
+                // 64 owned 24-byte keys plus cursor, heap heads and entry-array overhead.
+                reserve?.Invoke(8192);
                 var cursor = index.OpenCursor(snapshot, new IndexKeyRange(LabelKey(label, 0), LabelKey(label, ulong.MaxValue), true, true), cancellationToken: token);
                 cursors.Add(cursor);
                 Advance(cursor, label);
@@ -138,14 +143,14 @@ public sealed partial class GraphStore
                 OnLabelEntryRead?.Invoke();
                 token.ThrowIfCancellationRequested();
                 if (returned == id) { continue; }
+                visit?.Invoke();
                 var found = ReadAt(location, snapshot);
                 if (found?.Record.Node is not { } node || node.Id != id ||
                     !found.Value.Record.LabelIds!.Contains(entry.Label) ||
                     !node.Labels.Any(label => labels.Contains(label, StringComparer.Ordinal))) { continue; }
-                result.Add(node);
                 returned = id;
+                yield return node;
             }
-            return result;
         }
         finally
         {

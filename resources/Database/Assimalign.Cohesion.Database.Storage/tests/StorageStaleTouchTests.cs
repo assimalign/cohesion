@@ -206,7 +206,7 @@ public sealed class StorageStaleTouchTests
 
         // Act: reuse runs on a different thread, only after the freeing commit returns.
         // The callback never allocates under the freeing thread's reentrant storage locks.
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             if (insert)
             {
@@ -219,7 +219,7 @@ public sealed class StorageStaleTouchTests
         try
         {
             await learned.Task.WaitAsync(cancellationToken);
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 deleting.Commit();
                 Interlocked.Increment(ref frees);
@@ -372,7 +372,7 @@ public sealed class StorageStaleTouchTests
 
         // Act: the stale writer pins first; this thread commits and optionally reallocates
         // before allowing it to register its touch. The replacement keeps its write lock.
-        var writer = Task.Run(() =>
+        var writer = DedicatedTestTask.Run(() =>
         {
             if (insert)
             {
@@ -390,7 +390,7 @@ public sealed class StorageStaleTouchTests
             deleting.Commit();
             if (reuse)
             {
-                await Task.Run(() =>
+                await DedicatedTestTask.Run(() =>
                 {
                     storage.Insert(replacement, 99, [7]).PageId.ShouldBe(original.PageId);
                     reuses++;

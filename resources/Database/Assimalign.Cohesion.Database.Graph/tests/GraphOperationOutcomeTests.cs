@@ -21,7 +21,7 @@ public sealed class GraphOperationOutcomeTests
     public async Task ExecutePathsAsync_LatencyFlushDisposed_ShouldCloseWithoutEngineErrorOrRetry()
     {
         // Arrange: cross the cooperative latency boundary before the second path, with no
-        // performance deadline. An injected flush failure must not become COHDBG019.
+        // performance deadline. An injected flush failure must not become CG09019.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var recorder = new EventSourceRecorder(GraphDatabaseEventSource.Log, EventLevel.Verbose);
         await using var harness = await GraphServerHarness.StartAsync();
@@ -93,7 +93,7 @@ public sealed class GraphOperationOutcomeTests
         else
         {
             var frame = await client.ExpectAsync(ProtocolMessageType.Error);
-            ProtocolErrorMessage.Decode(frame.Payload.Span).Message.ShouldStartWith("COHDBG019:", Case.Sensitive);
+            ProtocolErrorMessage.Decode(frame.Payload.Span).Message.ShouldStartWith("CG09019:", Case.Sensitive);
             transaction.State.ShouldBe(TransactionState.Faulted);
             await client.SendAsync(ProtocolMessageType.Ping);
             await client.ExpectAsync(ProtocolMessageType.Pong);
@@ -112,7 +112,7 @@ public sealed class GraphOperationOutcomeTests
         (await GraphCatalogIntrospectionTests.Rows(observer, "SHOW LABELS")).ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: closing before the kernel end reports structured COHDBG019")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Transaction: closing before the kernel end reports structured CG09019")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task EndAsync_CoordinatorClosesBeforeKernelEnd_ShouldReportDisposed(bool commit)
@@ -140,8 +140,8 @@ public sealed class GraphOperationOutcomeTests
 
         // Assert
         closes.ShouldBe(1);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG019");
-        failure.Message.ShouldNotStartWith("COHDBG019:", Case.Sensitive);
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG09019");
+        failure.Message.ShouldNotStartWith("CG09019:", Case.Sensitive);
         failure.InnerException.ShouldBeOfType<ObjectDisposedException>();
         transaction.State.ShouldNotBe(TransactionState.Committed);
         await database.DisposeAsync();

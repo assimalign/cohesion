@@ -17,12 +17,34 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
+
+    private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
+
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate.DebugView))]
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
         object?[] OldValues, object?[] NewValues, HashSet<int> Assigned)
     {
         // Referential actions fill this only after every assignment to the final row is known.
         internal byte[] NewVersion { get; set; } = [];
+
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate value)
+            {
+                _target = value;
+            }
+
+            public global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable Table => _target.Table;
+            public (global::Assimalign.Cohesion.Database.Storage.PageId PageId, int SlotIndex) Location => _target.Location;
+            public object?[] OldValues => _target.OldValues;
+            public object?[] NewValues => _target.NewValues;
+            public global::System.Collections.Generic.HashSet<int> Assigned => _target.Assigned;
+        }
     }
 
     /// <summary>
@@ -142,7 +164,7 @@ internal sealed partial class SqlPlanExecutor
     // A failed try releases only new grants, waits, and rebuilds the live graph. Prior
     // transaction/row grants remain protected and use ordinary deadlock detection.
     private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true)
+        CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false)
     {
         var references = statement.References;
         incoming &= !references.IncomingLocks.Contains(table.ObjectId);
@@ -192,6 +214,7 @@ internal sealed partial class SqlPlanExecutor
             if (acquired) { acquired = locks.TryAcquire(owner, LockResource.Object(table.ObjectId), LockMode.IntentExclusive); }
             if (!acquired)
             {
+                if (cascade) { throw new SqlCascadeLockRetry(LockResource.Object(blocked), mode); }
                 locks.ReleaseSince(mark);
                 // Waiting owns no new table grants; completion is only a rendezvous.
                 // Reacquire the entire graph because publication can precede the wakeup.
@@ -246,7 +269,7 @@ internal sealed partial class SqlPlanExecutor
     /// </param>
     /// <exception cref="TransactionAbortedException">A matched parent version was removed by a concurrently committed transaction.</exception>
     private async ValueTask AcquireParentRowLocksAsync(List<SqlParentReference> references, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool validate = true)
+        CancellationToken cancellationToken, bool validate = true, bool cascade = false)
     {
         if (references.Count == 0)
         {
@@ -266,8 +289,8 @@ internal sealed partial class SqlPlanExecutor
             }
 
             previous = (reference.Parent.ObjectId, reference.EntryId);
-            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+            await AcquirePreparationLockAsync(statement,
+                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cascade, cancellationToken).ConfigureAwait(false);
 
             if (validate)
             {
@@ -340,7 +363,7 @@ internal sealed partial class SqlPlanExecutor
         {
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementTableChanged, expected.Schema, expected.Name);
             throw new DatabaseTransactionAbortedException(message,
-                [new Diagnostic { Code = "COHSQLT006", Severity = DiagnosticSeverity.Error, Message = message }]);
+                [new Diagnostic { Code = "CS04006", Severity = DiagnosticSeverity.Error, Message = message }]);
         }
     }
 
@@ -511,7 +534,7 @@ internal sealed partial class SqlPlanExecutor
     /// Checks the values a write assigns to columns of a domain (phase E3): each domain's check is
     /// evaluated on its column's value as a column CHECK is, so only FALSE refuses the row, and a
     /// column whose domain the engine does not register refuses any write that assigns it with
-    /// <c>COHSQLE010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
+    /// <c>CS02010</c>. PostgreSQL likewise checks a domain where a value is coerced to it, on
     /// INSERT for every column, its default included, and on UPDATE for the columns it sets
     /// (<c>ExecEvalConstraintCheck</c>, <c>src/backend/executor/execExprInterp.c</c>).
     /// </summary>
@@ -520,7 +543,7 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="evaluator">The statement's evaluator.</param>
     /// <param name="ordinals">The columns the write assigns; null for every column.</param>
     /// <exception cref="SqlConstraintViolationException">A domain's check returned FALSE.</exception>
-    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>COHSQLE010</c>), or a check failed (<c>COHSQLE007</c>).</exception>
+    /// <exception cref="SqlEvaluationException">A column's domain does not resolve (<c>CS02010</c>), or a check failed (<c>CS05007</c>).</exception>
     private static void CheckDomains(SqlBoundTable bound, object?[] values, SqlExpressionEvaluator evaluator, int[]? ordinals = null)
     {
         if (bound.Domains.Count == 0)
@@ -780,7 +803,7 @@ internal sealed partial class SqlPlanExecutor
             return null;
         }
 
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
         // transaction's begin; a target of the statement itself was found through that snapshot.
@@ -792,7 +815,7 @@ internal sealed partial class SqlPlanExecutor
         if (scannedTables.Add(table.ObjectId))
         {
             EnsureCurrentDefinition(table);
-            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+            await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
         // Deleting the row releases every reference it holds. The edge it was
@@ -878,24 +901,21 @@ internal sealed partial class SqlPlanExecutor
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version that was rolled back after the walk found it, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
         }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
         {
             throw new StorageCorruptionException(
                 location.PageId,
-                $"The row record in slot {location.SlotIndex} of page {(long)location.PageId} of table '{table.Schema}.{table.Name}' holds " +
-                $"{record.Length} bytes, fewer than its {SqlRowCodec.StampHeaderSize}-byte version-stamp header.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EnsureSnapshotSeesCascadeRowFailure2, location.SlotIndex, (long)location.PageId, table.Schema, table.Name, record.Length, SqlRowCodec.StampHeaderSize));
         }
 
         var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
             throw new TransactionAbortedException(
-                $"Write-write conflict on '{table.Schema}.{table.Name}': ON DELETE {action} reached a row version written by transaction {writer}, " +
-                "which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
         }
     }
 
@@ -1019,7 +1039,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var group in deletions.GroupBy(deletion => deletion.Table.ObjectId).OrderBy(group => group.Key))
         {
-            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken).ConfigureAwait(false);
+            await AcquireRowWriteLocksAsync(statement, group.Key, group.Select(row => row.Location).ToList(), cancellationToken, cascade: true).ConfigureAwait(false);
             var hashes = new List<ulong>();
             var indexes = GetLiveIndexes(group.First().Table, statement);
             foreach (var row in group)
@@ -1027,7 +1047,7 @@ internal sealed partial class SqlPlanExecutor
                 CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
             }
 
-            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken).ConfigureAwait(false);
+            await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }
     }
 
@@ -1208,6 +1228,8 @@ internal sealed partial class SqlPlanExecutor
     /// (owner decision 64); a stored predicate is not held to it again, so a function whose
     /// registration changed does not stop its database from opening.
     /// </remarks>
+    [global::System.Diagnostics.DebuggerDisplay("SqlCheckSyntax")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax.DebugView))]
     private sealed class SqlCheckSyntax
     {
         private readonly SqlCatalogTable _table;
@@ -1254,7 +1276,7 @@ internal sealed partial class SqlPlanExecutor
                  qualifiedColumn.SchemaName is not null && !string.Equals(qualifiedColumn.SchemaName, _table.Schema, StringComparison.OrdinalIgnoreCase)))
             {
                 string name = string.Join('.', new[] { qualifiedColumn.SchemaName, qualifiedColumn.TableAlias, qualifiedColumn.ColumnName }.Where(part => part is not null));
-                throw new SqlPlanningException("COHSQLE015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.MissingFromClauseEntry, name), qualifiedColumn.Location);
             }
 
@@ -1476,6 +1498,14 @@ internal sealed partial class SqlPlanExecutor
             }
 
             return function;
+        }
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlCheckSyntax value)
+            {
+                _ = value;
+            }
         }
     }
 }

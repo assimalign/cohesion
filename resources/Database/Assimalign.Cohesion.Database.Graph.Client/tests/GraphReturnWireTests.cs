@@ -110,7 +110,7 @@ public sealed class GraphReturnWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain("CG05001", Case.Sensitive);
         error.Message.ShouldContain("exactly one path or bound entity projection", Case.Sensitive);
         (await connection.QueryAsync("RETURN 1 AS one", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
@@ -137,7 +137,7 @@ public sealed class GraphReturnWireTests
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        error.Message.ShouldContain("COHDBG015", Case.Sensitive);
+        error.Message.ShouldContain("CG01015", Case.Sensitive);
         error.Message.ShouldContain("is declared more than once", Case.Sensitive);
         var result = await connection.QueryAsync("RETURN 1 AS x, 2 AS X", cancellationToken: harness.Token);
         result.Columns.Select(column => column.Name).ShouldBe(["x", "X"]);

@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// Requests the target column's default as a whole INSERT VALUES item or UPDATE SET value.
 /// </summary>
 /// <remarks>This contextually typed node is not a scalar operand.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlDefaultExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlDefaultExpression.DebugView))]
 public sealed class SqlDefaultExpression : SqlExpression
 {
     /// <summary>Initializes a DEFAULT item.</summary>
@@ -13,5 +15,13 @@ public sealed class SqlDefaultExpression : SqlExpression
     internal SqlDefaultExpression(Location? location)
         : base(location)
     {
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlDefaultExpression value)
+        {
+            _ = value;
+        }
     }
 }

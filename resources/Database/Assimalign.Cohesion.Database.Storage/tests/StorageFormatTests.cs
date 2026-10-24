@@ -73,11 +73,11 @@ public sealed class StorageFormatTests
     /// <summary>
     /// Storage format 3 (#1253) changed what the journal's page records mean, so a file set of
     /// format 2 — full before- and after-images, journal frame version 3 — is refused at open with
-    /// <c>COHDBS001</c> before anything reads its journal or writes either file: the data file and
+    /// <c>CK06001</c> before anything reads its journal or writes either file: the data file and
     /// the journal are left byte for byte as they were, so the engine that wrote them still opens
     /// them.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a format-2 file set is refused with COHDBS001 and left byte-identical")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: a format-2 file set is refused with CK06001 and left byte-identical")]
     public void Open_FormatTwoFileSet_ShouldBeRefusedAndLeftByteIdentical()
     {
         // Arrange: a crashed file set (its journal holds records recovery would replay) whose page

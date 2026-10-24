@@ -28,7 +28,7 @@ public sealed partial class SqlQueryParser
             {
                 return RejectWithForm(ref lexer, "[NOT] MATERIALIZED");
             }
-            if (!Expect(ref lexer, TokenType.LeftParen, "'(' before the common table expression body")) { return EmptyWithQuery(); }
+            if (!Expect(ref lexer, TokenType.LeftParen, _errorCteBodyOpeningExpected)) { return EmptyWithQuery(); }
             if (IsKeyword(ref lexer, "WITH")) { return RejectWithForm(ref lexer, "WITH inside a subquery or derived table"); }
             if (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE"))
             {
@@ -43,7 +43,7 @@ public sealed partial class SqlQueryParser
             // subqueries inside it retain their own depth and correlation checks.
             var body = ParseQueryExpression(ref lexer);
             int end = lexer.Current.Position + lexer.Current.Value.Length;
-            if (!Expect(ref lexer, TokenType.RightParen, "')' after the common table expression body")) { return EmptyWithQuery(); }
+            if (!Expect(ref lexer, TokenType.RightParen, _errorCteBodyClosingExpected)) { return EmptyWithQuery(); }
             definitions.Add(new SqlCommonTableExpression(name, columns, body, Location.Create(1, 1, start, end)));
             if (lexer.Current.Type != TokenType.Comma) { break; }
             Advance(ref lexer);

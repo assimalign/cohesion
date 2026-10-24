@@ -48,9 +48,9 @@ public sealed partial class SqlDefinedFunctionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader, "INSERT INTO t VALUES(0)"));
 
         // Assert
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
         (await RowsAsync(reader, "SELECT v FROM t")).ShouldBe([[1]]);
-        (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT nested(0) FROM t"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+        (await Should.ThrowAsync<DatabaseException>(() => RowsAsync(reader, "SELECT nested(0) FROM t"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader,
             "CREATE FUNCTION invalid_nested(p INT) RETURNS BOOLEAN IMMUTABLE RETURN nested(p)"));
         await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(reader,
@@ -101,8 +101,8 @@ public sealed partial class SqlDefinedFunctionTests
 
             // Assert
             (await RowsAsync(session, "SELECT v FROM t")).ShouldBe([[1]]);
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t VALUES(2)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
-            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET v = 2"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "INSERT INTO t VALUES(2)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
+            (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET v = 2"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01009");
             (await RowsAsync(session, "SELECT v FROM t")).ShouldBe([[1]]);
             await ExecuteAsync(session, "CREATE TABLE cleanup(id INT)");
             await ExecuteAsync(session, "DROP TABLE cleanup");
@@ -111,10 +111,10 @@ public sealed partial class SqlDefinedFunctionTests
             if (kind == "wrapper")
             {
                 (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "CREATE TABLE invalid_stored(v INT CHECK(wrapped(v)))")))
-                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE009");
+                    .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01009");
             }
             (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
-                "CREATE FUNCTION invalid_wrapper(p INT) RETURNS BOOLEAN IMMUTABLE RETURN allowed(p)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLD001");
+                "CREATE FUNCTION invalid_wrapper(p INT) RETURNS BOOLEAN IMMUTABLE RETURN allowed(p)"))).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03301");
         }
 
         var restored = SqlDatabaseEngine.CreateBuilder("weakened-native");

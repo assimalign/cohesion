@@ -48,7 +48,7 @@ internal static class SqlDefaultLiteralRenderer
         };
 
         return literal ?? throw new ArgumentException(
-            $"The default value cannot be represented as a {columnType} column literal.", nameof(value));
+            string.Format(CultureInfo.CurrentCulture, SqlDefaultLiteralErrorMessages.DefaultValueIncompatible, columnType), nameof(value));
     }
 
     internal static DatabaseType StorageType(Type clrType)

@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentWriteStream")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentWriteStream.DebugView))]
 internal sealed class DocumentWriteStream : Stream
 {
     private readonly DocumentStorage _storage;
@@ -180,7 +182,7 @@ internal sealed class DocumentWriteStream : Stream
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_failed)
         {
-            throw new InvalidOperationException("The document upload has failed and cannot be published.");
+            throw new InvalidOperationException(ErrorMessages.WriteStreamEnsureWritableFailure);
         }
     }
 
@@ -188,7 +190,7 @@ internal sealed class DocumentWriteStream : Stream
     {
         if (_context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("The document upload's transaction is no longer active.");
+            throw new InvalidOperationException(ErrorMessages.WriteStreamEnsureTransactionFailure);
         }
     }
 
@@ -248,5 +250,21 @@ internal sealed class DocumentWriteStream : Stream
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Internal.DocumentWriteStream _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentWriteStream value)
+        {
+            _target = value;
+        }
+
+        public bool CanRead => _target.CanRead;
+        public bool CanSeek => _target.CanSeek;
+        public bool CanWrite => _target.CanWrite;
+        public long Length => _target.Length;
+        public long Position => _target.Position;
+    }
 }
 

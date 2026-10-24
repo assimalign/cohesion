@@ -20,13 +20,15 @@ namespace Assimalign.Cohesion.Database;
 /// </remarks>
 internal static class DatabaseEngineOptionChecks
 {
+    private static readonly string _descriptionFormat = EngineErrorMessages.EngineDescription;
+
     /// <summary>
     /// Names an engine the way every option refusal starts: <c>{model} engine '{name}'</c>.
     /// </summary>
     /// <param name="model">The model's name as its messages start (<c>SQL</c>, <c>Key-value</c>, …).</param>
     /// <param name="engineName">The engine name.</param>
     /// <returns>The engine, described.</returns>
-    internal static string Describe(string model, string engineName) => $"{model} engine '{engineName}'";
+    internal static string Describe(string model, string engineName) => string.Format(System.Globalization.CultureInfo.CurrentCulture, _descriptionFormat, model, engineName);
 
     /// <summary>
     /// Creates a refusal of one option.
@@ -37,7 +39,7 @@ internal static class DatabaseEngineOptionChecks
     /// <param name="requirement">What the option must be, completing "<c>{option} …</c>".</param>
     /// <returns>The exception to throw.</returns>
     internal static ArgumentOutOfRangeException Refuse(string engine, string option, object? value, string requirement)
-        => new(option, value, $"{engine}: {option} {requirement}");
+        => new(option, value, string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.EngineOptionChecksRefuseFailure, engine, option, requirement));
 
     /// <summary>Refuses a cadence or timeout that is zero or negative.</summary>
     /// <param name="value">The value.</param>
@@ -48,7 +50,7 @@ internal static class DatabaseEngineOptionChecks
     {
         if (value <= TimeSpan.Zero)
         {
-            throw Refuse(engine, option, value, "must be positive.");
+            throw Refuse(engine, option, value, EngineErrorMessages.OptionPositiveRequirement);
         }
     }
 
@@ -61,7 +63,7 @@ internal static class DatabaseEngineOptionChecks
     {
         if (value <= 0)
         {
-            throw Refuse(engine, option, value, "must be positive.");
+            throw Refuse(engine, option, value, EngineErrorMessages.OptionPositiveRequirement);
         }
     }
 
@@ -74,7 +76,7 @@ internal static class DatabaseEngineOptionChecks
     {
         if (value < 0)
         {
-            throw Refuse(engine, option, value, "must not be negative.");
+            throw Refuse(engine, option, value, EngineErrorMessages.OptionNonnegativeRequirement);
         }
     }
 
@@ -94,7 +96,7 @@ internal static class DatabaseEngineOptionChecks
         if (value > Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow)
         {
             throw Refuse(engine, option, value,
-                $"must be at most {Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.OptionMaximumRequirement, Assimalign.Cohesion.Database.Storage.Storage.MaximumGroupCommitWindow));
         }
     }
 
@@ -119,8 +121,7 @@ internal static class DatabaseEngineOptionChecks
             const long page = Assimalign.Cohesion.Database.Storage.Units.Page.Size;
             const long minimum = Assimalign.Cohesion.Database.Storage.Storage.MinimumBufferPoolBytes;
             throw Refuse(engine, option, capacity,
-                $"must be a whole number of {page}-byte pages, at least {minimum} bytes ({minimum / page} pages) " +
-                $"and at most {(long)int.MaxValue * page} bytes.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.BufferPoolCapacityRequirement, page, minimum, minimum / page, (long)int.MaxValue * page));
         }
     }
 }

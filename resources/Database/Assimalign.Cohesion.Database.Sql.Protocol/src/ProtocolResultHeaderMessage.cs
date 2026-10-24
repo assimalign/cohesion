@@ -46,13 +46,13 @@ public sealed record ProtocolResultHeaderMessage(IReadOnlyList<(string Name, byt
         int position = 0;
         if (ProtocolPayload.ReadInt32(payload, ref position) != formatMarker)
         {
-            throw new ProtocolException("Unsupported SQL result-header format; rebuild the client and server together.");
+            throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol);
         }
         int count = ProtocolPayload.ReadInt32(payload, ref position);
 
         if (count < 0 || count > (payload.Length - position) / 9)
         {
-            throw new ProtocolException("Malformed payload: invalid column count.");
+            throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol2);
         }
 
         var columns = new List<(string, byte, int?)>(count);
@@ -63,21 +63,21 @@ public sealed record ProtocolResultHeaderMessage(IReadOnlyList<(string Name, byt
 
             if (position >= payload.Length)
             {
-                throw new ProtocolException("Malformed payload: truncated column type.");
+                throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol3);
             }
 
             byte type = payload[position++];
             int length = ProtocolPayload.ReadInt32(payload, ref position);
             if (length < -1 || length == 0)
             {
-                throw new ProtocolException("Malformed payload: invalid column length.");
+                throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol4);
             }
             columns.Add((name, type, length == -1 ? null : length));
         }
 
         if (position != payload.Length)
         {
-            throw new ProtocolException("Malformed payload: trailing result-header bytes.");
+            throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol5);
         }
         return new ProtocolResultHeaderMessage(columns);
     }

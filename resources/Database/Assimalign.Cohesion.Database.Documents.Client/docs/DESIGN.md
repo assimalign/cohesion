@@ -45,7 +45,7 @@ SELECT lists arrive as objects in projection order. SELECT VALUE/RAW uses the ex
 whole-value header mode and exposes a single `value` column and its JSON values in Documents.
 LIMIT/OFFSET use the ordinary JSON parameter path; Complete counts only the returned Document
 frames, while query AffectedCount stays -1. Empty pages retain headers, IsDocumentQuery and static
-function column types. OQL0007 survives parse or plan failure at the operand and keeps the session
+function column types. CD00007 survives parse or plan failure at the operand and keeps the session
 reusable. Both transports and the NativeAOT guard exercise paging.
 DISTINCT completion counts follow duplicate removal; object/array constructors need no codec
 extension. A lone SELECT * preserves stored bytes on the wire, including scalar roots.
@@ -113,19 +113,19 @@ sequenceDiagram
 `-1`; collection and index DDL use zero. INSERT uses the inserted-document count and emits
 no Document frames. UPSERT uses the written-document count for inserts and complete replacements,
 with fresh versions and the same MISSING validation as INSERT. Repeated keys fail the whole
-statement with COHDOC012; invalid keys use COHDOC008. Both preserve the connection. EXPLAIN UPSERT
+statement with CD03012; invalid keys use CD02008. Both preserve the connection. EXPLAIN UPSERT
 describes Upsert/UpsertSelect without writing. DELETE uses the deleted-document count, including zero, and likewise
 emits only Complete. UPDATE uses the matched-document count, including byte-identical rewrites
 and no-op UNSET, with fresh versions for every match. SET and UNSET preserve the engine's
 nested-path, array-index, MISSING and atomicity rules. Invalid paths return ExecutionFailure
-with COHDOC016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
+with CD02016 and leave the connection reusable. EXPLAIN UPDATE describes its access path
 without writing. DELETE's scan/seek selection, full-predicate filtering and rollback behavior
 are the embedded engine's. EXPLAIN DELETE includes its chosen access without mutating.
-Duplicate keys preserve COHDOC012 as ExecutionFailure and the next statement can reuse the
+Duplicate keys preserve CD03012 as ExecutionFailure and the next statement can reuse the
 session. The advertised-clause suite covers VALUES, UPSERT, SELECT, UPDATE, UNSET, DELETE and META.
 The advertised-predicate corpus also covers IN, BETWEEN, LIKE, searched/simple
 CASE, grouped CASE and CASE under SUM over InMemory and TCP. It preserves embedded rows,
-MISSING versus NULL, COHDOC013 and reuse after a malformed LIKE pattern.
+MISSING versus NULL, CD02013 and reuse after a malformed LIKE pattern.
 `CREATE COLLECTION [IF NOT EXISTS]` and
 `DROP COLLECTION [IF EXISTS]` use the existing Execute exchange and retain collection ownership
 and conditional no-op semantics. A schema-owned drop returns ExecutionFailure (6), and the
@@ -153,9 +153,9 @@ a server-side `DocumentCollection` is bound to an engine session and cannot cros
 Catalog queries use `COHESION_SCHEMA.INDEXES` and `COHESION_SCHEMA.OBJECT_OWNERSHIP`.
 
 Composite and UNIQUE index DDL and IF modifiers use Execute without new frames. Duplicate Put
-and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve COHDOC020 and
+and CREATE UNIQUE INDEX over duplicates return ExecutionFailure (6), preserve CD03020 and
 name index/collection without key contents; the same connection accepts the next query. Non-scalar
-UNIQUE keys retain COHDOC021. The AOT guard exercises the composite seek, metadata and duplicate
+UNIQUE keys retain CD02021. The AOT guard exercises the composite seek, metadata and duplicate
 failure over InMemory and TCP (#1135).
 
 ## Failures and pooling
@@ -169,7 +169,7 @@ including after partial rows or documents, with no `Complete` after it. The clie
 accumulated results and throws the typed error; the authenticated session remains reusable. Failure
 carries the shared classification
 and the server's structured `Diagnostic` values, including codes and nullable locations. Parser
-diagnostics, planning and evaluation diagnostics (`COHDOC001`–`COHDOC018`), and offline `COHDBD002`
+diagnostics, planning and evaluation diagnostics (`CD05001`–`CD02018`), and offline `CD06102`
 survive intact. The server reads the database exception carrier and composes `CODE: message`
 once; the client preserves that text without adding a prefix. Located diagnostics retain their
 spans; direct collection APIs retain unlocated diagnostics. An engine failure without structured diagnostics
@@ -178,18 +178,18 @@ text to 4096 UTF-16 characters and diagnostics to 256 (codes to 256 characters),
 truncation/omission markers. Codes and locations of retained diagnostics are unchanged. This
 keeps even a near-frame-sized failing identifier from turning a statement error into a broken wire.
 
-Blank OQL collection names return `COHDOC001` at the quoted name's span; empty quoted names
-return the parser's `OQL0002`. Both preserve the connection. The typed command API rejects blank
+Blank OQL collection names return `CD05001` at the quoted name's span; empty quoted names
+return the parser's `CD00002`. Both preserve the connection. The typed command API rejects blank
 names locally with its existing argument guard. A peer sending one through Command (69) receives
-an unlocated `COHDOC001` Failure and can continue using the same server session.
+an unlocated `CD05001` Failure and can continue using the same server session.
 
-Collection refusals preserve `COHDOC002` (missing DROP), `COHDOC010` (duplicate CREATE), and
-`COHDOC011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
+Collection refusals preserve `CD01002` (missing DROP), `CD03010` (duplicate CREATE), and
+`CD03011` (schema-owned DROP) through both OQL and Command exchanges. Their OQL diagnostics
 carry the statement span; command diagnostics have no source location. All are ExecutionFailure
 and preserve the session, including conditional schema-owned drops.
 
 INSERT rejects numeric literals and JsonElement parameters outside the exact decimal domain
-with COHDOC007 before normalization, including underflow and excess fractional precision.
+with CD02007 before normalization, including underflow and excess fractional precision.
 VALUES and computed SELECT inputs preserve the collection on failure over both InMemory and
 TCP; the diagnostic span and the reusable session survive the wire unchanged.
 
@@ -283,3 +283,34 @@ JSON uses fixed, one-level objects and cannot carry arbitrary nested content.
 ## Shared startup 2.1 (#1105)
 
 The shared client reads the negotiated Ready version and capability intersection. Documents agrees 2.1 with an empty list and retains its existing structured Failure payload; it does not adopt the core Diagnostics frame. A negotiated 2.0 peer still sends empty Ready.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Document access estimates (#1527)
+
+EXPLAIN remains a nonexecuting query returning one JSON document per plan row. IndexSeek now
+includes an Int64 index-entry estimate and labels complete counts or lower bounds in Detail.
+IndexIntersection has IndexSeek children and a minimum-input upper bound, before JSON reads;
+actual_rows remains JSON null. The existing nullable count members and Document frames carry
+these values over InMemory and TCP, without a protocol-version or client API change. The AOT
+consumer checks intersection results, both input descriptions and nonexecuting behavior.
+
+## Documents diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Client debugger views expose the captured database name, stored result metadata and counts from arrays materialized by the result/row constructors. They omit live connection state, transport settings and row-value buffers, and never enumerate results.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

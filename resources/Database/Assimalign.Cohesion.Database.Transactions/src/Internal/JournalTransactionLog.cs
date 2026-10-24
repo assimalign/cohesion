@@ -14,6 +14,8 @@ using Assimalign.Cohesion.Database.Storage;
 /// the journal's <see cref="StorageJournal.EnsureDurable"/> — a flush that covers one
 /// commit covers every earlier record, so concurrent commits share fsyncs.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("JournalTransactionLog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.Internal.JournalTransactionLog.DebugView))]
 internal sealed class JournalTransactionLog : TransactionLog
 {
     private readonly StorageJournal _journal;
@@ -86,9 +88,7 @@ internal sealed class JournalTransactionLog : TransactionLog
     /// </summary>
     /// <param name="sequence">The transaction's sequence.</param>
     internal static string UnconfirmedMessage(TransactionSequence sequence)
-        => $"Transaction {sequence} committed in this process, but its commit record could not be made durable, so its " +
-           "outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the " +
-           "database; its recovery keeps the commit if the record reached stable storage and discards it if not.";
+        => string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.LogUnconfirmedMessageFailure, sequence);
 
     /// <inheritdoc />
     public override ValueTask AppendAbortAsync(TransactionSequence sequence, CancellationToken cancellationToken = default)
@@ -104,5 +104,13 @@ internal sealed class JournalTransactionLog : TransactionLog
         }
 
         return default;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.Internal.JournalTransactionLog value)
+        {
+            _ = value;
+        }
     }
 }

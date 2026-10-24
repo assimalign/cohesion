@@ -20,7 +20,7 @@ public sealed class DocumentDuplicateKeyException : DatabaseException
         => new(collectionName, documentId, string.Format(CultureInfo.CurrentCulture, ErrorMessages.RepeatedDocumentKey, documentId));
 
     private DocumentDuplicateKeyException(string collectionName, DocumentId documentId, string message)
-        : base(message, [new Diagnostic { Code = "COHDOC012", Message = message, Severity = DiagnosticSeverity.Error }])
+        : base(message, [new Diagnostic { Code = "CD03012", Message = message, Severity = DiagnosticSeverity.Error }])
     {
         CollectionName = collectionName;
         DocumentId = documentId;

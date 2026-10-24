@@ -8,6 +8,8 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 /// In-memory transaction log for embedded working state and tests: appends are
 /// trivially "durable" because the log shares the process lifetime.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("InMemoryTransactionLog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.Internal.InMemoryTransactionLog.DebugView))]
 internal sealed class InMemoryTransactionLog : TransactionLog
 {
     private readonly List<(ulong Sequence, byte Kind)> _records = new();
@@ -46,6 +48,14 @@ internal sealed class InMemoryTransactionLog : TransactionLog
         lock (_sync)
         {
             _records.Add((sequence, kind));
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Transactions.Internal.InMemoryTransactionLog value)
+        {
+            _ = value;
         }
     }
 }

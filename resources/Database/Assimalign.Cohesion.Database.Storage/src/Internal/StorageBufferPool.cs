@@ -1,99 +1,50 @@
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 using Assimalign.Cohesion.Database.Storage.Units;
 
 /// <summary>
-/// An in-memory page cache over buffers that never move and supports pin-counted,
-/// least-recently-used eviction with buffer reuse.
+/// A bounded clock cache over pinned-heap page buffers. Cached pins own only frame-local
+/// state; mapping changes and admission use the pool monitor, never while doing page I/O.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Eviction policy: when the pool is at capacity, the least recently used page whose
-/// pin count is zero is evicted (written back first when dirty). Pinned pages are never
-/// evicted; if every resident page is pinned the pool refuses the new page loudly
-/// rather than silently exceeding its budget.
-/// </para>
-/// <para>
-/// Buffer reuse: evicted entries return their 8 KiB buffers to a recycle stack, so a
-/// pool under steady load reaches its capacity in allocations and stays there — page
-/// churn does not allocate. Buffers live on the pinned object heap: a raw page pointer
-/// stays valid for as long as anything references the buffer, so no pin can be released
-/// out from under a live handle, not even by disposing the pool.
-/// </para>
-/// <para>
-/// Integrity: every page loaded from the storage stream is verified against its
-/// header checksum, and every write-back stamps a fresh checksum over a private copy of
-/// the page, so the bytes that reach the stream always verify — even when a pinned
-/// writer is changing the page while it is written.
-/// </para>
-/// <para>
-/// Dirty tracking: every <see cref="StoragePageHandle.MarkDirty"/> advances the entry's
-/// modification version, and a write-back records the page clean only up to the version
-/// it copied. A change made while the page is being written keeps the page dirty, so the
-/// pool can never evict it clean and drop the change.
-/// </para>
-/// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("StorageBufferPool")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.DebugView))]
 internal sealed unsafe class StorageBufferPool : IDisposable
 {
-    private readonly Dictionary<long, BufferEntry> _entries = new();
-    private readonly LinkedList<long> _accessOrder = new(); // head = least recently used
+    private readonly ConcurrentDictionary<long, BufferEntry> _entries = new();
+    private readonly LinkedList<long> _accessOrder = new(); // clock hand = First
     private readonly Stack<BufferEntry> _recycled = new();
+    private LinkedListNode<long>? _clockHand;
+    private readonly Dictionary<long, LoadOperation> _loads = new();
     private readonly object _syncRoot = new();
-    // Lock order: flush/disposal gate -> pool monitor -> journal/stream. A flush releases
-    // the monitor before I/O; eviction never takes the flush gate and skips a frame whose
-    // WriteInProgress lease protects it. Waiting for such a frame releases the monitor.
+    // Flushes serialize with maintenance. Cold reads/evictions never take this gate.
     private readonly object _flushGate = new();
+    private readonly object _extensionGate = new();
+    private readonly object[] _pageIo = CreateIoGates();
+    private readonly HashSet<BufferEntry> _invariantScratch = new(ReferenceEqualityComparer.Instance);
     private int _dirtyPageCount;
-    internal int DirtyPageCount => Volatile.Read(ref _dirtyPageCount);
     private int _capacity;
+    private int _loadingFrames;
+    private int _activeIo;
+    private bool _maintenance;
+    private bool _disposed;
     private long _writeBackWaits;
-
     private const int flushBatchPages = 16;
 
-    // Foreground eviction's image, guarded by _syncRoot. Flushes rent their own single image.
-    private readonly byte[] _writeBackImage = new byte[Page.Size];
-
-    // Scratch set for the structural check; guarded by _syncRoot.
-    private readonly HashSet<BufferEntry> _invariantScratch = new(ReferenceEqualityComparer.Instance);
-    private bool _disposed;
-
-    /// <summary>
-    /// The write-ahead gate: invoked with a page's LSN before the page is written to
-    /// the storage stream, so the journal can be made durable up to that LSN first.
-    /// Set by the owning storage once its journal exists.
-    /// </summary>
+    internal int DirtyPageCount => Volatile.Read(ref _dirtyPageCount);
     internal Action<long>? WriteAheadGate;
-
-    /// <summary>
-    /// Invoked before every write the pool makes to the storage stream — a page write-back or
-    /// an extension of the stream — whatever the page's LSN: the owning storage throws from it
-    /// once it is offline, so no data write follows a failed durable flush (#1243).
-    /// </summary>
     internal Action? WriteGuard;
-
-    /// <summary>
-    /// Invoked with a page's id and LSN before every write-back, after <see cref="WriteGuard"/>:
-    /// the owning storage's debug consistency check audits that no page reaches the stream with a
-    /// change no journal record holds (#1253). Null unless the check is on; it throws to refuse
-    /// the write.
-    /// </summary>
     internal Action<long, long>? WriteBackAudit;
-
-    /// <summary>
-    /// The name of the storage that owns the pool, for its events' <c>database</c> payload
-    /// (<see cref="StorageEventSource"/>): set by the storage when it is created or opened, and
-    /// empty before that and for a pool nothing owns.
-    /// </summary>
     internal string StorageName { get; set; } = string.Empty;
-
-    // Counted only on the slow path; race tests wait for actual frame-I/O contention.
     internal long WriteBackWaits => Interlocked.Read(ref _writeBackWaits);
 
     internal StorageBufferPool(int capacity)
@@ -102,440 +53,426 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         _capacity = capacity;
     }
 
-    /// <summary>
-    /// Gets the maximum number of pages that can be held in the buffer pool.
-    /// </summary>
-    public int Capacity
-    {
-        get
-        {
-            lock (_syncRoot)
-            {
-                return _capacity;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Changes the number of pages the pool may hold. Growing takes effect at once; shrinking
-    /// evicts least recently used unpinned pages (writing dirty ones back first, through the
-    /// write-ahead gate) until the resident pages fit the new capacity.
-    /// </summary>
-    /// <param name="capacity">The new capacity in pages; at least one.</param>
-    /// <param name="stream">The stream evicted dirty pages are written to.</param>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="capacity"/> is less than one page.</exception>
-    /// <exception cref="StorageIOException">
-    /// More pages than the new capacity are pinned; the pool is unchanged.
-    /// </exception>
-    /// <remarks>
-    /// When the write-back of an evicted page fails, the failure propagates and the pool keeps
-    /// the smallest capacity that still holds every resident page, so its invariants hold.
-    /// </remarks>
-    internal void Resize(int capacity, StorageStream stream)
-    {
-        ValidateCapacity(capacity);
-        int previous;
-
-        // A shrink must not publish a smaller capacity then release the monitor to wait
-        // for a leased frame: that would expose an oversized resident set. Drain flush I/O
-        // before changing capacity, in the same outer-gate order as flush and disposal.
-        lock (_flushGate)
-        {
-            lock (_syncRoot)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                previous = _capacity;
-
-                int pinned = 0;
-                foreach (var entry in _entries.Values)
-                {
-                    if (entry.PinCount > 0)
-                    {
-                        pinned++;
-                    }
-                }
-
-                if (pinned > capacity)
-                {
-                    throw new StorageIOException(
-                        $"Cannot shrink the buffer pool to {capacity} pages: {pinned} pages are pinned.");
-                }
-
-                _capacity = capacity;
-
-                try
-                {
-                    while (_entries.Count > _capacity)
-                    {
-                        EvictOneLocked(stream);
-                    }
-                }
-                catch
-                {
-                    _capacity = Math.Max(_capacity, _entries.Count);
-                    throw;
-                }
-
-                AssertInvariantsLocked();
-            }
-        }
-
-        // Outside the pool lock; an unchanged capacity (an engine applying its option to a pool
-        // already that size) is not a resize.
-        if (previous != capacity)
-        {
-            StorageEventSource.Log.BufferPoolResized(this, previous, capacity);
-        }
-    }
+    public int Capacity { get { lock (_syncRoot) { return _capacity; } } }
+    public int Count { get { lock (_syncRoot) { return _entries.Count; } } }
 
     private static void ValidateCapacity(int capacity)
     {
         if (capacity < 1)
         {
-            throw new ArgumentOutOfRangeException(nameof(capacity), "Buffer pool capacity must be at least one page.");
+            throw new ArgumentOutOfRangeException(nameof(capacity), ErrorMessages.BufferPoolValidateCapacityFailure);
         }
     }
 
-    /// <summary>
-    /// Gets the current number of pages resident in the buffer pool.
-    /// </summary>
-    public int Count
+    private static object[] CreateIoGates()
     {
-        get
+        var gates = new object[128];
+        for (int i = 0; i < gates.Length; i++) { gates[i] = new object(); }
+        return gates;
+    }
+
+    private object IoGate(long id) => _pageIo[(int)((ulong)id % (uint)_pageIo.Length)];
+
+    public StoragePageHandle Pin(PageId pageId, StorageStream stream) => PinCore(pageId, stream, overwrite: false);
+    internal StoragePageHandle PinForOverwrite(PageId pageId, StorageStream stream) => PinCore(pageId, stream, overwrite: true);
+
+    private StoragePageHandle PinCore(PageId pageId, StorageStream stream, bool overwrite)
+    {
+        long id = (long)pageId;
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+        if (TryPin(id, out var hit)) { return new StoragePageHandle(pageId, hit!, this); }
+        while (true)
         {
+            LoadOperation? waiting = null;
+            LoadOperation? loading = null;
+            BufferEntry? frame = null;
+            long? victim = null;
             lock (_syncRoot)
             {
-                return _entries.Count;
+                WaitForAdmissionLocked();
+                if (TryPin(id, out hit)) { return new StoragePageHandle(pageId, hit!, this); }
+                if (_loads.TryGetValue(id, out waiting))
+                {
+                    // One completion per page fault; a waiter's task is created lazily.
+                    waiting.PrepareWait();
+                    Interlocked.Increment(ref _writeBackWaits);
+                }
+                else if (_entries.TryGetValue(id, out _))
+                {
+                    WaitForIoLocked(); // this page is reserved for eviction
+                    continue;
+                }
+                else
+                {
+                    if (_entries.Count + _loadingFrames < _capacity)
+                    {
+                        frame = TakeEntryLocked();
+                        _loadingFrames++;
+                    }
+                    else
+                    {
+                        frame = ReserveVictimLocked();
+                        if (frame is null) { WaitForIoLocked(); continue; }
+                        victim = frame.ResidentId;
+                    }
+                    loading = new LoadOperation();
+                    _loads.Add(id, loading);
+                    _activeIo++;
+                }
+            }
+            if (waiting is not null) { waiting.Wait(); continue; }
+
+            bool ownsLoadingFrame = victim is null;
+            bool published = false;
+            try
+            {
+                if (victim is long oldId)
+                {
+                    WriteVictim(stream, oldId, frame!);
+                    lock (_syncRoot)
+                    {
+                        DetachLocked(oldId, frame!);
+                        _loadingFrames++;
+                        ownsLoadingFrame = true;
+                        Monitor.PulseAll(_syncRoot);
+                    }
+                }
+                LoadPage(stream, pageId, frame!, overwrite);
+                lock (_syncRoot)
+                {
+                    frame!.ResidentId = id;
+                    frame.Referenced = 1;
+                    frame.WriteInProgress = false;
+                    frame.ClockNode.Value = id;
+                    frame.Node = frame.ClockNode;
+                    _accessOrder.AddLast(frame.Node);
+                    _entries[id] = frame;
+                    frame.PublishPin();
+                    _loadingFrames--;
+                    ownsLoadingFrame = false;
+                    CompleteLoadLocked(id, loading!, null);
+                    published = true;
+                    AssertInvariantsLocked();
+                }
+                return new StoragePageHandle(pageId, frame!, this);
+            }
+            catch (Exception failure)
+            {
+                if (published) { throw; }
+                lock (_syncRoot)
+                {
+                    if (ownsLoadingFrame) { _loadingFrames--; RecycleLocked(frame!); }
+                    else if (victim is not null)
+                    {
+                        frame!.WriteInProgress = false;
+                        frame.AllowPins(); // failed write leaves the old dirty mapping intact
+                    }
+                    CompleteLoadLocked(id, loading!, failure);
+                    AssertInvariantsLocked();
+                }
+                throw;
             }
         }
     }
 
-    /// <summary>
-    /// Retrieves a page from the pool and increments its pin count.
-    /// If the page is not in the pool, it is loaded from the backing storage stream.
-    /// </summary>
-    /// <param name="pageId">The identifier of the page to pin.</param>
-    /// <param name="stream">The storage stream to read from if the page is not cached.</param>
-    /// <returns>A handle to the pinned page.</returns>
-    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
-    /// <exception cref="StorageCorruptionException">
-    /// The page read from <paramref name="stream"/> failed its checksum, or its header
-    /// describes bytes past the end of the page buffer. The page is not cached.
-    /// </exception>
-    /// <exception cref="StorageIOException">The pool is full and every resident page is pinned, or the stream ended inside the page.</exception>
-    public StoragePageHandle Pin(PageId pageId, StorageStream stream)
+    private bool TryPin(long id, out BufferEntry? entry)
     {
-        lock (_syncRoot)
+        if (_entries.TryGetValue(id, out entry) && TryPinEntry(id, entry))
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            long id = (long)pageId;
+            return true;
+        }
+        entry = null;
+        return false;
+    }
 
-            if (_entries.TryGetValue(id, out var entry))
+    private bool TryPinEntry(long id, BufferEntry entry)
+    {
+        if (entry.TryPin())
+        {
+            // A lookup may have raced a complete eviction and reuse of this same object.
+            if (Volatile.Read(ref entry.ResidentId) == id)
             {
-                // A hit changes one pin count and one LRU position: check that frame only.
-                entry.PinCount++;
-                Touch(entry);
+                Volatile.Write(ref entry.Referenced, 1);
                 AssertFrameLocked(id, entry);
-                return new StoragePageHandle(pageId, entry, this);
+                return true;
             }
+            entry.ReleasePin();
+        }
+        return false;
+    }
 
-            while (_entries.Count >= _capacity)
+    private void LoadPage(StorageStream stream, PageId pageId, BufferEntry frame, bool overwrite)
+    {
+        lock (IoGate((long)pageId))
+        {
+            if (!overwrite && (long)pageId * Page.Size < stream.Length)
             {
-                EvictOneLocked(stream);
-                // Waiting for a flush releases the monitor. Another miss may have loaded
-                // our page while we waited; reuse its frame rather than replacing a pin.
-                if (_entries.TryGetValue(id, out entry))
-                {
-                    entry.PinCount++;
-                    Touch(entry);
-                    AssertFrameLocked(id, entry);
-                    return new StoragePageHandle(pageId, entry, this);
-                }
-            }
-
-            entry = TakeEntryLocked();
-
-            if (id * Page.Size < stream.Length)
-            {
-                // Set while the checksum is verified, so a failure there is reported as one.
                 bool verifyingChecksum = false;
                 try
                 {
-                    stream.ReadPage(pageId, entry.Buffer);
+                    stream.ReadPage(pageId, frame.Buffer);
                     StorageEventSource.Log.CountPageRead();
                     verifyingChecksum = true;
-                    PageChecksum.Verify(entry.Buffer, pageId);
+                    PageChecksum.Verify(frame.Buffer, pageId);
                     verifyingChecksum = false;
-                    VerifyFitsBuffer(entry.Page, pageId);
+                    _ = frame.Page.GetValidatedBodySize(pageId);
                 }
                 catch
                 {
-                    // Do not cache a page that failed to load or verify.
-                    RecycleLocked(entry);
-                    if (verifyingChecksum)
-                    {
-                        StorageEventSource.Log.PageChecksumFailed(this, pageId);
-                    }
-
+                    if (verifyingChecksum) { StorageEventSource.Log.PageChecksumFailed(this, pageId); }
                     throw;
                 }
             }
-            else
-            {
-                Array.Clear(entry.Buffer);
-            }
-
-            entry.PinCount = 1;
-            _entries[id] = entry;
-            entry.Node = _accessOrder.AddLast(id);
-
-            // A miss changes the pool's structure (an eviction, a recycled entry, a new
-            // resident page): walk all of it.
-            AssertInvariantsLocked();
-
-            return new StoragePageHandle(pageId, entry, this);
+            else { Array.Clear(frame.Buffer); }
         }
     }
 
-    /// <summary>
-    /// Pins a page every byte of which the caller is about to overwrite: a resident page is
-    /// pinned as it is, and a page that is not resident is not read from the stream — it
-    /// gets a zeroed buffer instead.
-    /// </summary>
-    /// <remarks>
-    /// Allocation clears a page before anything reads it, so reading and verifying the free
-    /// page's old bytes first is wasted I/O, and worse, it refuses the allocation of a free
-    /// page whose last write a crash tore. Recovery repairs torn pages only from journal
-    /// images, and a page written outside the journal — a freed checkpoint anchor page —
-    /// has none. The caller marks the page dirty once it has written it.
-    /// </remarks>
-    /// <param name="pageId">The page to pin.</param>
-    /// <param name="stream">The stream to evict to when the pool is full.</param>
-    /// <returns>A handle on the pinned page.</returns>
-    internal StoragePageHandle PinForOverwrite(PageId pageId, StorageStream stream)
+    private void CompleteLoadLocked(long id, LoadOperation operation, Exception? failure)
     {
-        lock (_syncRoot)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            long id = (long)pageId;
-
-            if (_entries.TryGetValue(id, out var entry))
-            {
-                entry.PinCount++;
-                Touch(entry);
-                AssertFrameLocked(id, entry);
-                return new StoragePageHandle(pageId, entry, this);
-            }
-
-            while (_entries.Count >= _capacity)
-            {
-                EvictOneLocked(stream);
-                if (_entries.TryGetValue(id, out entry))
-                {
-                    entry.PinCount++;
-                    Touch(entry);
-                    AssertFrameLocked(id, entry);
-                    return new StoragePageHandle(pageId, entry, this);
-                }
-            }
-
-            entry = TakeEntryLocked();
-            Array.Clear(entry.Buffer);
-            entry.PinCount = 1;
-            _entries[id] = entry;
-            entry.Node = _accessOrder.AddLast(id);
-            AssertInvariantsLocked();
-
-            return new StoragePageHandle(pageId, entry, this);
-        }
+        _loads.Remove(id);
+        _activeIo--;
+        operation.Complete(failure);
+        Monitor.PulseAll(_syncRoot);
     }
 
-    /// <summary>
-    /// Decrements the pin count for the specified page. When the pin count
-    /// reaches zero, the page becomes eligible for eviction.
-    /// </summary>
-    /// <remarks>
-    /// Releasing a pin the page does not hold is a caller bug. Debug builds throw
-    /// <see cref="InvalidOperationException"/> for it; release builds leave the
-    /// pin count at zero. A page that is not resident is ignored.
-    /// </remarks>
-    /// <param name="pageId">The identifier of the page to unpin.</param>
-    public void Unpin(PageId pageId)
-    {
-        lock (_syncRoot)
-        {
-            if (_entries.TryGetValue((long)pageId, out var entry))
-            {
-                UnpinLocked(entry);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Releases one pin a handle holds on its own entry. Unpinning the entry rather than
-    /// whatever is resident under the page id means a handle can only ever release the
-    /// pin it took.
-    /// </summary>
-    /// <param name="entry">The entry the handle pinned.</param>
-    internal void Unpin(BufferEntry entry)
-    {
-        lock (_syncRoot)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            AssertResidentLocked(entry);
-            UnpinLocked(entry);
-        }
-    }
-
-    /// <summary>
-    /// Attempts to retrieve a page from the pool without loading it from disk.
-    /// </summary>
-    /// <param name="pageId">The identifier of the page to look up.</param>
-    /// <param name="handle">When this method returns, contains the page handle if the page was found; otherwise, <c>null</c>.</param>
-    /// <returns><c>true</c> if the page was found in the pool; otherwise, <c>false</c>.</returns>
-    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
     public bool TryGet(PageId pageId, out StoragePageHandle? handle)
     {
-        lock (_syncRoot)
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+        if (TryPin((long)pageId, out var entry))
         {
+            handle = new StoragePageHandle(pageId, entry!, this);
+            return true;
+        }
+        handle = null;
+        return false;
+    }
+
+    public void Unpin(PageId pageId)
+    {
+        if (_entries.TryGetValue((long)pageId, out var entry)) { Unpin(entry); }
+    }
+
+    internal void Unpin(BufferEntry entry)
+    {
+        if (Volatile.Read(ref _disposed)) { return; }
+        AssertResidentLocked(entry);
+        if (!entry.ReleasePin()) { FailOverReleaseLocked(entry); }
+    }
+
+    // Two bounded revolutions: clear a reference on the first encounter, then claim
+    // an unpinned frame atomically. Hits never move the shared clock hand.
+    private BufferEntry? ReserveVictimLocked()
+    {
+        bool writing = _loadingFrames > 0;
+        int count = _accessOrder.Count;
+        for (int step = 0; step < count * 2; step++)
+        {
+            var node = _clockHand ?? _accessOrder.First!;
+            _clockHand = node.Next ?? _accessOrder.First;
+            var entry = _entries[node.Value];
+            if (entry.WriteInProgress) { writing = true; continue; }
+            if (entry.PinCount != 0) { continue; }
+            if (Interlocked.Exchange(ref entry.Referenced, 0) != 0 && step < count) { continue; }
+            if (!entry.TryReserve()) { continue; }
+            entry.WriteInProgress = true;
+            return entry;
+        }
+        if (writing) { return null; }
+        StorageEventSource.Log.BufferPoolExhausted(this, _capacity);
+        throw new StorageIOException(ErrorMessages.PoolReserveVictimLockedStorageIO);
+    }
+
+    private void WaitForIoLocked()
+    {
+        Interlocked.Increment(ref _writeBackWaits);
+        Monitor.Wait(_syncRoot);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private void WaitForAdmissionLocked()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        while (_maintenance)
+        {
+            Monitor.Wait(_syncRoot);
             ObjectDisposedException.ThrowIf(_disposed, this);
-
-            if (_entries.TryGetValue((long)pageId, out var entry))
-            {
-                entry.PinCount++;
-                Touch(entry);
-                AssertFrameLocked((long)pageId, entry);
-                handle = new StoragePageHandle(pageId, entry, this);
-                return true;
-            }
-
-            handle = null;
-            return false;
         }
     }
 
-    /// <summary>
-    /// Forces eviction of a specific page from the pool. The page must not be pinned.
-    /// If the page is dirty, it is flushed to disk before eviction.
-    /// </summary>
-    /// <param name="pageId">The identifier of the page to evict.</param>
-    /// <param name="stream">The storage stream to flush to if the page is dirty.</param>
     public void Evict(PageId pageId, StorageStream stream)
     {
+        long id = (long)pageId;
+        BufferEntry entry;
         lock (_syncRoot)
         {
-            long id = (long)pageId;
-
-            while (_entries.TryGetValue(id, out var writing) && writing.WriteInProgress)
+            while (true)
             {
-                Interlocked.Increment(ref _writeBackWaits);
-                Monitor.Wait(_syncRoot);
+                WaitForAdmissionLocked();
+                if (_loads.ContainsKey(id)) { WaitForIoLocked(); continue; }
+                if (!_entries.TryGetValue(id, out entry!)) { return; }
+                if (entry.WriteInProgress) { WaitForIoLocked(); continue; }
+                if (!entry.TryReserve()) { throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolEvictStorageIO, id)); }
+                entry.WriteInProgress = true;
+                _activeIo++;
+                break;
             }
-
-            if (!_entries.TryGetValue(id, out var entry))
+        }
+        bool removed = false;
+        try
+        {
+            WriteVictim(stream, id, entry);
+            lock (_syncRoot) { DetachLocked(id, entry); RecycleLocked(entry); removed = true; }
+        }
+        finally
+        {
+            lock (_syncRoot)
             {
-                return;
+                if (!removed) { entry.WriteInProgress = false; entry.AllowPins(); }
+                _activeIo--;
+                Monitor.PulseAll(_syncRoot);
+                AssertInvariantsLocked();
             }
-
-            if (entry.PinCount > 0)
-            {
-                throw new StorageIOException($"Cannot evict page {id}: page is pinned.");
-            }
-
-            if (entry.IsDirty)
-            {
-                WriteBack(stream, pageId, entry);
-            }
-
-            RemoveLocked(id, entry);
-            AssertInvariantsLocked();
         }
     }
 
-    /// <summary>
-    /// Flushes all dirty pages in the buffer pool to the backing storage stream.
-    /// </summary>
-    /// <param name="stream">The storage stream to write dirty pages to.</param>
+    internal void Resize(int capacity, StorageStream stream)
+    {
+        ValidateCapacity(capacity);
+        int previous;
+        lock (_flushGate)
+        {
+            var victims = new List<BufferEntry>();
+            lock (_syncRoot)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _maintenance = true;
+                while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
+                previous = _capacity;
+                int pinned = 0;
+                foreach (var entry in _entries.Values) { if (entry.PinCount > 0) { pinned++; } }
+                if (pinned > capacity)
+                {
+                    _maintenance = false;
+                    Monitor.PulseAll(_syncRoot);
+                    throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, pinned));
+                }
+                try
+                {
+                    int needed = Math.Max(0, _entries.Count - capacity);
+                    // Reserve the complete shrink before I/O: later cached pins cannot
+                    // turn a previously valid shrink into an over-capacity state.
+                    while (victims.Count < needed)
+                    {
+                        var victim = ReserveVictimLocked();
+                        if (victim is not null) { victims.Add(victim); }
+                        else { throw new StorageIOException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageBufferPoolResizeStorageIO, capacity, _entries.Count - victims.Count)); }
+                    }
+                }
+                catch
+                {
+                    foreach (var entry in victims) { entry.WriteInProgress = false; entry.AllowPins(); }
+                    _maintenance = false;
+                    Monitor.PulseAll(_syncRoot);
+                    throw;
+                }
+            }
+            try
+            {
+                foreach (var entry in victims)
+                {
+                    long id = entry.ResidentId;
+                    WriteVictim(stream, id, entry);
+                    lock (_syncRoot) { DetachLocked(id, entry); RecycleLocked(entry); }
+                }
+                lock (_syncRoot) { _capacity = capacity; }
+            }
+            catch
+            {
+                lock (_syncRoot) { _capacity = Math.Max(capacity, _entries.Count); }
+                throw;
+            }
+            finally
+            {
+                lock (_syncRoot)
+                {
+                    foreach (var entry in victims)
+                    {
+                        if (!entry.IsRecycled) { entry.WriteInProgress = false; entry.AllowPins(); }
+                    }
+                    while (_recycled.Count > _capacity - _entries.Count) { _recycled.Pop(); }
+                    _maintenance = false;
+                    Monitor.PulseAll(_syncRoot);
+                    AssertInvariantsLocked();
+                }
+            }
+        }
+        if (previous != capacity) { StorageEventSource.Log.BufferPoolResized(this, previous, capacity); }
+    }
+
+    private void WriteVictim(StorageStream stream, long id, BufferEntry entry)
+    {
+        if (!entry.IsDirty) { return; }
+        byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
+        try
+        {
+            lock (IoGate(id))
+            {
+                WriteGuard?.Invoke();
+                long version = Volatile.Read(ref entry.Version);
+                entry.Buffer.AsSpan().CopyTo(image);
+                long lsn = WriteImage(stream, (PageId)id, entry, image, version);
+                StorageEventSource.Log.CountForegroundPageWrite();
+                StorageEventSource.Log.DirtyPageEvicted(this, (PageId)id, lsn);
+            }
+        }
+        finally { ArrayPool<byte>.Shared.Return(image); }
+    }
+
     public void FlushAll(StorageStream stream)
     {
         lock (_flushGate)
         {
-            var dirty = SnapshotDirty(int.MaxValue, skipPinned: false);
-            FlushSnapshot(stream, dirty, skipPinned: false);
-            // Device flushes also run outside the monitor: cached readers need no I/O.
+            FlushSnapshot(stream, SnapshotDirty(int.MaxValue, false), false);
             stream.Flush();
         }
     }
 
     private List<KeyValuePair<long, BufferEntry>>? SnapshotDirty(int maximum, bool skipPinned)
     {
+        WriteGuard?.Invoke();
         lock (_syncRoot)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            WriteGuard?.Invoke();
+            if (DirtyPageCount == 0) { return null; }
             List<KeyValuePair<long, BufferEntry>>? dirty = null;
             foreach (var pair in _entries)
             {
                 if (pair.Value.IsDirty && (!skipPinned || pair.Value.PinCount == 0))
                 {
                     (dirty ??= new List<KeyValuePair<long, BufferEntry>>(Math.Min(_entries.Count, maximum))).Add(pair);
-                    if (dirty.Count == maximum)
-                    {
-                        break;
-                    }
+                    if (dirty.Count == maximum) { break; }
                 }
             }
-
             return dirty;
         }
     }
 
     private int FlushSnapshot(StorageStream stream, List<KeyValuePair<long, BufferEntry>>? dirty, bool skipPinned)
     {
-        if (dirty is null)
-        {
-            return 0;
-        }
-
+        if (dirty is null) { return 0; }
         byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
         int written = 0;
         try
         {
-            for (int start = 0; start < dirty.Count; start += flushBatchPages)
+            for (int index = 0; index < dirty.Count; index++)
             {
-                int end = Math.Min(dirty.Count, start + flushBatchPages);
-                for (int index = start; index < end; index++)
-                {
-                    var pair = dirty[index];
-                    if (FlushEntry(stream, pair.Key, pair.Value, image, skipPinned))
-                    {
-                        written++;
-                    }
-                }
-
-                // Bounded bursts, without spreading the sharp checkpoint over a time target.
-                // PostgreSQL CheckpointWriteDelay (checkpointer.c:782-865) paces after writes;
-                // here the apply gate remains held, so only yield between 128 KiB batches.
-                if (end < dirty.Count)
-                {
-                    Thread.Yield();
-                }
+                var pair = dirty[index];
+                if (FlushEntry(stream, pair.Key, pair.Value, image, skipPinned)) { written++; }
+                if ((index + 1) % flushBatchPages == 0 && index + 1 < dirty.Count) { Thread.Yield(); }
             }
         }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(image);
-        }
-
-        lock (_syncRoot)
-        {
-            AssertInvariantsLocked();
-        }
-
+        finally { ArrayPool<byte>.Shared.Return(image); }
+        lock (_syncRoot) { AssertInvariantsLocked(); }
         return written;
     }
 
@@ -544,22 +481,20 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         long version;
         lock (_syncRoot)
         {
-            // An intervening eviction already wrote the old image. Never write a recycled
-            // entry under its old id, and never let eviction recycle this lease's buffer.
-            if (!_entries.TryGetValue(id, out var entry) || !ReferenceEquals(entry, expected) ||
-                !entry.IsDirty || (skipPinned && entry.PinCount != 0))
+            while (true)
             {
-                return false;
+                if (!_entries.TryGetValue(id, out var entry) || !ReferenceEquals(entry, expected) ||
+                    !entry.IsDirty || (skipPinned && entry.PinCount != 0)) { return false; }
+                if (entry.WriteInProgress) { WaitForIoLocked(); continue; }
+                version = Volatile.Read(ref entry.Version);
+                entry.Buffer.AsSpan().CopyTo(image);
+                entry.WriteInProgress = true;
+                break;
             }
-
-            version = Volatile.Read(ref entry.Version);
-            entry.Buffer.AsSpan().CopyTo(image);
-            entry.WriteInProgress = true;
         }
-
         try
         {
-            WriteImage(stream, (PageId)id, expected, image, version);
+            lock (IoGate(id)) { WriteImage(stream, (PageId)id, expected, image, version); }
             return true;
         }
         finally
@@ -573,325 +508,140 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
     }
 
-    /// <summary>
-    /// Flushes a single dirty page to the stream without evicting it.
-    /// </summary>
-    /// <param name="pageId">The page to flush.</param>
-    /// <param name="stream">The stream to write to.</param>
     internal void FlushPage(PageId pageId, StorageStream stream)
     {
         lock (_flushGate)
         {
-            BufferEntry? entry;
-            lock (_syncRoot)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                _entries.TryGetValue((long)pageId, out entry);
-            }
-
-            if (entry is not null)
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+            if (_entries.TryGetValue((long)pageId, out var entry))
             {
                 byte[] image = ArrayPool<byte>.Shared.Rent(Page.Size);
-                try
-                {
-                    FlushEntry(stream, (long)pageId, entry, image, skipPinned: false);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(image);
-                }
+                try { FlushEntry(stream, (long)pageId, entry, image, false); }
+                finally { ArrayPool<byte>.Shared.Return(image); }
             }
         }
     }
 
-    /// <summary>
-    /// Reads a page's bytes from the stream as they stand, whether or not the page is resident,
-    /// without verifying or caching them: the debug consistency check's view of what the last
-    /// write-back left (#1253).
-    /// </summary>
-    /// <remarks>
-    /// Under the pool lock, waiting for a write-back of this frame with the monitor released.
-    /// The storage handle serializes stream reads with writes and extensions.
-    /// </remarks>
-    /// <param name="pageId">The page to read.</param>
-    /// <param name="stream">The stream to read from.</param>
-    /// <param name="destination">A <see cref="Page.Size"/>-byte buffer.</param>
-    /// <returns>False when the page lies past the end of the stream, which holds nothing of it.</returns>
-    internal bool TryReadStored(PageId pageId, StorageStream stream, byte[] destination)
-    {
-        lock (_syncRoot)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-
-            while (_entries.TryGetValue((long)pageId, out var entry) && entry.WriteInProgress)
-            {
-                Monitor.Wait(_syncRoot);
-                ObjectDisposedException.ThrowIf(_disposed, this);
-            }
-
-            if (((long)pageId + 1) * Page.Size > stream.Length)
-            {
-                return false;
-            }
-
-            stream.ReadPage(pageId, destination);
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Grows the stream to at least <paramref name="requiredLength"/> bytes; never shrinks it.
-    /// </summary>
-    /// <remarks>
-    /// The pool monitor serializes the grow-only length check with other allocations;
-    /// the storage handle serializes the growth itself with page I/O, including flushes
-    /// outside the monitor. An in-memory stream can therefore never lose a write into
-    /// the old array when growth replaces it.
-    /// </remarks>
-    /// <param name="stream">The stream to extend.</param>
-    /// <param name="requiredLength">The minimum length the stream must have.</param>
-    internal void EnsureLength(StorageStream stream, long requiredLength)
-    {
-        lock (_syncRoot)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-
-            if (stream.Length < requiredLength)
-            {
-                WriteGuard?.Invoke();
-                stream.SetLength(requiredLength);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Writes back up to <paramref name="maxPages"/> dirty pages without evicting
-    /// them — the paced write-back pass a page-writer worker performs between
-    /// checkpoints. Each write-back honors the write-ahead gate like any other.
-    /// </summary>
-    /// <remarks>
-    /// Pinned pages are skipped: page content changes only under a pin, so an unpinned
-    /// page is quiescent and its image on the stream is the page as its last writer left
-    /// it. A pinned dirty page waits for a later pass, an eviction, or the checkpoint.
-    /// </remarks>
-    /// <param name="stream">The stream to write to.</param>
-    /// <param name="maxPages">The maximum number of dirty pages to write.</param>
-    /// <returns>The number of pages written.</returns>
     internal int FlushSome(StorageStream stream, int maxPages)
     {
-        if (maxPages <= 0)
-        {
-            return 0;
-        }
-
-        lock (_flushGate)
-        {
-            return FlushSnapshot(stream, SnapshotDirty(maxPages, skipPinned: true), skipPinned: true);
-        }
+        if (maxPages <= 0) { return 0; }
+        lock (_flushGate) { return FlushSnapshot(stream, SnapshotDirty(maxPages, true), true); }
     }
 
-    /// <summary>
-    /// Checks the pool's structural invariants and throws
-    /// <see cref="InvalidOperationException"/> naming the first violation: every resident
-    /// entry has a non-negative pin count, is not on the recycle stack, and owns exactly
-    /// one node of the access list keyed by its page; the access list holds nothing else;
-    /// every recycled entry is unpinned, detached, and not resident.
-    /// </summary>
-    /// <remarks>
-    /// Compiled into every configuration, so tests can run it in the Release configuration
-    /// CI uses. Debug builds additionally run it after every operation that changes the
-    /// pool's structure — a pin miss, an eviction, a removal, a flush — and check only the
-    /// frame involved after a pin hit or an unpin (#1240); release builds run it only when
-    /// called.
-    /// </remarks>
-    internal void CheckInvariants()
+    internal bool TryReadStored(PageId pageId, StorageStream stream, byte[] destination)
     {
-        lock (_syncRoot)
+        object gate = IoGate((long)pageId);
+        // The write-back audit reads its own previous physical image reentrantly.
+        // That read belongs to its parent's admission, even during maintenance.
+        bool nested = Monitor.IsEntered(gate);
+        if (!nested) { BeginIo(); }
+        try
         {
-            CheckInvariantsLocked();
+            lock (gate)
+            {
+                if (((long)pageId + 1) * Page.Size > stream.Length) { return false; }
+                stream.ReadPage(pageId, destination);
+                return true;
+            }
         }
+        finally { if (!nested) { EndIo(); } }
     }
 
-    /// <inheritdoc />
+    internal void EnsureLength(StorageStream stream, long requiredLength)
+    {
+        BeginIo();
+        try
+        {
+            lock (_extensionGate)
+            {
+                if (stream.Length < requiredLength) { WriteGuard?.Invoke(); stream.SetLength(requiredLength); }
+            }
+        }
+        finally { EndIo(); }
+    }
+
+    private void BeginIo() { lock (_syncRoot) { WaitForAdmissionLocked(); _activeIo++; } }
+    private void EndIo() { lock (_syncRoot) { _activeIo--; Monitor.PulseAll(_syncRoot); } }
+
+    internal void CheckInvariants() { lock (_syncRoot) { CheckInvariantsLocked(); } }
+
     public void Dispose()
     {
-        // Wait for a flush before clearing frames and before Storage closes the stream.
         lock (_flushGate)
         {
             lock (_syncRoot)
             {
-                // No buffer is released here: buffers are pinned-heap arrays that stay valid
-                // while any handle still references one, so a handle outliving its pool can
-                // never write into reclaimed memory.
-                _disposed = true;
+                _maintenance = true;
+                while (_activeIo != 0) { Monitor.Wait(_syncRoot); }
+                Volatile.Write(ref _disposed, true);
                 _entries.Clear();
                 _accessOrder.Clear();
+                _clockHand = null;
                 _recycled.Clear();
+                _maintenance = false;
                 Monitor.PulseAll(_syncRoot);
             }
         }
     }
 
-    /// <summary>
-    /// Moves the entry to the most-recently-used position.
-    /// </summary>
-    private void Touch(BufferEntry entry)
-    {
-        if (entry.Node is not null)
-        {
-            _accessOrder.Remove(entry.Node);
-            _accessOrder.AddLast(entry.Node);
-        }
-    }
-
-    private void UnpinLocked(BufferEntry entry)
-    {
-        if (entry.PinCount > 0)
-        {
-            entry.PinCount--;
-        }
-        else
-        {
-            // Release builds ignore an over-release: the count stays at zero.
-            FailOverReleaseLocked(entry);
-        }
-
-        // An unpin changes one pin count: check that frame only.
-        if (entry.Node is not null)
-        {
-            AssertFrameLocked(entry.Node.Value, entry);
-        }
-    }
-
-    /// <summary>
-    /// Evicts the least recently used unpinned page, writing it back first when dirty.
-    /// </summary>
-    private void EvictOneLocked(StorageStream stream)
-    {
-        bool writing = false;
-        for (var node = _accessOrder.First; node is not null; node = node.Next)
-        {
-            var entry = _entries[node.Value];
-
-            if (entry.PinCount > 0)
-            {
-                continue;
-            }
-
-            if (entry.WriteInProgress)
-            {
-                writing = true;
-                continue;
-            }
-
-            if (entry.IsDirty)
-            {
-                // A foreground write: the thread that needed the frame (a pin, or a shrink) pays
-                // for the write-back, not a page writer.
-                long pageLsn = WriteBack(stream, (PageId)node.Value, entry);
-                StorageEventSource.Log.CountForegroundPageWrite();
-                StorageEventSource.Log.DirtyPageEvicted(this, (PageId)node.Value, pageLsn);
-            }
-
-            RemoveLocked(node.Value, entry);
-            return;
-        }
-
-        if (writing)
-        {
-            Interlocked.Increment(ref _writeBackWaits);
-            Monitor.Wait(_syncRoot);
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            // The caller rechecks its requested id and capacity after every wait.
-            return;
-        }
-
-        StorageEventSource.Log.BufferPoolExhausted(this, _capacity);
-        throw new StorageIOException("Buffer pool is full and all pages are pinned.");
-    }
-
-    /// <summary>
-    /// Takes a recycled entry when one is available, otherwise allocates a fresh buffer
-    /// on the pinned object heap.
-    /// </summary>
     private BufferEntry TakeEntryLocked()
     {
-        if (_recycled.Count > 0)
-        {
-            var recycledEntry = _recycled.Pop();
-            recycledEntry.IsRecycled = false;
-            recycledEntry.PinCount = 0;
-            recycledEntry.MarkClean(Volatile.Read(ref recycledEntry.Version));
-            recycledEntry.Node = null;
-            return recycledEntry;
-        }
-
-        return new BufferEntry(GC.AllocateArray<byte>(Page.Size, pinned: true), this);
+        BufferEntry entry = _recycled.Count == 0
+            ? new BufferEntry(GC.AllocateArray<byte>(Page.Size, pinned: true), this)
+            : _recycled.Pop();
+        entry.IsRecycled = false;
+        entry.WriteInProgress = true;
+        entry.MarkClean(Volatile.Read(ref entry.Version));
+        entry.ReserveNew();
+        return entry;
     }
 
-    private void RemoveLocked(long id, BufferEntry entry)
+    private void DetachLocked(long id, BufferEntry entry)
     {
         if (entry.Node is not null)
         {
+            if (ReferenceEquals(_clockHand, entry.Node))
+            {
+                _clockHand = entry.Node.Next ?? _accessOrder.First;
+                if (ReferenceEquals(_clockHand, entry.Node)) { _clockHand = null; }
+            }
             _accessOrder.Remove(entry.Node);
             entry.Node = null;
         }
-
-        _entries.Remove(id);
-        RecycleLocked(entry);
+        _entries.TryRemove(id, out _);
     }
 
     private void RecycleLocked(BufferEntry entry)
     {
-        entry.PinCount = 0;
         entry.MarkClean(Volatile.Read(ref entry.Version));
-        entry.Node = null;
+        entry.WriteInProgress = false;
         entry.IsRecycled = true;
+        entry.Node = null;
+        entry.ReserveNew();
         _recycled.Push(entry);
     }
 
-    /// <summary>
-    /// Refuses a loaded page whose header describes bytes past the end of its buffer.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="Page.AsSpan"/> and <see cref="Page.AsBodySpan"/> size their spans from
-    /// the header's overflow flag and size, and every pool buffer holds exactly
-    /// <see cref="Page.Size"/> bytes. Nothing writes overflow pages yet, and a page whose
-    /// stored checksum is zero is not verified, so without this check a damaged or crafted
-    /// header would hand the B-tree and every other span user a writable span past the
-    /// buffer — the out-of-bounds write #1157 was about, reached through the header.
-    /// </remarks>
-    /// <param name="page">The page just read into a pool buffer.</param>
-    /// <param name="pageId">The page identifier, for the exception.</param>
-    /// <exception cref="StorageCorruptionException">The header's overflow area does not fit the buffer.</exception>
-    private static void VerifyFitsBuffer(Page page, PageId pageId)
+    [global::System.Diagnostics.DebuggerDisplay("LoadOperation")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.LoadOperation.DebugView))]
+    private sealed class LoadOperation
     {
-        _ = page.GetValidatedBodySize(pageId);
-    }
+        private TaskCompletionSource? _completion;
+        private ExceptionDispatchInfo? _failure;
+        internal void PrepareWait() => _completion ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal void Wait() { _completion!.Task.GetAwaiter().GetResult(); _failure?.Throw(); }
+        internal void Complete(Exception? failure)
+        {
+            if (failure is not null) { _failure = ExceptionDispatchInfo.Capture(failure); }
+            _completion?.SetResult();
+        }
 
-    /// <summary>
-    /// Writes a page's current image to the stream under a fresh checksum. Enforces the
-    /// write-ahead rule first: the journal must be durable up to the LSN of the image
-    /// being written before that image may reach the data stream.
-    /// </summary>
-    /// <remarks>
-    /// The page is copied before anything else, because a writer holding a pin may change
-    /// it at any moment: the checksum is computed over the copy and the copy is what is
-    /// written, so the stream never receives bytes that disagree with their checksum. The
-    /// write-ahead LSN is read from the copy too — a writer stamps a page's LSN before it
-    /// changes the bytes that record covers, so the copy's LSN covers every change in it.
-    /// The entry is recorded clean only up to the version observed before the copy.
-    /// </remarks>
-    /// <returns>The LSN the written image carries (for the eviction's event).</returns>
-    private long WriteBack(StorageStream stream, PageId pageId, BufferEntry entry)
-    {
-        // Before anything else: an offline storage writes no page, whatever its LSN.
-        WriteGuard?.Invoke();
-
-        long version = Volatile.Read(ref entry.Version);
-        new ReadOnlySpan<byte>(entry.Page.Pointer, Page.Size).CopyTo(_writeBackImage);
-
-        return WriteImage(stream, pageId, entry, _writeBackImage, version);
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.LoadOperation value)
+            {
+                _ = value;
+            }
+        }
     }
 
     private long WriteImage(StorageStream stream, PageId pageId, BufferEntry entry, byte[] imageBytes, long version)
@@ -923,7 +673,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     //
     // The full walk is O(resident pages), so it runs only where the pool's structure
     // changes: a pin miss (which may evict and recycle), an explicit eviction, a flush. A pin
-    // hit or an unpin changes one entry's pin count and LRU position, and checks just that
+    // hit or an unpin changes frame-local pin/reference state, and checks just that
     // frame. Running the walk on every access made Debug runs of the 100,000-row cascade
     // test spend about 77% of their time in it (#1240), 99.7% of it on hits and unpins.
 
@@ -937,33 +687,41 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     [Conditional("DEBUG")]
     private void AssertFrameLocked(long id, BufferEntry entry)
     {
-        if (entry.PinCount < 0)
+        lock (_syncRoot)
         {
-            FailInvariantLocked($"page {id} has pin count {entry.PinCount}");
-        }
+            if (Volatile.Read(ref _disposed)) { return; }
+            if (entry.PinCount < 0)
+            {
+                FailInvariantLocked($"page {id} has pin count {entry.PinCount}");
+            }
 
-        if (entry.IsRecycled)
-        {
-            FailInvariantLocked($"page {id} is resident but its entry is marked recycled");
-        }
+            if (entry.IsRecycled)
+            {
+                FailInvariantLocked($"page {id} is resident but its entry is marked recycled");
+            }
 
-        if (!_entries.TryGetValue(id, out var resident) || !ReferenceEquals(resident, entry))
-        {
-            FailInvariantLocked($"page {id} is not resident under its entry");
-        }
+            if (!_entries.TryGetValue(id, out var resident) || !ReferenceEquals(resident, entry))
+            {
+                FailInvariantLocked($"page {id} is not resident under its entry");
+            }
 
-        if (entry.Node is null || !ReferenceEquals(entry.Node.List, _accessOrder) || entry.Node.Value != id)
-        {
-            FailInvariantLocked($"page {id} does not own a node of the access list keyed by its id");
+            if (entry.Node is null || !ReferenceEquals(entry.Node.List, _accessOrder) || entry.Node.Value != id)
+            {
+                FailInvariantLocked($"page {id} does not own a node of the access list keyed by its id");
+            }
         }
     }
 
     [Conditional("DEBUG")]
     private void AssertResidentLocked(BufferEntry entry)
     {
-        if (entry.IsRecycled || entry.Node is null || !_entries.TryGetValue(entry.Node.Value, out var resident) || !ReferenceEquals(resident, entry))
+        lock (_syncRoot)
         {
-            FailInvariantLocked("a handle released a pin on an entry that is no longer resident (recycled while pinned)");
+            if (Volatile.Read(ref _disposed)) { return; }
+            if (entry.IsRecycled || entry.Node is null || !_entries.TryGetValue(entry.Node.Value, out var resident) || !ReferenceEquals(resident, entry))
+            {
+                FailInvariantLocked("a handle released a pin on an entry that is no longer resident (recycled while pinned)");
+            }
         }
     }
 
@@ -975,12 +733,12 @@ internal sealed unsafe class StorageBufferPool : IDisposable
 
     private static void FailInvariantLocked(string violation)
     {
-        throw new InvalidOperationException($"Buffer pool invariant violated: {violation}.");
+        throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BufferPoolFailInvariantLockedFailure, violation));
     }
 
     private void CheckInvariantsLocked()
     {
-        if (_entries.Count > _capacity)
+        if (_entries.Count + _loadingFrames > _capacity)
         {
             FailInvariantLocked($"{_entries.Count} resident pages exceed the capacity of {_capacity}");
         }
@@ -1048,15 +806,52 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     /// <summary>
     /// Holds a page buffer and the associated page metadata.
     /// </summary>
+    [global::System.Diagnostics.DebuggerDisplay("BufferEntry")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry.DebugView))]
     internal sealed unsafe class BufferEntry
     {
         public readonly byte[] Buffer;
         public readonly Page Page;
-        public int PinCount;
+        private const long unavailable = 1L << 32;
+        private long _pins = unavailable;
+        public int PinCount
+        {
+            get => unchecked((int)Volatile.Read(ref _pins));
+            set => Interlocked.Exchange(ref _pins, (Volatile.Read(ref _pins) & unavailable) | (uint)value);
+        }
+        internal long ResidentId;
+        internal int Referenced;
+        internal bool TryPin()
+        {
+            long state = Volatile.Read(ref _pins);
+            while ((state & unavailable) == 0)
+            {
+                long observed = Interlocked.CompareExchange(ref _pins, state + 1, state);
+                if (observed == state) { return true; }
+                state = observed;
+            }
+            return false;
+        }
+        internal bool ReleasePin()
+        {
+            long state = Volatile.Read(ref _pins);
+            while (unchecked((int)state) > 0)
+            {
+                long observed = Interlocked.CompareExchange(ref _pins, state - 1, state);
+                if (observed == state) { return true; }
+                state = observed;
+            }
+            return false;
+        }
+        internal bool TryReserve() => Interlocked.CompareExchange(ref _pins, unavailable, 0) == 0;
+        internal void ReserveNew() => Volatile.Write(ref _pins, unavailable);
+        internal void PublishPin() => Volatile.Write(ref _pins, 1);
+        internal void AllowPins() => Volatile.Write(ref _pins, 0);
         public bool IsRecycled;
-        // Protected by the pool monitor. A flush owns this frame's stream I/O until
+        // Protected by the pool monitor. A flush or eviction owns frame I/O until
         // its finally releases the lease; pins may still read or dirty its live bytes.
         public bool WriteInProgress;
+        internal readonly LinkedListNode<long> ClockNode = new(0);
         public LinkedListNode<long>? Node;
 
         // Advanced by every MarkDirty (any thread, no lock); the entry is dirty while it
@@ -1066,9 +861,25 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         private readonly object _dirtySync = new();
         private readonly StorageBufferPool _pool;
 
-        // Odd while a rollback rewrites the page in place, advanced by two by every restore
-        // (BeginRestore, EndRestore); read by record readers that hold only a pin (BeginRead).
-        private int _restoreSequence;
+        // Even when stable, odd while a mutable handle or rollback can change the
+        // live bytes. Private to this frame: no process-wide work counter.
+        private long _restoreSequence;
+        private object? _writer;
+        private int _writerThread;
+        private int _writeDepth;
+        // Only the owning writer reads this while updating a record-space hint.
+        internal bool HasNestedWriter => _writeDepth > 1;
+        private int _writeEpoch;
+        private int _restoring;
+        private int _restoreEpoch;
+        // Allocated only if a bracket completes while a mutable handle is still
+        // pinned. Its eventual disposal must not release a later writer's epoch.
+        private Dictionary<int, int>? _retiredEpochs;
+
+        // Test rendezvous when an unlatched reader must wait for this frame's writer.
+        internal Action? ReadWaitStarted { get; set; }
+        internal Action? ReadCopied { get; set; }
+        internal Action? OwnReadAccepted { get; set; }
 
         public BufferEntry(byte[] buffer, StorageBufferPool pool)
         {
@@ -1102,56 +913,166 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
 
         /// <summary>
-        /// Starts a read of the page that must not observe a rollback's restore half done, and
-        /// returns the restore sequence to confirm it with (<see cref="IsUnchangedSince"/>). Waits
-        /// while a restore is rewriting the page; a restore is one copy of the page, so the wait is
-        /// short unless the restoring thread is descheduled.
+        /// Starts a private-copy read, confirmed with IsUnchangedSince. Both forward
+        /// writes and rollback use PostgreSQL's change-count protocol
+        /// (src/include/utils/backend_status.h:101-116,181-238); no code copied.
         /// </summary>
-        /// <remarks>
-        /// A sequence lock, PostgreSQL's <c>st_changecount</c> protocol
-        /// (<c>src/include/utils/backend_status.h:101-116</c>, <c>:181-238</c>): the restore makes
-        /// the sequence odd before it changes the page and even again after, and a read that saw
-        /// the same even value before and after it saw no restore. The page's own writers do not
-        /// advance it: a bracket's forward changes publish in an order a pinned reader can follow
-        /// (<see cref="SlottedPage"/>), and only the restore rewrites bytes a reader may be copying.
-        /// </remarks>
-        public int BeginRead()
+        public long BeginRead()
         {
-            int sequence = Volatile.Read(ref _restoreSequence);
-            return (sequence & 1) == 0 ? sequence : WaitForRestore();
+            long sequence = Volatile.Read(ref _restoreSequence);
+            return (sequence & 1) == 0 ? sequence : WaitForWriter();
         }
 
         /// <summary>
-        /// Returns whether no restore started or ran since <paramref name="sequence"/> was read
+        /// Returns whether no write boundary ran since <paramref name="sequence"/> was read
         /// (<see cref="BeginRead"/>): every load the read made before this call happened before the
         /// sequence is read again, so a read this confirms saw one state of the page.
         /// </summary>
-        public bool IsUnchangedSince(int sequence)
+        public bool IsUnchangedSince(long sequence)
         {
+            ReadCopied?.Invoke();
             Volatile.ReadBarrier();
             return Volatile.Read(ref _restoreSequence) == sequence;
         }
 
-        /// <summary>
-        /// Marks the page as being restored in place; the restoring thread holds the page's write
-        /// lock, so no other writer changes it, and calls <see cref="EndRestore"/> when the page is
-        /// whole again, also on failure.
-        /// </summary>
-        public void BeginRestore() => Interlocked.Increment(ref _restoreSequence);
+        internal int BeginWrite(object owner) => BeginWriteCore(owner, restoring: false);
 
-        /// <summary>Marks the restore <see cref="BeginRestore"/> started as finished.</summary>
-        public void EndRestore() => Interlocked.Increment(ref _restoreSequence);
+        private int BeginWriteCore(object owner, bool restoring)
+        {
+            lock (_dirtySync)
+            {
+                RetireCompletedWriter();
+                while (_writer is not null && !ReferenceEquals(_writer, owner))
+                {
+                    Monitor.Wait(_dirtySync);
+                    RetireCompletedWriter();
+                }
+                // Exclude own-thread reads before publishing the restore boundary.
+                if (restoring) { Volatile.Write(ref _restoring, 1); }
+                if (_writer is null)
+                {
+                    do { _writeEpoch = unchecked(_writeEpoch + 1); }
+                    while (_writeEpoch == 0 || (_retiredEpochs?.ContainsKey(_writeEpoch) ?? false));
+                    _writer = owner;
+                    _writerThread = Environment.CurrentManagedThreadId;
+                    Interlocked.Increment(ref _restoreSequence);
+                }
+                else
+                {
+                    // Keep it odd, but invalidate an own-thread read across a
+                    // nested write as well as a read across the outer scope.
+                    Interlocked.Add(ref _restoreSequence, 2);
+                }
+                _writeDepth++;
+                return _writeEpoch;
+            }
+        }
 
-        private int WaitForRestore()
+        internal void AdoptWriter(int epoch, object previousOwner, object owner)
+        {
+            lock (_dirtySync)
+            {
+                if (_writeEpoch == epoch && ReferenceEquals(_writer, previousOwner)) { _writer = owner; }
+            }
+        }
+
+        internal void EndWrite(int epoch)
+        {
+            lock (_dirtySync)
+            {
+                if (_writer is not null && epoch == _writeEpoch)
+                {
+                    if (--_writeDepth == 0) { FinishWriter(); }
+                    else { Interlocked.Add(ref _restoreSequence, 2); }
+                }
+                else if (_retiredEpochs is not null && _retiredEpochs.TryGetValue(epoch, out int count))
+                {
+                    if (count == 1) { _retiredEpochs.Remove(epoch); }
+                    else { _retiredEpochs[epoch] = count - 1; }
+                }
+            }
+        }
+
+        public void BeginRestore(object? owner = null)
+        {
+            _restoreEpoch = BeginWriteCore(owner ?? this, restoring: true);
+        }
+
+        public void EndRestore()
+        {
+            lock (_dirtySync)
+            {
+                Volatile.Write(ref _restoring, 0);
+                EndWrite(_restoreEpoch);
+            }
+        }
+
+        private void RetireCompletedWriter()
+        {
+            if (_writer is StorageTransaction transaction && !transaction.IsActive)
+            {
+                (_retiredEpochs ??= new())[_writeEpoch] = _writeDepth;
+                FinishWriter();
+            }
+        }
+
+        private void FinishWriter()
+        {
+            _writeDepth = 0;
+            _writer = null;
+            Volatile.Write(ref _writerThread, 0);
+            Interlocked.Increment(ref _restoreSequence);
+            Monitor.PulseAll(_dirtySync);
+        }
+
+        private long WaitForWriter()
         {
             var spinner = new SpinWait();
-            int sequence;
-            while (((sequence = Volatile.Read(ref _restoreSequence)) & 1) != 0)
+            bool observed = false;
+            while (true)
             {
+                // Capture before permission: a restore starting after the check
+                // must invalidate this copy, never supply it with a newer token.
+                long sequence = Volatile.Read(ref _restoreSequence);
+                if ((sequence & 1) == 0) { return sequence; }
+                if (Volatile.Read(ref _writerThread) == Environment.CurrentManagedThreadId
+                    && Volatile.Read(ref _restoring) == 0)
+                {
+                    OwnReadAccepted?.Invoke();
+                    return sequence;
+                }
+                if (!observed)
+                {
+                    ReadWaitStarted?.Invoke();
+                    observed = true;
+                }
+                lock (_dirtySync) { RetireCompletedWriter(); }
                 spinner.SpinOnce();
             }
+        }
 
-            return sequence;
+        private sealed class DebugView
+        {
+            private readonly global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry _target;
+
+            public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool.BufferEntry value)
+            {
+                _target = value;
+            }
+
+            public int PinCount => _target.PinCount;
+            public bool IsRecycled => _target.IsRecycled;
+            public bool WriteInProgress => _target.WriteInProgress;
+            public long Version => _target.Version;
+            public bool IsDirty => _target.IsDirty;
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Storage.Internal.StorageBufferPool value)
+        {
+            _ = value;
         }
     }
 }

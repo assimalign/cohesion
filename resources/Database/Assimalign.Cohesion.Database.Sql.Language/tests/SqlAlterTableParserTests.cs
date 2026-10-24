@@ -58,7 +58,7 @@ public sealed class SqlAlterTableParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Single(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
     }
 
@@ -87,8 +87,8 @@ public sealed class SqlAlterTableParserTests
         var statement = new SqlQueryParser().Parse("ALTER TABLE t " + action);
 
         // Assert
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "SQL0003");
-        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "COHDBL001");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS00003");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - ALTER: syntax diagnostics list every supported action family")]
@@ -101,7 +101,7 @@ public sealed class SqlAlterTableParserTests
 
         // Assert
         var diagnostic = statement.Diagnostics.Single(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Code.ShouldBe("CS00003");
         foreach (string supported in new[] { "ADD [COLUMN]", "ADD CONSTRAINT", "DROP [COLUMN]", "DROP CONSTRAINT", "RENAME TO", "RENAME [COLUMN]", "ALTER COLUMN", "SET/DROP DEFAULT", "SET/DROP NOT NULL" })
         {
             diagnostic.Message!.ShouldContain(supported, Case.Sensitive);

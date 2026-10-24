@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 [Collection(nameof(DocumentContentFailureCollection))]
@@ -53,7 +55,7 @@ public sealed class DocumentContentFailureConcurrencyTests
                 throw new InvalidOperationException("Injected content chunk failure.");
             };
             // Capture the expected failure so teardown can always drain the writer task.
-            var writing = Task.Run(async () =>
+            var writing = DedicatedTestTask.Run(async () =>
             {
                 try
                 {

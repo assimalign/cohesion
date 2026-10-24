@@ -45,7 +45,7 @@ internal static class SqlTemporalArithmetic
     }
 
     internal static SqlPlanningException InvalidOperands(SqlBinaryOperator op, DatabaseType left, DatabaseType right, Location? location = null)
-        => new("COHSQLE003", $"Invalid temporal arithmetic operands: {SqlType.NameOf(left)} {op switch { SqlBinaryOperator.Add => "+", SqlBinaryOperator.Subtract => "-", SqlBinaryOperator.Multiply => "*", SqlBinaryOperator.Divide => "/", SqlBinaryOperator.Modulo => "%", _ => op.ToString() }} {SqlType.NameOf(right)}.", location);
+        => new("CS02003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ArithmeticInvalidOperandsSqlPlanning, SqlType.NameOf(left), op switch { SqlBinaryOperator.Add => "+", SqlBinaryOperator.Subtract => "-", SqlBinaryOperator.Multiply => "*", SqlBinaryOperator.Divide => "/", SqlBinaryOperator.Modulo => "%", _ => op.ToString() }, SqlType.NameOf(right)), location);
 
     internal static object Evaluate(SqlBinaryOperator op, object left, object right)
     {
@@ -69,7 +69,7 @@ internal static class SqlTemporalArithmetic
                     DateTime wall => add ? wall.Add(interval) : wall.Subtract(interval),
                     DateTimeOffset instant => AddInstant(instant, add ? interval : -interval),
                     TimeSpan duration => add ? duration.Add(interval) : duration.Subtract(interval),
-                    _ => throw new SqlPlanningException("COHSQLE003", "Invalid temporal arithmetic operands."),
+                    _ => throw new SqlPlanningException("CS02003", ErrorMessages.TemporalArithmeticEvaluateSqlPlanning),
                 };
             }
             if (left is DateTime or DateTimeOffset && right is DateTime or DateTimeOffset && op == SqlBinaryOperator.Subtract)
@@ -78,9 +78,9 @@ internal static class SqlTemporalArithmetic
                 long rightTicks = right is DateTime clock ? clock.Ticks : ((DateTimeOffset)right).UtcTicks;
                 return new TimeSpan(leftTicks - rightTicks);
             }
-            throw new SqlPlanningException("COHSQLE003", "Invalid temporal arithmetic operands.");
+            throw new SqlPlanningException("CS02003", ErrorMessages.TemporalArithmeticEvaluateSqlPlanning);
         }
-        catch (ArgumentOutOfRangeException exception) { throw SqlEvaluationException.NumericValueOutOfRange("Temporal arithmetic is outside years 1..9999.", exception); }
+        catch (ArgumentOutOfRangeException exception) { throw SqlEvaluationException.NumericValueOutOfRange(ErrorMessages.ArithmeticEvaluateSqlEvaluation, exception); }
         catch (ArithmeticException exception) { throw SqlEvaluationException.FromArithmetic(exception); }
     }
 }

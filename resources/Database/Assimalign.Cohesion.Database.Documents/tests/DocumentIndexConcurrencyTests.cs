@@ -10,6 +10,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Documents.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 [Collection("Document index concurrency")]
@@ -44,7 +46,7 @@ public sealed class DocumentIndexConcurrencyTests
 
             // Act: hold commit after lock release and before coordinator untracking.
             using var gate = new DocumentCommitEventGate(database.Name, writer.Context.Sequence.Value);
-            var committing = Task.Run(async () => await writer.CommitAsync(timeout.Token), timeout.Token);
+            var committing = DedicatedTestTask.Run(async () => await writer.CommitAsync(timeout.Token), timeout.Token);
             try
             {
                 await gate.Entered.WaitAsync(timeout.Token);

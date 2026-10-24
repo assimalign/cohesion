@@ -22,6 +22,8 @@ using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 [Collection(SqlLockWaitCollection.Name)]
@@ -55,7 +57,7 @@ public sealed class SqlTableReclamationTests
             var elapsed = Stopwatch.StartNew();
 
             // Act: only public session operations drive DDL, alongside the normal engine worker.
-            var cycles = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(async () =>
+            var cycles = await Task.WhenAll(Enumerable.Range(0, 3).Select(index => DedicatedTestTask.Run(async () =>
             {
                 await using var session = await database.CreateSessionAsync(timeout.Token);
                 int completed = 0;
@@ -506,11 +508,13 @@ public sealed class SqlTableReclamationTests
         await using var engine = await builder.BuildAsync(timeout.Token);
         var database = await engine.CreateDatabaseAsync("db", timeout.Token);
         await using var writer = await database.CreateSessionAsync(timeout.Token);
-        await SeedAsync(writer, "t", 100, timeout.Token);
+        // Preserve the cursor-specific half of this race under probe costing: 100 matches
+        // out of 500 rows retain the seek; the scan variant still has exactly 100 rows.
+        await SeedAsync(writer, "t", indexed ? 500 : 100, timeout.Token);
         await using var reader = await database.CreateSessionAsync(timeout.Token);
         var snapshot = await reader.BeginTransactionAsync(IsolationLevel.Snapshot, timeout.Token);
         string sql = indexed ? "SELECT id FROM t WHERE id >= 0 AND id < 100 AND hold_row(id) >= 0" : "SELECT id FROM t WHERE hold_row(id) >= 0";
-        var scan = Task.Run(async () => await reader.ExecuteAsync(sql, cancellationToken: timeout.Token));
+        var scan = DedicatedTestTask.Run(async () => await reader.ExecuteAsync(sql, cancellationToken: timeout.Token));
         try
         {
             entered.Wait(timeout.Token);

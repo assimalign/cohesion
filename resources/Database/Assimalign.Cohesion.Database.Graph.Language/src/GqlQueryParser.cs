@@ -10,6 +10,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>Parses the executable GQL subset using the shared lexer and analyzer pipeline.</summary>
 /// <remarks>Concurrent calls are serialized. Malformed input returns statement diagnostics.</remarks>
+[global::System.Diagnostics.DebuggerDisplay("GqlQueryParser")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryParser.DebugView))]
 public sealed partial class GqlQueryParser : QueryParser
 {
     private readonly object _gate = new();
@@ -18,7 +20,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private readonly HashSet<int> _parameterFormPositions = [];
     private readonly HashSet<int> _questionedPathPositions = [];
     // Each '--' comment by its start offset, so a pattern element can tell whether one begins
-    // exactly where its ')' or ']' ends (GQL0008).
+    // exactly where its ')' or ']' ends (CG00008).
     private readonly Dictionary<int, Lexeme> _lineComments = new();
     private string _source = string.Empty;
     private int _position;
@@ -26,8 +28,8 @@ public sealed partial class GqlQueryParser : QueryParser
     // A statement that nests deeper than the stack the parsing thread has left. The same text
     // parses on a thread with more stack: the statement is within the language, the thread is too
     // small for it, so GraphQueryRequest.FromGql reports it as the engine's statement-too-complex
-    // failure, COHDBG008, not as a parse error.
-    private const string statementTooDeepCode = "GQL0009";
+    // failure, CG05008, not as a parse error.
+    private const string statementTooDeepCode = "CG00009";
 
     /// <summary>Initializes a GQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -68,7 +70,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 token.Position + token.Value.Length, line);
             if (token.Type == TokenType.Comment)
             {
-                if (!IsCompleteComment(lexeme.Text)) { Error("GQL0003", "Unterminated block comment.", lexeme); }
+                if (!IsCompleteComment(lexeme.Text)) { Error("CG00003", ErrorMessages.GqlQueryParserParseCoreVoid, lexeme); }
                 else if (lexeme.Text.StartsWith("--", StringComparison.Ordinal)) { _lineComments[lexeme.Start] = lexeme; }
             }
             else
@@ -79,13 +81,13 @@ public sealed partial class GqlQueryParser : QueryParser
                 else { _tokens.Add(lexeme); }
                 if (token.Type is TokenType.String or TokenType.QuotedIdentifier && !IsCompleteQuoted(lexeme.Text))
                 {
-                    Error("GQL0003", "Unterminated quoted text.", lexeme);
+                    Error("CG00003", ErrorMessages.GqlQueryParserParseCoreVoid2, lexeme);
                 }
                 else if (token.Type == TokenType.Unrecognized && token.Value[0] != '?')
                 {
                     // A character GQL does not use is never a name or an expression, so the
                     // statement is not parsed and nothing is bound (#1101).
-                    Error("GQL0002", $"Unexpected character {DescribeCharacter(lexeme.Text)}; it is not part of GQL.", lexeme);
+                    Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseCoreVoid3, DescribeCharacter(lexeme.Text)), lexeme);
                 }
             }
         }
@@ -95,14 +97,25 @@ public sealed partial class GqlQueryParser : QueryParser
         // SHOW has a deliberately separate grammar: catalog definitions are not graph elements.
         // Check attempted composition before generic capability errors (SET, DROP, etc.).
         bool catalogStatement = Is("SHOW");
+        bool transactionStatement = Is("START") || Is("COMMIT") || Is("ROLLBACK");
         if (catalogStatement) { FindCatalogMutation(); }
-        else { FindUnsupported(); }
+        else if (!transactionStatement) { FindUnsupported(); }
         GqlQueryExpression expression;
         if (Failed) { expression = EmptyExpression(); }
         else if (Current.Type == TokenType.Eof)
         {
-            Error("GQL0001", "Query text is empty.", Current);
+            Error("CG00001", ErrorMessages.GqlQueryParserParseCoreVoid4, Current);
             expression = EmptyExpression();
+        }
+        else if (transactionStatement)
+        {
+            var first = Current;
+            var command = Is("START") ? GqlTransactionCommand.Start
+                : Is("COMMIT") ? GqlTransactionCommand.Commit : GqlTransactionCommand.Rollback;
+            _position++;
+            if (command == GqlTransactionCommand.Start) { Expect("TRANSACTION"); }
+            expression = new GqlQueryExpression(Array.Empty<GqlStage>(), Span(first, _tokens[_position - 1]))
+            { TransactionCommand = command };
         }
         else if (Is("EXPLAIN"))
         {
@@ -128,7 +141,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             else if (Is("DELETE") || Is("DETACH") || Is("WHERE") || Is("SET") || Is("REMOVE"))
             {
-                Error("GQL0002", "Expected MATCH, INSERT, CREATE, RETURN, LET, FILTER, FOR, UNWIND, or WITH before this clause.", Current);
+                Error("CG00002", ErrorMessages.GqlQueryParserParseCoreVoid5, Current);
             }
             else { Unsupported(Current.Text, Current); }
             expression = EmptyExpression();
@@ -139,7 +152,7 @@ public sealed partial class GqlQueryParser : QueryParser
             Take(TokenType.Semicolon);
             if (Current.Type != TokenType.Eof)
             {
-                Error("GQL0002", "Unexpected token; exactly one statement is accepted.", Current);
+                Error("CG00002", ErrorMessages.GqlQueryParserParseCoreVoid6, Current);
             }
         }
         // '?' still binds nothing. Only an operand receives the parameter-form message;
@@ -151,7 +164,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (!_parameterFormPositions.Contains(token.Start))
             {
                 _diagnostics.RemoveAll(diagnostic => diagnostic.Start == token.Start);
-                Error("GQL0002", "Unexpected character '?'; it is not part of GQL.", token);
+                Error("CG00002", ErrorMessages.GqlQueryParserParseCoreVoid7, token);
             }
             expression = EmptyExpression();
         }
@@ -211,7 +224,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
             // ':' or IS straight after an abbreviated edge (-IS T->, <-:A|B-) is a label
-            // expression on an edge ISO gives no filler. The parser reports that (GQL0002); the
+            // expression on an edge ISO gives no filler. The parser reports that (CG00002); the
             // scan reads the names that follow as labels, so IS is not the unsupported IS clause
             // and -IS Order-> is not ORDER BY.
             if (patternDepth == 0 && !valuePosition && FollowsEdgeConnector(i) &&
@@ -302,7 +315,7 @@ public sealed partial class GqlQueryParser : QueryParser
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function)
             {
-                Error("GQL0010", $"Unknown function '{token.Text}'.", token);
+                Error("CG00010", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserFindUnsupportedVoid, token.Text), token);
                 continue;
             }
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
@@ -579,12 +592,12 @@ public sealed partial class GqlQueryParser : QueryParser
     }
     private void Expect(string text)
     {
-        if (!Failed && !Take(text)) { Error("GQL0002", $"Expected {text}.", Current); }
+        if (!Failed && !Take(text)) { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserExpectVoid, text), Current); }
     }
     private void Expect(TokenType type, string text)
     {
         // Preserve the original capability diagnostic instead of masking it with missing delimiters.
-        if (!Failed && !Take(type)) { Error("GQL0002", $"Expected {text}.", Current); }
+        if (!Failed && !Take(type)) { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserExpectVoid, text), Current); }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
         Location.Create(start.Line, end.Line + TokenLexer.CountLineBreaks(end.Text), start.Start, end.End);
@@ -593,7 +606,7 @@ public sealed partial class GqlQueryParser : QueryParser
         var token = Current;
         if (Take(TokenType.QuotedIdentifier))
         {
-            if (token.Text.Length <= 2) { Error("GQL0002", "An identifier cannot be empty.", token); }
+            if (token.Text.Length <= 2) { Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid, token); }
             return token.Text.Length >= 2 ? token.Text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal) : string.Empty;
         }
         if ((allowKeyword || !IsReservedTemporal(token)) && (token.Type is TokenType.Identifier or TokenType.Function || token.Type == TokenType.Keyword && token.Text.ToUpperInvariant() is "NEXT" or "FOR" || allowKeyword && token.Type == TokenType.Keyword) &&
@@ -602,14 +615,14 @@ public sealed partial class GqlQueryParser : QueryParser
             Advance();
             return token.Text;
         }
-        Error("GQL0002", "Expected an identifier.", token);
+        Error("CG00002", ErrorMessages.GqlQueryParserIdentifierVoid2, token);
         return string.Empty;
     }
     /// <summary>
     /// Whether the parser may descend into the parenthesized group that <paramref name="token"/>
     /// opens. The grammar recurses only through parentheses, in a label expression or a predicate,
     /// and no fixed depth applies (Neo4j bounds this nesting only by the stack too). When the
-    /// thread is out of stack, the parse stops with <c>GQL0009</c> at that <c>(</c>, and every rule
+    /// thread is out of stack, the parse stops with <c>CG00009</c> at that <c>(</c>, and every rule
     /// still on the stack returns without reading further, instead of the process overflowing.
     /// </summary>
     /// <param name="token">The <c>(</c> about to be consumed.</param>
@@ -617,8 +630,7 @@ public sealed partial class GqlQueryParser : QueryParser
     private bool HasStackToNest(Lexeme token)
     {
         if (RuntimeHelpers.TryEnsureSufficientExecutionStack()) { return true; }
-        Error(statementTooDeepCode, "The statement nests deeper than the stack available to the parser on this thread; " +
-            "reduce the nesting of its parentheses or run it on a thread with a larger stack.", token);
+        Error(statementTooDeepCode, ErrorMessages.GqlQueryParserHasStackToNestVoid, token);
         return false;
     }
     private void Unsupported(string clause, Lexeme token) =>
@@ -667,4 +679,12 @@ public sealed partial class GqlQueryParser : QueryParser
         return depth == 0;
     }
     private readonly record struct Lexeme(TokenType Type, string Text, int Start, int End, int Line);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryParser value)
+        {
+            _ = value;
+        }
+    }
 }

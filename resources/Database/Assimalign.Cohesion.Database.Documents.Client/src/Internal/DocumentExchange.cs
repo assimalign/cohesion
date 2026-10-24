@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Client.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentExchange")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Client.Internal.DocumentExchange.DebugView))]
 internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchangeResult>
 {
     private readonly ProtocolFrame _request;
@@ -160,5 +162,13 @@ internal sealed class DocumentExchange : DatabaseProtocolExchange<DocumentExchan
             _ => false,
         };
         if (!valid) { throw new ProtocolException(ErrorMessages.CompletionUnexpected); }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Client.Internal.DocumentExchange value)
+        {
+            _ = value;
+        }
     }
 }

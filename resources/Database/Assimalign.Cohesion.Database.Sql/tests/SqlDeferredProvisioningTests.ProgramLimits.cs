@@ -61,9 +61,9 @@ public sealed partial class SqlDeferredProvisioningTests
         // Assert
         deferredSteps.ShouldBe(1);
         failed.IsOffline.ShouldBeTrue();
-        failed.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("COHSQLP004");
+        failed.Provisioning.ShouldNotBeNull().FailureCode.ShouldBe("CS03104");
         var migration = failed.OfflineError.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlSchemaMigrationException>();
-        migration.InnerException.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("COHSQLE042");
+        migration.InnerException.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe("CS05042");
         // Offline catalogs refuse reads. Inspect the durable retry image before its next step.
         var image = storage.CaptureDurableImages();
         using var release = new ManualResetEventSlim();

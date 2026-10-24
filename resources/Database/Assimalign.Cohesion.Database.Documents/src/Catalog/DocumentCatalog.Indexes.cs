@@ -79,7 +79,7 @@ public sealed partial class DocumentCatalog
     /// <returns>The published index definition.</returns>
     /// <exception cref="ArgumentNullException">The paths or context are null.</exception>
     /// <exception cref="ArgumentException">A name or path is invalid.</exception>
-    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (COHDOC022).</exception>
+    /// <exception cref="DatabaseException">The path count is zero or exceeds 32 (CD03022).</exception>
     /// <exception cref="DocumentCatalogException">The collection is absent, the name exists, or a key exceeds 1024 bytes.</exception>
     /// <exception cref="DocumentConstraintViolationException">A UNIQUE key is duplicate or non-scalar.</exception>
     /// <exception cref="InvalidOperationException">The context is not active.</exception>
@@ -95,19 +95,19 @@ public sealed partial class DocumentCatalog
         if (paths.Count is < 1 or > 32)
         {
             string message = ErrorMessages.IndexPathCount;
-            throw new DatabaseException(message, [new Types.Diagnostic { Code = "COHDOC022", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
+            throw new DatabaseException(message, [new Types.Diagnostic { Code = "CD03022", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
         }
         paths = Array.AsReadOnly(paths.ToArray());
         foreach (string path in paths) { DocumentIndexKeys.ValidatePath(path); }
         if (!GetCollections(context.Snapshot).Any(collection => collection.Id == collectionId))
         {
-            throw new DocumentCatalogException("The collection does not exist.");
+            throw new DocumentCatalogException("CD01002", ErrorMessages.CreateIndexAsyncDocumentCatalog);
         }
         lock (_sync)
         {
             if (FindIndex(collectionId, name, context.Snapshot) is not null)
             {
-                throw new DocumentCatalogException("COHDOC024", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexAlreadyExists, name));
+                throw new DocumentCatalogException("CD03024", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexAlreadyExists, name));
             }
         }
         var metadata = new DocumentIndexMetadata(collectionId, name, paths, isUnique, (ulong)_storage.ReserveTransactionSequence());
@@ -177,7 +177,7 @@ public sealed partial class DocumentCatalog
         }
         if (previous is null)
         {
-            throw new DocumentCatalogException("COHDOC025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
+            throw new DocumentCatalogException("CD01025", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IndexDoesNotExist, name));
         }
         await DeleteAsync(previous, context, cancellationToken).ConfigureAwait(false);
     }
@@ -235,9 +235,48 @@ public sealed partial class DocumentCatalog
         lock (_sync)
         {
             definition = FindIndex(collectionId, indexName, snapshot)?.Record.Index
-                ?? throw new DocumentCatalogException($"Index '{indexName}' is not visible.");
+                ?? throw new DocumentCatalogException("CD01025", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SearchIndexAsyncDocumentCatalog, indexName));
         }
         var index = ResolveIndex(definition);
+        var range = SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper);
+        var result = new Dictionary<string, DocumentCatalogEntry>(StringComparer.Ordinal);
+        await using var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
+        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var (page, slot) = DocumentStorage.UnpackLocation(cursor.CurrentEntryReference);
+
+            // An entry whose catalog record was reclaimed beneath it (a deleted or reverted slot, an
+            // owner-zero page freed or reallocated) is stale, as in Find; a page that fails its
+            // checksum or cannot be read fails the search (#1342). The identity and stamp checks
+            // below reject a slot that now holds another record.
+            if (!_storage.TryReadRecord(page, slot, 0, out var bytes))
+            {
+                continue;
+            }
+
+            var record = DocumentCatalogCodec.Decode(bytes.Span, page, slot);
+            var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
+            if (record.Document is { } document && document.CollectionId == collectionId
+                && snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
+            {
+                result[document.Id] = document;
+            }
+        }
+        return result.Values.OrderBy(document => document.Id, StringComparer.Ordinal).ToArray();
+    }
+
+    // Counts physical, snapshot-visible index entries without loading document content.
+    // A completed count may still overestimate identities if catalog references are stale.
+    internal BTreeRangeCount CountIndexRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        object? lower, bool includeLower, object? upper, bool includeUpper, TransactionSnapshot snapshot,
+        CancellationToken cancellationToken)
+        => ResolveIndex(definition).CountRange(snapshot,
+            SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper),
+            entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
+
+    private static IndexKeyRange SeekRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        object? lower, bool includeLower, object? upper, bool includeUpper)
+    {
         if (equalityPrefix.Count > definition.Paths.Count ||
             equalityPrefix.Count == definition.Paths.Count && (lower is not null || upper is not null))
         { throw new ArgumentException(ErrorMessages.SeekBoundsTooWide, nameof(equalityPrefix)); }
@@ -254,31 +293,7 @@ public sealed partial class DocumentCatalog
             var key = DocumentIndexKeys.EncodePrefix(equalityPrefix, upper);
             end = includeUpper ? DocumentIndexKeys.Successor(key) : key;
         }
-        var range = new IndexKeyRange(start, end, true, false);
-        var result = new Dictionary<string, DocumentCatalogEntry>(StringComparer.Ordinal);
-        await using var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
-        while (await cursor.MoveNextAsync(cancellationToken).ConfigureAwait(false))
-        {
-            var (page, slot) = DocumentStorage.UnpackLocation(cursor.CurrentEntryReference);
-
-            // An entry whose catalog record was reclaimed beneath it (a deleted or reverted slot, an
-            // owner-zero page freed or reallocated) is stale, as in Find; a page that fails its
-            // checksum or cannot be read fails the search (#1342). The identity and stamp checks
-            // below reject a slot that now holds another record.
-            if (!_storage.TryReadRecord(page, slot, 0, out var bytes))
-            {
-                continue;
-            }
-
-            var record = DocumentCatalogCodec.Decode(bytes.Span);
-            var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
-            if (record.Document is { } document && document.CollectionId == collectionId
-                && snapshot.IsVisible(writer) && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter)))
-            {
-                result[document.Id] = document;
-            }
-        }
-        return result.Values.OrderBy(document => document.Id, StringComparer.Ordinal).ToArray();
+        return new IndexKeyRange(start, end, true, false);
     }
 
     /// <summary>Scrubs abandoned writers from every persisted B+Tree before recovery checkpointing.</summary>
@@ -330,7 +345,7 @@ public sealed partial class DocumentCatalog
         var key = DocumentIndexKeys.Read(_storage.ReadContent(new DocumentContentReference(document.HeadLocation, document.Length, document.Checksum)), metadata, out distinct);
         if (key is { Length: > 1024 })
         {
-            throw new DocumentCatalogException("COHDOC026", ErrorMessages.IndexKeyTooLarge);
+            throw new DocumentCatalogException("CD02026", ErrorMessages.IndexKeyTooLarge);
         }
         return key;
     }
@@ -381,7 +396,7 @@ public sealed partial class DocumentCatalog
 
     private BTreeIndex ResolveIndex(DocumentIndexMetadata metadata)
         => _indexes.TryGetIndex(metadata.ObjectId, metadata.Name, out var index)
-            ? index : throw new DocumentCatalogException($"Missing physical tree for index '{metadata.Name}'.");
+            ? index : throw new DocumentCatalogException("CD06105", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CatalogResolveIndexDocumentCatalog, metadata.Name));
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
@@ -399,6 +414,9 @@ public sealed partial class DocumentCatalog
         }
     }
 
+    internal ValueTask<long> PruneIndexesAsync(TransactionSequence bound, CancellationToken cancellationToken)
+        => _indexes.PruneAsync(bound, cancellationToken);
+
     private void OpenIndexes()
     {
         _registrations.Clear();
@@ -414,41 +432,46 @@ public sealed partial class DocumentCatalog
         {
             Storage = _storage,
             TransactionSource = ResolveStatementBracket,
+            PruneBound = () => _coordinator.PruneBound,
             ExistingIndexes = registrations
         });
     }
 
     private static List<(BTreeIndexRegistration Registration, PageId Page, int Slot, bool IsUnique)> ReadRegistrations(DocumentStorage storage)
     {
-        try
+        var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
+        var objectIds = new HashSet<ulong>();
+        using var iterator = storage.GetUnitIterator(1);
+        while (iterator.MoveNext())
         {
-            var registrations = new List<(BTreeIndexRegistration, PageId, int, bool)>();
-            var objectIds = new HashSet<ulong>();
-            using var iterator = storage.GetUnitIterator(1);
-            while (iterator.MoveNext())
+            var unit = iterator.Current;
+            try
             {
-                var unit = iterator.Current;
                 using var stream = new MemoryStream(unit.Data.ToArray(), writable: false);
                 using var reader = new BinaryReader(stream, new UTF8Encoding(false, true));
                 if (reader.ReadUInt64() != 0 || reader.ReadUInt64() != 0 || reader.ReadByte() != 5)
                 {
-                    throw new DocumentCatalogException("Invalid physical index registration header.");
+                    throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationHeaderInvalid);
                 }
                 DocumentCatalogCodec.EnsureVersion(5, reader.ReadByte());
                 ulong objectId = reader.ReadUInt64();
                 long root = reader.ReadInt64();
-                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("Missing physical index name.");
+                string name = DocumentCatalogCodec.ReadString(reader) ?? throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationNameMissing);
                 byte flags = reader.ReadByte();
                 if (flags > 1 || objectId == 0 || root <= 0 || stream.Position != stream.Length || !objectIds.Add(objectId))
                 {
-                    throw new DocumentCatalogException("Invalid physical index registration.");
+                    throw new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationInvalid);
                 }
                 registrations.Add((new BTreeIndexRegistration(objectId, new IndexDefinition(name), root), unit.PageId, unit.SlotIndex, flags == 1));
             }
-            return registrations;
+            catch (Exception error) when (error is DocumentCatalogException or IOException or ArgumentException or OverflowException)
+            {
+                var malformed = error as DocumentCatalogException
+                    ?? new DocumentCatalogException("CD06105", ErrorMessages.PhysicalRegistrationMalformed, error);
+                throw DocumentCatalogCodec.At(unit.PageId, unit.SlotIndex, malformed);
+            }
         }
-        catch (Exception error) when (error is IOException or ArgumentException or OverflowException)
-        { throw new DocumentCatalogException(ErrorMessages.PhysicalRegistrationMalformed, error); }
+        return registrations;
     }
 
     private void SaveRegistrations(StorageTransaction bracket)
@@ -489,8 +512,10 @@ public sealed partial class DocumentCatalog
     // coordinator owns, or this catalog's own error when there is none.
     private StorageTransaction ResolveStatementBracket(TransactionContext context)
         => _coordinator.TryGetStorageTransaction(context, out var bracket)
-            ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
+            ? bracket : throw new InvalidOperationException(ErrorMessages.CatalogResolveStatementBracketFailure);
 
+    [global::System.Diagnostics.DebuggerDisplay("IndexUndo")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.IndexUndo.DebugView))]
     private sealed class IndexUndo : RecordVersionIndex
     {
         private readonly DocumentCatalog _catalog;
@@ -514,5 +539,13 @@ public sealed partial class DocumentCatalog
         protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Documents.Catalog.DocumentCatalog.IndexUndo value)
+            {
+                _ = value;
+            }
+        }
     }
 }

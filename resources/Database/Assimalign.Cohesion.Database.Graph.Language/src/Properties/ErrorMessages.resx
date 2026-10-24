@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="GqlQueryParserFindCatalogMutationVoid" xml:space="preserve"><value>Graph catalog introspection is read-only.</value></data>
+  <data name="GqlQueryParserParseCoreVoid" xml:space="preserve"><value>Unterminated block comment.</value></data>
+  <data name="GqlQueryParserParseCoreVoid2" xml:space="preserve"><value>Unterminated quoted text.</value></data>
+  <data name="GqlQueryParserParseCoreVoid3" xml:space="preserve"><value>Unexpected character {0}; it is not part of GQL.</value></data>
+  <data name="GqlQueryParserParseCoreVoid4" xml:space="preserve"><value>Query text is empty.</value></data>
+  <data name="GqlQueryParserParseCoreVoid5" xml:space="preserve"><value>Expected MATCH, INSERT, CREATE, RETURN, LET, FILTER, FOR, UNWIND, or WITH before this clause.</value></data>
+  <data name="GqlQueryParserParseCoreVoid6" xml:space="preserve"><value>Unexpected token; exactly one statement is accepted.</value></data>
+  <data name="GqlQueryParserParseCoreVoid7" xml:space="preserve"><value>Unexpected character '?'; it is not part of GQL.</value></data>
+  <data name="GqlQueryParserFindUnsupportedVoid" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
+  <data name="GqlQueryParserExpectVoid" xml:space="preserve"><value>Expected {0}.</value></data>
+  <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
+  <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
+  <data name="GqlQueryParserHasStackToNestVoid" xml:space="preserve"><value>The statement nests deeper than the stack available to the parser on this thread; reduce the nesting of its parentheses or run it on a thread with a larger stack.</value></data>
+  <data name="GqlQueryParserParseExpressionVoid" xml:space="preserve"><value>Comparison predicates cannot be chained; use AND or parentheses.</value></data>
+  <data name="GqlQueryParserParseExpressionVoid2" xml:space="preserve"><value>Expected NULL, TRUE, FALSE or UNKNOWN after IS [NOT].</value></data>
+  <data name="GqlQueryParserParseExpressionVoid3" xml:space="preserve"><value>IN requires a list value, such as the [...] list form.</value></data>
+  <data name="GqlQueryParserParseAggregateVoid" xml:space="preserve"><value>Only COUNT(*) accepts a star, without a set quantifier.</value></data>
+  <data name="GqlQueryParserParseScalarVoid" xml:space="preserve"><value>Expected a named parameter after $ or @.</value></data>
+  <data name="GqlQueryParserParseLiteralVoid" xml:space="preserve"><value>Integer literal is outside the signed 64-bit range.</value></data>
+  <data name="GqlQueryParserParseLiteralVoid2" xml:space="preserve"><value>Floating-point literal is invalid or outside the finite double range.</value></data>
+  <data name="GqlQueryParserParseLiteralVoid3" xml:space="preserve"><value>List-valued properties are unsupported by graph storage.</value></data>
+  <data name="GqlQueryParserParseLiteralVoid4" xml:space="preserve"><value>Map-valued properties are unsupported by graph storage.</value></data>
+  <data name="GqlQueryParserParseLiteralVoid5" xml:space="preserve"><value>Expected a scalar literal.</value></data>
+  <data name="GqlQueryParserParseFunctionVoid" xml:space="preserve"><value>Function {0} does not accept a set quantifier.</value></data>
+  <data name="GqlQueryParserParseFunctionVoid2" xml:space="preserve"><value>Function {0} requires {1} to {2} arguments.</value></data>
+  <data name="GqlQueryParserParseCastVoid" xml:space="preserve"><value>Unknown CAST target '{0}'.</value></data>
+  <data name="ParserParseLabelSpecificationVoid" xml:space="preserve"><value>A relationship has one type: write one label expression, such as :T|U; ':A:B' repeats node labels.</value></data>
+  <data name="ParserParseLabelSpecificationVoid2" xml:space="preserve"><value>':' cannot follow an IS label expression; write IS A&amp;B.</value></data>
+  <data name="GqlQueryParserVoid" xml:space="preserve"><value>Repeated ':' labels cannot be combined with label-expression operators; write ':A&amp;B' or ':A:B'.</value></data>
+  <data name="QueryParserParseLabelDisjunctionVoid" xml:space="preserve"><value>'||' is not a label operator; write one '|' between labels.</value></data>
+  <data name="GqlQueryParserParseLabelPrimaryVoid" xml:space="preserve"><value>A label expression follows one ':'; write ':A|B', not ':A|:B'.</value></data>
+  <data name="GqlQueryParserParseLabelPrimaryVoid2" xml:space="preserve"><value>Expected a label name, '%' or '(' after '!'; '!' negates one label, '%' or parenthesized expression.</value></data>
+  <data name="GqlQueryParserParseLabelPrimaryVoid3" xml:space="preserve"><value>Expected a label name, '%', '!' or '('.</value></data>
+  <data name="QueryParserParseLabeledPredicateVoid" xml:space="preserve"><value>Repeated ':' labels are a node-pattern convenience; write n:A&amp;B in a predicate.</value></data>
+  <data name="GqlQueryParserParseQueryVoid" xml:space="preserve"><value>NEXT requires a RETURN or data-modifying segment and a following segment.</value></data>
+  <data name="GqlQueryParserParseQueryVoid2" xml:space="preserve"><value>RETURN * requires at least one named binding.</value></data>
+  <data name="GqlQueryParserParseQueryVoid3" xml:space="preserve"><value>Expected FIRST or LAST after NULLS.</value></data>
+  <data name="GqlQueryParserParseQueryVoid4" xml:space="preserve"><value>Expected OFFSET or SKIP before LIMIT, with each paging clause at most once.</value></data>
+  <data name="GqlQueryParserParseQueryVoid5" xml:space="preserve"><value>A read segment requires RETURN; a linear statement may also end with INSERT, CREATE, DELETE, SET or REMOVE.</value></data>
+  <data name="GqlQueryParserParsePageValueVoid" xml:space="preserve"><value>Expected an unsigned integer or parameter.</value></data>
+  <data name="GqlQueryParserParsePathVoid" xml:space="preserve"><value>INSERT and CREATE patterns cannot contain parenthesized paths or quantifiers.</value></data>
+  <data name="GqlQueryParserParsePathVoid2" xml:space="preserve"><value>A quantified parenthesized path requires a relationship.</value></data>
+  <data name="GqlQueryParserParsePathVoid3" xml:space="preserve"><value>Consecutive node patterns require an intervening edge or parenthesized path.</value></data>
+  <data name="GqlQueryParserParsePathVoid4" xml:space="preserve"><value>A node pattern cannot be quantified.</value></data>
+  <data name="GqlQueryParserParsePathVoid5" xml:space="preserve"><value>INSERT and CREATE patterns cannot contain quantifiers.</value></data>
+  <data name="GqlQueryParserParsePathVoid6" xml:space="preserve"><value>The sum of path repetition bounds cannot exceed 64 relationships.</value></data>
+  <data name="GqlQueryParserParsePathVoid7" xml:space="preserve"><value>Expected a node pattern.</value></data>
+  <data name="GqlQueryParserParseQuantifierVoid" xml:space="preserve"><value>A quantifier requires ordered bounds and a positive upper bound.</value></data>
+  <data name="QueryParserParseQuantifierBoundVoid" xml:space="preserve"><value>Invalid or out-of-range numeric literal.</value></data>
+  <data name="GqlQueryParserAbbreviatedEdgeVoid" xml:space="preserve"><value>An abbreviated edge pattern cannot carry a variable, label expression or property map; write the bracketed form, such as -[r:TYPE]-&gt;.</value></data>
+  <data name="RejectLineCommentAfterElementVoid" xml:space="preserve"><value>'--' directly after a node or edge pattern starts a GQL comment that hides the rest of the line; write the edge as '-&gt;', '&lt;-' or '-' (Cypher '--&gt;', '&lt;--', '--' and '&lt;--&gt;' are not GQL), or put a space before the comment.</value></data>
+  <data name="GqlQueryParserParsePropertiesVoid" xml:space="preserve"><value>Duplicate property '{0}'.</value></data>
+  <data name="GqlQueryParserParseMapVoid" xml:space="preserve"><value>Duplicate map key '{0}'.</value></data>
+  <data name="GqlQueryParserParseCaseVoid" xml:space="preserve"><value>Expected WHEN in CASE.</value></data>
+  <data name="QueryParserParseCaseAbbreviationVoid" xml:space="preserve"><value>COALESCE requires at least two operands.</value></data>
+  <data name="QueryParserParseCaseAbbreviationVoid2" xml:space="preserve"><value>NULLIF requires two operands.</value></data>
+</root>

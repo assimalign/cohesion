@@ -4,6 +4,8 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>A unary sign, logical NOT, or NULL, MISSING, or VALUED test.</summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlUnaryExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlUnaryExpression.DebugView))]
 public sealed class OqlUnaryExpression : OqlExpression
 {
     /// <summary>Initializes a new instance of the <see cref="OqlUnaryExpression"/> class.</summary>
@@ -20,4 +22,19 @@ public sealed class OqlUnaryExpression : OqlExpression
     public string Operator { get; }
     /// <summary>Gets the operand.</summary>
     public OqlExpression Operand { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlUnaryExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlUnaryExpression value)
+        {
+            _target = value;
+        }
+
+        public string Operator => _target.Operator;
+        public global::Assimalign.Cohesion.Database.Documents.Language.OqlExpression Operand => _target.Operand;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

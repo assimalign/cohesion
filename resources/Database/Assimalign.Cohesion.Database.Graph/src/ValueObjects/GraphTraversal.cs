@@ -14,4 +14,8 @@ public readonly record struct GraphTraversal(
     GraphNodeId Start,
     GraphDirection Direction = GraphDirection.Outgoing,
     string? RelationshipType = null,
-    int MaxDepth = 1);
+    int MaxDepth = 1)
+{
+    /// <summary>Optional statement limits, bounded by the owning engine's query ceilings.</summary>
+    public GraphQueryLimits? Limits { get; init; }
+}

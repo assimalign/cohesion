@@ -49,7 +49,7 @@ internal sealed partial class SqlDeclaredDatabase
                         !string.Equals(table.PrimaryKey?.Name, index.IndexName, StringComparison.OrdinalIgnoreCase)) { continue; }
                     objectName += "." + index.IndexName;
                 }
-                throw new SqlSchemaMigrationException($"COHSQLS005: Declared script '{script.Name}' cannot alter or drop typed schema object '{objectName}'; declare the change in the typed schema. Nothing was opened or written.");
+                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateScriptOwnershipFailure, script.Name, objectName));
             }
         }
     }
@@ -66,13 +66,13 @@ internal sealed partial class SqlDeclaredDatabase
             receipts.TryGetValue(script.Name, out var receipt);
             if (receipt is not null && receipt.ContentHash != script.ContentHash)
             {
-                throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' has a different body from its recorded SHA-256. Use a new name for forward-only changes.");
+                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValidateScriptsAsyncFailure, script.Name));
             }
             if (receipt is not null)
             {
                 if (receipt.StatementCount != script.Statements.Count || receipt.StatementObjects.Count != receipt.CompletedStatements)
                 {
-                    throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' has an inconsistent recorded statement count or target list.");
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValidateScriptsAsyncFailure2, script.Name));
                 }
                 var expected = new string[receipt.CompletedStatements];
                 for (int position = 0; position < receipt.CompletedStatements; position++)
@@ -80,7 +80,7 @@ internal sealed partial class SqlDeclaredDatabase
                     expected[position] = ScriptTarget(database, script, position, receipt);
                     if (!string.Equals(receipt.StatementObjects[position], expected[position], StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}', statement {position + 1} targets '{expected[position]}' but its receipt records '{receipt.StatementObjects[position]}'.");
+                        throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValidateScriptsAsyncFailure3, script.Name, position + 1, expected[position], receipt.StatementObjects[position]));
                     }
                 }
                 var created = Enumerable.Range(0, receipt.CompletedStatements)
@@ -88,12 +88,12 @@ internal sealed partial class SqlDeclaredDatabase
                     .Select(position => expected[position]).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 if (!created.SetEquals(receipt.Objects))
                 {
-                    throw new SqlSchemaMigrationException($"COHSQLS001: Declared script '{script.Name}' records object ownership inconsistent with its completed CREATE statements.");
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValidateScriptsAsyncFailure4, script.Name));
                 }
             }
             if (Mode == SqlProvisioningMode.Verify && (receipt is null || receipt.CompletedStatements != script.Statements.Count))
             {
-                throw new SqlSchemaMigrationException($"COHSQLS002: Declared script '{script.Name}' is not completely recorded with its checksum.");
+                throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseValidateScriptsAsyncFailure5, script.Name));
             }
         }
         if (Mode == SqlProvisioningMode.Verify) { return; }
@@ -149,19 +149,19 @@ internal sealed partial class SqlDeclaredDatabase
                     if (script.Statements[position].Statement.SqlExpression is SqlCreateTableExpression create &&
                         database.Catalog.TryGetTable(create.Table.SchemaName ?? SqlPlanner.DefaultSchema, create.Table.TableName, out _))
                     {
-                        throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing table '{create.Table.TableName}'.");
+                        throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseApplyScriptsAsyncFailure, script.Name, create.Table.TableName));
                     }
                     if (script.Statements[position].Statement.SqlExpression is SqlCreateIndexExpression index &&
                         database.Catalog.TryGetTable(index.Table.SchemaName ?? SqlPlanner.DefaultSchema, index.Table.TableName, out var indexedTable) &&
                         database.Catalog.GetIndexes(indexedTable.ObjectId).Any(existingIndex => existingIndex.Name.Equals(index.IndexName, StringComparison.OrdinalIgnoreCase)))
                     {
-                        throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}' cannot adopt existing index '{index.IndexName}'.");
+                        throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseApplyScriptsAsyncFailure2, script.Name, index.IndexName));
                     }
                     var result = await session.ExecuteScriptAsync(script.Statements[position], receipt, cancellationToken).ConfigureAwait(false);
                     if (result is DatabaseResultSet rows) { await rows.DisposeAsync().ConfigureAwait(false); }
                     if (result.Status != DatabaseResultStatus.Success)
                     {
-                        throw new SqlSchemaMigrationException($"COHSQLS004: Script '{script.Name}', statement {position + 1} failed.");
+                        throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseApplyScriptsAsyncFailure3, script.Name, position + 1));
                     }
                 }
                 if (receipt.ExpectedObject.Length == 0)
@@ -171,7 +171,7 @@ internal sealed partial class SqlDeclaredDatabase
                 existing = database.Catalog.Scripts.Single(recorded => recorded.Name == script.Name);
                 if (existing.CompletedStatements != position + 1)
                 {
-                    throw new SqlSchemaMigrationException($"COHSQLS001: Script '{script.Name}', statement {position + 1} did not publish its expected receipt.");
+                    throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseApplyScriptsAsyncFailure4, script.Name, position + 1));
                 }
             }
             if (completed != script.Statements.Count)
@@ -229,7 +229,7 @@ internal sealed partial class SqlDeclaredDatabase
                 }
             }
             if (database.Definitions.Functions.Types.Resolve(name, out string? error) is { } type && error is null) { return type; }
-            throw new SqlSchemaMigrationException($"COHSQLS001: Script '{script.Name}', statement {position + 1}: cannot resolve type '{name}' while validating its function target.");
+            throw new SqlSchemaMigrationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeclaredDatabaseScriptTargetFailure, script.Name, position + 1, name));
         }
     }
 }

@@ -179,7 +179,7 @@ public sealed class SqlCastTests
         await using var infinite = (await ExecuteAsync(session, "SELECT CAST(@value AS REAL) FROM t;",
             new Dictionary<string, object?> { ["value"] = double.PositiveInfinity })).ShouldBeAssignableTo<DatabaseResultSet>();
 
-        missing.DiagnosticDetail("COHSQLE011").ShouldBe("Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
+        missing.DiagnosticDetail("CS02011").ShouldBe("Cannot CAST type INTEGER to DATE: no cast from INTEGER to DATE is registered. " +
             "Register one on the engine's builder (SqlDatabaseEngineBuilder.Types.AddCast) before Build.");
         overflow.Message.ShouldContain("is out of range for REAL", Case.Sensitive);
         underflow.Message.ShouldContain("underflows REAL", Case.Sensitive);
@@ -188,12 +188,12 @@ public sealed class SqlCastTests
 
     /// <summary>
     /// A CAST no registered cast performs fails while planning whenever the plan knows the operand's
-    /// type, so it fails over an empty table as over a populated one (<c>COHSQLE011</c>, PostgreSQL's
+    /// type, so it fails over an empty table as over a populated one (<c>CS02011</c>, PostgreSQL's
     /// 42846 from parse analysis); before E3 the parser refused these targets outright.
     /// </summary>
     /// <param name="expression">A CAST of a statically typed operand that no cast converts.</param>
     /// <param name="pair">The pair the message names.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a pair no cast converts fails while planning with COHSQLE011, rows or not")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a pair no cast converts fails while planning with CS02011, rows or not")]
     [InlineData("CAST(1 AS DATE)", "INTEGER to DATE")]
     [InlineData("CAST(TRUE AS DOUBLE)", "BOOLEAN to DOUBLE")]
     [InlineData("CAST(TRUE AS INT)", "BOOLEAN to INTEGER")]
@@ -223,7 +223,7 @@ public sealed class SqlCastTests
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
         var written = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"UPDATE t SET id = 2 WHERE {expression} IS NULL;"));
 
-        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
+        empty.DiagnosticDetail("CS02011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
         populated.Message.ShouldBe(empty.Message);
         written.Message.ShouldBe(empty.Message);
         (await RowsAsync(session, "SELECT id FROM t;")).ShouldHaveSingleItem()[0].ShouldBe(1);
@@ -253,7 +253,7 @@ public sealed class SqlCastTests
     /// A parameter's type only its value reveals, so a CAST of a parameter no cast converts plans, and
     /// fails with the same code when a row evaluates it.
     /// </summary>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a parameter no cast converts fails with COHSQLE011 when a row evaluates it")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: a parameter no cast converts fails with CS02011 when a row evaluates it")]
     [InlineData("@value", "INTEGER")]
     [InlineData("CASE WHEN TRUE THEN @value ELSE NULL END", "INTEGER")]
     [InlineData("COALESCE(NULL, @value)", "INTEGER")]
@@ -273,7 +273,7 @@ public sealed class SqlCastTests
         (await ReadRowsAsync(empty)).ShouldBeEmpty();
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t;", parameters));
 
-        populated.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {source} to DATE: ", Case.Sensitive);
+        populated.DiagnosticDetail("CS02011").ShouldStartWith($"Cannot CAST type {source} to DATE: ", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: static CASE results reject unsupported pairs before any input rows")]
@@ -295,8 +295,8 @@ public sealed class SqlCastTests
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
 
         // Assert
-        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
-        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith("Cannot CAST type JSON to INTEGER: ", Case.Sensitive);
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
+        empty.DiagnosticDetail("CS02011").ShouldStartWith("Cannot CAST type JSON to INTEGER: ", Case.Sensitive);
         populated.Message.ShouldBe(empty.Message);
     }
 
@@ -317,7 +317,7 @@ public sealed class SqlCastTests
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT {expression} FROM t;"));
 
         // Assert
-        empty.DiagnosticDetail("COHSQLE011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
+        empty.DiagnosticDetail("CS02011").ShouldStartWith($"Cannot CAST type {pair}: ", Case.Sensitive);
         populated.Message.ShouldBe(empty.Message);
     }
 
@@ -337,7 +337,7 @@ public sealed class SqlCastTests
         var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE011");
+        empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
         populated.Message.ShouldBe(empty.Message);
     }
 
@@ -431,13 +431,13 @@ public sealed class SqlCastTests
         if (invalidModifier)
         {
             error.ShouldBeOfType<DatabaseParseException>();
-            error.Message.ShouldContain("SQL0005", Case.Sensitive);
+            error.Message.ShouldContain("CS00005", Case.Sensitive);
             error.Message.ShouldContain("CAST target", Case.Sensitive);
         }
         else
         {
             error.ShouldNotBeOfType<DatabaseParseException>();
-            error.DiagnosticDetail("COHSQLE010").ShouldStartWith("CAST target: type '" + target + "' does not exist", Case.Sensitive);
+            error.DiagnosticDetail("CS02010").ShouldStartWith("CAST target: type '" + target + "' does not exist", Case.Sensitive);
             error.Message.ShouldContain("SqlDatabaseEngineBuilder.Types", Case.Sensitive);
         }
     }

@@ -123,7 +123,7 @@ public sealed class GraphFunctionTests
         Convert.ToDecimal(actual, CultureInfo.InvariantCulture).ShouldBe(function == "abs" || value is byte or ushort or uint or ulong ? 2m : -2m);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: domain, conversion and dynamic kind errors carry COHDBG013")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Functions: domain, conversion and dynamic kind errors carry CG02013")]
     [InlineData("RETURN sqrt(-1)")]
     [InlineData("RETURN log(0)")]
     [InlineData("RETURN log(-1)")]
@@ -171,7 +171,7 @@ public sealed class GraphFunctionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(source, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Functions: exact numeric casts and replacement expansion retain bounds")]
@@ -185,29 +185,29 @@ public sealed class GraphFunctionTests
         (await RowsAsync(session, "RETURN CAST($v AS DECIMAL)", new Dictionary<string, object?> { ["v"] = 0.10000000000000002d })).ShouldHaveSingleItem()[0].ShouldBe(0.10000000000000002m);
         var parameters = new Dictionary<string, object?> { ["s"] = new string('a', 1000), ["r"] = new string('\0', 10000) };
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Unwritten) RETURN replace($s,'a',$r)", parameters, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (:Unwritten) RETURN replace($s,'',$r)", parameters, CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Functions: proven wrong kinds fail planning before mutation and under EXPLAIN")]
-    [InlineData("labels(r)", "labels", "COHDBG003")]
-    [InlineData("type(a)", "type", "COHDBG003")]
-    [InlineData("labels(properties(a))", "labels", "COHDBG003")]
-    [InlineData("CAST(a AS STRING)", "CAST", "COHDBG003")]
-    [InlineData("CAST(missing AS INTEGER)", "CAST", "COHDBG001")]
-    [InlineData("nodes(a)", "nodes", "COHDBG003")]
-    [InlineData("startNode(a)", "StartNode", "COHDBG003")]
-    [InlineData("endNode(a)", "EndNode", "COHDBG003")]
-    [InlineData("upper(1)", "Upper", "COHDBG003")]
-    [InlineData("labels(missing)", "labels", "COHDBG001")]
-    [InlineData("upper(toString(abs(missing)))", "Abs", "COHDBG001")]
-    [InlineData("upper(CAST(missing AS STRING))", "CAST", "COHDBG001")]
-    [InlineData("edges(a)", "edges", "COHDBG003")]
-    [InlineData("toBoolean(1.5)", "toBoolean", "COHDBG003")]
-    [InlineData("toBoolean(CAST(1 AS DECIMAL))", "toBoolean", "COHDBG003")]
-    [InlineData("CAST(TRUE AS INTEGER)", "CAST", "COHDBG003")]
+    [InlineData("labels(r)", "labels", "CG03003")]
+    [InlineData("type(a)", "type", "CG03003")]
+    [InlineData("labels(properties(a))", "labels", "CG03003")]
+    [InlineData("CAST(a AS STRING)", "CAST", "CG03003")]
+    [InlineData("CAST(missing AS INTEGER)", "CAST", "CG05001")]
+    [InlineData("nodes(a)", "nodes", "CG03003")]
+    [InlineData("startNode(a)", "StartNode", "CG03003")]
+    [InlineData("endNode(a)", "EndNode", "CG03003")]
+    [InlineData("upper(1)", "Upper", "CG03003")]
+    [InlineData("labels(missing)", "labels", "CG05001")]
+    [InlineData("upper(toString(abs(missing)))", "Abs", "CG05001")]
+    [InlineData("upper(CAST(missing AS STRING))", "CAST", "CG05001")]
+    [InlineData("edges(a)", "edges", "CG03003")]
+    [InlineData("toBoolean(1.5)", "toBoolean", "CG03003")]
+    [InlineData("toBoolean(CAST(1 AS DECIMAL))", "toBoolean", "CG03003")]
+    [InlineData("CAST(TRUE AS INTEGER)", "CAST", "CG03003")]
     public async Task Execute_ProvenSignatureError_ShouldPlanBeforeWritesAsync(string expression, string function, string code)
     {
         // Arrange
@@ -236,7 +236,7 @@ public sealed class GraphFunctionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new GraphQueryRequest(statement), CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001"); error.Message.ShouldContain("Abs");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001"); error.Message.ShouldContain("Abs");
         GraphProjectionText.Describe(new GqlFunctionCallExpression(GqlScalarFunction.Relationships, [new GqlVariableExpression("p")])).ShouldBe("edges(p)");
         GraphProjectionText.Describe(new GqlCastExpression(new GqlFunctionCallExpression(GqlScalarFunction.CharLength, [new GqlLiteralExpression("abc")]), GqlCastType.Int64))
             .ShouldBe("CAST(char_length('abc') AS BIGINT)");
@@ -267,7 +267,7 @@ public sealed class GraphFunctionTests
         foreach (string argument in new[] { "r", "properties({group:r}).group" })
         {
             var groupError = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"MATCH (a)-[r:KNOWS*1..2]->(b) RETURN labels({argument})", cancellationToken: CancellationToken.None));
-            groupError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            groupError.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
         (await RowsAsync(session, "MATCH (a)-[r:KNOWS*1..2]->(b) RETURN size(r)")).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
@@ -285,7 +285,7 @@ public sealed class GraphFunctionTests
         // Assert
         rows.ShouldHaveSingleItem()[0].ShouldBe(42L);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("INSERT (a:Unwritten {v:abs(b.v)}), (b:P {v:1})", cancellationToken: CancellationToken.None));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
     }
 
@@ -303,7 +303,7 @@ public sealed class GraphFunctionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MATCH (a) " + stage, cancellationToken: CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
     }
 
     [Fact(DisplayName = "Cohesion Test [Graph] - Functions: parameter list kinds validate before snapshot materialization")]
@@ -317,7 +317,7 @@ public sealed class GraphFunctionTests
         // Act
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("EXPLAIN RETURN labels($x)", parameters, CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003"); error.Message.ShouldContain("Labels");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003"); error.Message.ShouldContain("Labels");
         (await RowsAsync(session, "RETURN size($x)", parameters)).ShouldHaveSingleItem()[0].ShouldBe(1L);
     }
 
@@ -387,7 +387,7 @@ public sealed class GraphFunctionTests
         foreach (string value in new[] { "CURRENT_TIMESTAMP", "CURRENT_DATE", "CAST('2026-10-18' AS DATE)" })
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"INSERT (:Unwritten {{at:{value}}})", cancellationToken: CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         }
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();
     }
@@ -431,7 +431,7 @@ public sealed class GraphFunctionTests
             foreach (string clause in new[] { $"INSERT (:Unwritten {{at:{value}}})", $"INSERT (:Unwritten)-[:T {{at:{value}}}]->()", $"INSERT (:Unwritten) MATCH (n {{at:{value}}}) RETURN n", $"INSERT (:Unwritten) MATCH ()-[r {{at:{value}}}]->() RETURN r" })
             {
                 var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(prefix + "LET t=CURRENT_DATE " + clause, cancellationToken: CancellationToken.None));
-                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG003");
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
             }
         }
         (await RowsAsync(session, "MATCH (n:Unwritten) RETURN n")).ShouldBeEmpty();

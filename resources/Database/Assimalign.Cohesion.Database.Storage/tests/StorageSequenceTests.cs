@@ -34,7 +34,7 @@ public sealed class StorageSequenceTests
         int reservations = 0;
         int brackets = 0;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var reserving = Task.Run(() =>
+        var reserving = DedicatedTestTask.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {

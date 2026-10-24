@@ -114,7 +114,7 @@ public sealed class SqlReturningExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02001");
         await using var result = await QueryAsync(session, "SELECT id, age FROM t WHERE id < 9 ORDER BY id");
         CheckRows(await ReadAsync(result), [[1, 2], [2, 1]]);
         if (transaction)
@@ -128,7 +128,7 @@ public sealed class SqlReturningExecutionTests
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: constraint failures publish neither rows nor writes")]
     [InlineData("INSERT INTO t VALUES (2, 2, 1), (1, 3, 1) RETURNING returning_probe(id)", "UNIQUE", 1)]
     [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, -1, 1) RETURNING *", "CHECK", 0)]
-    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, NULL, 1) RETURNING *", "COHSQLE024", 0)]
+    [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, NULL, 1) RETURNING *", "CS03024", 0)]
     [InlineData("INSERT INTO t VALUES (2, 2, 1), (3, 3, 99) RETURNING *", "FOREIGN KEY", 0)]
     [InlineData("UPDATE t SET age = -1 RETURNING *", "CHECK", 0)]
     public async Task ExecuteAsync_ConstraintFailure_ShouldLeaveTableUnchanged(string sql, string failureKind, int expectedCalls)
@@ -149,7 +149,7 @@ public sealed class SqlReturningExecutionTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        if (failureKind == "COHSQLE024")
+        if (failureKind == "CS03024")
         {
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(failureKind);
         }
@@ -190,12 +190,12 @@ public sealed class SqlReturningExecutionTests
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - RETURNING: binding validates expressions even without targets")]
-    [InlineData("UPDATE t SET age = 1 RETURNING COUNT(*)", "COHSQLE017")]
-    [InlineData("DELETE FROM t RETURNING STRING_AGG(CAST(id AS TEXT), ',')", "COHSQLE017")]
-    [InlineData("INSERT INTO t VALUES (1, 2) RETURNING wrong.id", "COHSQLE015")]
-    [InlineData("INSERT INTO t SELECT * FROM t AS source RETURNING source.id", "COHSQLE015")]
-    [InlineData("UPDATE t AS x SET age = 1 RETURNING t.id", "COHSQLE015")]
-    [InlineData("DELETE FROM t RETURNING missing_function(id)", "COHSQLE016")]
+    [InlineData("UPDATE t SET age = 1 RETURNING COUNT(*)", "CS05017")]
+    [InlineData("DELETE FROM t RETURNING STRING_AGG(CAST(id AS TEXT), ',')", "CS05017")]
+    [InlineData("INSERT INTO t VALUES (1, 2) RETURNING wrong.id", "CS01015")]
+    [InlineData("INSERT INTO t SELECT * FROM t AS source RETURNING source.id", "CS01015")]
+    [InlineData("UPDATE t AS x SET age = 1 RETURNING t.id", "CS01015")]
+    [InlineData("DELETE FROM t RETURNING missing_function(id)", "CS01016")]
     public async Task ExecuteAsync_InvalidReturningBinding_ShouldFailBeforeWrites(string sql, string code)
     {
         // Arrange
@@ -262,7 +262,7 @@ public sealed class SqlReturningExecutionTests
         var failure = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        failure.Diagnostics.ShouldContain(item => item.Code == (sql.StartsWith("SELECT", StringComparison.Ordinal) ? "SQL0003" : "COHDBL001"));
+        failure.Diagnostics.ShouldContain(item => item.Code == (sql.StartsWith("SELECT", StringComparison.Ordinal) ? "CS00003" : "CK00001"));
         await using var result = await QueryAsync(session, "SELECT * FROM t");
         CheckRows(await ReadAsync(result), [[1, 1]]);
     }

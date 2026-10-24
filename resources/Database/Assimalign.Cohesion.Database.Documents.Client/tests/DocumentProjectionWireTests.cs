@@ -207,7 +207,7 @@ public sealed class DocumentProjectionWireTests
                 {
                     var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(query, parameters, harness.Token));
                     var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-                    diagnostic.Code.ShouldBe("COHDOC015");
+                    diagnostic.Code.ShouldBe("CD05015");
                     diagnostic.Start.ShouldBe(query.StartsWith("SELECT VALUE", StringComparison.Ordinal) ? 13 : 7);
                     error.Message.ShouldContain("SELECT " + (objects ? "object" : "array") + " constructor values must be nested no deeper than 256 levels.", Case.Sensitive);
                 }

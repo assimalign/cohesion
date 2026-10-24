@@ -4,7 +4,6 @@
 		<PackageId>Assimalign.Cohesion.Sdk.Database</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 		<!-- The SQL schema package exposes its declaration contract as preview API. -->
-		<EnablePreviewFeatures>true</EnablePreviewFeatures>
 		<IsAotCompatible>true</IsAotCompatible>
 	</PropertyGroup>
 	<ItemGroup>

@@ -153,7 +153,7 @@ public sealed partial class DocumentQueryTests
         await session.CreateCollectionAsync("items", CancellationToken.None);
         // Act / Assert
         (await Should.ThrowAsync<DatabaseException>(async () => await PlanAsync(database, query)))
-            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC001");
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05001");
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Scalars: grouped calls retain the exact grouping diagnostic")]
@@ -173,20 +173,20 @@ public sealed partial class DocumentQueryTests
         const string message = "An OQL grouped query may only read grouping expressions outside aggregate calls.";
         error.Message.ShouldBe(message);
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC001");
+        diagnostic.Code.ShouldBe("CD05001");
         diagnostic.Message.ShouldBe(message);
         diagnostic.Start.ShouldBe(13);
         diagnostic.End.ShouldBe(17);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Scalars: domain and overflow errors are coded and abort explicit transactions")]
-    [InlineData("SQRT(-1)", "COHDOC019", "The OQL function argument is outside its domain.")]
-    [InlineData("POWER(-2,0.5)", "COHDOC019", "The OQL function argument is outside its domain.")]
-    [InlineData("ROUND(1,0.5)", "COHDOC019", "The OQL function argument is outside its domain.")]
-    [InlineData("POWER(10,100)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
-    [InlineData("POWER(10,1000.5)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
-    [InlineData("REPLACE('abc','a','b',0.5)", "COHDOC008", "The OQL REPLACE count must be an integer.")]
-    [InlineData("ROUND(70000000000000000000000000000,-29)", "COHDOC007", "OQL numbers must fit the decimal scalar domain.")]
+    [InlineData("SQRT(-1)", "CD02019", "The OQL function argument is outside its domain.")]
+    [InlineData("POWER(-2,0.5)", "CD02019", "The OQL function argument is outside its domain.")]
+    [InlineData("ROUND(1,0.5)", "CD02019", "The OQL function argument is outside its domain.")]
+    [InlineData("POWER(10,100)", "CD02007", "OQL numbers must fit the decimal scalar domain.")]
+    [InlineData("POWER(10,1000.5)", "CD02007", "OQL numbers must fit the decimal scalar domain.")]
+    [InlineData("REPLACE('abc','a','b',0.5)", "CD02008", "The OQL REPLACE count must be an integer.")]
+    [InlineData("ROUND(70000000000000000000000000000,-29)", "CD02007", "OQL numbers must fit the decimal scalar domain.")]
     public async Task Execute_FunctionFailure_ShouldAbortWithFixedDiagnosticAsync(string expression, string code, string message)
     {
         // Arrange
@@ -255,7 +255,7 @@ public sealed partial class DocumentQueryTests
         // Act / Assert
         (await RowsAsync(session, "SELECT LENGTH(CONCAT($text,'')) FROM items", parameters)).Single().GetValue(0).ShouldBe(1_048_576L);
         var error = await Should.ThrowAsync<DatabaseException>(async () => await RowsAsync(session, "SELECT CONCAT($text,'a') FROM items", parameters));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC007");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02007");
         var previous = CultureInfo.CurrentCulture;
         try
         {
@@ -299,7 +299,7 @@ public sealed partial class DocumentQueryTests
         var error = Should.Throw<DatabaseException>(() => evaluator.Evaluate(query.Projections[0].Expression, default));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC007");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02007");
         error.Message.ShouldBe("The OQL function string exceeds 1,048,576 UTF-16 units.");
     }
 

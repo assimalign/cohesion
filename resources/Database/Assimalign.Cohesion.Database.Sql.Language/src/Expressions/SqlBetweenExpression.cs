@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Represents a <c>BETWEEN</c> predicate such as <c>x BETWEEN 1 AND 10</c>.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlBetweenExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlBetweenExpression.DebugView))]
 public sealed class SqlBetweenExpression : SqlExpression
 {
     /// <summary>
@@ -44,4 +46,19 @@ public sealed class SqlBetweenExpression : SqlExpression
     /// Gets whether the predicate is negated (<c>NOT BETWEEN</c>).
     /// </summary>
     public bool IsNegated { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlBetweenExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlBetweenExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Low => _target.Low;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression High => _target.High;
+        public bool IsNegated => _target.IsNegated;
+    }
 }

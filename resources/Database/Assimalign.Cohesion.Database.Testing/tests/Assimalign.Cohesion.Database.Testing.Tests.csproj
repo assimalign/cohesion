@@ -12,6 +12,10 @@
 		<!-- Build the SDK consumer and its generated manifest/apphost without making its
 		     Program or runtime closure a compile-time dependency of this test assembly. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.SampleHost" ReferenceOutputAssembly="false" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.TcpSdkHost" ReferenceOutputAssembly="false" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
@@ -32,4 +36,12 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
+  <Target Name="CopyDatabaseTcpSdkHost" AfterTargets="Build">
+    <ItemGroup>
+      <_DatabaseTcpSdkHostOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.TcpSdkHost\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_DatabaseTcpSdkHostOutput)"
+          DestinationFiles="@(_DatabaseTcpSdkHostOutput->'$(OutDir)TcpSdkHost\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

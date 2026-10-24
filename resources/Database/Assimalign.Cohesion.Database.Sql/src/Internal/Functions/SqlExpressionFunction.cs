@@ -10,6 +10,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A SQL body, bound once per input collation, called through the same ABI as native scalar functions.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlExpressionFunction {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionFunction.DebugView))]
 internal sealed class SqlExpressionFunction : SqlScalarFunction
 {
     private readonly SqlBoundExpression? _body;
@@ -96,5 +98,23 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionResultDomainViolation, Name, type.Name),
                 type.Name, string.Empty, "DOMAIN");
         }
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionFunction _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlExpressionFunction value)
+        {
+            _target = value;
+        }
+
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionKind Kind => _target.Kind;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType? VariadicParameter => _target.VariadicParameter;
+        public global::Assimalign.Cohesion.Database.Sql.SqlType ReturnType => _target.ReturnType;
+        public global::Assimalign.Cohesion.Database.Sql.SqlFunctionVolatility Volatility => _target.Volatility;
+        public global::Assimalign.Cohesion.Database.Sql.SqlNullBehavior NullBehavior => _target.NullBehavior;
+        public bool IsNeverNull => _target.IsNeverNull;
     }
 }

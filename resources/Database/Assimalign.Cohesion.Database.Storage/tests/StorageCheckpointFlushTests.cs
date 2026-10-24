@@ -103,7 +103,7 @@ public sealed class StorageCheckpointFlushTests
         try
         {
             entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 using var same = pool.Pin((PageId)0L, stream);
                 pool.TryGet((PageId)1L, out var hot).ShouldBeTrue();
@@ -206,13 +206,13 @@ public sealed class StorageCheckpointFlushTests
                 release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
             }
         };
-        var flushing = Task.Run(() => pool.FlushAll(stream));
+        var flushing = DedicatedTestTask.Run(() => pool.FlushAll(stream));
 
         // Act: remove a later snapshot entry while the first one's write is parked.
         try
         {
             entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 pool.Evict((PageId)1L, stream);
                 Initialize(pool, stream, 2, 30);
@@ -285,7 +285,7 @@ public sealed class StorageCheckpointFlushTests
             // Act: the worker has entered Resize and is blocked on the flush gate.
             await WaitForGateAsync(resizing, resizeStarted.Task);
             pool.Capacity.ShouldBe(6);
-            await Task.Run(() =>
+            await DedicatedTestTask.Run(() =>
             {
                 for (int i = 0; i < 32; i++)
                 {
@@ -353,7 +353,7 @@ public sealed class StorageCheckpointFlushTests
             entered.Set();
             release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
         };
-        var flushing = Task.Run(() => pool.FlushAll(stream));
+        var flushing = DedicatedTestTask.Run(() => pool.FlushAll(stream));
         Task<StoragePageHandle>? first = null;
         Task<StoragePageHandle>? second = null;
         try
@@ -403,7 +403,7 @@ public sealed class StorageCheckpointFlushTests
             entered.Set();
             release.Wait(TimeSpan.FromSeconds(20)).ShouldBeTrue();
         };
-        var flushing = Task.Run(() => pool.FlushAll(stream));
+        var flushing = DedicatedTestTask.Run(() => pool.FlushAll(stream));
         Task? closing = null;
         try
         {

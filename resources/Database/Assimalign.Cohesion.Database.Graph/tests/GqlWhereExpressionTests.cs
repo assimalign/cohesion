@@ -100,8 +100,8 @@ public sealed class GqlWhereExpressionTests
             await session.ExecuteAsync("MATCH (a:Person) WHERE " + predicate + " RETURN a.age", cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
-        error.Message.ShouldNotContain("COHDBG013", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
+        error.Message.ShouldNotContain("CG02013", Case.Sensitive);
         (await ValuesAsync(session, "MATCH (a:Person) RETURN a.age")).ShouldBe([42L]);
     }
 
@@ -198,7 +198,7 @@ public sealed class GqlWhereExpressionTests
                 predicate, [], [], false, [new GqlProjection(new GqlPropertyExpression("a", "x"))]);
             var error = await Should.ThrowAsync<DatabaseException>(async () =>
                 await session.ExecuteAsync(new GraphQueryRequest(new GqlQueryStatement(query)), CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         }
     }
 

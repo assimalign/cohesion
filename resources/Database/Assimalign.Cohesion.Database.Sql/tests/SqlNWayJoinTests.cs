@@ -40,10 +40,10 @@ public sealed class SqlNWayJoinTests
             [[2, 2, 2, -2L], [1, 1, 1, -1L]]);
         var error = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT *, a.id AS sort" + from + "ORDER BY 3;", cancellationToken: CancellationToken.None));
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE018");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS02018");
         var qualified = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("SELECT a.*, a.id AS sort" + from + "ORDER BY sort;", cancellationToken: CancellationToken.None));
-        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        qualified.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - LEFT: UNKNOWN, ON filters and WHERE filters retain SQL semantics")]
@@ -60,7 +60,7 @@ public sealed class SqlNWayJoinTests
         // Act / Assert
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id AND c.enabled = TRUE ORDER BY a.id;"),
             [[1, 1], [2, null], [3, null]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(indexed ? ["join-seek:ix_b", "join-seek:ix_c"] : ["join-scan", "join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(indexed ? ["join-seek:ix_b", "join-seek:ix_c"] : ["join-hash", "join-hash"]);
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id WHERE c.enabled = TRUE ORDER BY a.id;"), [[1, 1]]);
         Check(await RowsAsync(session, "SELECT COUNT(*), COUNT(c.id) FROM a JOIN b ON a.id = b.id LEFT JOIN c ON b.id = c.id AND c.enabled = TRUE;"), [[3L, 1L]]);
         Check(await RowsAsync(session, "SELECT a.id, c.id FROM a LEFT JOIN c ON NULL ORDER BY a.id;"), [[1, null], [2, null], [3, null]]);
@@ -141,17 +141,17 @@ public sealed class SqlNWayJoinTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - JOIN: invalid scopes and USING fail binding without reading rows")]
-    [InlineData("SELECT a.id FROM a JOIN b ON c.id = b.id JOIN c ON b.id = c.id;", "c.id", "COHSQLE015")]
-    [InlineData("SELECT a.id FROM a, b JOIN c ON a.id = c.id;", "a.id", "COHSQLE015")]
-    [InlineData("SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c a ON b.id = a.id;", "a", "COHSQLE019")]
-    [InlineData("SELECT * FROM a JOIN b ON a.id = b.id JOIN c USING (id);", "id", "COHSQLE015")]
-    [InlineData("SELECT * FROM a JOIN b USING (missing);", "missing", "COHSQLE015")]
-    [InlineData("SELECT * FROM a JOIN c USING (enabled);", "enabled", "COHSQLE015")]
-    [InlineData("SELECT * FROM c JOIN a USING (enabled);", "enabled", "COHSQLE015")]
-    [InlineData("SELECT * FROM a JOIN b USING (id, id);", "id", "COHSQLE015")]
-    [InlineData("SELECT a.id FROM a x LEFT JOIN b USING (id);", "a.id", "COHSQLE015")]
-    [InlineData("SELECT bogus.id FROM a CROSS JOIN b;", "bogus.id", "COHSQLE015")]
-    [InlineData("SELECT a.id FROM a x, b;", "a.id", "COHSQLE015")]
+    [InlineData("SELECT a.id FROM a JOIN b ON c.id = b.id JOIN c ON b.id = c.id;", "c.id", "CS01015")]
+    [InlineData("SELECT a.id FROM a, b JOIN c ON a.id = c.id;", "a.id", "CS01015")]
+    [InlineData("SELECT a.id FROM a JOIN b ON a.id = b.id JOIN c a ON b.id = a.id;", "a", "CS01019")]
+    [InlineData("SELECT * FROM a JOIN b ON a.id = b.id JOIN c USING (id);", "id", "CS01015")]
+    [InlineData("SELECT * FROM a JOIN b USING (missing);", "missing", "CS01015")]
+    [InlineData("SELECT * FROM a JOIN c USING (enabled);", "enabled", "CS01015")]
+    [InlineData("SELECT * FROM c JOIN a USING (enabled);", "enabled", "CS01015")]
+    [InlineData("SELECT * FROM a JOIN b USING (id, id);", "id", "CS01015")]
+    [InlineData("SELECT a.id FROM a x LEFT JOIN b USING (id);", "a.id", "CS01015")]
+    [InlineData("SELECT bogus.id FROM a CROSS JOIN b;", "bogus.id", "CS01015")]
+    [InlineData("SELECT a.id FROM a x, b;", "a.id", "CS01015")]
     public async Task Join_InvalidScope_ShouldFailBeforeReading(string sql, string reference, string code)
     {
         // Arrange
@@ -186,11 +186,11 @@ public sealed class SqlNWayJoinTests
         // Act / Assert
         Check(await RowsAsync(session, "SELECT n.name, c.COLUMN_NAME FROM names n LEFT JOIN INFORMATION_SCHEMA.COLUMNS c ON n.name = c.TABLE_NAME ORDER BY n.name;"),
             [["absent", null], ["names", "name"]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash"]);
         session.LastStatementMetrics.CatalogSnapshot.ShouldNotBeNull();
         Check(await RowsAsync(session, "SELECT t.TABLE_NAME, c.COLUMN_NAME, n.name FROM INFORMATION_SCHEMA.TABLES t JOIN INFORMATION_SCHEMA.COLUMNS c USING (TABLE_NAME) LEFT JOIN names n ON t.TABLE_NAME = n.name WHERE t.TABLE_NAME = 'names';"),
             [["names", "name", "names"]]);
-        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-scan", "join-scan"]);
+        session.LastStatementMetrics!.JoinAccessPaths.ShouldBe(["join-hash", "join-hash"]);
         session.LastStatementMetrics.CatalogSnapshotCaptures.ShouldBe(isolation == 2 ? 0 : 1);
     }
 
@@ -367,7 +367,7 @@ public sealed class SqlNWayJoinTests
             await session.ExecuteAsync($"SELECT * FROM a {join} b USING (id);", cancellationToken: CancellationToken.None));
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHSQLE015");
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01015");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - N-way: many empty and populated inputs do not recurse through the executor stack")]

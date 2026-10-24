@@ -31,16 +31,16 @@ public sealed class OqlCompositeIndexParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Invalid index keys have one exact diagnostic (#1135)")]
-    [InlineData("CREATE INDEX ix ON c (a, a)", "OQL0002", "a", 25)]
-    [InlineData("CREATE INDEX ix ON c (a, ['a'])", "OQL0002", "[", 25)]
-    [InlineData("CREATE INDEX ix ON c ()", "OQL0002", ")", 22)]
-    [InlineData("CREATE INDEX ix ON c (ALL tags)", "COHDBL001", "ALL", 22)]
-    [InlineData("CREATE INDEX ix ON c (DISTINCT ARRAY t FOR t IN tags END)", "COHDBL001", "DISTINCT", 22)]
-    [InlineData("CREATE INDEX ix ON c (tags[*])", "OQL0002", "*", 27)]
-    [InlineData("CREATE INDEX ix ON c (a DESC)", "OQL0002", "DESC", 24)]
-    [InlineData("CREATE INDEX ix ON c (LOWER(a))", "OQL0002", "(", 27)]
-    [InlineData("CREATE INDEX ix ON c (a) WHERE a > 1", "OQL0002", "WHERE", 25)]
-    [InlineData("CREATE INDEX ix ON c (a) INCLUDE MISSING", "OQL0002", "INCLUDE", 25)]
+    [InlineData("CREATE INDEX ix ON c (a, a)", "CD00002", "a", 25)]
+    [InlineData("CREATE INDEX ix ON c (a, ['a'])", "CD00002", "[", 25)]
+    [InlineData("CREATE INDEX ix ON c ()", "CD00002", ")", 22)]
+    [InlineData("CREATE INDEX ix ON c (ALL tags)", "CK00001", "ALL", 22)]
+    [InlineData("CREATE INDEX ix ON c (DISTINCT ARRAY t FOR t IN tags END)", "CK00001", "DISTINCT", 22)]
+    [InlineData("CREATE INDEX ix ON c (tags[*])", "CD00002", "*", 27)]
+    [InlineData("CREATE INDEX ix ON c (a DESC)", "CD00002", "DESC", 24)]
+    [InlineData("CREATE INDEX ix ON c (LOWER(a))", "CD00002", "(", 27)]
+    [InlineData("CREATE INDEX ix ON c (a) WHERE a > 1", "CD00002", "WHERE", 25)]
+    [InlineData("CREATE INDEX ix ON c (a) INCLUDE MISSING", "CD00002", "INCLUDE", 25)]
     public void Parse_InvalidIndexKey_ShouldReportExactToken(string text, string code, string token, int start)
     {
         // Arrange / Act.
@@ -50,7 +50,7 @@ public sealed class OqlCompositeIndexParserTests
         diagnostic.Code.ShouldBe(code);
         diagnostic.Start.ShouldBe(start);
         text.Substring(start, token.Length).ShouldBe(token);
-        if (code == "COHDBL001") { diagnostic.Message!.ShouldContain(token + (token == "DISTINCT" ? " ARRAY" : "")); }
+        if (code == "CK00001") { diagnostic.Message!.ShouldContain(token + (token == "DISTINCT" ? " ARRAY" : "")); }
     }
     [Fact(DisplayName = "Cohesion Test [OQL] - Large deferred array keys retain one bounded refusal (#1135)")]
     public void Parse_LargeDeferredIndexKey_ShouldRejectOnceInBoundedTime()
@@ -63,7 +63,7 @@ public sealed class OqlCompositeIndexParserTests
         var diagnostic = new OqlQueryParser().Parse(text).Diagnostics.ShouldHaveSingleItem();
 
         // Assert.
-        diagnostic.Code.ShouldBe("COHDBL001");
+        diagnostic.Code.ShouldBe("CK00001");
         diagnostic.Start.ShouldBe(22);
         diagnostic.Message!.ShouldContain("DISTINCT ARRAY");
         elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));

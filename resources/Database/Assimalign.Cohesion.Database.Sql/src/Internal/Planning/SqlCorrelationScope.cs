@@ -6,6 +6,8 @@ using Assimalign.Cohesion.Database.Sql.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A lexical scope, searched before its parent; views share the same execution frame.</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCorrelationScope")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCorrelationScope.DebugView))]
 internal sealed class SqlCorrelationScope
 {
     internal SqlCorrelationScope(int id, SqlExpressionEvaluator local, SqlCorrelationScope? parent,
@@ -56,11 +58,19 @@ internal sealed class SqlCorrelationScope
             }
             if (key < 0)
             {
-                throw new SqlPlanningException("COHSQLE017", string.Format(CultureInfo.CurrentCulture,
+                throw new SqlPlanningException("CS05017", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.CorrelatedUngroupedColumn, column.ColumnName), column.Location);
             }
             value = new SqlBoundSlot(key);
         }
         return new SqlOuterReference(Id, value, Local.ColumnMetadata(column));
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCorrelationScope value)
+        {
+            _ = value;
+        }
     }
 }

@@ -990,10 +990,10 @@ internal sealed class DatabaseEventSource : EventSource
     private static string GetTypeName(Exception exception)
         => exception.GetType().FullName ?? exception.GetType().Name;
 
-    // The diagnostic code a thrown failure carries: only an offline refusal carries one (the
-    // model's COHxxx code that leads its message); empty otherwise.
+    // Match returned failures: prefer the first error, then the first diagnostic. Never
+    // recover a code from message text, which can contain statement data.
     private static string GetFailureCode(Exception exception)
-        => exception is DatabaseOfflineException offline ? offline.Code : string.Empty;
+        => exception is DatabaseException failure ? FindFailureDiagnostic(failure.Diagnostics)?.Code ?? string.Empty : string.Empty;
 
     // Cuts a name to maxLength characters and marks the cut with an ellipsis, without splitting a
     // surrogate pair: the model servers' helper (a private copy, rule 3).

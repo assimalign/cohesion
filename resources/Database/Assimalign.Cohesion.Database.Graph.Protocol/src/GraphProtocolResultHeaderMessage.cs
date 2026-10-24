@@ -48,7 +48,7 @@ public sealed record GraphProtocolResultHeaderMessage(IReadOnlyList<(string Name
 
         if (count < 0 || count > (payload.Length - position) / 5)
         {
-            throw new ProtocolException("Malformed payload: invalid column count.");
+            throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol);
         }
 
         var columns = new List<(string, byte)>(count);
@@ -59,7 +59,7 @@ public sealed record GraphProtocolResultHeaderMessage(IReadOnlyList<(string Name
 
             if (position >= payload.Length)
             {
-                throw new ProtocolException("Malformed payload: truncated column type.");
+                throw new ProtocolException(ErrorMessages.ResultHeaderMessageDecodeProtocol2);
             }
 
             columns.Add((name, payload[position++]));

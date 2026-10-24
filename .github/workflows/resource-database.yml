@@ -52,8 +52,8 @@ jobs:
   build:
     name: "${{ github.workflow }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
-    # Above the per-area 30 until the first main runs measure this job: run 38740702835's
-    # single-project legs bound it at 29 minutes on Linux and 42 on Windows (.claude/rules/build-system.md).
+    # Latest three successful consolidated main runs (39656175267, 39625288435, 39285511469):
+    # slowest build 24m 1s; twice that, rounded up to 15 minutes, is 60 (#1470).
     timeout-minutes: 60
     strategy:
       # Every leg reports its own result. With fail-fast, one failing leg cancels the others (#1093).
@@ -100,8 +100,8 @@ jobs:
             'Assimalign.Cohesion.Database.Sql.Language',
             'Assimalign.Cohesion.Database.Sql.Protocol',
             'Assimalign.Cohesion.Database.Sql.Schema',
-            'Assimalign.Cohesion.Database.Sql.Tcp',
             'Assimalign.Cohesion.Database.Storage',
+            'Assimalign.Cohesion.Database.Tcp',
             'Assimalign.Cohesion.Database.Testing',
             'Assimalign.Cohesion.Database.Transactions',
             'Assimalign.Cohesion.Database.Types'
@@ -141,7 +141,8 @@ jobs:
   #   AOT-compiled build that loses a code path fails the job;
   # - the Documents client guard, which drives OQL and document commands through real servers
   #   over InMemory and TCP, checking typed failures and pooled session reuse.
-  # All three projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
+  # - the shared TCP guard, which authenticates and exchanges Ping/Pong with every model.
+  # All guard projects set PublishAot. Each publish step fails on any IL2xxx/IL3xxx warning in its
   # output, whatever the project promotes to an error (the guard also makes ILC's warnings errors).
   sql-benchmarks:
     name: "Database NativeAOT harnesses (linux-x64)"
@@ -231,6 +232,34 @@ jobs:
             throw "Database.Documents.AotSample reported a failed check (exit code $LASTEXITCODE)."
           }
 
+      - name: Publish and run the shared TCP NativeAOT guard
+        shell: pwsh
+        env:
+          MSBUILDDISABLENODEREUSE: '1'
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "tcp-aot-sample"
+          $log = dotnet publish "./resources/Database/Assimalign.Cohesion.Database.Tcp/samples/Assimalign.Cohesion.Database.Tcp.AotSample/Assimalign.Cohesion.Database.Tcp.AotSample.csproj" `
+              --configuration Release `
+              --runtime linux-x64 `
+              --output $output `
+              --nologo 2>&1
+          $log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT publish of Database.Tcp.AotSample failed with exit code $LASTEXITCODE."
+          }
+          if ($log -match "warning (?:IL[23]|CS)[0-9]{3,4}") {
+            throw "NativeAOT publish of Database.Tcp.AotSample reported compiler or trimming warnings."
+          }
+
+          $checks = & (Join-Path $output "Assimalign.Cohesion.Database.Tcp.AotSample")
+          $checks | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database.Tcp.AotSample reported a failed check (exit code $LASTEXITCODE)."
+          }
+          if ($checks -notcontains "Database.Tcp NativeAOT: 5/5 model servers passed.") {
+            throw "Database.Tcp.AotSample did not complete all five model checks."
+          }
+
       - name: Publish and smoke-run the NativeAOT statement benchmark
         shell: pwsh
         run: |
@@ -289,6 +318,8 @@ jobs:
     name: "Database.Testing E2E [${{ matrix.os }}]"
     needs: database-testing-pack
     runs-on: ${{ matrix.os }}
+    # Same healthy runs: slowest E2E 3m 15s; the #1470 minimum for this job is 45 minutes.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

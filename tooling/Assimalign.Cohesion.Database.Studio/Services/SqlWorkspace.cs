@@ -37,7 +37,7 @@ internal sealed class SqlWorkspace : LanguageWorkspace
 
     // The typed embedded session: SQL text executes on the SQL session's language member, which the
     // lifecycle-only ModelWorkspace.RequireSession() does not reach.
-    private SqlDatabaseSession SqlSession => _session ?? throw new InvalidOperationException("Select a database first.");
+    private SqlDatabaseSession SqlSession => _session ?? throw new InvalidOperationException(ErrorMessages.SessionSelectionMissing);
 
     protected override async Task OpenSessionAsync(string database, CancellationToken cancellationToken)
     {

@@ -25,6 +25,8 @@ namespace Assimalign.Cohesion.Database.Blob.Catalog;
 /// triplet of <c>database-area.md</c> rule 1).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("BlobCatalog")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog.DebugView))]
 public sealed partial class BlobCatalog
 {
     private readonly BlobStorage _storage;
@@ -67,7 +69,7 @@ public sealed partial class BlobCatalog
         while (iterator.MoveNext())
         {
             var unit = iterator.Current;
-            var record = BlobCatalogCodec.Decode(unit.Data.Span);
+            var record = BlobCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
             var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
@@ -132,12 +134,12 @@ public sealed partial class BlobCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(container.Name);
         if (container.Id == Guid.Empty)
         {
-            throw new ArgumentException("A container must have a nonempty identity.", nameof(container));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveContainerAsyncArgument, nameof(container));
         }
         if (container.Owner is not (DatabaseObjectOwner.Adhoc or DatabaseObjectOwner.Schema)
             || (container.Owner == DatabaseObjectOwner.Schema && string.IsNullOrWhiteSpace(container.OwningSchema)))
         {
-            throw new ArgumentException("A schema-owned container must name its owning schema.", nameof(container));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveContainerAsyncArgument2, nameof(container));
         }
 
         Found? previous;
@@ -238,7 +240,7 @@ public sealed partial class BlobCatalog
         ArgumentException.ThrowIfNullOrWhiteSpace(blob.Name);
         if (blob.ContainerId == Guid.Empty || blob.Length < 0 || ((blob.Length == 0) != (blob.HeadLocation == 0)))
         {
-            throw new ArgumentException("Blob metadata requires a container identity and a head for nonempty content.", nameof(blob));
+            throw new ArgumentException(ErrorMessages.BlobCatalogSaveBlobAsyncArgument, nameof(blob));
         }
 
         Found? previous;
@@ -532,11 +534,11 @@ public sealed partial class BlobCatalog
         if (!_storage.TryReadRecord(reference.PageId, reference.SlotIndex, 0, out var bytes)) { return null; }
         if (bytes.Length < RecordVersionStamp.HeaderSize + 2)
         {
-            throw new BlobCatalogException("Truncated blob catalog record.");
+            BlobCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         }
         var (writer, deleter) = RecordVersionStamp.ReadStamps(bytes.Span);
         if (writer != reference.Writer) { return null; }
-        var record = BlobCatalogCodec.Decode(bytes.Span);
+        var record = BlobCatalogCodec.Decode(bytes.Span, reference.PageId, reference.SlotIndex);
         return matches(record) ? (record, deleter) : null;
     }
 
@@ -544,9 +546,17 @@ public sealed partial class BlobCatalog
     {
         if (context.State != TransactionState.Active)
         {
-            throw new InvalidOperationException("Catalog mutations require an active transaction.");
+            throw new InvalidOperationException(ErrorMessages.BlobCatalogEnsureActiveFailure);
         }
     }
 
     private readonly record struct Found(Reference Reference, CatalogRecord Record);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Blob.Catalog.BlobCatalog value)
+        {
+            _ = value;
+        }
+    }
 }

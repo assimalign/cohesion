@@ -198,7 +198,7 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (SqlCatalogException failure)
             {
-                throw new SqlPlanningException("COHSQLE025", failure.Message, innerException: failure);
+                throw new SqlPlanningException("CS03025", failure.Message, innerException: failure);
             }
         }
         if (boundDefault is null)

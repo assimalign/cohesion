@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Documents.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("DocumentRowWriter")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentRowWriter.DebugView))]
 internal sealed class DocumentRowWriter : IDisposable
 {
     private readonly DocumentJsonBuffer _buffer = new();
@@ -68,6 +70,14 @@ internal sealed class DocumentRowWriter : IDisposable
             case float number when float.IsFinite(number): writer.WriteNumberValue(Convert.ToDecimal(number)); break;
             case double number when double.IsFinite(number): writer.WriteNumberValue(Convert.ToDecimal(number)); break;
             default: throw new ArgumentException(ErrorMessages.JsonScalarInvalid, nameof(value));
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentRowWriter value)
+        {
+            _ = value;
         }
     }
 }

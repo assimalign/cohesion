@@ -24,10 +24,10 @@ engines translate at their boundary.
 
 The package owns the B-tree page format (`BTreeIndexManager.FormatVersion`, format
 2 since #1194: entries ordered by key, entry reference and writer). Attaching a
-tree written in any other format fails with `IndexFormatException` (`COHDBI001`);
+tree written in any other format fails with `IndexFormatException` (`CK06101`);
 each model's open surfaces that refusal — see [DESIGN.md](DESIGN.md), "Page format
 2 and the format gate". An attached tree that reaches a damaged page fails the
-operation with `IndexCorruptionException` (`COHDBI002`).
+operation with `IndexCorruptionException` (`CK06102`).
 
 ## Consumers
 
@@ -42,3 +42,42 @@ with statement snapshots, and `Sql.Catalog` persists the manager's registrations
 maintenance surfaces this consumer added — the stamp-preserving build path, the
 physical undo pair, the aborted-writer purge walk, and the snapshot cursor
 overload — are documented in [DESIGN.md](DESIGN.md).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Dead-version maintenance (#1195, #1239)
+
+`BTreeIndexManager.PruneAsync(bound, token)` removes safe committed tombstones in batches of
+at most 64 leaf pages, preserving old snapshots and resuming after cancellation or its budget.
+The owning coordinator calls it under the apply gate. Unique inserts use the optional
+`BTreeIndexManagerOptions.PruneBound` provider to prune their key's history while reusing one
+descent and insertion position through splits. Read cursors stay read-only. Empty-leaf reclamation
+and merges remain deferred; B-tree format 2 is unchanged. Physical page rollback remains the
+approved #1393 design; [DESIGN.md](DESIGN.md) records the alternatives and measurements.
+
+## Bounded range counts (#1522)
+
+BTreeIndex.CountRange(TransactionSnapshot, IndexKeyRange, int entryLimit = 512,
+int pageLimit = 32, CancellationToken = default) returns BTreeRangeCount: Count,
+IsComplete, EntriesExamined and PagesVisited. The caller keeps its statement snapshot pinned.
+A shared tree hold protects descent and leaf walking; no key or page escapes. Physical entry work
+includes invisible versions and the stopping key; page visits include descent and empty leaves.
+Both limits must be positive. Cancellation preserves its token and releases all ownership.
+An incomplete result is a visible-entry lower bound, never an exact statistic or extrapolation.
+It writes no pages, adds no format/version state, and uses no process-global counter or atomic.
+D3's transient probes use this surface; estimates and SQL-specific cost heuristics belong to SQL.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+
+## Debugger inspection convention
+
+Index debugger views filter nonpublic traversal and page state. BTreeIndex exposes its existing Name, Kind and IsUnique values; IndexKey exposes Length. Cursor positioning guards, entry/key construction and pointer-backed node/search-key state are omitted. The ref-struct views retain no stack-only instance or span; internal-only views can be empty.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

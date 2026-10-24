@@ -20,10 +20,10 @@ internal static class SqlConstraintAssertions
     {
         string code = failure.ConstraintKind switch
         {
-            "UNIQUE" or "PRIMARY KEY" => "COHSQLE037",
-            "CHECK" or "DOMAIN" => "COHSQLE038",
-            "FOREIGN KEY" => "COHSQLE039",
-            "NOT NULL" => "COHSQLE024",
+            "UNIQUE" or "PRIMARY KEY" => "CS03037",
+            "CHECK" or "DOMAIN" => "CS03038",
+            "FOREIGN KEY" => "CS03039",
+            "NOT NULL" => "CS03024",
             _ => throw new InvalidOperationException("Unexpected constraint kind in the corpus."),
         };
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();

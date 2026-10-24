@@ -9,6 +9,8 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
+[global::System.Diagnostics.DebuggerDisplay("SqlDeferredMigration")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeferredMigration.DebugView))]
 internal sealed class SqlDeferredMigration
 {
     private readonly SqlSchemaProvisioner _owner;
@@ -73,5 +75,13 @@ internal sealed class SqlDeferredMigration
         // has already stopped. A claimed one is joined before storage can close.
         Run(stopped);
         await _completion.Task.ConfigureAwait(false);
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeferredMigration value)
+        {
+            _ = value;
+        }
     }
 }

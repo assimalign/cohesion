@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// </summary>
 internal static class JournalImage
 {
-    private const int PrefixSize = sizeof(int) + sizeof(int);
-    private const int Magic = 0x324C4157; // 'WAL2'
+    private const int prefixSize = sizeof(int) + sizeof(int);
+    private const int magic = 0x324C4157; // 'WAL2'
 
     /// <summary>
     /// The frames of a journal, in order, up to the first that does not frame.
@@ -22,24 +22,24 @@ internal static class JournalImage
     {
         var frames = new List<Frame>();
         int offset = 0;
-        while (journal.Length - offset >= PrefixSize)
+        while (journal.Length - offset >= prefixSize)
         {
             int body = BinaryPrimitives.ReadInt32LittleEndian(journal.AsSpan(offset));
-            if (BinaryPrimitives.ReadInt32LittleEndian(journal.AsSpan(offset + sizeof(int))) != Magic
+            if (BinaryPrimitives.ReadInt32LittleEndian(journal.AsSpan(offset + sizeof(int))) != magic
                 || body < 26
-                || journal.Length - offset - PrefixSize - sizeof(uint) < body)
+                || journal.Length - offset - prefixSize - sizeof(uint) < body)
             {
                 break;
             }
 
-            var span = journal.AsSpan(offset + PrefixSize, body);
+            var span = journal.AsSpan(offset + prefixSize, body);
             frames.Add(new Frame(
                 offset,
-                PrefixSize + body + sizeof(uint),
+                prefixSize + body + sizeof(uint),
                 (JournalRecordType)span[17],
                 BinaryPrimitives.ReadInt64LittleEndian(span[1..]),
                 BinaryPrimitives.ReadInt64LittleEndian(span[18..])));
-            offset += PrefixSize + body + sizeof(uint);
+            offset += prefixSize + body + sizeof(uint);
         }
 
         return frames;

@@ -1,7 +1,9 @@
 using System;
+using System.Globalization;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -27,19 +29,22 @@ namespace Assimalign.Cohesion.Database;
 /// back after the database reopens, as after any commit whose acknowledgment was lost.
 /// </para>
 /// <para>
-/// <b>Every engine's message leads with the model's offline code</b> (owner decision 24 of
+/// <b>Every engine carries the model's offline code in Diagnostics</b> (owner decision 24 of
 /// 2026-10-06, #1272), whichever path raised it: a transaction's commit, explicit or the
 /// autocommit transaction of one statement or operation
 /// (<see cref="Create(string, string, TransactionCommitUnconfirmedException)"/>, which keeps the
 /// kernel's exception as the inner exception); a statement that committed by itself, or a storage
 /// bracket whose commit record was written before the flush failed
 /// (<see cref="Create(string, string, StorageOfflineException)"/>). The codes are those of
-/// <see cref="DatabaseOfflineException"/>: <c>COHSQLT004</c>, <c>COHDBK002</c>,
-/// <c>COHDBD002</c>, <c>COHDBG012</c> and <c>COHDBB002</c>.
+/// <see cref="DatabaseOfflineException"/>: <c>CS04004</c>, <c>CV06102</c>,
+/// <c>CD06102</c>, <c>CG06012</c> and <c>CB06002</c>.
 /// </para>
 /// </remarks>
 public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseException
 {
+    private DatabaseTransactionCommitUnconfirmedException(string message, string code, Exception cause)
+        : base(message, [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }], cause) { }
+
     /// <summary>
     /// Initializes a new <see cref="DatabaseTransactionCommitUnconfirmedException"/>.
     /// </summary>
@@ -63,7 +68,7 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
     /// the database went offline. Either way the effect survives the reopen exactly when its
     /// records reached stable storage.
     /// </summary>
-    /// <param name="code">The model's offline code that leads the message, for example <c>COHSQLT004</c>.</param>
+    /// <param name="code">The model's structured offline code, for example <c>CS04004</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The storage's offline error.</param>
     /// <returns>The exception to throw.</returns>
@@ -73,21 +78,19 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
         ArgumentNullException.ThrowIfNull(cause);
 
         return new DatabaseTransactionCommitUnconfirmedException(
-            $"{code}: Database '{database}' went offline while the operation was committing: {DatabaseOfflineException.DescribeFailure(cause)} " +
-            "after the operation's work reached the journal. The operation may or may not have been " +
-            "applied; do not retry it. Reopen the database (OpenDatabaseAsync): its recovery keeps the work if its records " +
-            "reached stable storage and discards it if not, and reading the data back then tells which.",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.OperationCommitUnconfirmed, database, DatabaseOfflineException.DescribeFailure(cause)),
+            code,
             cause);
     }
 
     /// <summary>
     /// Creates the exception an engine raises for a transaction's commit whose commit record was
     /// appended but could not be made durable: the transaction kernel's unconfirmed commit,
-    /// translated at the model boundary with the model's code leading the message (#1272). The
+    /// translated at the model boundary with the model's code in Diagnostics (#1272). The
     /// transaction ended committed in this process; the reopen's recovery keeps it exactly when
     /// its record reached stable storage.
     /// </summary>
-    /// <param name="code">The model's offline code that leads the message, for example <c>COHDBD002</c>.</param>
+    /// <param name="code">The model's structured offline code, for example <c>CD06102</c>.</param>
     /// <param name="database">The database's name.</param>
     /// <param name="cause">The kernel's unconfirmed commit, which becomes the inner exception.</param>
     /// <returns>The exception to throw.</returns>
@@ -100,12 +103,10 @@ public sealed class DatabaseTransactionCommitUnconfirmedException : DatabaseExce
         // it; the root words its cause, as it does for every other offline message.
         string failure = StorageOfflineException.Find(cause) is { } offline
             ? DatabaseOfflineException.DescribeFailure(offline)
-            : $"the durable flush of its commit record failed ({cause.InnerException?.Message ?? cause.Message})";
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.UnconfirmedExceptionCreateFailure, cause.InnerException?.Message ?? cause.Message);
         return new DatabaseTransactionCommitUnconfirmedException(
-            $"{code}: Database '{database}' went offline while a transaction was committing: {failure} after the transaction's " +
-            "commit record was written. The transaction may or may not have committed; do not retry it. Reopen the database " +
-            "(OpenDatabaseAsync): its recovery keeps the commit if its record reached stable storage and discards it if not, and " +
-            "reading the data back then tells which.",
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitUnconfirmed, database, failure),
+            code,
             cause);
     }
 }

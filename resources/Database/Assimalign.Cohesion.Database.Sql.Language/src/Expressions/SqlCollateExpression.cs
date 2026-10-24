@@ -5,6 +5,8 @@ using Assimalign.Cohesion.Database.Language;
 /// <summary>
 /// Applies an explicit string collation to an expression without changing its value.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlCollateExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlCollateExpression.DebugView))]
 public sealed class SqlCollateExpression : SqlExpression
 {
     /// <summary>Initializes an explicit collation expression.</summary>
@@ -24,4 +26,17 @@ public sealed class SqlCollateExpression : SqlExpression
 
     /// <summary>Gets the explicit collation name.</summary>
     public string CollationName { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlCollateExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlCollateExpression value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression Operand => _target.Operand;
+        public string CollationName => _target.CollationName;
+    }
 }

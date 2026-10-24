@@ -72,10 +72,10 @@ public sealed class KeyValueCommandEntryTests
                 error.ShouldBeAssignableTo<OperationCanceledException>().CancellationToken.ShouldBe(cancellation.Token);
                 break;
             case "Offline":
-                error.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("COHDBK002");
+                error.ShouldBeOfType<DatabaseOfflineException>().Code.ShouldBe("CV06102");
                 break;
             case "Transaction":
-                error.ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("COHDBK001");
+                error.ShouldBeAssignableTo<DatabaseException>().Diagnostics[0].Code.ShouldBe("CV04101");
                 break;
             case "Parse":
                 error.ShouldBeOfType<DatabaseParseException>();

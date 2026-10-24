@@ -73,7 +73,7 @@ public sealed class GraphAggregateWireTests
                 await connection.QueryAsync("MATCH (a:Value) RETURN sum(9223372036854775807)", cancellationToken: harness.Token));
             // Assert: the exchange only certifies reusable completion for an error before any header.
             error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG013");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02013");
             connection.IsOpen.ShouldBeTrue();
         }
         await using var reused = await harness.Client.ConnectAsync(harness.Token);
@@ -96,7 +96,7 @@ public sealed class GraphAggregateWireTests
             await foreach (var path in connection.QueryPathsAsync("MATCH (a) RETURN count(a)", cancellationToken: harness.Token)) { }
         });
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         error.Message.ShouldContain("Path execution requires", Case.Sensitive);
         (await connection.QueryAsync("RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(1L);
         harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
@@ -119,11 +119,11 @@ public sealed class GraphAggregateWireTests
         // Act / Assert
         foreach (var (source, code) in new[]
         {
-            ("RETURN collect_list(1)", "COHDBG016"),
-            ("RETURN collect(1)", "COHDBG016"),
-            ("RETURN sum('text')", "COHDBG013"),
-            ("RETURN avg('text')", "COHDBG013"),
-            ("MATCH (a:Value) RETURN sum(9223372036854775807)", "COHDBG013"),
+            ("RETURN collect_list(1)", "CG07016"),
+            ("RETURN collect(1)", "CG07016"),
+            ("RETURN sum('text')", "CG02013"),
+            ("RETURN avg('text')", "CG02013"),
+            ("MATCH (a:Value) RETURN sum(9223372036854775807)", "CG02013"),
         })
         {
             await Execute(source);

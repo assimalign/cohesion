@@ -212,4 +212,20 @@ framing, handshake and model messages are unchanged.
 
 ## Coded command failures (#1105)
 
-The shared core negotiates protocol 2.1 with no Key-Value capabilities. Empty command text is sent to the server for coded ParseFailure (COHKV001), as other command grammar refusals are. Statement Error text is CODE: message; the client retains that text and its existing terminal-response reuse policy.
+The shared core negotiates protocol 2.1 with no Key-Value capabilities. Empty command text is sent to the server for coded ParseFailure (CV00001), as other command grammar refusals are. Statement Error text is CODE: message; the client retains that text and its existing terminal-response reuse policy.
+
+## KeyValuePair diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Client debugger views expose the captured database name, stored materialized-result metadata and owned-row field counts. They omit live connection state, transport settings and row-value buffers, and perform no result enumeration or decoding.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

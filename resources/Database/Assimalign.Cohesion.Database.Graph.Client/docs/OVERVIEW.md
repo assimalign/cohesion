@@ -34,12 +34,13 @@ properties. DISTINCT deduplicates identities, and RETURN * works when one named 
 Execute's static planned-kind gate directs entity columns to this path API before any mutation.
 Enumerate to completion to verify the terminal count; abandoning an unfinished
 enumeration discards its connection. After EOF, read the result's `Diagnostics` for
-completion warnings, including COHDBG010 for an unknown label. Each result is enumerated once.
+completion warnings, including CG01010 for an unknown label. Each result is enumerated once.
 
 Dispose each connection to return a healthy authenticated session to the pool, and dispose the
 client to close the pool. Scalar parse/execution failures and terminal path rejections before any
-path output retain the session; later path failures discard it. Explicit transactions are not exposed:
-BEGIN/COMMIT/ROLLBACK and the reserved Transaction message are unsupported.
+path output retain the session; later path failures discard it. Execute accepts START TRANSACTION,
+COMMIT and ROLLBACK. Negotiated server status makes pool return roll back unfinished transactions.
+BEGIN and the reserved Transaction message remain unsupported.
 
 Parameters use scalar components, or GraphValueCodec when graph.composite-values is negotiated, and bind `$name` or `@name` in property maps, WHERE
 operands and RETURN expressions. Bare names match case-sensitively after removing one sigil; runtime scalar types are
@@ -48,3 +49,19 @@ string dictionaries. Conditional expressions include CASE, COALESCE and NULLIF. 
 See [design](DESIGN.md) for completion and lifetime behavior.
 
 Supply an `IDuplexConnectionFactory` through `GraphClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+## Debugger inspection (#1470)
+
+Client debugger views show captured metadata without transport work, path enumeration or exchange completion.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

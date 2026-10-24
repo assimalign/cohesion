@@ -55,29 +55,29 @@ public sealed class DocumentUpdateTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UPDATE: invalid or overlapping paths change no document")]
-    [InlineData("SET name.first = 'x'", "COHDOC016")]
-    [InlineData("UNSET name.first", "COHDOC016")]
-    [InlineData("SET tags[5] = 'x'", "COHDOC016")]
-    [InlineData("SET absent[0] = 1", "COHDOC016")]
-    [InlineData("UNSET absent[0].x", "COHDOC016")]
-    [InlineData("SET absent[0].x = MISSING", "COHDOC016")]
-    [InlineData("UNSET tags[5].x", "COHDOC016")]
-    [InlineData("SET tags[5].x = MISSING", "COHDOC016")]
-    [InlineData("SET amount = 99 UNSET absent[0].x", "COHDOC016")]
-    [InlineData("SET amount = 99, absent[0].x = MISSING", "COHDOC016")]
-    [InlineData("SET amount = 99 UNSET tags[5].x", "COHDOC016")]
-    [InlineData("SET amount = 99, tags[5].x = MISSING", "COHDOC016")]
-    [InlineData("UNSET absent.deep[0].x", "COHDOC016")]
-    [InlineData("SET details[0] = 1", "COHDOC016")]
-    [InlineData("SET tags.name = 1", "COHDOC016")]
-    [InlineData("SET d = {}", "COHDOC016")]
-    [InlineData("UNSET tags[0]", "COHDOC016")]
-    [InlineData("SET a = 1, a.b = 2", "COHDOC017")]
-    [InlineData("SET a.b = 1, a = 2", "COHDOC017")]
-    [InlineData("SET a = 1 UNSET a", "COHDOC017")]
-    [InlineData("SET d.amount = 1, amount = 2", "COHDOC017")]
-    [InlineData("SET details.score = 1, d['details']['score'] = 2", "COHDOC017")]
-    [InlineData("UNSET a, a.b", "COHDOC017")]
+    [InlineData("SET name.first = 'x'", "CD02016")]
+    [InlineData("UNSET name.first", "CD02016")]
+    [InlineData("SET tags[5] = 'x'", "CD02016")]
+    [InlineData("SET absent[0] = 1", "CD02016")]
+    [InlineData("UNSET absent[0].x", "CD02016")]
+    [InlineData("SET absent[0].x = MISSING", "CD02016")]
+    [InlineData("UNSET tags[5].x", "CD02016")]
+    [InlineData("SET tags[5].x = MISSING", "CD02016")]
+    [InlineData("SET amount = 99 UNSET absent[0].x", "CD02016")]
+    [InlineData("SET amount = 99, absent[0].x = MISSING", "CD02016")]
+    [InlineData("SET amount = 99 UNSET tags[5].x", "CD02016")]
+    [InlineData("SET amount = 99, tags[5].x = MISSING", "CD02016")]
+    [InlineData("UNSET absent.deep[0].x", "CD02016")]
+    [InlineData("SET details[0] = 1", "CD02016")]
+    [InlineData("SET tags.name = 1", "CD02016")]
+    [InlineData("SET d = {}", "CD02016")]
+    [InlineData("UNSET tags[0]", "CD02016")]
+    [InlineData("SET a = 1, a.b = 2", "CD01017")]
+    [InlineData("SET a.b = 1, a = 2", "CD01017")]
+    [InlineData("SET a = 1 UNSET a", "CD01017")]
+    [InlineData("SET d.amount = 1, amount = 2", "CD01017")]
+    [InlineData("SET details.score = 1, d['details']['score'] = 2", "CD01017")]
+    [InlineData("UNSET a, a.b", "CD01017")]
     public async Task Execute_InvalidPath_ShouldPreserveAllContentAndVersionsAsync(string changes, string code)
     {
         // Arrange
@@ -188,7 +188,7 @@ public sealed class DocumentUpdateTests
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
             var refusal = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("SELECT * FROM items", cancellationToken: CancellationToken.None));
-            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBD001");
+            refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD04101");
             await transaction.RollbackAsync(CancellationToken.None);
         }
         (await SnapshotAsync(items, session)).ShouldBe(before);
@@ -227,11 +227,11 @@ public sealed class DocumentUpdateTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - UPDATE: invalid expressions fail over empty collections")]
-    [InlineData("UPDATE items SET n = $absent WHERE 0", "COHDOC005")]
-    [InlineData("UPDATE items SET n = COUNT(*)", "COHDOC001")]
-    [InlineData("UPDATE items d SET n = META(other).id", "COHDOC001")]
-    [InlineData("UPDATE items SET n = 1 WHERE COUNT(*) > 0", "COHDOC001")]
-    [InlineData("UPDATE x SET n = 1", "COHDOC002")]
+    [InlineData("UPDATE items SET n = $absent WHERE 0", "CD01005")]
+    [InlineData("UPDATE items SET n = COUNT(*)", "CD05001")]
+    [InlineData("UPDATE items d SET n = META(other).id", "CD05001")]
+    [InlineData("UPDATE items SET n = 1 WHERE COUNT(*) > 0", "CD05001")]
+    [InlineData("UPDATE x SET n = 1", "CD01002")]
     public async Task Execute_InvalidExpression_ShouldRejectBeforeReadingAsync(string statement, string code)
     {
         // Arrange
@@ -242,7 +242,7 @@ public sealed class DocumentUpdateTests
         // Act / Assert
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
-        if (code == "COHDOC002") { error.Message.ShouldBe("Collection 'x' does not exist."); }
+        if (code == "CD01002") { error.Message.ShouldBe("Collection 'x' does not exist."); }
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - UPDATE: schema ownership permits mutation and META version rejects stale preconditions")]
@@ -286,7 +286,7 @@ public sealed class DocumentUpdateTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement,
             new Dictionary<string, object?> { ["value"] = parameter.RootElement }, CancellationToken.None));
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC018");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02018");
         error.Message.ShouldBe("UPDATE JSON must be valid and nested no deeper than 128 levels.");
         (await SnapshotAsync(items, session)).ShouldBe(before);
     }
@@ -310,7 +310,7 @@ public sealed class DocumentUpdateTests
         // Act: tags is null on the final document; arithmetic fails on the second.
         var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("UPDATE items " + change, cancellationToken: CancellationToken.None));
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(arithmetic ? "COHDOC006" : "COHDOC016");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(arithmetic ? "CD02006" : "CD02016");
         if (transaction is not null)
         {
             transaction.State.ShouldBe(TransactionState.Faulted);
@@ -391,7 +391,7 @@ public sealed class DocumentUpdateTests
         else
         {
             var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(statement, cancellationToken: CancellationToken.None));
-            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDOC018");
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD02018");
             (await items.GetAsync(session, "one", CancellationToken.None)).ShouldNotBeNull().Version.ShouldBe(original.Version);
         }
     }
@@ -485,7 +485,7 @@ public sealed class DocumentUpdateTests
             new Dictionary<string, object?> { ["deep"] = parameter.RootElement }, CancellationToken.None));
         // Assert
         var diagnostic = error.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHDOC018");
+        diagnostic.Code.ShouldBe("CD02018");
         diagnostic.Start.ShouldBe(statement.IndexOf("b.c", StringComparison.Ordinal));
         diagnostic.End.ShouldBe(statement.IndexOf("b.c", StringComparison.Ordinal) + 3);
         (await SnapshotAsync(items, session)).ShouldBe(before);

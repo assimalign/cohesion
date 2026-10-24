@@ -4,6 +4,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference        Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference        Include="Assimalign.Cohesion.Connections" />
 		<!--
 			The area root rolls up the child roots: the base components a database is
 			made of (execution, indexing, language infra, wire protocol, security,

@@ -28,6 +28,8 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// and a new column takes <c>relnatts + 1</c> (<c>src/backend/commands/tablecmds.c:7445-7446</c>).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCatalogTable {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable.DebugView))]
 public sealed class SqlCatalogTable
 {
     private readonly int[] _physicalOrdinals;
@@ -69,7 +71,7 @@ public sealed class SqlCatalogTable
 
         if (columns.Count == 0)
         {
-            throw new SqlCatalogException($"Table '{schema}.{name}' must declare at least one column.");
+            throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableSqlCatalog, schema, name));
         }
 
         ObjectId = objectId;
@@ -82,7 +84,7 @@ public sealed class SqlCatalogTable
         var constraintCopy = new SqlCatalogConstraint[constraints?.Count ?? 0];
         for (int index = 0; index < constraintCopy.Length; index++)
         {
-            constraintCopy[index] = constraints![index] ?? throw new ArgumentException("A constraint cannot be null.", nameof(constraints));
+            constraintCopy[index] = constraints![index] ?? throw new ArgumentException(ErrorMessages.SqlCatalogTableArgument, nameof(constraints));
         }
         Constraints = Array.AsReadOnly(constraintCopy);
 
@@ -94,14 +96,14 @@ public sealed class SqlCatalogTable
             if (dropped[index] < 0 || dropped[index] >= PhysicalColumnCount)
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is outside its {PhysicalColumnCount} physical columns.",
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument2, dropped[index], schema, name, PhysicalColumnCount),
                     nameof(droppedColumnOrdinals));
             }
 
             if (index > 0 && dropped[index] == dropped[index - 1])
             {
                 throw new ArgumentException(
-                    $"Dropped column ordinal {dropped[index]} of '{schema}.{name}' is listed more than once.", nameof(droppedColumnOrdinals));
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogTableArgument3, dropped[index], schema, name), nameof(droppedColumnOrdinals));
             }
         }
 
@@ -207,5 +209,26 @@ public sealed class SqlCatalogTable
         }
 
         return null;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogTable value)
+        {
+            _target = value;
+        }
+
+        public ulong ObjectId => _target.ObjectId;
+        public string Schema => _target.Schema;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseObjectOwner Owner => _target.Owner;
+        public string? OwningSchema => _target.OwningSchema;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogColumn> Columns => _target.Columns;
+        public int PhysicalColumnCount => _target.PhysicalColumnCount;
+        public global::System.Collections.Generic.IReadOnlyList<int> DroppedColumnOrdinals => _target.DroppedColumnOrdinals;
+        public global::System.Collections.Generic.IReadOnlyList<string> PrimaryKeyColumns => _target.PrimaryKeyColumns;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogConstraint> Constraints => _target.Constraints;
     }
 }

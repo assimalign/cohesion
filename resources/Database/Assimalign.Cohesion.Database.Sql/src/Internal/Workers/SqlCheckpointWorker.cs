@@ -22,6 +22,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// closed while the engine keeps it registered is never due, and its checkpoint racing the close is
 /// not a failure (<see cref="SqlDatabaseEngine.IsOpen(SqlDatabase)"/> is false for it).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlCheckpointWorker {Name,nq}")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCheckpointWorker.DebugView))]
 internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase>
 {
     private readonly SqlDatabaseEngine _engine;
@@ -96,5 +98,21 @@ internal sealed class SqlCheckpointWorker : DatabaseCheckpointWorker<SqlDatabase
         }
 
         return finished;
+    }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlCheckpointWorker _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlCheckpointWorker value)
+        {
+            _target = value;
+        }
+
+        public global::Assimalign.Cohesion.Database.DatabaseWorkerLanes<bool> Lanes => _target.Lanes;
+        public bool CompletionOnly => _target.CompletionOnly;
+        public string Name => _target.Name;
+        public global::Assimalign.Cohesion.Database.DatabaseEngineWorkerKind Kind => _target.Kind;
+        public global::System.TimeSpan Interval => _target.Interval;
     }
 }

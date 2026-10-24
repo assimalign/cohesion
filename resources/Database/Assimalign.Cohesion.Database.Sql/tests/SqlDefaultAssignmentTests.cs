@@ -35,7 +35,7 @@ public sealed class SqlDefaultAssignmentTests
 
         // Assert
         var diagnostic = failure.Diagnostics.Where(item => item.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("SQL0003");
+        diagnostic.Code.ShouldBe("CS00003");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe("DEFAULT");
         await using var rows = (await session.ExecuteAsync("SELECT \"DEFAULT\", c FROM defaults", cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<DatabaseResultSet>();
@@ -68,7 +68,7 @@ public sealed class SqlDefaultAssignmentTests
 
         // Assert
         updated.AffectedCount.ShouldBe(1);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHSQLE005");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS01005");
         await using var rows = (await session.ExecuteAsync("SELECT c FROM defaults", cancellationToken: CancellationToken.None))
             .ShouldBeAssignableTo<DatabaseResultSet>();
         int count = 0;
@@ -173,7 +173,7 @@ public sealed class SqlDefaultAssignmentTests
             ? "Column 'label' does not allow NULL."
             : "Column 'label' does not allow NULL and has no default.");
         var diagnostic = failure.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("COHSQLE024");
+        diagnostic.Code.ShouldBe("CS03024");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
         diagnostic.Message.ShouldBe(failure.Message);
         diagnostic.Start.ShouldBe(0);

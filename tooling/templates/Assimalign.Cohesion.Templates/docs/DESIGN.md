@@ -202,6 +202,12 @@ execution and disposal available while the root interfaces carry only area contr
 
 ## Database composition
 
+All five programs import `Assimalign.Cohesion.Database` for the shared `Listen(Uri)` extension in
+`Database.Tcp`, alongside their model and Hosting imports. The `App.Database` framework already
+supplies that assembly, so no explicit package reference is needed. This import keeps the
+standalone, app and three zone scaffolds compiling against the shared listener without changing
+endpoints, schemas or application defaults.
+
 The five Database programs (the standalone `cohesion-database`, the app's `Acme.Database` and the
 landing zone's three) use the three composition levels of the engine extensibility design (B1,
 owner decisions 49 to 59 and 72 of 2026-10-09). `builder.AddSql("<engine>", sql => ...)` names the

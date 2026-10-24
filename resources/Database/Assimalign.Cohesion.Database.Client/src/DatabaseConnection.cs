@@ -26,10 +26,12 @@ namespace Assimalign.Cohesion.Database.Client;
 /// returning its session, and an overlapping exchange is rejected before it writes any frame.
 /// </para>
 /// <para>
-/// End or roll back an explicit transaction before disposing a connection. The pool does not yet
-/// reset transaction state on return; server-reported status and pool rollback are tracked by #1540.
+/// Pool return rolls back an active or failed transaction using negotiated server status. A session
+/// that cannot certify a clean state is closed instead of reused (#1540).
 /// </para>
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("DatabaseConnection")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Client.DatabaseConnection.DebugView))]
 public sealed class DatabaseConnection : IAsyncDisposable
 {
     private readonly DatabaseClient _owner;
@@ -157,7 +159,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             ArgumentNullException.ThrowIfNull(exchange);
             if (!ReferenceEquals(_connector.Family, exchange.Family))
             {
-                throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+                throw new ArgumentException(ErrorMessages.ClientExecuteStreamingAsyncArgument, nameof(exchange));
             }
             if (!_connector.CanExecute)
             {
@@ -165,7 +167,7 @@ public sealed class DatabaseConnection : IAsyncDisposable
             }
             if (_operation is not null)
             {
-                throw new InvalidOperationException("An exchange is already active on this connection.");
+                throw new InvalidOperationException(ErrorMessages.DatabaseConnectionExecuteAsyncFailure);
             }
             operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -293,6 +295,14 @@ public sealed class DatabaseConnection : IAsyncDisposable
         else
         {
             returned.TrySetException(failure);
+        }
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Client.DatabaseConnection value)
+        {
+            _ = value;
         }
     }
 }

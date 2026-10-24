@@ -28,7 +28,7 @@ internal static class DatabaseDeclarations
     /// <param name="declared">The database as it was first declared.</param>
     /// <returns>The exception to throw.</returns>
     internal static InvalidOperationException AlreadyDeclared(string model, string engineName, DatabaseName declared)
-        => new($"{model} engine '{engineName}' already declares database '{declared}'.");
+        => new(string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DeclarationsAlreadyDeclaredFailure, model, engineName, declared));
 
     /// <summary>
     /// Creates the refusal of a drop of a database the engine's builder declared: the declaration
@@ -44,8 +44,7 @@ internal static class DatabaseDeclarations
             declared,
             declared,
             "DROP DATABASE",
-            $"{model} engine '{engineName}' declares database '{declared}' ({builderType}.AddDatabase), so " +
-            "DROP DATABASE is refused. Remove the declaration from the engine builder and rebuild the engine before dropping it.");
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseDeclarationsRefuseDropFailure, model, engineName, declared, builderType));
 
     /// <summary>
     /// Records an engine's declared databases once, before they are opened: from then on the
@@ -62,7 +61,7 @@ internal static class DatabaseDeclarations
         var none = field;
         if (none.Length != 0 || !ReferenceEquals(Interlocked.CompareExchange(ref field, declarations, none), none))
         {
-            throw new InvalidOperationException($"Engine '{engineName}' already declares its databases.");
+            throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, EngineErrorMessages.DatabaseDeclarationsDeclareFailure, engineName));
         }
     }
 

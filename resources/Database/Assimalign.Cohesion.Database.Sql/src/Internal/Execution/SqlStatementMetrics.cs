@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// It also records the catalog changes a self-committing statement (DDL) committed by itself,
 /// which decide how the session reports the statement's failure on an offline storage (#1272).
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("SqlStatementMetrics")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.DebugView))]
 internal sealed class SqlStatementMetrics
 {
     private bool _capturedCatalogSnapshot;
@@ -83,16 +85,133 @@ internal sealed class SqlStatementMetrics
     internal string AccessPath
     {
         get => _accessPath is string text ? text
-            : _accessPath is IReadOnlyList<string> { Count: 1 } paths ? paths[0]
-            : string.Join("; ", (IReadOnlyList<string>)_accessPath);
-        set => _accessPath = value;
+            : _accessPath is JoinWork { Paths.Count: 0, ScalarPath: { } scalar } ? scalar
+            : JoinAccessPaths is { Count: 1 } paths ? paths[0]
+            : string.Join("; ", JoinAccessPaths);
+        set
+        {
+            if (_accessPath is JoinWork work) { work.ScalarPath = value; }
+            else { _accessPath = value; }
+        }
     }
 
     /// <summary>Gets the executed join access paths, one entry per step in written order, including empty inputs.</summary>
     internal IReadOnlyList<string> JoinAccessPaths
     {
-        get => _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
-        set => _accessPath = value;
+        get => _accessPath is JoinWork work ? work.Paths : _accessPath as IReadOnlyList<string> ?? Array.Empty<string>();
+        set
+        {
+            if (_accessPath is JoinWork work) { work.Paths = value; work.ScalarPath = null; }
+            else { _accessPath = new JoinWork(value); }
+        }
+    }
+
+    /// <summary>Actual joined candidates tested, including index-probe matches and hash collisions.</summary>
+    internal long JoinCandidatePairs => (_accessPath as JoinWork)?.CandidatePairs ?? 0;
+
+    internal void RecordJoinCandidate()
+    {
+        if (_accessPath is JoinWork work) { work.CandidatePairs++; }
+    }
+
+    internal long HashMemoryBytes => (_accessPath as JoinWork)?.MemoryBytes ?? 0;
+    internal long PeakHashMemoryBytes => (_accessPath as JoinWork)?.PeakMemoryBytes ?? 0;
+
+    internal bool IsAnalyzing => (_accessPath as JoinWork)?.Operators is not null;
+
+    internal void BeginAnalysis()
+    {
+        if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
+        work.Operators = new();
+    }
+
+    internal SqlOperatorWork? Analysis(object operation)
+    {
+        if ((_accessPath as JoinWork)?.Operators?.Work is not { } operators) { return null; }
+        if (!operators.TryGetValue(operation, out var work)) { work = new(); operators.Add(operation, work); }
+        return work;
+    }
+
+    internal long? ActualCandidates(object operation)
+        => (_accessPath as JoinWork)?.Operators?.Work is { } operators && operators.TryGetValue(operation, out var work)
+            ? work.Candidates : null;
+
+    internal SqlAnalysisFrame BeginAnalysisFrame()
+    {
+        var state = ((JoinWork)_accessPath).Operators!;
+        return state.Active = new(state.Active, RecordsExamined, JoinCandidatePairs);
+    }
+
+    internal void EndAnalysisFrame(SqlAnalysisFrame frame)
+    {
+        ((JoinWork)_accessPath).Operators!.Active = frame.Parent;
+        if (frame.Parent is { } parent)
+        {
+            // Propagate inclusive work once to the immediate parent. Each node
+            // subtracts its direct children's inclusive work from its own total.
+            parent.ChildRecords += RecordsExamined - frame.StartRecords;
+            parent.ChildPairs += JoinCandidatePairs - frame.StartPairs;
+        }
+    }
+
+    internal void ReserveHashMemory(long bytes, long budget)
+    {
+        if (_accessPath is not JoinWork work) { work = new([]); _accessPath = work; }
+        if (bytes > budget - work.MemoryBytes)
+        {
+            throw new SqlExecutionException(SqlExecutionException.StatementMemoryBudgetCode,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StatementMemoryBudgetExceeded, budget));
+        }
+        work.MemoryBytes += bytes;
+        work.PeakMemoryBytes = Math.Max(work.PeakMemoryBytes, work.MemoryBytes);
+    }
+
+    internal void ReleaseHashMemory(long bytes)
+    {
+        if (_accessPath is JoinWork work) { work.MemoryBytes -= bytes; }
+    }
+
+    // Join-only telemetry shares the existing path slot. Scalar statements keep
+    // exactly their previous instance layout and allocate no new telemetry object.
+    [global::System.Diagnostics.DebuggerDisplay("JoinWork")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork.DebugView))]
+    private sealed class JoinWork
+    {
+        internal JoinWork(IReadOnlyList<string> paths)
+        {
+            Paths = paths;
+        }
+
+        internal IReadOnlyList<string> Paths { get; set; }
+        internal string? ScalarPath;
+        internal long CandidatePairs;
+        internal long MemoryBytes;
+        internal long PeakMemoryBytes;
+        internal AnalysisState? Operators;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.JoinWork value)
+            {
+                _ = value;
+            }
+        }
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.AnalysisState.DebugView))]
+    private sealed class AnalysisState
+    {
+        internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
+        internal SqlAnalysisFrame? Active;
+
+        private sealed class DebugView
+        {
+            public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.AnalysisState value)
+            {
+                _ = value;
+            }
+        }
     }
 
     /// <summary>
@@ -110,4 +229,12 @@ internal sealed class SqlStatementMetrics
     /// Records one catalog change the statement committed by itself (<see cref="SelfCommits"/>).
     /// </summary>
     internal void RecordSelfCommit() => SelfCommits++;
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics value)
+        {
+            _ = value;
+        }
+    }
 }

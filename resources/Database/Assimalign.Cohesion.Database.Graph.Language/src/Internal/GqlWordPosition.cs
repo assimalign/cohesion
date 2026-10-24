@@ -32,7 +32,7 @@ internal enum GqlWordPosition
     /// <summary>
     /// An edge's opening spelling directly after a node pattern's <c>)</c>: <c>~</c>, or
     /// <c>&lt;~</c> written without a space. Elsewhere the character is not GQL and fails with
-    /// <c>GQL0002</c>.
+    /// <c>CG00002</c>.
     /// </summary>
     EdgePattern,
 }

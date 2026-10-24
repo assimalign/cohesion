@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 [Collection(nameof(BlobClientEventSourceCollection))]
 public sealed class BlobClientEventSourceTests
 {
-    private const string SecretName = "private/secret-report.bin";
+    private const string secretName = "private/secret-report.bin";
 
     [Fact(DisplayName = "Cohesion Test [Database.Blob.Client] - BlobClientEventSource: Should be named for its assembly")]
     public void GetName_BlobClientEventSource_ShouldEqualAssemblyName()
@@ -71,15 +71,15 @@ public sealed class BlobClientEventSourceTests
         // deleted blob, which the server refuses.
         await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
         {
-            (await connection.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token)).ShouldBe(content.Length);
-            await using (Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token))
+            (await connection.UploadAsync("files", secretName, new MemoryStream(content), cancellationToken: timeout.Token)).ShouldBe(content.Length);
+            await using (Stream download = await connection.DownloadAsync("files", secretName, timeout.Token))
             {
                 var copy = new MemoryStream();
                 await download.CopyToAsync(copy, timeout.Token);
                 copy.Length.ShouldBe(content.Length);
             }
 
-            (await connection.GetPropertiesAsync("files", SecretName, timeout.Token)).ShouldNotBeNull();
+            (await connection.GetPropertiesAsync("files", secretName, timeout.Token)).ShouldNotBeNull();
             int listed = 0;
             await foreach (BlobProperties _ in connection.GetBlobsAsync("files", cancellationToken: timeout.Token))
             {
@@ -87,8 +87,8 @@ public sealed class BlobClientEventSourceTests
             }
 
             listed.ShouldBe(1);
-            (await connection.DeleteAsync("files", SecretName, timeout.Token)).ShouldBeTrue();
-            failure = await Should.ThrowAsync<BlobClientException>(async () => await connection.DownloadAsync("files", SecretName, timeout.Token));
+            (await connection.DeleteAsync("files", secretName, timeout.Token)).ShouldBeTrue();
+            failure = await Should.ThrowAsync<BlobClientException>(async () => await connection.DownloadAsync("files", secretName, timeout.Token));
         }
 
         // Assert
@@ -134,7 +134,7 @@ public sealed class BlobClientEventSourceTests
         failed.Level.ShouldBe(EventLevel.Error);
         failed.PayloadNames.ShouldBe(["database", "operation", "container", "code", "exceptionType", "durationMilliseconds"]);
         failed.Payload![3].ShouldBe(failure.Code.ToString());
-        failure.Message.ShouldContain(SecretName, Case.Sensitive);
+        failure.Message.ShouldContain(secretName, Case.Sensitive);
         failed.Payload[4].ShouldBe(typeof(BlobClientException).FullName);
         events[12].Payload!.Take(5).ShouldBe(["app", "Download", "files", "Error", 0L]);
 
@@ -153,7 +153,7 @@ public sealed class BlobClientEventSourceTests
         Random.Shared.NextBytes(content);
         await using (BlobConnection setup = await harness.Client.ConnectAsync(timeout.Token))
         {
-            await setup.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token);
+            await setup.UploadAsync("files", secretName, new MemoryStream(content), cancellationToken: timeout.Token);
         }
 
         using var recorder = new BlobClientEventRecorder();
@@ -162,14 +162,14 @@ public sealed class BlobClientEventSourceTests
         // canceled before it started.
         await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
         {
-            Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token);
+            Stream download = await connection.DownloadAsync("files", secretName, timeout.Token);
             await download.DisposeAsync();
         }
 
         await using (BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token))
         {
             await Should.ThrowAsync<OperationCanceledException>(async () =>
-                await connection.GetPropertiesAsync("files", SecretName, new CancellationToken(canceled: true)));
+                await connection.GetPropertiesAsync("files", secretName, new CancellationToken(canceled: true)));
         }
 
         // Assert: each start is closed by a Cancelled stop, and no failure is written.
@@ -195,16 +195,16 @@ public sealed class BlobClientEventSourceTests
         byte[] content = new byte[512 * 1024];
         Random.Shared.NextBytes(content);
         await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
-        await connection.UploadAsync("files", SecretName, new MemoryStream(content), cancellationToken: timeout.Token);
+        await connection.UploadAsync("files", secretName, new MemoryStream(content), cancellationToken: timeout.Token);
         using var recorder = new BlobClientEventRecorder();
 
         // Act
         InvalidOperationException overlapping;
-        Stream download = await connection.DownloadAsync("files", SecretName, timeout.Token);
+        Stream download = await connection.DownloadAsync("files", secretName, timeout.Token);
         try
         {
             overlapping = await Should.ThrowAsync<InvalidOperationException>(async () =>
-                await connection.GetPropertiesAsync("files", SecretName, timeout.Token));
+                await connection.GetPropertiesAsync("files", secretName, timeout.Token));
         }
         finally
         {
@@ -249,15 +249,15 @@ public sealed class BlobClientEventSourceTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
         await using BlobConnection connection = await harness.Client.ConnectAsync(timeout.Token);
-        await connection.UploadAsync("files", SecretName, new MemoryStream(new byte[] { 1, 2, 3 }), cancellationToken: timeout.Token);
+        await connection.UploadAsync("files", secretName, new MemoryStream(new byte[] { 1, 2, 3 }), cancellationToken: timeout.Token);
         using var recorder = new BlobClientEventRecorder();
 
         // Act
         var failure = await Should.ThrowAsync<BlobClientException>(async () =>
-            await connection.UploadAsync("files", SecretName, new MemoryStream(new byte[] { 4, 5, 6 }), overwrite: false, cancellationToken: timeout.Token));
+            await connection.UploadAsync("files", secretName, new MemoryStream(new byte[] { 4, 5, 6 }), overwrite: false, cancellationToken: timeout.Token));
 
         // Assert
-        failure.Message.ShouldContain(SecretName, Case.Sensitive);
+        failure.Message.ShouldContain(secretName, Case.Sensitive);
         var events = recorder.Events.Where(e => Equals(e.Payload?[0], "app")).ToArray();
         events.Select(e => (e.EventName, Operation: (string)e.Payload![1]!)).ShouldBe([("TransferStart", "Upload"), ("TransferFailed", "Upload"), ("TransferStop", "Upload")]);
         events[1].Payload![4].ShouldBe(typeof(BlobClientException).FullName);

@@ -26,7 +26,7 @@ internal static partial class GraphExpressionEvaluator
             };
         }
         catch (Exception error) when (error is ArithmeticException or FormatException or InvalidCastException or ArgumentException)
-        { throw new GraphPlanningException("COHDBG013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CastValueFailure, GraphScalarFunctions.Name(cast.Target)), cast.Location, error); }
+        { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CastValueFailure, GraphScalarFunctions.Name(cast.Target)), cast.Location, error); }
     }
 
     // SQL #1119 rejects fractional integers rather than rounding or truncating.

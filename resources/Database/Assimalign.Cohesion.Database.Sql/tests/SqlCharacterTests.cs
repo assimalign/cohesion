@@ -154,8 +154,8 @@ public sealed class SqlCharacterTests
                 await Reject("INSERT INTO parents VALUES ('a ')", "duplicate key");
                 await Reject("INSERT INTO unique_chars VALUES ('a')", "duplicate key");
                 await Reject("INSERT INTO children VALUES ('z')", "FOREIGN KEY");
-                await Reject("INSERT INTO chars VALUES (5, 'abcd', 'x', 'x')", "COHSQLE012");
-                await Reject("SELECT pad('abcd') FROM chars WHERE id = 1", "COHSQLE012");
+                await Reject("INSERT INTO chars VALUES (5, 'abcd', 'x', 'x')", "CS02012");
+                await Reject("SELECT pad('abcd') FROM chars WHERE id = 1", "CS02012");
                 await Reject("INSERT INTO domains VALUES ('ab')", "domain");
                 var functions = await Query("SELECT pad('a'), domain_pad('a'), param_like('a'), c FROM domains");
                 functions.Columns.ShouldBe([(DatabaseType.Character, (int?)5), (DatabaseType.Character, (int?)3), (DatabaseType.Boolean, (int?)null), (DatabaseType.Character, (int?)3)]);

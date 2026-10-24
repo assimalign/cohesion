@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Graph.Client;
 /// It layers the graph surface over the shared <see cref="DatabaseClient"/> core, which owns pooling,
 /// framing and the wire handshake. Disposing the client closes every pooled connection.
 /// </remarks>
+[global::System.Diagnostics.DebuggerDisplay("GraphClient")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Client.GraphClient.DebugView))]
 public sealed class GraphClient : IAsyncDisposable
 {
     private readonly DatabaseClient _client;
@@ -33,7 +35,7 @@ public sealed class GraphClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         if (options.Settings is null || options.ConnectionFactory is null)
         {
-            throw new ArgumentException("Connection settings and a connection factory are required.", nameof(options));
+            throw new ArgumentException(ErrorMessages.GraphClientCreateArgument, nameof(options));
         }
         return new GraphClient(DatabaseClient.Create(new DatabaseClientOptions
         {
@@ -69,4 +71,12 @@ public sealed class GraphClient : IAsyncDisposable
     /// </summary>
     /// <returns>A task that completes when the idle connections are closed.</returns>
     public ValueTask DisposeAsync() => _client.DisposeAsync();
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Client.GraphClient value)
+        {
+            _ = value;
+        }
+    }
 }

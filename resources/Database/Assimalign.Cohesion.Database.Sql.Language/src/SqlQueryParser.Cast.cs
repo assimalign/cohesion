@@ -24,7 +24,7 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected '(' after CAST.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCastVoid);
         }
 
         var operand = ParseOperand(ref lexer, OperandRule.Expression);
@@ -34,18 +34,18 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected AS before the CAST target type.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCastVoid2);
         }
 
         string targetType = string.Empty;
         DatabaseTypeInfo? targetTypeInfo = null;
         if (IsIdentifierOrKeyword(ref lexer))
         {
-            targetType = ParseDefinitionType(ref lexer, $"CAST target '{CurrentText(ref lexer)}'", out targetTypeInfo);
+            targetType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorCastTargetSubject, CurrentText(ref lexer)), out targetTypeInfo);
         }
         else
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected a CAST target type name.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCastVoid3);
         }
 
         if (lexer.Current.Type == TokenType.RightParen)
@@ -54,7 +54,7 @@ public sealed partial class SqlQueryParser
         }
         else
         {
-            AddSyntaxDiagnostic(ref lexer, "Expected ')' after the CAST target type.");
+            AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCastVoid4);
         }
 
         return new SqlCastExpression(operand, targetType, targetTypeInfo,
@@ -81,7 +81,7 @@ public sealed partial class SqlQueryParser
         _parseDiagnostics.Add(new Diagnostic
         {
             Code = code,
-            Message = $"{subject}: {message}",
+            Message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.AddTypeModifierDiagnosticDiagnostic, subject, message),
             Start = start,
             End = end,
             Severity = DiagnosticSeverity.Error,

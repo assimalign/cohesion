@@ -39,8 +39,8 @@ internal sealed class SqlDatabaseEventSource : EventSource
     // The longest name (database, principal) and text (a refusal's detail, a violation) a payload
     // carries. Each can quote what a peer sent, before authentication too, and a frame may hold
     // 16 MB, so a longer value is cut and marked (event-source.md rule 11: bounded payloads).
-    private const int MaxNameLength = 256;
-    private const int MaxTextLength = 1024;
+    private const int maxNameLength = 256;
+    private const int maxTextLength = 1024;
 
     private PollingCounter? _currentSessionsCounter;
     private PollingCounter? _totalSessionsCounter;
@@ -190,7 +190,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            HandshakeRefused(session.Id, Bound(database, MaxNameLength), Bound(principal, MaxNameLength), code.ToString(), Bound(detail, MaxTextLength));
+            HandshakeRefused(session.Id, Bound(database, maxNameLength), Bound(principal, maxNameLength), code.ToString(), Bound(detail, maxTextLength));
         }
     }
 
@@ -236,7 +236,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
-            SessionProtocolViolation(session.Id, Bound(message, MaxTextLength));
+            SessionProtocolViolation(session.Id, Bound(message, maxTextLength));
         }
     }
 
@@ -289,7 +289,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, Keywords.Statements))
         {
-            StatementPlanned(database.ToString(), Bound(metrics.AccessPath, MaxNameLength), metrics.RecordsExamined);
+            StatementPlanned(database.ToString(), Bound(metrics.AccessPath, maxNameLength), metrics.RecordsExamined);
         }
     }
 
@@ -316,7 +316,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ExtensionRegistered(function.Kind.ToString(), Bound(function.Name, MaxNameLength));
+            ExtensionRegistered(function.Kind.ToString(), Bound(function.Name, maxNameLength));
         }
     }
 
@@ -325,7 +325,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ExtensionRegistered("Type", Bound(type.Name, MaxNameLength));
+            ExtensionRegistered("Type", Bound(type.Name, maxNameLength));
         }
     }
 
@@ -334,7 +334,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ExtensionRegistered("Cast", Bound(cast.Source.Name, MaxNameLength) + " -> " + Bound(cast.Target.Name, MaxNameLength));
+            ExtensionRegistered("Cast", Bound(cast.Source.Name, maxNameLength) + " -> " + Bound(cast.Target.Name, maxNameLength));
         }
     }
 
@@ -345,7 +345,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         {
             return 0;
         }
-        ProvisioningStart(database.Engine.Name, database.Name.ToString(), Bound(schema.Name, MaxNameLength), schema.Hash, mode, -1);
+        ProvisioningStart(database.Engine.Name, database.Name.ToString(), Bound(schema.Name, maxNameLength), schema.Hash, mode, -1);
         return Stopwatch.GetTimestamp();
     }
 
@@ -354,7 +354,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (trace.Started != 0 && IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            ProvisioningStop(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength), trace.Schema.Hash,
+            ProvisioningStop(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, maxNameLength), trace.Schema.Hash,
                 trace.StepCount, trace.Outcome, Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
         }
     }
@@ -364,7 +364,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (trace.Failure is { } failure && IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            ProvisioningFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, MaxNameLength),
+            ProvisioningFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Schema.Name, maxNameLength),
                 trace.Position, trace.Kind, trace.Code, failure.GetType().FullName ?? failure.GetType().Name);
         }
     }
@@ -376,7 +376,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         {
             return 0;
         }
-        DeferredStepBound(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+        DeferredStepBound(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
             trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
         return Stopwatch.GetTimestamp();
     }
@@ -386,7 +386,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            DeferredStepProgress(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+            DeferredStepProgress(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
                 trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows);
         }
     }
@@ -396,7 +396,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            DeferredStepCompleted(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+            DeferredStepCompleted(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
                 trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows, trace.Outcome,
                 trace.Started == 0 ? 0 : Stopwatch.GetElapsedTime(trace.Started).TotalMilliseconds);
         }
@@ -407,7 +407,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
         {
-            DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, MaxNameLength), Bound(trace.ObjectName, MaxNameLength),
+            DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
                 trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows,
                 SqlProvisioningCodes.StepFailed, failure.GetType().FullName ?? failure.GetType().Name);
         }
@@ -422,7 +422,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            ScriptApplied(database.Engine.Name, database.Name.ToString(), Bound(name, MaxNameLength), hash);
+            ScriptApplied(database.Engine.Name, database.Name.ToString(), Bound(name, maxNameLength), hash);
         }
     }
 
@@ -603,7 +603,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         if (IsEnabled(EventLevel.Warning, EventKeywords.None))
         {
             TransactionCleanupFailed(transaction.Id.ToString(), exception.GetType().FullName ?? exception.GetType().Name,
-                Bound(exception.Message, MaxTextLength));
+                Bound(exception.Message, maxTextLength));
         }
     }
 

@@ -63,7 +63,9 @@ public sealed class DocumentExplainTests
         {
             rows[2][3].ShouldBe("items");
             rows[2][4].ShouldBe("by_score");
-            rows[2][5].ShouldBe("score >= 2 AND score < 10");
+            rows[2][5].ShouldBe("score >= 2 AND score < 10; estimate_kind=exact_index_entries; probe_entries=1; probe_pages=1");
+            rows[2][6].ShouldBe(1L);
+            rows[2][7].ShouldBeNull();
         }
         var unchanged = (await collection.GetAsync(session, "a", CancellationToken.None)).ShouldNotBeNull();
         System.Text.Encoding.UTF8.GetString(unchanged.Content.Span).ShouldBe("{\"name\":\"Ada\",\"score\":5}");

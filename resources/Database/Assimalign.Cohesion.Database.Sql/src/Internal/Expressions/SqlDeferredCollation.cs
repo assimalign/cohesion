@@ -3,6 +3,8 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>A comparison's collation that one of its operands decides only at run time (<see cref="SqlBoundCollation"/>).</summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlDeferredCollation")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeferredCollation.DebugView))]
 internal sealed class SqlDeferredCollation
 {
     private readonly SqlCollationCandidate _first;
@@ -28,5 +30,13 @@ internal sealed class SqlDeferredCollation
         var first = _first.Resolve(subqueries);
         var second = _second.Resolve(subqueries);
         return SqlCollationCandidate.Choose(first, second) ?? _default;
+    }
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDeferredCollation value)
+        {
+            _ = value;
+        }
     }
 }

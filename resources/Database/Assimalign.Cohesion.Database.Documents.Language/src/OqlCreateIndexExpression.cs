@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>
 /// A <c>CREATE INDEX</c> statement that creates an index over ordered document paths.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("OqlCreateIndexExpression")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlCreateIndexExpression.DebugView))]
 public sealed class OqlCreateIndexExpression : OqlExpression
 {
     /// <summary>Initializes a document index creation statement.</summary>
@@ -58,4 +60,22 @@ public sealed class OqlCreateIndexExpression : OqlExpression
 
     /// <summary>Gets whether an existing name is a no-op.</summary>
     public bool IfNotExists { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Documents.Language.OqlCreateIndexExpression _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Documents.Language.OqlCreateIndexExpression value)
+        {
+            _target = value;
+        }
+
+        public string IndexName => _target.IndexName;
+        public string Collection => _target.Collection;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlPathExpression> Paths => _target.Paths;
+        public bool IsUnique => _target.IsUnique;
+        public bool IfNotExists => _target.IfNotExists;
+        public string? Text => _target.Text;
+        public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
+    }
 }

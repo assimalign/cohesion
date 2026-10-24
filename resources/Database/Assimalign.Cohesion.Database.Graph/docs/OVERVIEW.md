@@ -42,7 +42,7 @@ the explicit-transaction state machine and their checks, so the typed members ne
 (concrete-types plan, phase 4; DESIGN.md, "Concrete types").
 
 A failed journal or data fsync takes the database offline: every later operation, in process
-and over the server, is refused with `DatabaseOfflineException` (`COHDBG012`) until
+and over the server, is refused with `DatabaseOfflineException` (`CG06012`) until
 `OpenDatabaseAsync` reopens it and recovery decides the unconfirmed commit (#1243). A database
 its holder disposed is forgotten once the close ends, and `OpenDatabaseAsync` opens it again with
 its graph, in memory as on disk (owner decision 33).
@@ -64,11 +64,11 @@ For real path results, pass `GraphPathsQueryRequest.FromGql(...)` to the existin
 one-node path, a single relationship includes its stored endpoints, and
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p` preserves the matched traversal order. Scalar and mutation
 requests continue to use ordinary execution. Explicit transactions remain available through the
-in-process session API; Graph wire transaction control is deliberately deferred. A statement that
+in-process session API and ISO START TRANSACTION / COMMIT / ROLLBACK over Execute. A statement that
 fails inside an explicit transaction aborts the whole transaction: the session refuses further
-statements with `COHDBG007` until the caller rolls back, and a commit fails without committing.
+statements with `CG04007` until the caller rolls back, and a commit fails without committing.
 A read that names a label or relationship type the database does not have is not a failure: as in
-Neo4j, the name matches nothing and the result carries a `COHDBG010` or `COHDBG011` warning, so a
+Neo4j, the name matches nothing and the result carries a `CG01010` or `CG01011` warning, so a
 probe such as `MATCH (n:Missing) RETURN n` keeps the transaction.
 
 `GraphDatabaseEngine.CreateBuilder(name)` returns the same model builder for
@@ -86,7 +86,7 @@ and text execution; a foreign-model request fails compilation. `GraphRequest` ow
 use the model-neutral `DatabaseResult` family. Lifecycle and explicit transactions remain
 on `DatabaseSession`.
 
-GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over an eagerly materialized binding table. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).
+GQL linear composition executes LET, FILTER, FOR/UNWIND, RETURN ... NEXT and Cypher WITH over streaming owned slot bindings for reads and bounded materialized mutation-target tables. Projection boundaries retain only carried columns, including entity kinds and aggregate types; statements observe their own source-ordered writes. See [planning and bounds](DESIGN.md#planning-execution-and-bounds).
 
 
 ## Catalog component
@@ -131,7 +131,7 @@ compatible, and uses explicit binary codecs without reflection.
 
 Graph record and tree-registration format 4 adds catalog label GUIDs and label postings to
 format 3, which shipped with #1532's typed adjacency and entity revisions. Opening an earlier
-format fails with COHDBG017 before logical recovery scrub writes; recreate the database with
+format fails with CG06017 before logical recovery scrub writes; recreate the database with
 this engine. There is no upgrade path.
 
 `GraphStorage` owns the data, journal and backup streams and delegates page allocation,
@@ -153,3 +153,133 @@ Owner-zero pages remain available to `Graph.Catalog` through the low-level recor
 
 See [DESIGN.md](DESIGN.md) for the binary format, adjacency costs, numeric index
 semantics, transaction lifecycle, recovery sequence and current limits.
+
+Offline refusals and unconfirmed commits expose their existing model code through Diagnostics,
+with unprefixed exception detail and the original cause. Failure tracing reads that carrier;
+legacy wire error text keeps its existing code prefix. See DESIGN, structured failure codes (#1350).
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+## Index history reclamation (#1195)
+
+The shared coordinator's purge pass reclaims safe dead B-tree entries in bounded batches;
+unique inserts also prune their key's history while reusing a single descent. Old snapshot
+views remain valid. Empty-leaf reclamation remains deferred, with no format, wire or language
+change. The callback follows the current manager after catalog/store reattachment.
+
+## Cached record integrity
+
+A present graph record with an unknown kind or zero identity fails as corruption with its
+page and slot; it cannot become an absent node through cached-reference cleanup. A valid
+replacement identity still invalidates the old reference. This fixes the defect found during
+#1372 without changing graph format 4, public signatures or diagnostic code CK06003.
+
+
+## Confirmed decode failures (#1372)
+
+Storage's D1 seqlock confirms private record copies before models decode them. Malformed
+copies report the existing corruption code with page and slot. Direct catalog APIs retain
+their model exception type and cause; engine boundaries use the common corruption exception. The shared version store rejects records shorter than its
+16-byte stamp header and retains failed undo/prune work for retry. StorageCorruptionException
+adds a record-scoped constructor and nullable SlotIndex. Formats and wire frames are unchanged.
+
+## Query resource budgets (#1533)
+
+Read LIMIT without ORDER BY can stop upstream expansion; grouping consumes rows incrementally,
+and ordered finite pages retain only OFFSET + LIMIT candidates. Final result rows/paths remain
+materialized until statement completion. QueryMemoryBudget defaults to 64 MiB and QueryWorkBudget
+to 1,000,000 physical units after relationship type/direction selection; FOR elements also consume
+work. Engines can explicitly set higher positive ceilings. GraphQueryLimits supplies optional lower
+MemoryBytes/WorkUnits to the three-argument request constructors/factories or GraphTraversal.Limits.
+Remote Execute statements use server ceilings; wire payloads are unchanged. Memory exhaustion is
+CG05020, invalid limits CG08021, and work/hop exhaustion CG05004. Shared containers and large values are
+counted once across operators (small leaves use conservative per-reference estimates) and every ownership lease is released on completion or failure.
+
+A bounded per-session cache reuses only cleared accounting buffers; large high-water workspaces
+are discarded and disposal drops the cache. Retained values and budget ownership do not escape
+into that cache. The unchanged TCP path-allocation test guards the combined engine/client cost.
+
+All five server-options leaves inherit DatabaseServerOptions. Database.Tcp provides generic
+Listen(Uri), retaining the concrete options type, and is public in App.Database (#1391, D7 B).
+The SQL-specific TCP integration is removed; import Assimalign.Cohesion.Database for the helper.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Graph diagnostic conventions (#1470)
+
+Exception and diagnostic templates use the project's build-generated `ErrorMessages` resources.
+Parameterized templates format with the current culture; abort/cancellation templates used in
+normal cleanup are cached. The [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md)
+assigns this family its two-letter prefix and categorized five-digit identities.
+Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
+Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
+standard .NET argument guards retain their own contracts.
+
+
+## Reusable conflict throw member (#1470)
+
+Catalog conflict callers use the internal static extension member
+`DatabaseTransactionAbortedException.ThrowGraphConflict()`. The root Database assembly owns the
+exception; Graph retains its cached resource and structured `CG04007` diagnostic. The message
+contains no code prefix. Exception identity, diagnostic severity and catalog conflict behavior
+are preserved, with no public API, wire, storage-format, event or counter change.
+
+
+## Shared validation message completion (#1470)
+
+Engine option requirements and portable database-name refusal reasons, including their rule
+text, resolve through each consuming model's generated internal resources. Valid name checks
+still avoid resource lookup; the engine-description template is cached for construction.
+Existing message text, parameter names, refused values and pre-I/O validation order remain
+unchanged. No public API, error identity, SQLSTATE, storage or wire format, event or counter changes.
+Local predicate guards remain with the policies they validate; reusable unconditional catalog
+throws use exception-type extension members. Private cold comparison and location-attachment
+paths retain their allocation and exception-identity behavior.
+
+## Explicit private execution state
+
+Private execution accounting uses explicit constructors, with unchanged lease ownership, budgets and path results. Internal helpers follow the folder and asynchronous naming conventions; see [DESIGN.md](DESIGN.md).
+
+## Direct catalog diagnostics
+
+`GraphCatalogException.Diagnostics` is non-null and preserves the existing catalog error identities
+without changing exception ancestry or message text. See [DESIGN.md](DESIGN.md#direct-catalog-diagnostic-carriers)
+for producer codes and the legacy public-constructor contract.
+
+## Shared lifecycle diagnostic completion
+
+Duplicate logical database/storage creation carries CK03001, whether the database is open or
+represented only by its closed files. Ordinary logical absence remains the precise
+DatabaseNotFoundException and carries CK03002. Each diagnostic has Error severity, the unchanged
+unprefixed exception message and no statement span. Existing coded interrupted-creation failures
+and original causes are retained. No ownership, file mutation, lifecycle ordering, format or
+protocol message-kind change accompanies these diagnostics.
+
+## Model failure producer completion
+
+Session-state, result-row and model-specific refusals expose structured codes while preserving
+their exception types and detail. The [producer table](DESIGN.md#model-failure-producer-completion)
+lists each condition. Successful execution, transaction ownership, storage formats and wire
+layouts are unchanged; the existing wire formatter includes an error code once.
+
+The result-header size guard uses the same `CG02013` value-limit diagnostic as row-size
+validation, retaining the existing limit detail and ExecutionFailure category. A synthetic
+header regression exercises the guard directly through the existing runtime test seam;
+ordinary projection admission and the 16 MiB cap are unchanged.
+Graph handshake refusals and the CK07001 overflow notice bind their existing wording through
+resources. Protocol categories, authentication/version negotiation and the overflow notice's
+invariant formatting and published limits remain unchanged.
+
+## Debugger inspection (#1470)
+
+Graph debugger inspection uses stored metadata without traversing bindings, enumerating results or expanding query/session state.
+
+Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.

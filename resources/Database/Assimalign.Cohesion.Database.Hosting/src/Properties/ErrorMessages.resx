@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ApplicationOnStartingAsyncFailure" xml:space="preserve"><value>A database application supports only one start lifecycle.</value></data>
+  <data name="ApplicationDisposeCoreAsyncAggregate" xml:space="preserve"><value>Database application disposal failed.</value></data>
+  <data name="DatabaseApplicationBuilderFailure" xml:space="preserve"><value>The registered database resource control-plane factory returned null.</value></data>
+  <data name="BuilderBuildCompositionFailure" xml:space="preserve"><value>The database application Build has already been attempted.</value></data>
+  <data name="BuilderBuildCompositionFailure2" xml:space="preserve"><value>Engine factory '{0}' returned null.</value></data>
+  <data name="BuilderBuildCompositionFailure3" xml:space="preserve"><value>Engine factory '{0}' returned an already registered product.</value></data>
+  <data name="BuilderBuildCompositionFailure4" xml:space="preserve"><value>Engine factory '{0}' returned engine '{1}'.</value></data>
+  <data name="BuilderBuildCompositionFailure5" xml:space="preserve"><value>Engine '{0}' has an unknown model.</value></data>
+  <data name="BuilderBuildCompositionFailure6" xml:space="preserve"><value>A service factory returned null.</value></data>
+  <data name="BuilderBuildCompositionFailure7" xml:space="preserve"><value>A service factory returned an already registered product.</value></data>
+  <data name="BuilderBuildCompositionFailure8" xml:space="preserve"><value>A lifecycle service was registered more than once.</value></data>
+  <data name="BuilderSnapshotOptionsFailure" xml:space="preserve"><value>Database applications require sequential service start and stop.</value></data>
+  <data name="BuilderEnsureMutableFailure" xml:space="preserve"><value>Registration is closed because application Build has begun.</value></data>
+  <data name="BuilderBuildServiceProviderFailure" xml:space="preserve"><value>{0} is reserved for the application's own {1}.</value></data>
+  <data name="BuilderBuildServiceProviderFailure2" xml:space="preserve"><value>Database hosting requires closed factory or instance service registrations.</value></data>
+  <data name="ApplicationBuilderReserveNameFailure" xml:space="preserve"><value>Duplicate database engine name '{0}'.</value></data>
+  <data name="ContextGetEngineKeyNotFound" xml:space="preserve"><value>No database engine named '{0}' is registered.</value></data>
+  <data name="DatabaseAdminEndpointServiceFailure" xml:space="preserve"><value>The ambient Database endpoint 'admin' must use http or https, not '{0}'.</value></data>
+  <data name="DatabaseAdminEndpointServiceFailure2" xml:space="preserve"><value>The Database https endpoint 'admin' requires its certificate Secret mount (default 'tls').</value></data>
+  <data name="ServiceResolveBindAddressFailure" xml:space="preserve"><value>The ambient Database admin endpoint host '{0}' is not a bindable IP address.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure" xml:space="preserve"><value>database.add-principal cannot create principal '{0}' in database '{1}': the database runtime has no principal mutation seam for this command.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure2" xml:space="preserve"><value>database.add-database database name '{0}' must not contain '/'; the final slash separates the engine from the database.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure3" xml:space="preserve"><value>database.add-database key '{0}' must match database key '{1}'.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure4" xml:space="preserve"><value>database.add-database cannot move owned database '{0}' from engine '{1}' to '{2}'; delete its declaration before changing engines.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure5" xml:space="preserve"><value>database.add-database cannot claim existing database '{0}' on engine '{1}'; it was not created by this declaration.</value></data>
+  <data name="CommandHandlerExecuteCoreAsyncFailure6" xml:space="preserve"><value>database.add-database '{0}' on engine '{1}' was refused: {2}</value></data>
+  <data name="CommandHandlerDeleteCoreAsyncFailure" xml:space="preserve"><value>{0} cannot be deleted: the database runtime has no principal mutation seam.</value></data>
+  <data name="CommandHandlerDeleteCoreAsyncFailure2" xml:space="preserve"><value>database.add-database deletion of '{0}' on engine '{1}' was refused: {2}</value></data>
+  <data name="CommandHandlerResolveEngineFailure" xml:space="preserve"><value>database.add-database requires exactly one matching engine; engine '{0}' matched {1}. Specify a registered engine name.</value></data>
+  <data name="ResourceCommandHandlerRequiredJson" xml:space="preserve"><value>The database command payload requires a nonblank '{0}'.</value></data>
+</root>

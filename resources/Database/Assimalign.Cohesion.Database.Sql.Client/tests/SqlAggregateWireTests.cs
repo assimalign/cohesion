@@ -366,7 +366,7 @@ public sealed class SqlAggregateWireTests
 
     /// <summary>Excluded aggregate forms fail through the capability diagnostic before planning.</summary>
     /// <param name="statement">The excluded aggregate form.</param>
-    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: excluded forms report COHDBL001 over the wire")]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: excluded forms report CK00001 over the wire")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY ROLLUP(name)")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY CUBE(name)")]
     [InlineData("SELECT name, COUNT(*) FROM users GROUP BY GROUPING SETS ((name), ())")]
@@ -382,7 +382,7 @@ public sealed class SqlAggregateWireTests
         var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
             statement, cancellationToken: SqlClientTestHarness.Timeout()));
         error.Kind.ShouldBe(SqlClientErrorKind.ParseFailure);
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
+        error.Message.ShouldContain("CK00001", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
         (await connection.QueryAsync("SELECT COUNT(*) AS rows FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["rows"].ShouldBe(2L);

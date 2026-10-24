@@ -9,6 +9,8 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Protocol;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Client.Tests;
 
 /// <summary>A non-Blob model uses shared streaming and pool ownership without implementing either.</summary>
@@ -39,7 +41,7 @@ public sealed class DatabaseStreamingExchangeTests
         using var output = new MemoryStream();
         if (synchronous)
         {
-            await Task.Run(() => stream.CopyTo(output), timeout.Token);
+            await DedicatedTestTask.Run(() => stream.CopyTo(output), timeout.Token);
         }
         else
         {
@@ -199,7 +201,7 @@ public sealed class DatabaseStreamingExchangeTests
         await stream.CopyToAsync(Stream.Null, timeout.Token);
         Task<DatabaseConnection> pending = harness.Client.RentAsync(timeout.Token).AsTask();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task[] disposing = Enumerable.Range(0, 16).Select(_ => Task.Run(async () =>
+        Task[] disposing = Enumerable.Range(0, 16).Select(_ => DedicatedTestTask.Run(async () =>
         {
             await start.Task.WaitAsync(timeout.Token);
             await stream.DisposeAsync();

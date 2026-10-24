@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// Binds the shared version ledger to key-value entries and their existing packed locations.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("KeyValueTransactionRecordSpace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueTransactionRecordSpace.DebugView))]
 internal sealed class KeyValueTransactionRecordSpace : TransactionRecordSpace
 {
     private readonly KeyValueStorage _storage;
@@ -37,4 +39,12 @@ internal sealed class KeyValueTransactionRecordSpace : TransactionRecordSpace
     /// <inheritdoc />
     protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location)
         => KeyValueRecordLocation.Unpack(location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.KeyValuePair.Internal.KeyValueTransactionRecordSpace value)
+        {
+            _ = value;
+        }
+    }
 }

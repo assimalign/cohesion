@@ -18,7 +18,7 @@ internal sealed record SqlRowCount(SqlBoundExpression? Expression, string Clause
             short number when number >= 0 => number,
             int number when number >= 0 => number,
             long number when number >= 0 => number,
-            _ => throw new SqlPlanningException("COHSQLE018", string.Format(CultureInfo.CurrentCulture,
+            _ => throw new SqlPlanningException("CS02018", string.Format(CultureInfo.CurrentCulture,
                 ErrorMessages.CountNonNegative, Clause), Location),
         };
         return this with { Expression = null, Count = count };

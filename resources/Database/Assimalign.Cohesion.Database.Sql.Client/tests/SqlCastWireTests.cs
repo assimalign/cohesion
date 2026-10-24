@@ -311,7 +311,7 @@ public sealed class SqlCastWireTests
         row[3].ShouldBe("12");
         row[4].ShouldBe("ab");
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        error.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+        error.Message.ShouldStartWith("CS02002:", Case.Sensitive);
         error.ConnectionUsable.ShouldBeTrue();
     }
 
@@ -424,7 +424,7 @@ public sealed class SqlCastWireTests
         foreach (SqlClientException failure in failures)
         {
             failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-            failure.Message.ShouldStartWith("COHSQLE002:", Case.Sensitive);
+            failure.Message.ShouldStartWith("CS02002:", Case.Sensitive);
             failure.ConnectionUsable.ShouldBeTrue();
         }
         SqlResultSet rows = await connection.QueryAsync("SELECT * FROM numeric_rejected",
@@ -480,7 +480,7 @@ public sealed class SqlCastWireTests
     }
 
     /// <summary>
-    /// A name the engine's type catalog does not know fails while planning with <c>COHSQLE010</c>,
+    /// A name the engine's type catalog does not know fails while planning with <c>CS02010</c>,
     /// before any row is read: the parser leaves a name that is not a built-in type to the engine (E3).
     /// </summary>
     /// <returns>The asynchronous test operation.</returns>
@@ -499,7 +499,7 @@ public sealed class SqlCastWireTests
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         failure.ConnectionUsable.ShouldBeTrue();
-        failure.Message.ShouldStartWith("COHSQLE010: CAST target: type 'NOTATYPE' does not exist", Case.Sensitive);
+        failure.Message.ShouldStartWith("CS02010: CAST target: type 'NOTATYPE' does not exist", Case.Sensitive);
     }
 
     /// <summary>
@@ -537,12 +537,12 @@ public sealed class SqlCastWireTests
     /// <param name="diagnostic">The precise parser diagnostic.</param>
     /// <returns>The asynchronous test operation.</returns>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - CAST: invalid target specifications return parse failures")]
-    [InlineData("DATE(3)", "SQL0005")]
-    [InlineData("INT(3)", "SQL0005")]
-    [InlineData("VARCHAR(0)", "SQL0005")]
-    [InlineData("VARCHAR(3, 1)", "SQL0005")]
-    [InlineData("DECIMAL(29, 2)", "SQL0005")]
-    [InlineData("DECIMAL(3, 4)", "SQL0005")]
+    [InlineData("DATE(3)", "CS00005")]
+    [InlineData("INT(3)", "CS00005")]
+    [InlineData("VARCHAR(0)", "CS00005")]
+    [InlineData("VARCHAR(3, 1)", "CS00005")]
+    [InlineData("DECIMAL(29, 2)", "CS00005")]
+    [InlineData("DECIMAL(3, 4)", "CS00005")]
     public async Task QueryAsync_InvalidTarget_ShouldRejectBeforeExecution(string typeName, string diagnostic)
     {
         // Arrange

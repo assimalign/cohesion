@@ -7,6 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// <summary>
 /// Represents a column definition in a CREATE TABLE statement.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlColumnDefinition")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition.DebugView))]
 public sealed class SqlColumnDefinition
 {
     /// <summary>
@@ -79,4 +81,24 @@ public sealed class SqlColumnDefinition
 
     /// <summary>Gets the declared collation name, or null to inherit the database default.</summary>
     public string? CollationName { get; }
+
+    private sealed class DebugView
+    {
+        private readonly global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition _target;
+
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Language.SqlColumnDefinition value)
+        {
+            _target = value;
+        }
+
+        public string ColumnName => _target.ColumnName;
+        public string DataType => _target.DataType;
+        public global::Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? ResolvedType => _target.ResolvedType;
+        public bool IsNullable => _target.IsNullable;
+        public bool IsPrimaryKey => _target.IsPrimaryKey;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlExpression? DefaultValue => _target.DefaultValue;
+        public global::Assimalign.Cohesion.Database.Sql.Language.SqlIdentityDefinition? Identity => _target.Identity;
+        public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlConstraintDefinition> Constraints => _target.Constraints;
+        public string? CollationName => _target.CollationName;
+    }
 }

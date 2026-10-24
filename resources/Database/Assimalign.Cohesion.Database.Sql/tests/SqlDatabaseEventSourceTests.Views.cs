@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 public sealed partial class SqlDatabaseEventSourceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Sql] - Views: a cold view chain on a small stack advises open and reports COHSQLE004 on read")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Views: a cold view chain on a small stack advises open and reports CS05004 on read")]
     public async Task BindViews_SmallStackChain_ShouldPreserveOpenAndReadFailures()
     {
         // Arrange: put the root first in catalog order, so open must bind the cold chain.
@@ -51,7 +51,7 @@ public sealed partial class SqlDatabaseEventSourceTests
         openFailure.Message.ShouldEndWith("Open the database on a thread with a larger stack.", Case.Sensitive);
         openFailure.Message.ShouldNotContain("cannot be bound", Case.Sensitive);
         var readFailure = read.Failure.ShouldBeOfType<SqlEvaluationException>();
-        readFailure.Code.ShouldBe("COHSQLE004");
+        readFailure.Code.ShouldBe("CS05004");
         readFailure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
         NewEvent(recorder, 11, "StatementTooComplex", "database", "depth").Payload.ShouldBe(["db", -1]);
     }

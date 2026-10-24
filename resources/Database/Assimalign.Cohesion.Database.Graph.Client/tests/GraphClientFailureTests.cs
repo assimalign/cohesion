@@ -90,7 +90,7 @@ public sealed class GraphClientFailureTests
         {
             (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
             await WriteAsync(channel, ProtocolMessageType.Diagnostics, new ProtocolDiagnosticsMessage(
-                [new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Error, "COHDBG001", "Terminal failure.", null, null, 1)]).Encode(), timeout.Token);
+                [new ProtocolDiagnostic(ProtocolDiagnosticSeverity.Error, "CG05001", "Terminal failure.", null, null, 1)]).Encode(), timeout.Token);
             await WriteAsync(channel, ProtocolMessageType.Error,
                 new ProtocolErrorMessage(ProtocolErrorCode.ExecutionFailure, "Terminal failure.").Encode(), timeout.Token);
         }, timeout.Token, compositeValues: true);
@@ -107,7 +107,7 @@ public sealed class GraphClientFailureTests
 
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBG001");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
         await server.WaitAsync(timeout.Token);
     }
 

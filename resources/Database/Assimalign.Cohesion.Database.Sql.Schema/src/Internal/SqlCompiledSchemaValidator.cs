@@ -38,8 +38,7 @@ internal static class SqlCompiledSchemaValidator
         if (!string.Equals(format, SqlCompiledSchema.CurrentFormat, StringComparison.Ordinal))
         {
             throw InvalidDocument("schema.format",
-                $"Compiled schema format '{format}' is not supported; expected '{SqlCompiledSchema.CurrentFormat}'. " +
-                "Rebuild schema artifacts and recreate databases that record an older schema format.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorValidateFormatFailure, format, SqlCompiledSchema.CurrentFormat));
         }
     }
 
@@ -65,7 +64,7 @@ internal static class SqlCompiledSchemaValidator
             if (declaration is null)
             {
                 Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The custom type entry cannot be null.");
+                    ErrorMessages.SchemaValidatorValidateTypesVoid);
                 continue;
             }
 
@@ -84,14 +83,14 @@ internal static class SqlCompiledSchemaValidator
             if (!CompiledSchemaTypeNames.IsIdentifier(declaration.Name))
             {
                 Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,
-                    $"The custom type name '{declaration.Name}' is not a SQL identifier, so it cannot name a domain.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorValidateTypesVoid2, declaration.Name));
                 continue;
             }
 
             if (!result.TryAdd(declaration.Name, declaration))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The custom type name is declared more than once.");
+                    ErrorMessages.SchemaValidatorValidateTypesVoid3);
             }
 
             ValidateStorageType(
@@ -119,14 +118,14 @@ internal static class SqlCompiledSchemaValidator
             if (table is null)
             {
                 Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The table entry cannot be null.");
+                    ErrorMessages.SchemaValidatorCollectTablesVoid);
                 continue;
             }
 
             if (RequireName(table.Name, path, errors) && !result.TryAdd(table.Name, table))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The table name is declared more than once.");
+                    ErrorMessages.SchemaValidatorCollectTablesVoid2);
             }
 
             if (!RequireName(table.RowType, $"{path}.rowType", errors))
@@ -137,7 +136,7 @@ internal static class SqlCompiledSchemaValidator
             if (!rowTypes.Add(table.RowType))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, $"{path}.rowType",
-                    $"CLR row type '{table.RowType}' is mapped more than once.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorCollectTablesVoid3, table.RowType));
             }
         }
 
@@ -166,7 +165,7 @@ internal static class SqlCompiledSchemaValidator
             if (table.Columns.Count == 0)
             {
                 Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, path,
-                    "A table must declare at least one column.");
+                    ErrorMessages.SchemaValidatorValidateTablesVoid);
             }
 
             if (table.PrimaryKey is not null)
@@ -203,20 +202,20 @@ internal static class SqlCompiledSchemaValidator
                 if (constraint is null)
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                        "The constraint entry cannot be null.");
+                        ErrorMessages.ValidatorValidateTableConstraintsVoid);
                     continue;
                 }
 
                 if (RequireName(constraint.Name, path, errors) && !names.Add(constraint.Name))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                        "The constraint name is declared more than once.");
+                        ErrorMessages.ValidatorValidateTableConstraintsVoid2);
                 }
 
                 if (!Enum.IsDefined(constraint.Kind))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.kind",
-                        $"Constraint kind '{constraint.Kind}' is not defined.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTableConstraintsVoid3, constraint.Kind));
                     continue;
                 }
 
@@ -224,7 +223,7 @@ internal static class SqlCompiledSchemaValidator
                     (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnDelete != CompiledSchemaReferentialAction.Restrict))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onDelete",
-                        "The referential delete action is invalid for this constraint.");
+                        ErrorMessages.ValidatorValidateTableConstraintsVoid4);
                 }
 
                 if (constraint.Kind != CompiledSchemaConstraintKind.Check || constraint.Columns.Count > 0)
@@ -242,7 +241,7 @@ internal static class SqlCompiledSchemaValidator
                     !tableColumns.TryGetValue(target, out Dictionary<string, CompiledSchemaColumn>? targetColumns))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.UnknownReference, $"{path}.referencedObject",
-                        $"Referenced table '{constraint.ReferencedObject}' is not declared.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTableConstraintsVoid5, constraint.ReferencedObject));
                     continue;
                 }
 
@@ -254,7 +253,7 @@ internal static class SqlCompiledSchemaValidator
                 if (constraint.Columns.Count != constraint.ReferencedColumns.Count)
                 {
                     Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, path,
-                        "A reference must pair every local column with one referenced column.");
+                        ErrorMessages.ValidatorValidateTableConstraintsVoid6);
                     continue;
                 }
 
@@ -266,7 +265,7 @@ internal static class SqlCompiledSchemaValidator
                     {
                         Add(errors, SqlSchemaValidationErrorCode.UnsupportedType,
                             $"{path}.columns.{constraint.Columns[columnIndex]}",
-                            $"Reference column type does not match '{target.Name}.{referenced.Name}'.");
+                            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTableConstraintsVoid7, target.Name, referenced.Name));
                     }
                 }
             }
@@ -286,14 +285,14 @@ internal static class SqlCompiledSchemaValidator
             if (principal is null)
             {
                 Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, path,
-                    "The principal entry cannot be null.");
+                    ErrorMessages.SchemaValidatorValidatePrincipalsVoid);
                 continue;
             }
 
             if (RequireName(principal.Name, path, errors) && !names.Add(principal.Name))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, path,
-                    "The principal name is declared more than once.");
+                    ErrorMessages.SchemaValidatorValidatePrincipalsVoid2);
             }
 
             var grantedPermissions = new HashSet<SqlPermission>();
@@ -304,25 +303,25 @@ internal static class SqlCompiledSchemaValidator
                 if (grant is null)
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, grantPath,
-                        "The grant entry cannot be null.");
+                        ErrorMessages.SchemaValidatorValidatePrincipalsVoid3);
                     continue;
                 }
 
                 if (!Enum.IsDefined(grant.Permission))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{grantPath}.permission",
-                        $"SqlPermission '{grant.Permission}' is not defined.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorValidatePrincipalsVoid4, grant.Permission));
                 }
                 else if (!grantedPermissions.Add(grant.Permission))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, grantPath,
-                        $"SqlPermission '{grant.Permission}' is granted more than once.");
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaValidatorValidatePrincipalsVoid5, grant.Permission));
                 }
 
                 if (grant.Objects.Count == 0)
                 {
                     Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, grantPath,
-                        "A grant must name at least one schema object.");
+                        ErrorMessages.SchemaValidatorValidatePrincipalsVoid6);
                 }
 
                 var objects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -337,13 +336,13 @@ internal static class SqlCompiledSchemaValidator
                     if (!objects.Add(objectName!))
                     {
                         Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration,
-                            $"{objectPath}.{objectName}", "The grant names the same object more than once.");
+                            $"{objectPath}.{objectName}", ErrorMessages.SchemaValidatorValidatePrincipalsVoid7);
                     }
 
                     if (!tables.ContainsKey(objectName!))
                     {
                         Add(errors, SqlSchemaValidationErrorCode.UnknownReference,
-                            $"{objectPath}.{objectName}", "The granted schema object is not declared.");
+                            $"{objectPath}.{objectName}", ErrorMessages.SchemaValidatorValidatePrincipalsVoid8);
                     }
                 }
 
@@ -365,14 +364,14 @@ internal static class SqlCompiledSchemaValidator
             if (column is null)
             {
                 Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, columnPath,
-                    "The column or field entry cannot be null.");
+                    ErrorMessages.SchemaValidatorValidateColumnsVoid);
                 continue;
             }
 
             if (RequireName(column.Name, columnPath, errors) && !result.TryAdd(column.Name, column))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, columnPath,
-                    "The column or field name is declared more than once.");
+                    ErrorMessages.SchemaValidatorValidateColumnsVoid2);
             }
 
             ValidateTypeReference(column.Type, column.CustomType, types, $"{columnPath}.type", errors);
@@ -380,7 +379,7 @@ internal static class SqlCompiledSchemaValidator
             if (column.DefaultLiteral is not null && string.IsNullOrWhiteSpace(column.DefaultLiteral))
             {
                 Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, $"{columnPath}.defaultLiteral",
-                    "A declared DEFAULT literal cannot be empty or white space.");
+                    ErrorMessages.SchemaValidatorValidateColumnsVoid3);
             }
         }
 
@@ -397,7 +396,7 @@ internal static class SqlCompiledSchemaValidator
         if (key.Columns.Count == 0)
         {
             Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, path,
-                "A key must declare at least one column or field.");
+                ErrorMessages.SchemaValidatorValidateKeyVoid);
         }
 
         ValidateMemberNames(key.Columns, columns, $"{path}.columns", errors);
@@ -417,20 +416,20 @@ internal static class SqlCompiledSchemaValidator
             if (declaration is null)
             {
                 Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, indexPath,
-                    "The index entry cannot be null.");
+                    ErrorMessages.SchemaValidatorValidateIndexesVoid);
                 continue;
             }
 
             if (RequireName(declaration.Name, indexPath, errors) && !names.Add(declaration.Name))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, indexPath,
-                    "The index name is declared more than once.");
+                    ErrorMessages.SchemaValidatorValidateIndexesVoid2);
             }
 
             if (declaration.Columns.Count == 0)
             {
                 Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, indexPath,
-                    "An index must declare at least one column or field.");
+                    ErrorMessages.SchemaValidatorValidateIndexesVoid3);
             }
 
             ValidateMemberNames(declaration.Columns, columns, $"{indexPath}.columns", errors);
@@ -456,13 +455,13 @@ internal static class SqlCompiledSchemaValidator
             if (!unique.Add(name!))
             {
                 Add(errors, SqlSchemaValidationErrorCode.DuplicateDeclaration, memberPath,
-                    "The same column or field is named more than once.");
+                    ErrorMessages.ValidatorValidateMemberNamesVoid);
             }
 
             if (!columns.ContainsKey(name!))
             {
                 Add(errors, SqlSchemaValidationErrorCode.UnknownReference, memberPath,
-                    "The column or field is not declared.");
+                    ErrorMessages.ValidatorValidateMemberNamesVoid2);
             }
         }
     }
@@ -477,7 +476,7 @@ internal static class SqlCompiledSchemaValidator
         if (!Enum.IsDefined(type) || type == DatabaseType.Null)
         {
             Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, path,
-                $"Database type '{type}' is not a supported stored value type.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTypeReferenceVoid, type));
         }
 
         if (customType is null)
@@ -497,7 +496,7 @@ internal static class SqlCompiledSchemaValidator
             if (!CompiledSchemaTypeNames.IsTypeName(customType))
             {
                 Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.customType",
-                    $"'{customType}' is not a SQL type name: an identifier, optionally followed by one or two unsigned integer arguments.");
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTypeReferenceVoid2, customType));
             }
             else if (SqlTypeModifiers.TrySplit(customType, out string name, out int? first, out int? second) &&
                 SqlTypeModifiers.GetError(name, first, second) is { } error)
@@ -508,7 +507,7 @@ internal static class SqlCompiledSchemaValidator
         else if (declaration.StorageType != type)
         {
             Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.customType",
-                $"Custom type '{customType}' uses {declaration.StorageType}, not {type}.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTypeReferenceVoid3, customType, declaration.StorageType, type));
         }
     }
 
@@ -523,7 +522,7 @@ internal static class SqlCompiledSchemaValidator
         if (!Enum.IsDefined(type) || type == DatabaseType.Null)
         {
             Add(errors, SqlSchemaValidationErrorCode.UnsupportedType, $"{path}.type",
-                $"Database type '{type}' is not a supported stored value type.");
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatorValidateTypeReferenceVoid, type));
             return;
         }
 
@@ -541,7 +540,7 @@ internal static class SqlCompiledSchemaValidator
         if (expression is null || string.IsNullOrWhiteSpace(expression.CanonicalText))
         {
             Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, path,
-                "A canonical expression is required.");
+                ErrorMessages.SchemaValidatorValidateExpressionVoid);
         }
     }
 
@@ -560,7 +559,7 @@ internal static class SqlCompiledSchemaValidator
         }
 
         Add(errors, SqlSchemaValidationErrorCode.IncompleteDeclaration, declaration,
-            "A non-empty declaration name is required.");
+            ErrorMessages.SchemaValidatorRequireNameVoid);
         return false;
     }
 

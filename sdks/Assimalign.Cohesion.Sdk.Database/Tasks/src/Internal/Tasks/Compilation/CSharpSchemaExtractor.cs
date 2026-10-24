@@ -386,7 +386,7 @@ internal sealed class CSharpSchemaExtractor
             principals.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray());
     }
 
-    // A declaration every SQL engine build refuses before it touches a file (COHSQLP001, owner
+    // A declaration every SQL engine build refuses before it touches a file (CS03101, owner
     // decision 58 of 2026-10-09) fails the project's build instead of its first start. It is still
     // extracted, so the other checks do not report what its absence would cause.
     private void ReportUnprovisionable(IMethodSymbol method, InvocationExpressionSyntax invocation)
@@ -394,7 +394,7 @@ internal sealed class CSharpSchemaExtractor
         Error(
             "COHDBSDK108",
             $"SqlSchemaBuilder.{method.Name} declares what no SQL engine can provision yet: every engine build refuses it " +
-            "before touching any file (COHSQLP001, owner decision 58). Remove it; principals and grants wait for their DDL.",
+            "before touching any file (CS03101, owner decision 58). Remove it; principals and grants wait for their DDL.",
             invocation.GetLocation());
     }
 
@@ -708,7 +708,7 @@ internal sealed class CSharpSchemaExtractor
     // table.Check(name, sql): both arguments compile-time string constants, read as written. The SQL
     // is not parsed here: the task references no SQL parser, and a function the predicate calls is
     // registered on the engine builder, which the SDK never sees. The engine's build binds the
-    // predicate before it touches a file (owner decision 64; COHSQLP001).
+    // predicate before it touches a file (owner decision 64; CS03101).
     private SchemaCheckSource? ExtractCheck(SemanticModel model, InvocationExpressionSyntax operation, IMethodSymbol method, string tableName)
     {
         ExpressionSyntax? nameExpression = GetArgument(operation, method, "name", 0);

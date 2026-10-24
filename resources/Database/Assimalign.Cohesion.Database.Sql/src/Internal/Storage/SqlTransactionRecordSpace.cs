@@ -9,6 +9,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>
 /// Binds the shared version ledger to SQL rows and their existing packed locations.
 /// </summary>
+[global::System.Diagnostics.DebuggerDisplay("SqlTransactionRecordSpace")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTransactionRecordSpace.DebugView))]
 internal sealed class SqlTransactionRecordSpace : TransactionRecordSpace
 {
     private readonly SqlStorage _storage;
@@ -37,4 +39,12 @@ internal sealed class SqlTransactionRecordSpace : TransactionRecordSpace
     /// <inheritdoc />
     protected override (PageId PageId, int SlotIndex) UnpackLocationCore(ulong location)
         => SqlRecordLocation.Unpack(location);
+
+    private sealed class DebugView
+    {
+        public DebugView(global::Assimalign.Cohesion.Database.Sql.Internal.SqlTransactionRecordSpace value)
+        {
+            _ = value;
+        }
+    }
 }

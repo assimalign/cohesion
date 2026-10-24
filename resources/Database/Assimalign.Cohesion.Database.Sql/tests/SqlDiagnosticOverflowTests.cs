@@ -50,7 +50,7 @@ public sealed class SqlDiagnosticOverflowTests
         parse.Message.ShouldBe($"SQL parse error {expected[0].Code}: {expected[0].Message}");
         parse.Diagnostics.Count.ShouldBe(4096);
         parse.Diagnostics.Take(4095).Select(Value).ShouldBe(expected.Take(4095).Select(Value));
-        parse.Diagnostics[^1].Code.ShouldBe("COHDBP001");
+        parse.Diagnostics[^1].Code.ShouldBe("CK07001");
         parse.Diagnostics[^1].Message!.ShouldContain("first 4095 of 4097", Case.Sensitive);
         connection.IsOpen.ShouldBeTrue();
 
@@ -74,7 +74,7 @@ public sealed class SqlDiagnosticOverflowTests
         success[0].GetInt32(0).ShouldBe(7);
         success.Diagnostics.Count.ShouldBe(2);
         success.Diagnostics[0].Code.ShouldBe("SQLTEST001");
-        success.Diagnostics[^1].Code.ShouldBe("COHDBP001");
+        success.Diagnostics[^1].Code.ShouldBe("CK07001");
         success.Diagnostics[^1].Message!.ShouldContain("first 1 of 3", Case.Sensitive);
         new ProtocolDiagnosticsMessage(success.Diagnostics).Encode().Length.ShouldBeLessThanOrEqualTo(ProtocolDiagnosticsMessage.MaxPayloadLength);
 
@@ -84,7 +84,7 @@ public sealed class SqlDiagnosticOverflowTests
         var single = await connection.QueryAsync("SELECT 7;", cancellationToken: TestTimeout.Token());
         // Assert
         single.Count.ShouldBe(1);
-        single.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("COHDBP001");
+        single.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK07001");
         single.Diagnostics[0].Message!.ShouldContain("first 0 of 1", Case.Sensitive);
 
         // Act: oversized failure diagnostics must keep the original error code and message, too.
@@ -93,7 +93,7 @@ public sealed class SqlDiagnosticOverflowTests
         // Assert
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
         failure.Message.ShouldBe("Original failure");
-        failure.Diagnostics[^1].Code.ShouldBe("COHDBP001");
+        failure.Diagnostics[^1].Code.ShouldBe("CK07001");
         connection.IsOpen.ShouldBeTrue();
         session.ExecuteResultOverride = null;
         (await connection.QueryAsync("SELECT id FROM numbers;", cancellationToken: TestTimeout.Token())).Count.ShouldBe(1);

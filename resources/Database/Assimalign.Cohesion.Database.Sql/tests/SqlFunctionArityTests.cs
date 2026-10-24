@@ -20,13 +20,13 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// Function calls are matched against their signatures (#1189). A call whose argument count no
 /// signature of its function accepts used to plan, evaluate no argument and return NULL, so
 /// <c>SELECT ABS(1, 2), UPPER(), COALESCE()</c> returned three NULLs and a CHECK built on one
-/// never fired. It now fails with <c>COHSQLE006</c> while planning, in every expression position
+/// never fired. It now fails with <c>CS01006</c> while planning, in every expression position
 /// and over an empty table as over a populated one; the evaluator refuses one that reaches it
 /// without planning, and a stored definition holding one fails the database's open.
 /// </summary>
 public sealed class SqlFunctionArityTests : IDisposable
 {
-    private const string FunctionSignatureMismatch = "COHSQLE006";
+    private const string functionSignatureMismatch = "CS01006";
 
     private static readonly string[] _schema =
     [
@@ -112,8 +112,8 @@ public sealed class SqlFunctionArityTests : IDisposable
             var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
             // Assert
-            error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(FunctionSignatureMismatch, $"withRows: {withRows}");
-            error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
+            error.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(functionSignatureMismatch, $"withRows: {withRows}");
+            error.ShouldStartWithMessage($"{functionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive, $"withRows: {withRows}");
             (await SnapshotAsync(session)).ShouldBe(before);
             database.Catalog.TryGetTable("dbo", "c", out _).ShouldBeFalse();
             database.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
@@ -126,15 +126,15 @@ public sealed class SqlFunctionArityTests : IDisposable
     /// <param name="sql">A statement with one wrong-arity call.</param>
     /// <param name="message">The complete message.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: the wrong-arity error names the function, its accepted counts and its call forms")]
-    [InlineData("SELECT ABS(1, 2) FROM t;", "COHSQLE006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
-    [InlineData("SELECT upper() FROM t;", "COHSQLE006: Function 'upper' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
-    [InlineData("SELECT COALESCE() FROM t;", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
-    [InlineData("SELECT COUNT(id, age) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
-    [InlineData("SELECT SUM(*) FROM t;", "COHSQLE006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).")]
-    [InlineData("SELECT LENGTH(*) FROM t;", "COHSQLE006: Function 'LENGTH' takes exactly 1 argument but was called with '*'. Accepted: LENGTH(TEXT).")]
+    [InlineData("SELECT ABS(1, 2) FROM t;", "CS01006: Function 'ABS' takes exactly 1 argument but was called with 2. Accepted: ABS(numeric).")]
+    [InlineData("SELECT upper() FROM t;", "CS01006: Function 'upper' takes exactly 1 argument but was called with none. Accepted: UPPER(TEXT).")]
+    [InlineData("SELECT COALESCE() FROM t;", "CS01006: Function 'COALESCE' takes 1 or more arguments but was called with none. Accepted: COALESCE(value [, value ...]).")]
+    [InlineData("SELECT COUNT(id, age) FROM t;", "CS01006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2. Accepted: COUNT(*) or COUNT(value).")]
+    [InlineData("SELECT SUM(*) FROM t;", "CS01006: Function 'SUM' takes exactly 1 argument but was called with '*'. Accepted: SUM(numeric).")]
+    [InlineData("SELECT LENGTH(*) FROM t;", "CS01006: Function 'LENGTH' takes exactly 1 argument but was called with '*'. Accepted: LENGTH(TEXT).")]
     // '*' among other arguments is counted with them, not reported as if it were the only one.
-    [InlineData("SELECT COUNT(id, *) FROM t;", "COHSQLE006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).")]
-    [InlineData("SELECT COALESCE(age, *) FROM t;", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with 2 arguments including '*'. Accepted: COALESCE(value [, value ...]).")]
+    [InlineData("SELECT COUNT(id, *) FROM t;", "CS01006: Function 'COUNT' takes exactly 1 argument or '*' but was called with 2 arguments including '*'. Accepted: COUNT(*) or COUNT(value).")]
+    [InlineData("SELECT COALESCE(age, *) FROM t;", "CS01006: Function 'COALESCE' takes 1 or more arguments but was called with 2 arguments including '*'. Accepted: COALESCE(value [, value ...]).")]
     public async Task ExecuteAsync_WrongArity_ShouldNameTheFunctionAndItsSignature(string sql, string message)
     {
         // Arrange
@@ -169,7 +169,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         var accepted = await ExecuteAsync(session, "INSERT INTO ck1 VALUES (-4);");
 
         // Assert
-        refused.ShouldStartWithMessage(FunctionSignatureMismatch, Case.Sensitive);
+        refused.ShouldStartWithMessage(functionSignatureMismatch, Case.Sensitive);
         violation.ShouldNotBeNull();
         accepted.AffectedCount.ShouldBe(1);
         (await RowsAsync(session, "SELECT c FROM ck1;")).ShouldHaveSingleItem().ShouldBe(new object?[] { -4 });
@@ -227,8 +227,8 @@ public sealed class SqlFunctionArityTests : IDisposable
         var error = Should.Throw<SqlEvaluationException>(() => evaluator.Evaluate(call, []));
 
         // Assert
-        error.Code.ShouldBe(FunctionSignatureMismatch);
-        error.ShouldStartWithMessage($"{FunctionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
+        error.Code.ShouldBe(functionSignatureMismatch);
+        error.ShouldStartWithMessage($"{functionSignatureMismatch}: Function '{function}' takes ", Case.Sensitive);
     }
 
     /// <summary>
@@ -313,8 +313,8 @@ public sealed class SqlFunctionArityTests : IDisposable
     /// <param name="predicate">The persisted predicate.</param>
     /// <param name="call">The start of the coded error the open reports.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Functions: a stored wrong-arity CHECK fails the open with the coded error and the constraint's name")]
-    [InlineData("COALESCE() IS NULL", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
-    [InlineData("qty > 0 AND COALESCE() IS NOT NULL", "COHSQLE006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
+    [InlineData("COALESCE() IS NULL", "CS01006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
+    [InlineData("qty > 0 AND COALESCE() IS NOT NULL", "CS01006: Function 'COALESCE' takes 1 or more arguments but was called with none.")]
     public async Task Open_StoredWrongArityCheck_ShouldFailWithTheCodedErrorNamingTheConstraint(string predicate, string call)
     {
         // Arrange: a healthy format-4 database, then the predicate written straight to its catalog,
@@ -341,7 +341,7 @@ public sealed class SqlFunctionArityTests : IDisposable
         failure.Message.ShouldContain("open the database with that build and drop the constraint", Case.Sensitive);
         failure.Message.ShouldNotContain("restore the database from a backup", Case.Sensitive);
         var coded = failure.InnerException.ShouldNotBeNull().InnerException.ShouldBeOfType<SqlEvaluationException>();
-        coded.Code.ShouldBe(FunctionSignatureMismatch);
+        coded.Code.ShouldBe(functionSignatureMismatch);
     }
 
     private SqlDatabaseEngine CreateEngine()

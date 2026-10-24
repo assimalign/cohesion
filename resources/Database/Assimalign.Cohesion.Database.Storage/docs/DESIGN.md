@@ -77,11 +77,16 @@ and phase 2 replaced the remaining six with sealed types.
   through them in other assemblies, so they cannot be internal, and every call on the per-page
   and per-record paths is now direct. The page manager is not disposable: the storage owns
   it, and its former `Dispose` did nothing.
-- **`StoragePageLatch` is sealed with a private constructor and `Create()`** (rule 1). Indexing
+- **`StoragePageLatch` is sealed with a public parameterless constructor** (owner decision 61). Indexing
   creates one per tree and passes it to the latched page-write overloads, so it is public; its
   creation order, its owner check and its waiter count are internal (#1371, "No reader sees a
   rollback's restore half done"). The restore sequence a record read confirms against lives on
   the internal buffer-pool frame, so the fix adds no other public surface.
+- **`StorageStream` is a sealed public adapter.** Its existing stream and handle constructors,
+  file factories and public operations retain their ownership, positional-I/O and durability
+  contracts. No shipped or test type derives from it; subclasses would bypass the concrete
+  storage boundary. The free-byte map's private heap entry uses an explicit constructor and
+  retains the same fields and one entry per registered page.
 - **The buffer pool is internal.** `Storage.BufferPool` returns the internal
   `StorageBufferPool`; only the storage and its own tests read it.
 - **The unused `IStorageBackupManager` and `IStorageRecoveryManager` placeholders were
@@ -143,7 +148,7 @@ Open reads page 0 in two independent 4 KiB halves (#1270), completing short read
 each half. An `IOException` or `StorageIOException` (including a premature zero-byte read)
 invalidates that whole half, including any partially read
 bytes; the other slot can supply the identity and checkpoint state. If no slot verifies,
-the open throws page-0 `StorageCorruptionException` (`COHDBS003`) when a completely read
+the open throws page-0 `StorageCorruptionException` (`CK06003`) when a completely read
 half has a damaged slot, attaching the other half's read error as its inner exception so
 `StorageCorruptionException.Find` and the engine corruption translation recognize it.
 If both halves are unreadable, no checksum damage is established and the original I/O
@@ -259,7 +264,7 @@ never misread.
 - **The fence reads the raw bytes first.** Open reads magic (page offset 96) and format
   version (100) from the raw page-0 bytes before it verifies any checksum. With the magic in
   place, any version but the current one is refused with `StorageFormatException`, whose
-  message leads with `COHDBS001`, names the version found and the version supported, and
+  message leads with `CK06001`, names the version found and the version supported, and
   points at #1152 (export with the engine that wrote the file, or open it with the newer
   engine). Only then are the slots' and the identity block's checksums verified. A wrong
   magic is "not a storage file" (`StorageIOException`) unless a header slot verifies, in
@@ -274,7 +279,7 @@ never misread.
   to accept any positive version.
 - **Engines name the database.** Every model engine catches the refusal around its storage
   open and rethrows it with the database's name, as it already does for an index-format
-  refusal: "Database 'x' cannot be opened. COHDBS001: …". The SQL and key-value engines open
+  refusal: "Database 'x' cannot be opened. CK06001: …". The SQL and key-value engines open
   two file sets per database and name the one refused ("its catalog file set 'x/catalog' was
   refused"); SQL carries it in its format exception, which its server forwards to the client.
 - **Journal frames are fenced too.** A frame whose length, magic and CRC-32C verify but whose
@@ -296,7 +301,7 @@ This follows PostgreSQL's `PageIsVerified` all-zero exception
 (`src/backend/storage/page/bufpage.c:148-152`): an apparently new header alone cannot prove
 that the whole block is empty. `StoragePageIntegrityTests` covers a zeroed first sector,
 a missing checksum, a false free header with a matching checksum, legitimate reclamation
-and an all-zero extension page. `StorageCorruptionException.Code` is `COHDBS003` and its
+and an all-zero extension page. `StorageCorruptionException.Code` is `CK06003` and its
 `PageId` identifies page-scoped damage; engines translate it to the database boundary.
 `StorageCorruptionException.Find` searches inner chains and all aggregate branches with an
 iterative, cycle-safe walk, so deeply wrapped integrity failures and shared aggregate branches
@@ -308,7 +313,7 @@ Storage format 3 (#1253), superseded by format 4 above, changed what the journal
 records mean: a full page image once per checkpoint interval and byte-range deltas at commit,
 replayed in order ("Write ordering rules", "Page records", "Recovery replay rules"). The page and
 page-0 layouts are format 2's. Journal frames are version 4. The bump goes through #1251's fence
-unchanged: a format-2 data file names version 2 at page offset 100 and is refused with `COHDBS001`
+unchanged: a format-2 data file names version 2 at page offset 100 and is refused with `CK06001`
 before any checksum is verified and before its journal is read, so the open writes nothing and the
 file set stays byte-identical for the engine that wrote it (`StorageFormatTests`, "a format-2 file
 set is refused"). A format-2 journal frame (version 3) keeps the CRC-32C its format 3 successor
@@ -411,15 +416,23 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
 - **Content changes only under a pin.** Readers and writers take pins; the pool takes
   no part in content access. The write-back rules below rest on that.
 
-- **Eviction is least-recently-used** over unpinned entries: pins and cache hits move a
-  page to the MRU end; capacity overflow evicts from the LRU end, skipping pinned
-  pages, and fails loudly (`StorageIOException`) when every resident page is pinned —
-  the pool never silently exceeds its memory budget. LRU (not clock/2Q) because the
-  pool is fully lock-serialized anyway, so the precise policy costs nothing extra and
-  is trivially testable.
-- **Buffers are reused**: evicted entries return their pinned 8 KiB buffers to a
-  recycle stack, so steady-state page churn performs zero allocations — fresh pages
-  are zeroed on reuse so recycled buffers never leak prior content.
+- **Eviction uses a clock (#1541).** Cached hits use concurrent lookup, atomically
+  acquire a frame-local pin, recheck the frame's binding and set its reference bit.
+  Unpins change only that frame's count. They do not move a shared list or enter the
+  mapping monitor in Release. A miss advances the clock over unpinned frames: its first
+  revolution clears reference bits; the second can claim an unpinned frame even if
+  concurrent readers keep setting its bit. Selection is bounded by twice the resident
+  count. An atomic zero-pin reservation excludes new pins before eviction; existing
+  pins always win and their buffers cannot be reused. All-pinned exhaustion still
+  throws `StorageIOException`. Clock replaces exact LRU because moving one global
+  list on every cached hit prevented independent readers from scaling.
+  PostgreSQL `src/backend/storage/buffer/freelist.c:238–311` supplies the clock/atomic
+  reservation precedent; Cohesion uses a pool-local hand under the mapping monitor,
+  without PostgreSQL's global atomic sweep/allocation counters. No code copied.
+- **Buffers and clock nodes are reused.** Each frame owns one pinned 8 KiB array and
+  one clock node. Eviction detaches the node and recycles the frame; fresh/overwrite
+  pages are zeroed before publication. Cold loads still allocate a small completion
+  record and a concurrent-map node. Cached pins allocate only their existing handle.
 - **Failed loads never poison the cache**: a page that fails checksum verification is
   not cached; its buffer goes straight back to the recycle stack and the exception
   propagates. The same holds for a page whose header claims an overflow area that does
@@ -427,37 +440,47 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   `AsBodySpan()` size their spans from that header, nothing writes overflow pages yet,
   and an unstamped page (checksum zero) is never verified, so the header alone would
   otherwise hand the B-tree a writable span past the buffer.
-- **Extension runs under the pool lock.** Allocating a page past the end of the data
-  stream grows the stream through `EnsureLength`, serializing grow-only length checks
-  with other allocations. The backing handle serializes the growth itself with page I/O,
-  including flush write-back outside the pool monitor (#1269). An in-memory stream copies its array
-  into a new one when it grows; a write-back that landed in the old array after its
-  region was copied was lost while the pool recorded the page clean, so a later eviction
-  dropped the change and the reload was stale or all zeros (#1157 review). The
-  `StorageStream` adapter over a plain `Stream` also routes `Length` and `SetLength`
-  through the gate that serializes its page reads and writes, so the stream is safe on
-  its own, not only under the pool.
-- **One lock.** All pool state is guarded by a single monitor. Page *content* access is
-  the caller's concern (a handle hands out a raw pointer); the transaction layer above
-  provides content-level isolation. Sharding the lock is a measured-need optimization,
-  not a default.
-- **Flush I/O leaves the monitor (#1269).** `FlushAll` snapshots dirty frame identities
-  under the monitor, then writes in 16-page bursts with a yield between them. One rented
-  page image is reused; each copy is made under the monitor and its frame holds an I/O
-  lease until the write completes. Pins and dirty marks still progress, while eviction
-  skips the leased frame or waits with the monitor released if it is the only candidate.
-  A miss rechecks its requested id after that wait, so two misses cannot replace each
-  other's pinned frame. Snapshot entries evicted in between are ignored by identity.
-  `FlushSome` uses the same path, copying only unpinned pages; `FlushPage` and the final
-  stream flush also leave the monitor. A flush/resize/disposal gate serializes those operations
-  before they take the monitor; a shrink never exposes a resident set above its capacity while
-  waiting for a frame's I/O. Disposal drains I/O before clearing frames or closing
-  streams. Blocked-handle rendezvous tests observe resize and disposal waiting on that
-  gate and verify frame residency before releasing I/O in both Debug and Release.
-  Every exception releases the frame lease and rented image in `finally`; lease waiters
-  are pulsed before the debug frame assertion can throw.
-  Foreground misses and evictions still perform their own I/O under the monitor; moving
-  those paths is #1541. No checkpoint completion-time target or spread checkpoint is added.
+- **Page I/O leaves mapping locks (#1541).** Concurrent lookup is separate from the
+  short monitor protecting admission, the clock, recycled frames and pending faults.
+  One per-page fault completion coalesces cold readers; its awaitable task is created
+  only when there is a waiter. The synchronous pin API waits internally and retries
+  lookup after completion. The original I/O/checksum exception is rethrown with its
+  identity intact. A new frame is published only after its read and validation finish.
+  A failed dirty-victim write leaves its old mapping and dirty bytes available; a failed
+  incoming read recycles its unpublished buffer. Resident plus reserved loading frames
+  never exceed Capacity. Independent cold pages can perform I/O concurrently.
+  Neo4j `community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnPageCursor.java:332–405`
+  is the binding-recheck/coalesced-fault precedent. PostgreSQL
+  `src/backend/storage/buffer/bufmgr.c:2460–2522,7370–7440` separates mapping ownership
+  from buffer I/O completion. No code copied.
+- **Per-page physical I/O ordering.** 128 pool-local monitor stripes serialize a page's
+  physical reads and writes outside the mapping monitor. Colliding page ids can share
+  an I/O stripe; cached hits use neither stripe nor stream. Write-back audits may read
+  their own prior physical image reentrantly. The WAL gate, audit, checksums, Length,
+  ReadPage, WritePage and device flush never run under the mapping monitor. The
+  existing backing handles continue to serialize their own memory-stream array access.
+- **Growth is separately serialized.** EnsureLength's extension gate protects the
+  grow-only Length/SetLength pair outside the mapping monitor. This prevents a late
+  smaller request from truncating a concurrent extension. The backing handle serializes
+  growth with its page I/O, so replacement of an in-memory array cannot lose a write
+  into the previous array (#1157). Cached pins keep progressing during growth.
+- **Flush and maintenance ownership.** FlushAll snapshots dirty identities under the
+  monitor, then uses one rented image in 16-page bursts, yielding between bursts.
+  FlushSome skips pinned candidates; FlushPage uses the same frame-I/O lease. Eviction
+  skips a leased frame, or waits with the monitor released if it is the only candidate.
+  A snapshot waits for an already reserved eviction to finish before deciding whether
+  its old mapping still needs writing. This preserves WAL-before-data and final device
+  flush ordering. Dirtying newer bytes during an older image's write still owes a write.
+  The outer flush gate serializes flushes, resize and disposal; ordinary misses never
+  take it, so independent misses can progress during a parked flush (#1269).
+  Resize/disposal close cold-I/O admission and drain existing reservations with the
+  monitor released. Shrink reserves every required unpinned victim before doing I/O
+  and publishes its smaller capacity only after eviction finishes. Cached pins on other
+  frames remain available throughout. Failure restores unprocessed victims and retains
+  the smallest capacity covering surviving residents. Disposal drains I/O before clearing
+  bookkeeping; outstanding handles still keep their pinned-heap arrays alive.
+  Every completion releases ownership and wakes waiters on success and failure. No
+  public async pin, format change, checkpoint time target or spread checkpoint is added.
 - **Write-back writes a private copy.** A pinned writer can change a page while the pool
   writes it back — `FlushAll` and `FlushPage` write pinned pages, and until #1157 the
   paced page writer did too. Write-back therefore copies the page first, stamps the
@@ -479,12 +502,12 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   an eviction, or the checkpoint (which runs with no transaction active).
 - **Invariants.** The structural check (`CheckInvariants`) verifies, under the lock,
   that every resident entry has a non-negative pin count, is not on the recycle stack,
-  and owns exactly one node of the LRU list keyed by its page; that the LRU list holds
+  and owns exactly one node of the clock list keyed by its page; that the clock list holds
   nothing else; and that recycled entries are unpinned and detached. It is compiled
   into every configuration. Debug builds also run it wherever the pool's structure
   changes — a pin miss (which may evict and recycle), an explicit eviction, a flush —
   and, on a pin hit, a `TryGet` hit or an unpin, which change one entry's pin count and
-  LRU position, check just that frame: resident under its page, owning its node of the
+  reference state, check just that frame: resident under its page, owning its node of the
   access list, not recycled, with a non-negative pin count (#1240). They add
   per-operation checks too: a handle never releases a pin on an entry that is no longer
   resident, a page is never unpinned more often than it was pinned, and a handle's page
@@ -508,6 +531,32 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   stream extension but before buffer initialization, and dirty marking runs last, so a
   refusing audit preserves a resident free page's bytes and dirty version.
 
+### Buffer-pool measurements (#1541)
+
+A package-free Release probe on Windows ARM64 / .NET 10.0.13 pins 128 cached pages,
+checks each id and endpoint bytes, hashes 512 payload bytes and disposes the handle.
+After warm-up, twelve interleaved samples execute 20,000 reads per client. Tiering and
+background GC are disabled on both sides. Median throughput changes from 3,089,367.951
+to 18,017,265.899 reads/s with three clients and from 2,260,095.482 to 37,148,082.221
+with eight. Eight clients exceed three in all twelve final samples. Allocations stay
+48 bytes/read; digests stay A4D0DC62FFDC04E0 and 83ED8A8D91A17500 respectively.
+A separate EventPipe attribution pass identifies the actual monitor addresses: the
+mapping monitor changes from 2,239 waits / 330.193 aggregate ms to zero waits;
+the flush gate has zero on both sides. These are combined three/eight-client passes,
+including thread warm-ups; overlapping aggregate waits are not elapsed time and CAS
+retries are not monitor waits. The host is shared: official full-engine profiling after the existing #1280 / F01.T01
+read-only commit optimization and quiet-host acceptance remain for the owner benchmark run. These figures are not rankings.
+
+The same executable also cycles 128 persisted pages through 64 frames, checking and
+hashing every payload. One warm-up and twelve 4,096-read samples show median cold-read
+cost 1,145.629883 -> 1,532.385254 ns/read and 96 -> 128 bytes/read; all twelve final
+time samples exceed the old median. Digest C24E798F959F1000 is unchanged. Frame arrays
+and clock nodes are reused; the additional cold allocation is the fault record and
+concurrent-map bookkeeping in place of a freshly allocated old LRU node. This reports
+the cold-path cost of scalable cached lookup and fault coordination without relaxing
+an allocation assertion. The probe verifies the loaded assembly hashes; an initial
+stale copied-assembly run was discarded before the final measurements.
+
 ### Capacity (#1254)
 
 The pool holds `Storage.DefaultBufferPoolCapacity` pages, 4,096 (32 MiB), unless the
@@ -527,8 +576,11 @@ third of the 4,096-page rate ("Measurements").
   what one PostgreSQL cluster does.
 - **What it costs.** Page buffers are allocated on first load and recycled, never preallocated,
   so a database pays for the pages it has touched, up to the capacity. At capacity the pool
-  holds 32 MiB of pinned-heap buffers plus about 160 bytes of bookkeeping per resident page
-  (entry, dictionary slot, LRU node: 0.6 MiB at 4,096 pages). The SQL and key-value engines open
+  holds 32 MiB of pinned-heap buffers plus frame metadata, concurrent-map nodes and one
+  reusable clock node per frame; the pool also owns 128 I/O stripes. Each concurrent dirty
+  eviction rents one private page image, and a flush reuses one image for its whole pass.
+  Pending loads reserve frames within the same capacity rather than allocating an
+  unbounded second buffer set. The SQL and key-value engines open
   a second, catalog file set per database whose pool stays at 128 pages (1 MiB): the catalog is
   small and hot. So an open database costs up to about 33 MiB (34 MiB for SQL and key-value) of
   pool memory, plus each file set's two retained journal buffers, each 64 KiB to 1 MiB
@@ -541,10 +593,19 @@ third of the 4,096-page rate ("Measurements").
   (`StreamFileHandle.SetLength`); before the #1254 review a `MemoryStream` kept it, so an
   in-memory database held up to twice the checkpoint size for its lifetime once its journal first
   reached it.
-- **Resizing.** Growing takes effect at once. Shrinking evicts least-recently-used unpinned
+- **Resizing.** Growing takes effect at once. Shrinking evicts clock-selected unpinned
   pages, writing dirty ones back through the write-ahead gate, until the resident set fits; if
   more pages than the new capacity are pinned, the resize throws `StorageIOException` and the
   pool keeps its capacity.
+  A shrink also drops recycled entries beyond the space left by resident pages, so retained
+  buffers obey the new capacity. If write-back fails after some evictions, the existing
+  recovery capacity remains the larger of the requested count and surviving residents;
+  surplus recycled buffers are released against that recovered count in `finally`.
+  Before this fix (found during #1541), reducing a 16-frame pool to 1 or 4 retained all
+  16 pinned-heap buffers, and failure after one eviction retained 16 against a recovered
+  capacity of 15. Weak references now observe exactly 1, 4 and 15 surviving buffers,
+  respectively, while the original write failure retains its identity. No pinned handle's
+  buffer is discarded, and no hot pin/unpin, format or public signature changes.
 
 ## The record layer
 
@@ -570,14 +631,13 @@ instead of dereferencing it:
   writer — a scan takes a pin, not a latch — so they enforce only what holds in every state a
   well-formed page passes through: the slot index lies inside a directory a page can
   hold, and the record lies inside the page body. That is what keeps a read inside the
-  buffer. A read racing a change can still copy a torn record — stale bytes, or bytes an
-  in-place `UpdateSlot` or a page clear is overwriting — which is the content-isolation
-  question page latches would answer; the layers above own it today (the SQL and key-value
-  reads confirm a record that does not decode by reading it again, each model's DESIGN,
-  "Error model"). A rollback's page restore is not among them: `TryReadRecord` and the unit
-  iterator confirm each read against the page's restore sequence and read again when a restore
-  overlapped it, and a latched structure's pages are restored under its latch ("No reader sees a
-  rollback's restore half done", #1371). A reader that walks slots uses `TryReadSlot`,
+  buffer. Storage's unlatched readers additionally confirm their private copy against the
+  frame's 64-bit restore sequence, advanced by forward writers and rollback (D1, #1365).
+  A copy overlapping `UpdateSlot`, a tombstone stamp, a page clear or compaction is retried;
+  stable malformed geometry still throws. Protected `ReadRecord` confirms its length/read
+  pair together, preventing a concurrent size change from publishing a truncated or padded
+  result. A latched structure's pages are still restored under its latch (#1371).
+  A reader that walks slots uses `TryReadSlot`,
   which reads the slot count and one snapshot of the slot entry and copies the record from
   that snapshot: a slot deleted or reverted between two separate reads would otherwise fail
   the read ("Reading a record through a reference", below).
@@ -602,14 +662,48 @@ instead of dereferencing it:
   within milliseconds on the same host. The acquire loads cost about 1 ns per slot read
   (in-process A/B against the plain loads on ARM64, median of five runs), well under the noise
   of a table scan. This is publication order only: it does not latch a page against its writer.
-- **Relocation needs the whole record.** An update that outgrows its slot appends the
-  record at the free-data end and leaves the old bytes as dead space, so it requires
-  the record's full length in free space and leaves the page untouched when it does
-  not fit (the caller relocates to another page — the catalogs' delete-and-insert).
+- **Raw relocation needs the whole record.** `SlottedPage.UpdateSlot` appends an
+  outgrown record at the free-data end, requiring its whole length rather than just
+  its growth. `Storage.UpdateRecord` first tries compaction when that append would
+  fail. It validates every live slot, including the replacement target, and checks
+  packed capacity before changing bytes. If the replacement fits, it retires the old
+  target, packs the other records and publishes the replacement at the same slot.
+  An insufficient packed capacity leaves the body and directory unchanged.
 - **`Compact` moves records in offset order.** A relocated record can sit above a
   record with a higher slot index; compacting in slot order overwrote it. Overlapping
-  records are corruption and fail before any byte moves. Nothing calls `Compact` yet:
-  dead space from relocations is not reclaimed in place (see the #1157 follow-up below).
+  records are corruption and fail before any byte moves. `Storage.InsertRecord`
+  tries this on its current write page before allocating another page when contiguous
+  space is insufficient. Deleted slot identities are retained; new inserts append a
+  directory entry. Older partly empty pages are selected through #1288's free-byte hints below.
+- **Automatic compaction uses the D1 mutable scope (#1161).** Physical transaction
+  ownership excludes competing writers, and the frame's writer scope advances its
+  sequence before packing and closes after the replacement or insertion is published.
+  Unlatched readers copy and confirm through that scope, so none can accept an image
+  taken during the rewrite. This is the existing equivalent exclusion mechanism;
+  compaction does not add a second page latch or make raw `SlottedPage` writers safe
+  without their caller's synchronization. Borrowed input overlapping the page is
+  copied before any move. Rejected plans release their pin and mutable scope.
+  First-touch journaling precedes these changes, and the existing dirty-page WAL
+  barrier covers the entire packed layout, including stolen writes before commit.
+  Flushes may persist an intermediate rewrite image; recovery repairs it from WAL
+  on both abort and commit. A dedicated test forces this before replacement publication.
+  No format, public signature, diagnostic code or wire change is needed.
+
+  PostgreSQL's `PageRepairFragmentation` requires exclusive cleanup access and checks
+  geometry and total live bytes before packing (`src/backend/storage/page/bufpage.c:694–707`,
+  `:735–751`, `:777–803`). RavenDB tries aggregate capacity before defragmenting
+  (`src/Voron/Data/BTrees/TreePage.cs:536–577`). These informed the exclusion and
+  preflight checks; no code was copied. Unlike PostgreSQL's trailing line-pointer
+  truncation, Cohesion preserves every slot identity for stored record references.
+  Neo4j likewise marks a page dirty after write access so a concurrent flush cannot
+  leave later changes clean (`community/io/src/main/java/org/neo4j/io/pagecache/impl/muninn/MuninnWritePageCursor.java:57–64`);
+  its read cursor validates the stamp before accepting a read (`MuninnReadPageCursor.java:115–126`).
+  The final insertion/update dirty mark remains after the compaction dirty mark for
+  this reason, including when an intermediate image was flushed.
+  `StorageCompactionTests` covers repeated grow/shrink, deleted space, aliases,
+  corrupt and insufficient plans, all three unlatched reader paths, committed and
+  aborted recovery with or without eviction, and whole or torn power loss at every
+  write of the compaction/flush/commit sequence.
 - **Clears span the buffer, not the header.** Freeing and allocating a page clear a
   fixed `Page.Size` (or body) span; `Page.AsSpan()` honors the reserved overflow size in
   the header, and a header is page content that a corrupt page controls. The pool refuses
@@ -629,7 +723,7 @@ needed), `GetUnitIterator(ownerId)` iterates only the owner's pages, and
 object ids, so a table scan stops decoding the whole database.
 
 - **An owner is a long-lived object, never a transaction.** Each owner has one current
-  write page, and the free-space map holds only whole free pages, so a record shares a page
+  write page, with a per-owner free-byte map for older pages, so a record shares a page
   only with earlier records of its own owner. An owner per transaction therefore gives every
   transaction a page of its own. The document and blob engines tagged content chunks
   `writer | 1 << 63` until a 180-byte document took a whole 8 KiB page (1.009 pages per
@@ -642,14 +736,74 @@ object ids, so a table scan stops decoding the whole database.
   record, so logical transactions share a page freely as long as their physical brackets do not
   overlap on it: a bracket that touches a page another open bracket holds fails with a
   write-lock error, and the coordinator's apply gate runs a database's brackets one at a time.
-  A record that does not fit the current write page moves the owner to a fresh page, and
-  the page it leaves is not revisited: reusing partly free pages needs a free-space map that
-  records free bytes per page, as PostgreSQL's does (`GetPageWithFreeSpace`,
-  `src/backend/storage/freespace/freespace.c`).
+  A record that does not fit the current write page searches the owner's free-byte hints
+  before extending; a selected older page becomes the next current write page. The
+  whole-page `StorageFreeSpaceMap` remains the allocation/generation authority.
 - **The directory is in-memory only, page headers are the truth.** The per-owner
   page directory is rebuilt on open by the same header scan that rebuilds the
   free-space map (no extra I/O) and maintained at allocation/free time. A persisted
   directory could drift from reality; headers cannot (the FSM precedent).
+- **Free-byte hints are in memory only (#1288).** An indexed maximum heap per owner
+  stores one node per data page. A node holds the bytes available for an insertion
+  after packing, including the cost of its new slot entry:
+  `Page.Size - Page.HeaderSize - (SlotCount + 1) * sizeof(PageSlot) - liveRecordBytes`.
+  Insert subtracts payload plus entry size, delete/purge adds the deleted length,
+  and update adds old length minus new length. Compaction does not change aggregate
+  capacity. Whole-page releases remove the hint; rollback restores an unmeasured hint.
+  Updating a measured node reorders it without allocating a replacement node. The
+  current target remains the fast preference; a heap supplies a fitting older target
+  without copying or walking the owner directory. Among older pages it prefers the
+  greatest available capacity, then the lower page id for a tie, and fills that target
+  before searching again. A sorted set would allocate nodes on ordinary updates;
+  byte buckets could miss a fitting page at their rounding boundary.
+- **A hint never grants a write or establishes capacity.** Selection captures the
+  allocation generation under owner-lock then free-map-lock order. Both locks close
+  before pinning, first-touch registration, a callback or I/O. Registration confirms
+  that generation under the transaction lock; a stale selection is excluded from
+  this insert, including same-owner reuse. D1 writer ownership then protects the
+  physical capacity check and any compaction. A refused capacity is corrected before
+  another candidate is tried. No new process-wide atomic or public pin API is added.
+- **Open preserves its existing validation boundary.** The existing header scan
+  rebuilds data-page membership and seeds unmeasured capacities at the maximum record
+  size. An owned insertion probe measures actual slot geometry. There is no
+  extra eager full-page scan, persisted map, journal record or format change. Cold
+  searches may visit unmeasured full pages once before finding room; measured full
+  pages cannot remain false candidates. Raw `OpenPageForWrite` (with or without a
+  structure latch) invalidates its data page's hint. A nested typed probe leaves the
+  hint unmeasured because the outer writable handle may still change geometry after
+  it returns. Rollback invalidates restored hints without decoding damaged pre-images
+  during exception cleanup. The next owned probe validates them normally.
+- **Reuse evidence and limits.** `StorageFreeBytesTests` keeps 1,024 live 500-byte
+  records and performs 384 insert-before-purge replacements across partly full older
+  pages. After each 32 replacements, twelve samples remain at 67 pages after a seed
+  of 66; the old allocator grew from 68 through 90 in steps of two. Existing record
+  references and all payloads survive. Separate tests cover passed-over contiguous
+  space, fragmentation, shrinking updates, reopen, rollback, raw/nested writers and
+  generation races. Deleted slot entries still occupy directory bytes and are never
+  recycled into another record reference. A permanently anchored page can therefore
+  eventually exhaust directory capacity despite free payload bytes; this map accounts
+  for that cost rather than promising unlimited slot reuse.
+
+  PostgreSQL treats FSM results as hints, rechecks capacity under the buffer lock,
+  reports refusals and searches again (`src/backend/storage/freespace/freespace.c:121–181`,
+  `src/backend/access/heap/hio.c:700–760`). RavenDB records sparse sections on delete
+  and searches candidates before creating another section
+  (`src/Voron/Data/Tables/Table.cs:572–585`, `:783–797`). Neo4j consults reusable IDs
+  before advancing its high id (`community/id-generator/src/main/java/org/neo4j/internal/id/indexed/IndexedIdGenerator.java:426–451`);
+  its fixed-record allocation does not supply the variable-byte accounting used here.
+  These references informed reuse and revalidation; no code was copied.
+
+  **Exact allocation measurement.** The node-reuse guard remains Release-only and
+  requires zero bytes over 100,000 update pairs after warming all measured paths.
+  Storage.Tests disables background GC and verifies the actual `ConcurrentGC` flag,
+  because [dotnet/runtime#134724](https://github.com/dotnet/runtime/issues/134724)
+  can charge unused allocation-context bytes during an allocation-free interval.
+  A full-suite guard failure reported 7,288 bytes despite passing in isolation.
+  Controlled empty intervals and the unchanged statement-mark loop reproduce the
+  artifact, while real-allocation controls remain visible; Transactions DESIGN records
+  the standalone measurements and proposed upstream fix. This changes only the test
+  host configuration, keeps runner parallelism uncapped and keeps the zero-byte bound.
+  Model-engine suites exercise the storage under their own GC configuration.
 - **Owner tags are WAL-covered like all page bytes.** A fresh chain page is tagged
   *before* its first-touch pre-image (and full page image) is captured, so a rolled-back allocation
   restores an empty page still belonging to the chain — a safe leak the owner's
@@ -740,7 +894,7 @@ reclamation positively and returns `false`; every other failure throws:
 | Its page was freed | `StoragePageManager.TryGetPage`, which checks `FreeSpaceMap.IsAllocated` and pins only an allocated page | `false` |
 | Its page now holds a non-data page, or (owner overload) another owner's records | the page header's type and owner tag, under the pin | `false` |
 | Its slot lies past the slot directory (a rollback reverted it), or is deleted | `SlottedPage.TryReadSlot`, over one snapshot of the slot entry | `false` |
-| Its page is being restored by a failed bracket's rollback | the buffer-pool frame's restore sequence, read before and after | read again once the page is whole (#1371) |
+| Its page is changing in place, including rollback | the buffer-pool frame's restore sequence, read before and after | wait for the mutable scope and retry an overlapping copy (D1, #1365) |
 | Its page fails its checksum, or its header or slot addresses bytes outside the page | the buffer-pool load; the slotted geometry checks | `StorageCorruptionException` |
 | Its page ends inside the stream, or every buffer-pool frame is pinned | the buffer-pool load | `StorageIOException` |
 | The device fails the read | the file handle | its `IOException` |
@@ -753,18 +907,17 @@ the type, owner or slot check. Catching the pin's "not allocated" failure and ch
 again would not do: a page freed and reallocated between the two checks reads as an I/O error,
 which a two-second race test (`StorageRecordReclamationTests`) reproduces on every run. The overload
 without an owner serves the version ledger, which does not know a record's owner and rechecks its
-stamps instead. The checks share the caveat of every pinned read beside the page's single writer
-(above): a read that races a free, a reallocation and a rewrite of the same frame can still see
-torn geometry. A rollback's restore is the one rewrite the read confirms against: until #1371 a
-read during the restore found a committed record's page cleared and returned `false`, and the
-models dropped live rows ("No reader sees a rollback's restore half done").
+stamps instead. Type, owner, slot and payload are inside one frame-sequence confirmation.
+A free/reuse rewrite cannot publish torn geometry or a partly overwritten payload; stable
+reclamation still returns false and stable corruption still throws. This extends #1371's
+rollback-only confirmation to every in-place writer (D1).
 
 A scan meets the same reclamation without a reference. `StorageUnitIterator` pins a page and
 holds the pin across `MoveNext` calls, but not a latch, so the version purge deletes slots, a
 failed statement's rollback reverts the page to fewer slots, and an emptied page is freed while
 the scan stands on it or between its allocation check and its pin. The iterator pins through
 `TryGetPage` and reads each slot through `TryReadSlot`, so it skips what was reclaimed and still
-fails on a page it cannot read; a read a restore overlapped is read again, as above (#1371).
+fails on a page it cannot read; a read any in-place write overlapped is read again (D1).
 Until #1342 it read the slot count, the slot's length and the
 slot as three separate reads, and a SQL `UPDATE` or `DELETE` that scanned its target table beside
 the purge failed with "Cannot read a deleted slot", an out-of-range slot index, or "Page N is not
@@ -1156,14 +1309,51 @@ does not take.
   runs), and the tests that hold a restore open while a read or a scan starts
   (`StorageRollbackRestoreReadTests`) fail at once. Without the single copy the sequence alone
   would be correct, but a reader would wait out a journal read for a spilled pre-image.
-- **The page's own writers do not advance the sequence.** A bracket's forward changes publish in
-  an order a pinned reader follows ("The record layer"), and only the restore rewrites bytes a
-  reader may be copying. A reader waits only while one page is copied, and a restore holds no
-  lock while it copies, so the wait cannot be part of a cycle.
-- **Cost.** On the ARM64 development host an isolated `TryReadRecord` measured 172 to 202 ns per
-  call (run medians) with the check and 160 to 197 ns without it, about 10 ns and inside the
-  run-to-run spread; owner scans and a bracket of 40 inserts rolled back showed no difference
-  beyond noise. The restore copies each page twice, 16 KiB per page, on the rollback path only.
+- **Forward writes advance the sequence too (D1, #1365).** Every writable handle opens a
+  frame-local mutable epoch before changing live bytes and closes it on disposal, including
+  allocation/free clears, `UpdateSlot`, tombstone stamps and LSN stamps. Nested handles from
+  the same physical transaction keep the sequence odd until the last closes; nested boundaries
+  also invalidate earlier reads. `MarkDirty` does not end the scope: bytes may still change.
+  Existing-page first-touch journal I/O precedes the mutable scope. Rollback builds its private
+  image, including spilled-image I/O, before opening the short live-copy scope.
+- **Writer identity and lifetime.** A private frame gate tracks the physical transaction;
+  it does not hold a thread-affine monitor across the handle's lifetime. Disposal remains
+  idempotent and may run on another thread. A synchronous read on the writer's own thread sees
+  its forward changes; another thread waits. Rollback excludes that bypass before advancing
+  its sequence, and an own-thread reader captures its token before checking permission. A
+  restore starting after permission therefore invalidates the copy. The wait loop rechecks
+  permission after a nested restore ends, even with the outer handle still active. Completion
+  publishes the transaction's inactive state with a volatile store. A reader or later writer
+  retires a completed bracket's epoch even when its handle remains pinned, and late disposal
+  cannot close a newer epoch. Only that exceptional lifetime allocates retired-epoch accounting.
+  An interrupted raw overwrite wait releases its newly acquired pin and rethrows the same
+  failure. Mutable access is valid only while the bracket is active. Normal handle allocation size is
+  unchanged; all sequence work is frame-local, with no process-wide per-write atomic counter.
+- **Allocation publication.** The map reserves an identity without publishing it. Pinning,
+  growth and initialization hold no map monitor. Raw allocation publishes after initialization;
+  transaction allocation additionally waits for owner stamping and first-touch ownership.
+  Allocation predicates exclude reservations; failure uses the existing free path. A stale
+  reader that passed the map before free/reuse still confirms its copy against the frame.
+  Exact-EOF short-read speculation was ruled out: `Pin` supplies a zero frame there. Premature
+  visibility was confirmed; a partial-page read retains its existing I/O failure.
+- **Evidence.** The eight original `StorageInPlaceReadTests` cases all failed before the fix:
+  all three read paths returned a synthetic half-written record, four record mutations left
+  the old sequence valid, and allocation exposed the reserved identity. Tests observe a real
+  frame-wait event or completion, with 30-second hang guards. Additional cases exercise size
+  changes, nested handles, completion, cross-thread disposal, token wrap, a copy-to-confirm
+  write, rollback after own-read permission and interrupted overwrite cleanup. The complete
+  focused set has 23 cases.
+  PostgreSQL's change-count reference above informs the ordering/private-copy protocol;
+  no code was copied. The writer lifetime implementation is specific to Cohesion.
+- **Measured cost.** On .NET 10.0.13 / SDK 10.0.401, Windows ARM64 Release with tiering
+  disabled, one warmup and twelve samples per build, a 64-byte owner-scoped `TryReadRecord`
+  (200,000 calls/sample) moved from median 77.518 to 80.02475 ns/read. Same-size `Update`
+  (100,000 calls/sample in one physical bracket, begin/rollback outside the interval) moved
+  from 109.216 to 160.9625 ns/update. Eleven of twelve read samples and all twelve update
+  samples exceeded the before median. Allocation stayed 136 bytes/read and 48.003760
+  bytes/update; the latter amortizes first touch. The private writer gate and ordered epoch cost 51.7465 ns/update
+  in this small in-memory kernel workload. These are descriptive measurements, not timing
+  assertions; correctness requires the D1 ordering. Rollback still copies a page twice.
 
 **A latched structure's pages are restored last, under its latch.** `StoragePageLatch` is the
 tree latch, owned by the storage so a rollback can take it. A structure whose readers take no
@@ -1197,12 +1387,12 @@ as it was before.
   the page's LSN field, which no structure reads.
 - **The overloads without a latch are unchanged**, and right for pages read under a pin
   (records) or read by nothing until their owner publishes them (a new tree's root page).
-- **A design question stays open.** PostgreSQL and Voron never restore a page a reader can see:
+- **Physical index rollback retained (#1393, approved).** PostgreSQL and Voron never restore a page a reader can see:
   PostgreSQL leaves an aborted transaction's index entries for later pruning, and Voron writes
   into private page copies that a rollback discards. Moving index pages off physical rollback
   needs a statement-level stamp or a logical statement undo, and a bracket that can commit some
   pages while rolling back others, which this storage does not offer; the `Database.Indexing`
-  DESIGN records it for the owner.
+  DESIGN records the approved status quo and its tradeoffs.
 
 ### The debug consistency check (#1253)
 
@@ -1355,7 +1545,7 @@ the journal"); `DataFlush`; or `HeaderWrite`. The engines' coded refusals word i
 flush of the journal", "a durable flush of the data file", "a write of the file header"); a
 caller that tells the causes apart reads the enum, never the message:
 
-- **The failing call throws `StorageOfflineException`** (`COHDBS002`), carrying the I/O
+- **The failing call throws `StorageOfflineException`** (`CK06002`), carrying the I/O
   failure as its inner exception. The journal latches the error under its append lock, so no
   append can slip in behind the failed flush; a data-file or header failure, and
   `TakeOffline`, latch the journal too. The journal's latch is the storage's only one: it keeps
@@ -1442,7 +1632,7 @@ Exception)` is that entry point:
 - **The message names the worker; the inner exception is its last failure.** The engine passes
   the reason ("the engine's checkpoint worker 'orders/checkpoint' failed on database 'orders' on
   101 passes in a row over 100 s, at least the engine's window of 100 s"), and the storage's
-  `COHDBS002` message reads "The
+  `CK06002` message reads "The
   storage is offline: {reason} (last failure: {message}). Its engine stopped retrying, …".
 - **Everything else is the offline storage of #1243.** The journal latches the error under its
   lock, the group-commit waiters are released, `OnOffline` is raised once (so a second file set
@@ -2244,7 +2434,7 @@ for #1157 failed on three further defects, each independent of the ALTER crash:
   the pool recorded the page clean, so a later eviction dropped the change and the
   reload was stale or all zeros. This was the in-memory engines' default path, and the
   SQL engine lost index entries for committed rows under a fast page writer. Extension
-  now only grows, through `EnsureLength` under the pool lock, and `StorageStream` routes
+  now only grows, through `EnsureLength` under its extension gate, and `StorageStream` routes
   `Length` and `SetLength` through its handle's gate (buffer-pool rules above). File
   handles were not affected by the array copy, but share the grow-only, locked path.
 
@@ -2279,17 +2469,16 @@ succeeded. Every one of these cases crashes the test host with the old `UpdateSl
 within seconds, as do the deterministic `ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT`
 loops.
 
-**Open follow-ups.** Dead space left by relocations and deletes is not reclaimed in
-place: `Compact` is correct now, but compacting moves other records, and scans read
-pages under a pin without a latch, so in-place compaction waits for page latches.
-Under heavy ALTER churn a catalog page fills with dead record images, the record moves
-to another page, and the dead space stays until its page holds no live record.
+**Follow-up resolution (#1161).** Dead bytes are now reclaimed by storage's automatic
+compaction under D1's writer exclusion and read confirmation (record layer above).
+Catalogs retain their fallback relocation when the packed replacement cannot fit.
+Revisiting older partly empty pages is covered by #1288's free-byte hints above.
 (The SQL index seek and the version store used to read any `StorageException` from a record
 read as reclamation, `StorageCorruptionException` included; #1342 closed that with
 `Storage.TryReadRecord`, "Reading a record through a reference" above.)
 Overflow pages themselves remain unimplemented. Their reserved body length is checked
 by both span accessors and the pool (#1162, "The page model"); caller memory follows the
-same throw-on-invalid-geometry rule. Compaction and multi-page overflow need their own work items.
+same throw-on-invalid-geometry rule. Multi-page overflow remains separate work.
 
 ## Measurements (#1251, 2026-10-04)
 
@@ -2606,13 +2795,13 @@ the others) stay as they were; the counters are their process-wide totals for to
 
 `StorageException` is the child root for this library. `StorageIOException` (stream and
 allocation failures), `SlottedPageException` (record layout violations),
-`StorageCorruptionException` (`COHDBS003`, checksum/header integrity failures, and since #1253 a gap
+`StorageCorruptionException` (`CK06003`, checksum/header integrity failures, and since #1253 a gap
 in a page's chain of journal records found by recovery, naming both LSNs — carries the
 `PageId`), `StorageFormatException` (a file set in another on-disk format, coded
-`COHDBS001`, carrying the found and supported versions), `StorageOfflineException` (a
+`CK06001`, carrying the found and supported versions), `StorageOfflineException` (a
 durable flush of the journal or the data file, a write of the journal's append buffer or a
 header slot write failed, or the engine gave up on the storage (owner decision 25), and the
-storage writes nothing more until it is reopened, coded `COHDBS002`, carrying the I/O failure
+storage writes nothing more until it is reopened, coded `CK06002`, carrying the I/O failure
 or the engine worker's last failure; `Cause` names which; `Find` locates one in an
 inner-exception or aggregate chain, and
 `CommitRecordWritten` says the throwing bracket's commit record was appended before the flush
@@ -2653,3 +2842,90 @@ they share stays in every build for tests to call.
   Replication, when it is built, rides the journal from above this layer.
 - **No encryption yet.** The header reserves nonce/MAC space and `PageFlags.Encrypted`;
   the encryption-at-rest feature (#861) implements it beneath the buffer pool.
+
+## Dedicated test actors (#1285)
+
+Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
+
+Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Invalid signed page identities (found during #1365)
+
+PageId remains a signed value type because callers also carry absent-reference sentinels.
+The free-space map's allocation domain is nonnegative: IsAllocated,
+TryGetAllocationGeneration and IsAllocationCurrent return false for a negative identity.
+Free rejects it through the existing StorageIOException path for a page never allocated,
+before changing the queue, free set or generation table. Previously Free(-1) queued -1 and
+made the next Allocate return -1; both -1 and Int64.MinValue also read as allocated.
+Clamping to zero would target a different page, and silently ignoring a bad free would hide
+an invalid caller operation, so both alternatives are rejected. Valid page identities retain
+the same allocator, generation and locking behavior. No new message/code, public signature,
+format or version is introduced.
+
+PostgreSQL's page-number domain likewise separates valid identities and its invalid sentinel
+(src/include/storage/block.h:19-34, :67-72): unsigned block numbers run from zero through
+0xFFFFFFFE and 0xFFFFFFFF is invalid. Cohesion keeps its signed PageId and checks the bound
+where allocation is classified or changed. No reference-engine code was copied.
+
+Release on Windows ARM64, .NET 10.0.13 / SDK 10.0.401, tiering disabled: a temporary probe
+checks one valid allocated page 1,000,000 times per sample, one warmup and twelve samples per
+predicate/build. Result validation and CSV output are outside the interval. Median ns/check:
+IsAllocated 8.32465 → 8.41235; TryGetAllocationGeneration 9.15915 → 9.17735;
+IsAllocationCurrent 9.12515 → 10.18595. Three, five and zero of the twelve new samples,
+respectively, are at or below their base median. Every measured round allocates zero bytes.
+These are descriptive guard costs, without a timing assertion or a throughput claim.
+The temporary probe/project inclusion is restored after each run. The three regression
+cases check negative sentinels and the next real allocation; no test reads source text.
+
+## Confirmed record decoding (D1, #1372)
+
+The public overload
+`StorageCorruptionException(PageId pageId, int slotIndex, string message, Exception? inner = null)`
+and nullable `SlotIndex` property add structured record context. The existing nullable PageId,
+CK06003 code and page-only constructors retain their contracts. The resx context template
+contains no code prefix. This is an exception API change only; the frame sequence and file
+formats do not change.
+
+Reference consulted, without copying code: Neo4j
+community/record-storage-engine/src/main/java/org/neo4j/kernel/impl/store/CommonAbstractStore.java:785–792
+retries the page cursor before checking decoding errors; :861–865 checks bounds and cursor errors.
+Its record/RecordLoad.java:155–163 retains the cursor failure as the invalid-record cause.
+Cohesion uses the already-established D1 seqlock rather than adding a page read latch.
+
+Stable malformed copies are reported without speculative retries or waiting for a whole
+physical transaction. The existing storage read confirms both bytes and absence against
+all page mutations (#1365), including the copy-to-confirm window. Storage I/O, cancellation,
+timeout and existing storage exception identities are not caught by decoder-only wrappers.
+No file format, version, protocol frame, event, counter or diagnostic number changes.
+
+## Normal-read measurements for #1372
+
+Isolated Release Windows ARM64, .NET 10.0.13 / SDK 10.0.401, tiered compilation disabled.
+Each probe uses one warmup and twelve samples; times are descriptive, never test assertions.
+Graph FindNode over a fixed committed node/snapshot: 10,000 warmups, 50,000 calls/sample,
+median 782.227 -> 756.087 ns, 10/12 after samples at or below the old median; median allocation
+960 bytes in both. Version-store visible lookup over a 17-byte version: 10,000 warmups,
+200,000 calls/sample, 134.8895 -> 134.89325 ns, 6/12 at or below; 96 bytes in every sample.
+Stored ReadCommitted SQL SELECT: 1,000 warmups, 20,000 calls/sample, 5072.35 -> 5074.78 ns,
+6/12 at or below; median 4280 bytes in both. KeyValuePair ReadCommitted Get: 1,000 warmups,
+20,000 calls/sample, 2532.9375 -> 2521.2125 ns, 7/12 at or below; 3608 bytes throughout.
+Blob 64-byte chunk download: 10,000 warmups, 100,000 complete streams/sample,
+334.2315 -> 335.1565 ns, 4/12 at or below; 272 bytes throughout. Documents' same chunk method:
+333.332 -> 332.887 ns, 6/12 at or below; median 272 bytes in both. The changed success paths
+add no process-wide atomic or allocation. One-time sample bookkeeping is listed in the external
+summary; no budget or threshold is relaxed. Temporary Compile links/source substitutions restore
+in finally, and CSVs are outside the repository in Temp/wave11-1372-probes.
+
+## Error and construction conventions (#1470)
+
+Exception messages and format templates are generated from `src/Properties/ErrorMessages.resx`;
+format arguments use the current culture. Cancellation and abort templates used during normal
+cleanup are cached before reuse. Error identities remain separate from message text where a
+structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
+`StoragePageLatch()` is public; the parameterless `Create()` factory is removed. Its creation-order rule is unchanged.
+
+## Debugger inspection convention
+
+Storage debugger views filter nonpublic implementation state and expose only reviewed public/protected value reads. StorageStream has an empty projection: inspection does not invoke delegated stream/handle properties. Pool/free-space counts that acquire locks, journal getters that initialize storage, disposed-page guards and pointer-backed SlottedPage reads are omitted. Public identity/value/count reads and existing volatile flags remain observable without page I/O or mutation.
+
+Concrete eligible types carry their own concise display and private nested DebugView at the end of the type; an effective inherited display/proxy pair is reused. Projections are public read-only members of that private view and never reveal private/internal data. Empty views use the constant type name. Debugger attributes and nested infrastructure add no public API, instance fields to existing runtime types, storage/wire format change or successful-path work.

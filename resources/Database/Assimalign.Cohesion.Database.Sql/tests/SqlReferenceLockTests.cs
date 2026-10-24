@@ -143,7 +143,7 @@ public sealed class SqlReferenceLockTests
                 {
                     var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
                     failure.Diagnostics.Count.ShouldBe(1);
-                    failure.Diagnostics[0].Code.ShouldBe("COHSQLT006");
+                    failure.Diagnostics[0].Code.ShouldBe("CS04006");
                     (await setup.ExecuteAsync("DELETE FROM c")).AffectedCount.ShouldBe(1);
                 }
                 else
@@ -221,7 +221,7 @@ public sealed class SqlReferenceLockTests
                 {
                     var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await pending);
                     failure.Diagnostics.Count.ShouldBe(1);
-                    failure.Diagnostics[0].Code.ShouldBe("COHSQLT006");
+                    failure.Diagnostics[0].Code.ShouldBe("CS04006");
                 }
                 else
                 {

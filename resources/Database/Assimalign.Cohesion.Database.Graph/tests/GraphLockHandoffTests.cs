@@ -12,6 +12,8 @@ using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
+using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 [Collection(nameof(GraphConcurrencyCollection))]
@@ -56,7 +58,7 @@ public sealed class GraphLockHandoffTests
             pending.IsCompleted.ShouldBeFalse();
             queued++;
             using var gate = new CommitEventGate(database.Name, writer.Context.Sequence.Value);
-            var committing = Task.Run(async () => await writer.CommitAsync(token), token);
+            var committing = DedicatedTestTask.Run(async () => await writer.CommitAsync(token), token);
             try
             {
                 // Act: A has released its lock but remains tracked while B snapshots and validates.
@@ -117,7 +119,7 @@ public sealed class GraphLockHandoffTests
             pending.IsCompleted.ShouldBeFalse();
             blocked++;
             using var gate = new CommitEventGate(database.Name, writer.Context.Sequence.Value);
-            var committing = Task.Run(async () => await writer.CommitAsync(token), token);
+            var committing = DedicatedTestTask.Run(async () => await writer.CommitAsync(token), token);
             try
             {
                 // Act: hold A after lock release, and let B validate before A is untracked.
@@ -129,7 +131,7 @@ public sealed class GraphLockHandoffTests
                 else
                 {
                     var error = await Should.ThrowAsync<DatabaseException>(async () => await pending.WaitAsync(token));
-                    error.Message.ShouldContain("COHDBG003");
+                    error.Message.ShouldContain("CG03003");
                     error.Message.ShouldContain(path.StartsWith("Drop", StringComparison.Ordinal) ? "in use" : "Existing graph data violates");
                 }
                 refused++;

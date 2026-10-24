@@ -45,12 +45,12 @@ internal sealed partial class DocumentExpressionEvaluator
                 else { return (long)number; }
             }
         }
-        catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Code is "COHDOC007" or "COHDOC008")
+        catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Code is "CD02007" or "CD02008")
         {
-            throw new DocumentPlanningException("OQL0007",
+            throw new DocumentPlanningException("CD00007",
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.PagingCountInvalid, clause), expression.Location, exception);
         }
-        throw new DocumentPlanningException("OQL0007",
+        throw new DocumentPlanningException("CD00007",
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.PagingCountInvalid, clause), expression.Location);
     }
 }

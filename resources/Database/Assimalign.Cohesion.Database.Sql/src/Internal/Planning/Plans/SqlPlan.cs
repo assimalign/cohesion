@@ -2,8 +2,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
 /// The bound plan produced by <see cref="SqlPlanner"/>: the AST resolved against the
-/// catalog into executable shape. Rule-based and deliberately simple — a cost-based
-/// planner replaces the binding internals later without changing the executor seam.
+/// catalog into executable shape. Transient probe costing chooses physical access
+/// paths after binding without changing the executor seam or persisted catalog.
 /// Every scalar expression a plan evaluates is a <see cref="SqlBoundExpression"/> the
 /// planner compiled once; the executor never resolves a name or a collation per row.
 /// </summary>
