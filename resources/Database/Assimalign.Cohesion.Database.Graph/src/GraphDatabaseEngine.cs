@@ -103,10 +103,11 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     // The databases the builder declared (owner decision 56): set once, before they are opened.
     private DatabaseName[] _declaredDatabases = [];
 
-    private GraphDatabaseEngine(string name, GraphDatabaseEngineOptions options)
+    private GraphDatabaseEngine(string name, GraphDatabaseEngineOptions options, GraphFunctionCatalog functions)
         : base(name, EngineModel.Graph, options.WorkerFailureWindow, options.WorkerFailureMinimumPasses, options.TimeProvider)
     {
         _options = options;
+        Functions = functions;
         JournalSizeLimit = DatabaseWorkerLimits.GetJournalSizeLimit(options.JournalSizeLimit, options.CheckpointJournalSize);
         _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
         _memory = options.StorageStrategy is null && _rootPath is null ? new DatabaseMemoryFiles() : null;
@@ -142,6 +143,9 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
             return offline is null ? [] : offline.AsReadOnly();
         }
     }
+
+    /// <summary>Gets the immutable engine-local function catalog, frozen before storage or worker creation.</summary>
+    public GraphFunctionCatalog Functions { get; }
 
     internal GraphDatabaseEngineOptions EngineOptions => _options;
 
@@ -238,10 +242,10 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
     /// (<see cref="GraphDatabaseEngineOptions.Snapshot"/>): the engine keeps this object.
     /// </param>
     /// <returns>The running engine.</returns>
-    internal static GraphDatabaseEngine CreateUncomposed(string name, GraphDatabaseEngineOptions options)
+    internal static GraphDatabaseEngine CreateUncomposed(string name, GraphDatabaseEngineOptions options, GraphFunctionCatalog? functions = null)
     {
         ValidateOptions(name, options);
-        return new GraphDatabaseEngine(name, options);
+        return new GraphDatabaseEngine(name, options, functions ?? GraphFunctionCatalog.Standard);
     }
 
     /// <summary>
@@ -834,5 +838,6 @@ public sealed class GraphDatabaseEngine : DatabaseEngine
 
         public string Name => _target.Name;
         public global::Assimalign.Cohesion.Database.EngineModel Model => _target.Model;
+        public GraphFunctionCatalog Functions => _target.Functions;
     }
 }

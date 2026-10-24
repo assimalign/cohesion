@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.Frozen;
+using Assimalign.Cohesion.Database.Graph.Language;
 using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Transactions;
@@ -14,6 +17,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphOperation.DebugView))]
 internal sealed class GraphOperation
 {
+    internal IReadOnlyDictionary<GqlNamedFunctionCallExpression, GraphFunction> FunctionBindings { get; set; } = FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty;
+    internal CancellationToken FunctionCancellation { get; set; }
     internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
     private readonly GraphDatabase _database;
     private readonly GraphDatabaseSession _session;

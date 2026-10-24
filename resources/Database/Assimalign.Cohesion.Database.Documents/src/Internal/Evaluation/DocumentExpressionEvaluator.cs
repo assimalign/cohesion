@@ -18,6 +18,9 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Internal.DocumentExpressionEvaluator.DebugView))]
 internal sealed partial class DocumentExpressionEvaluator
 {
+    private readonly DocumentFunctionCatalog _functions;
+    private readonly Assimalign.Cohesion.Database.DatabaseName _databaseName;
+    private Dictionary<OqlCallExpression, DocumentFunction>? _resolvedFunctions;
     private readonly string? _alias;
     private readonly string? _starSourceName;
     private readonly string? _writeVerb;
@@ -38,8 +41,10 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="writeVerb">INSERT or UPSERT when constructors target the storage depth limit; otherwise null.</param>
     /// <param name="transactionStart">The UTC instant captured before the executing transaction began.</param>
     /// <param name="starSourceName">The FROM object member name for a synthetic UNNEST star, or null for a stored star.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null)
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default)
     {
+        _functions = functions ?? DocumentFunctionCatalog.Standard;
+        _databaseName = databaseName;
         _alias = alias;
         _starSourceName = starSourceName;
         _writeVerb = writeVerb;
@@ -386,24 +391,22 @@ internal sealed partial class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, operation)),
     };
 
-    private object? Aggregate(OqlCallExpression call, IReadOnlyList<DocumentEvaluationContext> group)
+    private object? Aggregate(OqlCallExpression call, DocumentAggregateFunction function, IReadOnlyList<DocumentEvaluationContext> group)
     {
-        if (call.Arguments.Count != 1) { throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorAggregateFailure, call.Name)); }
-        if (call.Name == "COUNT" && call.Arguments[0] is OqlStarExpression) { return (long)group.Count; }
-        var values = group.Select(document => Evaluate(call.Arguments[0], document)).Where(value => value is not null and not DocumentMissing).ToArray();
-        if (call.Name == "COUNT") { return (long)values.Length; }
-        if (values.Length == 0) { return null; }
-        return call.Name switch
+        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
+        var accumulator = function.CreateAccumulator(in context);
+        bool star = call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression;
+        foreach (var document in group)
         {
-            "SUM" => values.Sum(value => Number(value!)),
-            "AVG" => values.Average(value => Number(value!)),
-            "MIN" => values.MinBy(value => value, ValueComparer.Instance),
-            "MAX" => values.MaxBy(value => value, ValueComparer.Instance),
-            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorAggregateFailure2, call.Name)),
-        };
+            _cancellationToken.ThrowIfCancellationRequested();
+            var values = star ? Array.Empty<object?>() : call.Arguments.Select(argument => Evaluate(argument, document)).ToArray();
+            var arguments = new DocumentArguments(values, in context);
+            accumulator.Add(in arguments);
+        }
+        return accumulator.Finish().Value;
     }
 
-    private static decimal Number(object value) => value switch { decimal number => number, long number => number,
+    internal static decimal Number(object value) => value switch { decimal number => number, long number => number,
         _ => throw new DocumentPlanningException("CD02008", ErrorMessages.ExpressionEvaluatorNumberFailure) };
     private static bool SameScalarKind(object left, object right) => Kind(left) == Kind(right) && Kind(left) is >= 1 and <= 3;
 

@@ -254,4 +254,12 @@
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiagnosticsOverflow" xml:space="preserve"><value>Diagnostic overflow: retained the first {0} of {1} Warning/Error entries in source order; omitted the remaining {2}. Limits: 4096 entries and 1048576 encoded bytes.</value></data>
+  <data name="FunctionCallbackFailure" xml:space="preserve"><value>Graph function '{0}' failed.</value></data>
+  <data name="FunctionUnknown" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
+  <data name="FunctionUnboundCall" xml:space="preserve"><value>The named function call has not been bound to an engine.</value></data>
+  <data name="FunctionTypeUnsupported" xml:space="preserve"><value>The function query-value type is unsupported.</value></data>
+  <data name="FunctionAccumulatorUnattached" xml:space="preserve"><value>The aggregate accumulator has not been attached to a function.</value></data>
+  <data name="FunctionCatalogFrozen" xml:space="preserve"><value>The function catalog is frozen.</value></data>
+  <data name="FunctionNameReserved" xml:space="preserve"><value>The function name is reserved or already registered.</value></data>
+  <data name="FunctionAccumulatorFinished" xml:space="preserve"><value>The aggregate accumulator has already finished.</value></data>
 </root>

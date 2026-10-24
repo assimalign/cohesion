@@ -342,3 +342,24 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CV05002 | Executor request kind is unsupported | — |
 | CV06107 | Entry-space format is unsupported | — |
 | CV07001 | Session belongs to another database | — |
+
+## Developer function conditions
+
+Engine builders register application functions in the same frozen per-engine catalog as native
+functions. Callback failures retain the original exception as their inner exception. At the function
+boundary, existing Database, storage and timeout failures keep their identity. Engine execution
+retains its existing failure classification and statement cancellation contract. These additions
+change no persisted format, wire frame, protocol version, or SQLSTATE. Function-name and overload
+failures use the binding category; return-type failures use the value category.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CG05021 | Graph application function callback failed | — |
+| CD05017 | Document application function callback failed | — |
+| CV00019 | CALL is missing its function name | — |
+| CV01018 | Key-value function is absent from the engine catalog | — |
+| CV01019 | No key-value function overload accepts the argument count | — |
+| CV01020 | No key-value function overload accepts the exact argument types | — |
+| CV01021 | More than one key-value function overload accepts the NULL-compatible arguments | — |
+| CV02016 | Key-value function result violates its declared return type | — |
+| CV05003 | Key-value application function callback failed | — |

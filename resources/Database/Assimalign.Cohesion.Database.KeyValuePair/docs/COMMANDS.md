@@ -36,7 +36,7 @@ events and failures with no listener. See [DESIGN.md](DESIGN.md) for event paylo
 ## Grammar
 
 ```
-command  :=  get | put | delete | exists | scan | keyspaces
+command  :=  get | put | delete | exists | scan | keyspaces | call
 
 get      :=  GET @key
 exists   :=  EXISTS @key
@@ -44,10 +44,12 @@ put      :=  PUT @key @value [ IF ABSENT | IF @etag ]
 delete   :=  DELETE @key [ IF @etag ]
 scan     :=  SCAN [ FROM @start ] [ TO @end ] [ PREFIX @prefix ] [ LIMIT limit ]
 keyspaces := KEYSPACES
+call     := CALL function-name { @argument }
+function-name := ASCII-letter-or-underscore { ASCII-letter-or-digit-or-underscore }
 limit    :=  <non-negative integer literal> | @limit
 ```
 
-- **Keywords** (`GET`, `PUT`, `DELETE`, `EXISTS`, `SCAN`, `KEYSPACES`, `IF`, `ABSENT`,
+- **Keywords** (`GET`, `PUT`, `DELETE`, `EXISTS`, `SCAN`, `KEYSPACES`, `CALL`, `IF`, `ABSENT`,
   `FROM`, `TO`, `PREFIX`, `LIMIT`) are case-insensitive. Tokens separate on
   whitespace.
 - **Operands are parameter references** (`@name`), bound by bare name from the
@@ -63,6 +65,7 @@ limit    :=  <non-negative integer literal> | @limit
 | `@key`, `@value`, `@start`, `@end`, `@prefix` | `byte[]` | `Binary` component |
 | `@etag` | `long` (or `int`) | `Int64` component |
 | `@limit` | non-negative `int`/`long` | `Int32`/`Int64` component |
+| CALL arguments | NULL or an exact native primitive (tags 0–16) | Existing `DatabaseValueCodec` component |
 
 A missing parameter, a non-`@` operand token, or a wrong operand type is a
 **parse error** (`DatabaseParseException` → `ParseFailure` on the wire) — the
@@ -105,6 +108,7 @@ ExecutionFailure fallback when the engine supplies no structured error code.
 | `CV00016` | Parameter reference required |
 | `CV01017` | Parameter value missing |
 | `CV00018` | Command arity mismatch |
+| `CV00019` | CALL function name missing |
 | `CV04019` | Execution failure without an engine diagnostic |
 
 Storage reads fail with structured CV06105 for StorageIOException/IOException (SQLSTATE
@@ -124,6 +128,7 @@ command. Other command errors retain their existing statement-atomic behavior (#
 | `DELETE @k [IF @etag]` | plain result; affected count 1/0 | 0 = no visible entry, or the condition missed |
 | `SCAN …` | result set `key`, `value`, `etag` — n rows in ascending key order | `FROM` inclusive, `TO` exclusive; `PREFIX p` = `[p, successor(p))` |
 | `KEYSPACES` | key-space metadata result set — one row for the implicit space | current database only; columns below |
+| `CALL name @p0 ...` | one nullable `value` column of the declared primitive type, exactly one row, affected count -1 | zero arguments allowed; catalog resolution precedes invocation |
 
 - **Etag** = the sequence of the transaction that wrote the entry's visible
   version; every applied write produces a new one. A conditional miss is a
@@ -194,3 +199,46 @@ semantics are unchanged.
 
 Messages remain code-free in-process and the wire includes the carrier code once. These codes
 add no SQLSTATE mapping and do not change the entry-space format, protocol layout or version.
+
+## Registered scalar functions
+
+An engine builder registers `KeyValueFunction` instances in `Functions` before `BuildAsync`.
+The engine's immutable `KeyValueFunctionCatalog` is shared by all its databases and sessions.
+`KeyValueFunctionRequest(name, arguments)` and `CALL name @p0 @p1` use the same resolver
+and nonvirtual `Invoke` contract. `KeyValueConnection.InvokeFunctionAsync(name, arguments)`
+constructs that command with invariant ordinal names `p0`, `p1`, and so on. Values stay in
+parameters; names use the shared `KeyValueFunctionName` identifier validation.
+
+Names and signature collisions compare ordinally ignoring case. GET, PUT, DELETE, EXISTS,
+SCAN, KEYSPACES and CALL are reserved. Overloads match arity and exact non-NULL native types,
+with no numeric widening or SQL casts. NULL is compatible with every parameter type;
+multiple compatible overloads are ambiguous even for strict functions. Strict NULL input
+returns NULL without invoking the body; `CalledOnNullInput` invokes it once. Otherwise the
+body executes once per CALL. Typed called-on-NULL delegates require nullable argument types.
+
+| Code | Execution refusal |
+| --- | --- |
+| `CV01018` | Unknown function |
+| `CV01019` | No overload with this arity |
+| `CV01020` | No overload with these exact non-NULL primitive types |
+| `CV01021` | More than one NULL-compatible overload |
+| `CV05003` | Application callback failed; original cause retained in-process |
+| `CV02016` | Callback returned an unsupported value or another declared primitive type |
+
+These execution refusals use ExecutionFailure and keep the connection usable; the existing
+parse failures still use ParseFailure. No new SQLSTATE mapping is introduced. Ordinary
+callback errors leave an explicit transaction active. Existing database, storage, timeout
+and actual cancellation exceptions retain their identity at `Invoke`; the session applies
+its existing storage/offline/abort classification. External callback effects are not rolled
+back. Callbacks are trusted application code, not sandboxed, and must be stateless or thread-safe.
+The context supplies only database identity and statement cancellation, with no storage handle.
+The six existing CRUD/discovery commands remain commands, with unchanged semantics; this model
+has no built-in scalar library and no aggregates. No frame, wire version or disk format changes.
+
+Binary argument snapshots are deduplicated per request by original backing-buffer and range
+identity, including repeated CALL references to one decoded parameter. Each unique input range
+is copied once, and argument slots share that detached snapshot; equal bytes in independent
+buffers and distinct slices remain separate. Thus owned payload bytes follow unique supplied
+ranges plus the argument slots, rather than multiplying a payload by its alias count. Typed
+`byte[]` delegate access still returns a defensive copy, and binary results remain detached.
+No arity limit, message limit, public API, disk format or wire version is added by this ownership rule.

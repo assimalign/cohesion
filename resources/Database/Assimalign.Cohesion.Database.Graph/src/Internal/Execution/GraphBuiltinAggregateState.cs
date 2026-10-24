@@ -11,9 +11,9 @@ using Assimalign.Cohesion.Database.Graph.Protocol;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>Bounded, statically typed aggregate state; numeric promotion considers every retained input.</summary>
-[global::System.Diagnostics.DebuggerDisplay("GraphAggregateAccumulator")]
-[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphAggregateAccumulator.DebugView))]
-internal sealed class GraphAggregateAccumulator
+[global::System.Diagnostics.DebuggerDisplay("GraphBuiltinAggregateState")]
+[global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBuiltinAggregateState.DebugView))]
+internal sealed class GraphBuiltinAggregateState
 {
     private static readonly BigInteger _scale = BigInteger.Pow(10, 28);
     private static readonly BigInteger _decimalMax = (BigInteger.One << 96) - 1;
@@ -36,7 +36,7 @@ internal sealed class GraphAggregateAccumulator
     private int _sumScale;
     private readonly GraphMemoryOwner? _memory;
 
-    internal GraphAggregateAccumulator(GqlAggregateExpression expression, GraphMemoryOwner? memory = null)
+    internal GraphBuiltinAggregateState(GqlAggregateExpression expression, GraphMemoryOwner? memory = null)
     {
         _expression = expression;
         _memory = memory;
@@ -198,7 +198,7 @@ internal sealed class GraphAggregateAccumulator
 
     private sealed class DebugView
     {
-        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphAggregateAccumulator value)
+        public DebugView(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBuiltinAggregateState value)
         {
             _ = value;
         }

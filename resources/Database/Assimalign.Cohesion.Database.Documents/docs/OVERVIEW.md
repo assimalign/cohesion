@@ -288,3 +288,27 @@ layouts are unchanged; the existing wire formatter includes an error code once.
 Documents debugger views show stored metadata without evaluating queries, reading content or taking session snapshots.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered document functions
+
+Configure `builder.Functions.Add(...)` on the engine builder before Build. Native and application
+scalars and aggregates use the same validated function family, and the built engine exposes its
+frozen catalog through `DocumentDatabaseEngine.Functions`. Registrations are engine-wide and
+case-insensitive; native names cannot be replaced. Typed scalar factories cover one through four
+inputs, and the typed aggregate factory supplies a per-group seed, step and finish.
+
+```csharp
+var builder = DocumentDatabaseEngine.CreateBuilder("custom-documents");
+builder.Functions.Add(DocumentScalarFunction.Create<string, string>(
+    "slug", value => value.ToLowerInvariant()));
+builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>(
+    "total_value", () => 0m, (total, value) => total + value, total => total));
+await using var engine = await builder.BuildAsync(CancellationToken.None);
+```
+
+Ordinary FromOql, session ExecuteAsync and remote Execute/Query calls bind names against that
+engine automatically. DocumentValue preserves NULL and MISSING, and advanced implementations
+derive from scalar/aggregate bases with protected cores. Function context supplies database,
+statement cancellation and transaction clock. Callback faults carry CD05017 with their original
+cause; native arithmetic codes, query planning, rollback, formats and wire layouts are preserved.
+See [DESIGN.md](DESIGN.md#engine-registered-document-functions) for contracts and reference anchors.

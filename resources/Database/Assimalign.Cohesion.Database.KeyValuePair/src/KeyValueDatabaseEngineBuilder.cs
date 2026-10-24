@@ -66,6 +66,7 @@ public sealed class KeyValueDatabaseEngineBuilder
     internal KeyValueDatabaseEngineBuilder(string name)
     {
         _state = new(name, KeyValueDatabaseEngine.ModelName);
+        Functions = new KeyValueFunctionCollection(_state.EnsureMutable);
     }
 
     /// <summary>
@@ -84,6 +85,10 @@ public sealed class KeyValueDatabaseEngineBuilder
     /// engine.
     /// </remarks>
     public KeyValueDatabaseEngineOptions Options => _options;
+
+    /// <summary>Gets the scalar registrations, frozen before any storage or worker is created.</summary>
+    /// <remarks>Registrations are shared by every database of the built engine. A function must be thread-safe.</remarks>
+    public KeyValueFunctionCollection Functions { get; }
 
     /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
@@ -225,7 +230,8 @@ public sealed class KeyValueDatabaseEngineBuilder
 
         // Phases 2 and 3: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = KeyValueDatabaseEngine.CreateUncomposed(Name, options);
+        KeyValueFunctionCatalog functions = Functions.Freeze();
+        var engine = KeyValueDatabaseEngine.CreateUncomposed(Name, options, functions);
         _state.Complete(engine, engine.Compose, KeyValueDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 4: each declared database, in declaration order; a failure disposes the engine.
@@ -252,6 +258,7 @@ public sealed class KeyValueDatabaseEngineBuilder
         }
 
         public string Name => _target.Name;
+        public KeyValueFunctionCollection Functions => _target.Functions;
         public global::Assimalign.Cohesion.Database.KeyValuePair.KeyValueDatabaseEngineOptions Options => _target.Options;
     }
 }

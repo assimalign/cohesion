@@ -51,7 +51,7 @@ public sealed class DocumentQueryRequest : DatabaseRequest
     public static DocumentQueryRequest FromOql(string oql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oql);
-        var statement = (OqlQueryStatement)new OqlQueryParser().Parse(oql);
+        var statement = (OqlQueryStatement)new OqlQueryParser(allowUnregisteredFunctions: true).Parse(oql);
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {

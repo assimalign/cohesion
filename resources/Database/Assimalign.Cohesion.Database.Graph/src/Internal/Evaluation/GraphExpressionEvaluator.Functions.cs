@@ -16,33 +16,35 @@ internal static partial class GraphExpressionEvaluator
         GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters)
     {
         if (!GraphScalarFunctions.ValidArity(call))
-        { throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
-        if (call.IsNiladic)
+        { throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function))); }
+        GraphInlineArguments buffer = default;
+        Span<object?> values = buffer;
+        values = values[..call.Arguments.Count];
+        for (int i = 0; i < values.Length; i++) { values[i] = Evaluate(call.Arguments[i], bindings, context, parameters); }
+        var arguments = new GraphArguments(values, new GraphFunctionContext(context));
+        try { return (context.Database?.Engine.Functions ?? GraphFunctionCatalog.Standard).Native(call.Function).Invoke(in arguments); }
+        catch (GraphPlanningException error) { throw error.At(call.Location); }
+    }
+
+    internal static object? InvokeBuiltin(GqlScalarFunction function, ReadOnlySpan<object?> values, GraphEvaluationContext context)
+    {
+        if (function is GqlScalarFunction.CurrentDate or GqlScalarFunction.CurrentTimestamp)
         {
-            return call.Function == GqlScalarFunction.CurrentDate
-                ? (object)DateOnly.FromDateTime(context.TransactionStart.UtcDateTime)
-                : context.TransactionStart.ToUniversalTime();
+            return function == GqlScalarFunction.CurrentDate
+                ? (object)DateOnly.FromDateTime(context.TransactionStart.UtcDateTime) : context.TransactionStart.ToUniversalTime();
         }
-        object? firstArgument = null, second = null, third = null;
-        bool hasNull = false;
-        for (int i = 0; i < call.Arguments.Count; i++)
+        for (int i = 0; i < values.Length; i++)
         {
-            object? value = Evaluate(call.Arguments[i], bindings, context, parameters);
-            hasNull |= value is null;
-            switch (i) { case 0: firstArgument = value; break; case 1: second = value; break; case 2: third = value; break; }
+            if ((GraphScalarFunctions.Argument(function, i) & GraphScalarFunctions.Kind(values[i])) == 0)
+            { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(function), i + 1)); }
         }
-        // Strict, NULL-first signatures: a NULL argument suppresses kind/domain checks.
-        if (hasNull) { return null; }
-        for (int i = 0; i < call.Arguments.Count; i++)
-        {
-            object? value = i switch { 0 => firstArgument, 1 => second, _ => third };
-            if ((GraphScalarFunctions.Argument(call.Function, i) & GraphScalarFunctions.Kind(value)) == 0)
-            { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Location); }
-        }
+        object? firstArgument = values.Length > 0 ? values[0] : null;
+        object? second = values.Length > 1 ? values[1] : null;
+        object? third = values.Length > 2 ? values[2] : null;
         object first = firstArgument!;
         try
         {
-            return call.Function switch
+            return function switch
             {
                 GqlScalarFunction.ElementId => first is GraphNode node ? node.Id.Value.ToString(CultureInfo.InvariantCulture) : ((GraphRelationship)first).Id.Value.ToString(CultureInfo.InvariantCulture),
                 GqlScalarFunction.Labels => ((GraphNode)first).Labels.Order(StringComparer.Ordinal).Cast<object?>().ToArray(),
@@ -61,7 +63,7 @@ internal static partial class GraphExpressionEvaluator
                 GqlScalarFunction.Replace => Replace((string)first, (string)second!, (string)third!),
                 GqlScalarFunction.CharLength => (long)((string)first).EnumerateRunes().Count(),
                 GqlScalarFunction.Size => first is string text ? (long)text.EnumerateRunes().Count() : ((object?[])first).LongLength,
-                GqlScalarFunction.Abs or GqlScalarFunction.Ceil or GqlScalarFunction.Floor or GqlScalarFunction.Round => Numeric(call.Function, first, second is not null ? NonnegativeInteger(second) : 0),
+                GqlScalarFunction.Abs or GqlScalarFunction.Ceil or GqlScalarFunction.Floor or GqlScalarFunction.Round => Numeric(function, first, second is not null ? NonnegativeInteger(second) : 0),
                 GqlScalarFunction.Sqrt => Finite(Math.Sqrt(Convert.ToDouble(first, CultureInfo.InvariantCulture))),
                 GqlScalarFunction.Log => Logarithm(first, second),
                 GqlScalarFunction.Mod => Arithmetic("%", first, second!),
@@ -69,11 +71,11 @@ internal static partial class GraphExpressionEvaluator
                 GqlScalarFunction.ToInteger => CypherInteger(first),
                 GqlScalarFunction.ToFloat => first is string input ? CypherFloat(input) : Finite(Convert.ToDouble(first, CultureInfo.InvariantCulture)),
                 GqlScalarFunction.ToBoolean => CypherBoolean(first),
-                _ => throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location),
+                _ => throw new GraphPlanningException("CG05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(function))),
             };
         }
         catch (Exception error) when (error is ArithmeticException or FormatException or InvalidCastException or ArgumentException)
-        { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, GraphScalarFunctions.Name(call.Function)), call.Location, error); }
+        { throw new GraphPlanningException("CG02013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.FunctionValue, GraphScalarFunctions.Name(function)), null, error); }
     }
 
     private static double Logarithm(object first, object? second)

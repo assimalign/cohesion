@@ -22,3 +22,12 @@ assigns this family its two-letter prefix and categorized five-digit identities.
 Existing SQLSTATE meanings, numeric wire error kinds, frame layouts and disk formats are preserved.
 Structured diagnostics keep their code outside the message. Compiler diagnostic identifiers and
 standard .NET argument guards retain their own contracts.
+
+## Shared scalar function identifier
+
+`KeyValueFunctionName` is a generated readonly value object with implicit string conversion,
+ordinal-ignore-case equality and ASCII identifier validation (letter/underscore first, then
+letters/digits/underscores). Default is refused by engine and client function boundaries.
+It adds one public top-level type (with its generated nested JSON converter) without adding frames, capabilities, protocol versions or references.
+The engine owns function metadata/resolution and the client owns CALL construction; both use
+this shared name grammar. No function implementation or catalog enters this contract package.

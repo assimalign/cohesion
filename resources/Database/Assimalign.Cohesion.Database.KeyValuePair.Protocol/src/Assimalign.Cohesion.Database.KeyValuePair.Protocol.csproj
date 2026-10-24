@@ -5,4 +5,13 @@
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Protocol" />
     </ItemGroup>
+    <ItemGroup>
+        <CohesionValueType Include="ValueObjects\KeyValueFunctionName.cs"
+                           ObjectRuntimeType="String"
+                           ObjectNamespace="Assimalign.Cohesion.Database.KeyValuePair.Protocol"
+                           ObjectAccessModifier="public"
+                           ObjectHasImplicitOperators="true"
+                           ObjectHasIsValidMethod="true"
+                           ObjectComparison="OrdinalIgnoreCase" />
+    </ItemGroup>
 </Project>

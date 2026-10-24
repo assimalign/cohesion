@@ -136,3 +136,17 @@ Existing engine refusals now retain their [producer identities](COMMANDS.md#mode
 in Diagnostics. ExecutionFailure still carries the same category and string payload, formatted
 as `CODE: message` once; an engine-carried identity takes precedence over `CV04019`. No
 Diagnostics frame, capability, message type or protocol version is added.
+
+## Registered scalar CALL
+
+`CALL function-name @p0 @p1` is an additive Execute command, with no new message types,
+capabilities, version or payload layout. Zero arguments encode as `CALL function-name`.
+Names follow the shared `KeyValueFunctionName` ASCII identifier rule. Parameters retain their
+exact native primitive codec types, including NULL. Successful calls send a ResultHeader with
+one `value` column of the declared type (NULL values permitted), one ResultRow and
+ResultComplete affected count -1, then return to the ready loop without an extra Ready frame. CALL never changes the grammar or result shape of the six existing commands.
+
+Missing names use CV00019/ParseFailure; resolution CV01018–21, callback CV05003 and declared
+result CV02016 use ExecutionFailure. Error text carries the code once. Ordinary callback
+failures keep the connection usable; cancellation/storage failures retain existing behavior.
+See [COMMANDS.md](COMMANDS.md) for overload and NULL semantics.

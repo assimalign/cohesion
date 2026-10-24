@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed partial class DocumentPlanner
 {
     // Available before data access and paging, including for an empty grouped result (#1129).
-    internal static DatabaseType StaticType(OqlExpression expression) => expression switch
+    internal static DatabaseType StaticType(OqlExpression expression, DocumentFunctionCatalog? functions = null) => expression switch
     {
         OqlLiteralExpression { Value: JsonElement json } => json.ValueKind switch
         {
@@ -26,12 +26,12 @@ internal sealed partial class DocumentPlanner
         OqlUnaryExpression unary when unary.Operator is "+" or "-" => DatabaseType.Decimal,
         OqlUnaryExpression => DatabaseType.Boolean,
         OqlBinaryExpression binary => binary.Operator is "+" or "-" or "*" or "/" or "%" ? DatabaseType.Decimal : DatabaseType.Boolean,
-        OqlCallExpression call => OqlFunctions.Find(call.Name)?.ResultType ?? DatabaseType.Null,
+        OqlCallExpression call => (functions ?? DocumentFunctionCatalog.Standard).Find(call.Name, call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression ? 0 : call.Arguments.Count)?.ReturnType ?? OqlFunctions.Find(call.Name)?.ResultType ?? DatabaseType.Null,
         OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression => DatabaseType.Boolean,
         _ => DatabaseType.Null,
     };
 
-    private static void ValidateFunctionKind(OqlFunction function, int index, OqlExpression argument)
+    private static void ValidateFunctionKind(DocumentFunction function, int index, OqlExpression argument)
     {
         // Only a literal (including unary minus) or constructor has a statically wrong kind.
         // Calls and paths may return NULL/MISSING at runtime, so their metadata is not a proof.

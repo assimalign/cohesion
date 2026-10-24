@@ -59,6 +59,7 @@ public sealed class DocumentDatabaseEngineBuilder
 {
     private readonly DatabaseEngineBuilderState<DocumentDatabaseEngine> _state;
     private readonly DocumentDatabaseEngineOptions _options = new();
+    private readonly DocumentFunctionCollection _functions;
 
     /// <summary>Initializes a builder for the engine of that name.</summary>
     /// <param name="name">The engine name.</param>
@@ -67,6 +68,7 @@ public sealed class DocumentDatabaseEngineBuilder
     internal DocumentDatabaseEngineBuilder(string name)
     {
         _state = new(name, DocumentDatabaseEngine.ModelName);
+        _functions = new(_state.EnsureMutable);
     }
 
     /// <summary>
@@ -85,6 +87,9 @@ public sealed class DocumentDatabaseEngineBuilder
     /// engine.
     /// </remarks>
     public DocumentDatabaseEngineOptions Options => _options;
+
+    /// <summary>Gets the engine-wide function registrations, standard library first; frozen when build begins.</summary>
+    public DocumentFunctionCollection Functions => _functions;
 
     /// <summary>
     /// Declares a database the engine owns: the build opens it, or creates it when it does not
@@ -217,6 +222,7 @@ public sealed class DocumentDatabaseEngineBuilder
     public async ValueTask<DocumentDatabaseEngine> BuildAsync(CancellationToken cancellationToken = default)
     {
         _state.BeginBuild();
+        var functions = _functions.Freeze();
 
         // Phase 1: the options, copied, then the copy checked, before anything is created; a change
         // racing the build cannot reach the engine unchecked.
@@ -226,7 +232,7 @@ public sealed class DocumentDatabaseEngineBuilder
 
         // Phases 2 and 3: the engine and its built-in workers, then the factories' products. A
         // failure here disposes what the engine and the composition hold.
-        var engine = DocumentDatabaseEngine.CreateUncomposed(Name, options);
+        var engine = DocumentDatabaseEngine.CreateUncomposed(Name, options, functions);
         _state.Complete(engine, engine.Compose, DocumentDatabaseEngine.ReleaseRefusedWorkerAsync);
 
         // Phase 4: each declared database, in declaration order; a failure disposes the engine.

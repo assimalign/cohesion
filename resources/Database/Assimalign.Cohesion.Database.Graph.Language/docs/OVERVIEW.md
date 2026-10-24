@@ -65,3 +65,11 @@ standard .NET argument guards retain their own contracts.
 AST debugger views use stored properties without building query stages, traversing caller collections or initializing parser profiles.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+Engine requests can opt into named developer scalar and aggregate calls without passing a
+catalog to the parser. The standalone default keeps unknown-name diagnostics; use
+GqlQueryParser(allowCustomFunctions: true) to defer name/kind/arity resolution. The immutable
+GqlNamedFunctionCallExpression shares generated GraphFunctionName identifiers with the engine.
+Native enum ASTs, source spans, star restrictions and special-form grammar are preserved.
+Window OVER invocations remain unsupported with CK00001 in either parser mode; over remains
+a legal identifier outside invocation positions.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Types;
 
@@ -18,9 +19,13 @@ public sealed class OqlFunction
         ResultType = resultType;
         IsAggregate = aggregate;
         _argumentTypes = argumentTypes;
+        ArgumentKinds = System.Array.AsReadOnly(argumentTypes);
     }
 
     private readonly JsonValueKind[] _argumentTypes;
+
+    /// <summary>Gets accepted argument kinds; Undefined means any, and the last kind repeats.</summary>
+    public IReadOnlyList<JsonValueKind> ArgumentKinds { get; }
 
     /// <summary>Gets the invariant upper-case name.</summary>
     public string Name { get; }

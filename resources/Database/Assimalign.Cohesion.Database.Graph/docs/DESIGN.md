@@ -957,13 +957,12 @@ parser; this is a bounded ISO subset, not a full conformance claim.
 The [language function table](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#core-scalar-functions-and-cast-1148)
 is the spelling/signature record. Immutable function and CAST AST nodes participate in every
 expression walk, projection/entity shape proof, structural grouping key and EXPLAIN rendering.
-Static enum switches define signatures and evaluators, preserving NativeAOT without reflection.
+Static enum metadata still describes native signatures and shapes; engine-registered function adapters now drive their common invocation pipeline without runtime code generation.
 Parsed scalar arity shares aggregates' CG00002 rule; hand-built invalid calls are CG05001.
 Provably incompatible kinds (including group lists) fail planning with CG03003 naming the
 function; dynamic wrong kinds and conversion/domain failures use CG02013. Unknown calls
-are CG00010. Strict NULL arguments return NULL before kind/domain checks. The main walk
-checks each reference once, carrying the enclosing function; evaluation uses fixed argument
-locals and formats function names only on errors. KnownFunctionKind proves non-integral
+retain CG00010 after deferred engine resolution as well as standalone parsing. Strict NULL arguments return NULL before kind/domain checks. The main walk
+checks each reference once, carrying the enclosing function; evaluation uses borrowed inline argument storage for native calls and formats function names only on errors. KnownFunctionKind proves non-integral
 toBoolean arguments, Boolean numeric CAST and temporal MATCH/INSERT properties incompatible
 (CG03003), including EXPLAIN and empty inputs.
 
@@ -2894,3 +2893,78 @@ invariant formatting and published limits remain unchanged.
 Graph debugger views expose stored request/result metadata, fixed identities and reviewed owned-array counts. They omit binding Keys/Values enumeration, arbitrary schema-result collection counts, synchronized current-transaction getters, engine/session snapshots and private memory/counter state. Internal helpers with no safe public or protected data have empty views.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered functions
+
+An engine builder exposes `Functions`. Register `GraphScalarFunction` or
+`GraphAggregateFunction` before its one build attempt; the engine exposes the frozen
+`GraphFunctionCatalog` before any storage is opened or workers are created. Direct
+`GraphDatabaseEngine.Create` uses the same standard catalog. Native scalar and aggregate
+calls enter the same public non-virtual invocation members and protected cores as developer
+callbacks. Native adapters retain the existing scalar domain/type errors (CG02013), exact
+aggregate promotion, empty identities, star and DISTINCT behavior. CASE, COALESCE, NULLIF and
+CAST remain grammar forms with their existing evaluation rules.
+
+Names use generated `GraphFunctionName` (Graph.Language), with implicit string conversion
+and ordinal case-insensitive equality. The identifier matches the lexer: a letter or underscore,
+then letters, digits or underscores. Default names fail registration. Native identities, aliases
+and the full lexical keyword vocabulary remain reserved. Recognized unsupported call words are
+also refused by a parser-only admission check at registration; no callback or engine is run. Disjoint-arity overloads are supported; same-arity type
+overloads and scalar/aggregate name sharing are refused at registration. Graph's dynamically
+typed property bindings cannot choose a same-arity overload reliably before execution, so this
+profile rejects that ambiguity instead of introducing SQL coercions or row-dependent name
+resolution. `GetOverloads` returns immutable metadata or an empty collection.
+
+`GraphQueryRequest.FromGql` automatically admits a `GqlNamedFunctionCallExpression`;
+the planner resolves its immutable descriptor once per statement by name and arity.
+Hand-built named native calls reuse the native enum AST shape proofs during planning only;
+runtime invocation still uses the bound catalog descriptor. Named-call binding and native-shape
+lookup maps are created only when needed. Enum-native-only plans and operations share an
+immutable empty binding map, avoiding empty per-statement dictionaries without bypassing
+the common function invocation pipeline.
+The standalone parser keeps its CG00010 unknown-name behavior unless constructed with
+`allowCustomFunctions: true`. Execution and wire requests require no catalog argument and
+introduce no wire message, persisted registration, disk format or protocol version change.
+EXPLAIN binds and validates metadata without invoking scalar, seed, step, finish or
+retained-size callbacks.
+
+`GraphFunctionType` declares exact CLR scalar kinds, entities, and recursively typed list
+elements/map values. Its immutable result metadata feeds LET/FOR/WITH propagation and the
+existing pre-write scalar/entity/composite admission gates, including empty inputs. Runtime
+callbacks must honor their declared shapes. Strict scalar invocation metadata conservatively
+marks the top result nullable even for a non-NULL callback contract; nested element/value
+nullability is unchanged. Carried result columns retain that invocation nullability. Strict functions evaluate argument expressions
+eagerly, then return NULL (or skip the aggregate row) before callback invocation when an input
+is NULL; called-on-NULL functions receive those NULLs. The borrowed `GraphArguments` and
+`GraphFunctionContext` carry query values, database name, captured transaction timestamp and
+statement cancellation. They expose no mutable operation, snapshot or transport.
+
+Each group receives fresh `GraphAggregateAccumulator` state. Attachment is claimed once;
+Add after Finish and repeated Finish are refused. Developer state reports its retained byte
+count through `RetainedBytesCore`; the typed factory requires a retained-size delegate.
+Initial, post-step and post-finish charges flow into the statement's existing
+`GraphMemoryOwner`. DISTINCT tuple state and native aggregate values use the existing
+statement accounting. Every created group is disposed and its charge released on completion
+or failure. Cleanup visits every state and does not replace an earlier statement failure.
+The callback must report retained referenced data honestly; arbitrary private temporary
+allocation, synchronous CPU and external I/O inside trusted developer code cannot be preempted
+or measured by this retained-state contract. Callbacks must observe cancellation and return
+stable supported query values. There is no process-wide hot-path accounting or spill.
+
+Unexpected developer failures and invalid callback contracts use CG05021, with the original
+cause and source span in the diagnostics carrier and no code prefix in the message.
+The callback pipeline preserves database, storage, I/O and timeout exception identity;
+the existing engine boundary still classifies storage/I/O failures as CG06006 with the original
+exception as InnerException. It preserves timeout identity and the established transaction
+abort behavior. Cancellation keeps its identity when the statement token is canceled. Native leaves retain their original coded
+arithmetic/type failures before the common callback filter.
+
+Reference behavior was compared with Neo4j
+`community/procedure/src/main/java/org/neo4j/procedure/impl/ProcedureRegistry.java:127-201`
+(shared scalar/aggregate registry and cross-kind collision checks),
+`community/kernel/src/main/java/org/neo4j/kernel/api/procedure/CallableUserFunction.java:27-37`
+(borrowed query values and execution context), and
+`community/kernel/src/main/java/org/neo4j/kernel/api/procedure/CallableUserAggregationFunction.java:28-47`
+(group-local state creation). PostgreSQL's
+`src/backend/utils/fmgr/fmgr.c:149-189` likewise installs builtin and catalog function
+metadata into one invocation descriptor. No reference code is copied.

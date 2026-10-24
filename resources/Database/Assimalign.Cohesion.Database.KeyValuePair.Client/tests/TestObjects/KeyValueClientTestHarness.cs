@@ -41,9 +41,12 @@ internal sealed class KeyValueClientTestHarness : IAsyncDisposable
         Action<KeyValueDatabaseServerOptions>? configureServer = null,
         KeyValueClientObserver? observer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
-        bool tcp = false)
+        bool tcp = false,
+        Action<KeyValueFunctionCollection>? configureFunctions = null)
     {
-        var engine = KeyValueDatabaseEngine.Create("kv-typed-client-e2e", new KeyValueDatabaseEngineOptions());
+        var builder = KeyValueDatabaseEngine.CreateBuilder("kv-typed-client-e2e");
+        configureFunctions?.Invoke(builder.Functions);
+        var engine = await builder.BuildAsync();
         await engine.CreateDatabaseAsync(DatabaseName);
 
         IDuplexConnectionListener listener = tcp

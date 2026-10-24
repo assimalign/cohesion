@@ -19,4 +19,9 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
 	</ItemGroup>
+	<ItemGroup>
+        <CohesionValueType Include="ValueObjects\DocumentFunctionName.cs" ObjectRuntimeType="String"
+            ObjectNamespace="Assimalign.Cohesion.Database.Documents" ObjectAccessModifier="public"
+            ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+    </ItemGroup>
 </Project>

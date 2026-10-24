@@ -314,3 +314,21 @@ standard .NET argument guards retain their own contracts.
 Client debugger views expose the captured database name, stored result metadata and counts from arrays materialized by the result/row constructors. They omit live connection state, transport settings and row-value buffers, and never enumerate results.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function execution
+
+Execute/Query send ordinary OQL text; no client-side registration or catalog argument is needed.
+The server binds application scalar and aggregate names against its engine-wide frozen catalog.
+Existing result headers preserve declared types, including empty results. CD05017 callback
+failures use the existing Failure exchange with one message prefix and structured spans; the
+connection remains reusable under the existing policy. DocumentRegisteredFunctionWireTests
+covers registered scalars, aggregates and NULL/MISSING-aware calls over InMemory and loopback TCP.
+No client production API, protocol bytes, format version or dependencies change.
+
+
+The model client NativeAOT sample independently registers lower_tag, rank_total and the
+compiled derived has_value function before building its real server. Each existing transport run
+executes three additional checks: exact string/metadata for the typed scalar, Boolean results
+and metadata for MISSING/NULL/valued inputs through the protected core, and exact Decimal
+aggregate result/metadata. This client/server sample is separate from the engine recovery fixture;
+both require their own publish/execution evidence. No sample project reference changes are needed.

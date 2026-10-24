@@ -511,7 +511,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
     {
         ThrowIfOffline();
 
-        var executor = new KeyValueOperationExecutor(Name, _catalog, _storage, _primaryIndex);
+        var executor = new KeyValueOperationExecutor(Name, _catalog, _storage, _primaryIndex, _engine.Functions);
         var session = new KeyValueDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<DatabaseSession>(session);

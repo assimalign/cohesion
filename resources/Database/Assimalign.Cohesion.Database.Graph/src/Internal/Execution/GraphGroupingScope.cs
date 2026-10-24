@@ -14,14 +14,15 @@ internal sealed class GraphGroupingScope
     private readonly HashSet<GqlExpression> _aggregates;
     private readonly HashSet<string> _variables;
     private readonly CancellationToken _token;
+    private readonly GraphFunctionCatalog? _functions;
 
-    internal GraphGroupingScope(IReadOnlyList<GqlExpression> keys, IReadOnlyList<GqlAggregateExpression> aggregates,
-        GraphExpressionShape shape, CancellationToken token)
+    internal GraphGroupingScope(IReadOnlyList<GqlExpression> keys, IReadOnlyList<GqlExpression> aggregates,
+        GraphExpressionShape shape, CancellationToken token, GraphFunctionCatalog? functions = null)
     {
         _keys = new HashSet<GqlExpression>(shape);
         _aggregates = new HashSet<GqlExpression>(shape);
         _variables = new HashSet<string>(StringComparer.Ordinal);
-        _token = token;
+        _token = token; _functions = functions;
         foreach (var key in keys)
         {
             token.ThrowIfCancellationRequested();
@@ -48,7 +49,7 @@ internal sealed class GraphGroupingScope
                 _ => null,
             };
             if (name is not null && (_variables.Contains(name) || aliases is not null && aliases.ContainsKey(name))) { continue; }
-            if (name is not null || expression is GqlAggregateExpression)
+            if (name is not null || expression is GqlAggregateExpression || expression is GqlNamedFunctionCallExpression named && _functions?.Resolve(named) is GraphAggregateFunction)
             { throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, expression.Location); }
             foreach (var child in GraphValueExpressions.Children(expression)) { pending.Push(child); }
         }

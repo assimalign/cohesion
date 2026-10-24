@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Tcp.AotSample;
-// Sixty-second outer hang guard for the five TCP smoke cases; this is not a timing measurement.
+// Sixty-second outer hang guard for the TCP smoke cases and function exchanges; this is not a timing measurement.
 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 for (int model = 0; model < TcpServerSmoke.Models.Length; model++)
 {
@@ -13,3 +13,4 @@ for (int model = 0; model < TcpServerSmoke.Models.Length; model++)
     Console.WriteLine(TcpServerSmoke.Models[model] + ": TCP handshake and Ping passed.");
 }
 Console.WriteLine("Database.Tcp NativeAOT: 5/5 model servers passed.");
+await KeyValueFunctionSmoke.RunAsync(timeout.Token);

@@ -6,6 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphBindingShape.DebugView))]
 internal sealed record GraphBindingShape(bool[] Entities, bool[] Composites, bool[] Scalars, GraphEntityShape[] EntityKinds, DatabaseType Type)
 {
+    internal bool? ResultNullable { get; init; }
     internal bool[] Groups { get; init; } = [];
     internal bool Group => Groups.Length > 0 && Groups[0];
     internal GraphFunctionKind ValueKind { get; init; }

@@ -400,3 +400,13 @@ standard .NET argument guards retain their own contracts.
 Client debugger views expose the captured database name, owned-row counts and stored result/diagnostic references. They omit live connection state, transport settings and row-value buffers. Inspecting a path result never enumerates its single-use stream or completes the exchange.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function calls
+
+QueryAsync and ExecuteAsync send ordinary named scalar/aggregate calls through the existing
+GQL request encoding. The server's engine-local catalog resolves them; the client needs no
+registration object or engine reference. Existing planned entity/composite admission,
+negotiated composite encoding and pooled-session cleanup apply. CG05021 callback diagnostics
+round-trip through the existing carrier. GraphRegisteredFunctionWireTests covers both InMemory
+and TCP, custom scalar and DISTINCT aggregate values, failure diagnostics and exact-session reuse.
+No protocol bytes, capabilities or version change.

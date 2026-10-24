@@ -83,9 +83,10 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 
-`OqlFunctions.All` is the public, immutable function table consumed by the parser, profile
-and engine. It classifies scalar versus aggregate calls, argument counts and kinds, and static
-result types. The profile derives its function tokens from this table; names remain usable as fields.
+`OqlFunctions.All` is the public, immutable standard-function metadata consumed by the
+standalone parser, profile and engine's native registrations. It classifies scalar versus aggregate
+calls, argument counts and kinds, and static result types. Engine request parsing admits additional
+named calls for the executing engine's frozen catalog to bind. The profile derives its function tokens from this table; names remain usable as fields.
 In this table, **propagate** means MISSING wins over NULL; a wrong-kind stored value gives NULL,
 while an incompatible literal kind fails planning before document access. **Selected** means the
 result has the selected argument's type. Conditional functions evaluate only through the selected
@@ -756,3 +757,14 @@ standard .NET argument guards retain their own contracts.
 Language debugger views expose stored AST properties and the reviewed source-text/location getters on sealed expression leaves. Parse Diagnostics sorting, the create-index Path indexer and parser Profile initialization are omitted. Source text is not included in debugger summaries.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Registered function admission
+
+The default parser retains the built-in OqlFunctions metadata table and standalone unknown-name
+and arity diagnostics. The optional allowUnregisteredFunctions constructor argument admits arbitrary
+named-call ASTs for engine binding; the language package takes no engine or catalog dependency.
+Ordinary DocumentQueryRequest.FromOql and wire execution select this mode automatically. Native
+arity checks and recognized unsupported constructs remain unchanged. OqlFunction.ArgumentKinds
+exposes the immutable metadata used to construct native registrations; execution uses the owning
+engine's frozen function catalog. Runtime binding, MISSING/NULL, grouping and error contracts are
+specified in the [engine design](../../Assimalign.Cohesion.Database.Documents/docs/DESIGN.md#engine-registered-document-functions).

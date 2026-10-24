@@ -315,9 +315,17 @@ internal static partial class GraphPlanExecutor
     {
         using var memory = new GraphMemoryOwner(operation.QueryBudget!.Memory);
         using var accumulator = new GraphGrouping.Accumulator(grouping, operation.EvaluationContext, parameters, token, memory);
-        await foreach (var binding in input.ConfigureAwait(false))
-        { operation.EnsureActive(); accumulator.Add(binding); }
-        foreach (var group in accumulator.Finish()) { token.ThrowIfCancellationRequested(); yield return group; }
+        List<Dictionary<string, object?>> groups;
+        try
+        {
+            await foreach (var binding in input.ConfigureAwait(false))
+            { operation.EnsureActive(); accumulator.Add(binding); }
+            groups = accumulator.Finish();
+        }
+        catch { accumulator.DisposeAfterFailure(); throw; }
+        // Release callback state before publishing materialized result rows.
+        accumulator.Dispose();
+        foreach (var group in groups) { token.ThrowIfCancellationRequested(); yield return group; }
     }
 
     private static object?[] EvaluateProjection(GraphPlan plan, IReadOnlyDictionary<string, object?> binding,
@@ -344,7 +352,7 @@ internal static partial class GraphPlanExecutor
         using var distinctMemory = new GraphMemoryOwner(budget.Memory);
         retained.Add(128L + 64L * plan.Projections.Count);
         var columns = plan.Projections.Select((projection, i) => new DatabaseColumn
-        { Name = projection.Name, Ordinal = i, Type = projection.Type }).ToArray();
+        { Name = projection.Name, Ordinal = i, Type = projection.Type, IsNullable = projection.ResultNullable ?? false }).ToArray();
         using var top = new GraphTopRows(budget.Memory, plan.SortPage, token);
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool valueColumnsAdded = false;

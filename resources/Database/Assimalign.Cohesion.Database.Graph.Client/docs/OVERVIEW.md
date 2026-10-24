@@ -65,3 +65,7 @@ standard .NET argument guards retain their own contracts.
 Client debugger views show captured metadata without transport work, path enumeration or exchange completion.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+Functions registered by the server engine are callable through ordinary QueryAsync/ExecuteAsync
+GQL text, with no client catalog argument. The same scalar/entity/composite admission and
+CG05021 diagnostic carrier apply over InMemory and TCP; wire formats remain unchanged.

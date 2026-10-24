@@ -27,3 +27,12 @@ flowchart TD
     Exit --> Open["Reopen and recover in another process"]
     Open --> Assert["Assert document and indexed OQL results"]
 ```
+
+## Registered-function NativeAOT consumer
+
+The fixture builds the engine with three application registrations before any database I/O:
+a typed lower_tag scalar, a typed rank_total aggregate and the derived has_value scalar that
+receives NULL/MISSING explicitly. Verify executes all three after recovery and checks exact
+string, Boolean and Decimal results. These registrations exercise static generic factory
+instantiations and a protected-core application implementation without reflection, dynamic code,
+new dependencies or persisted function records. Seed/verify storage behavior remains unchanged.

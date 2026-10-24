@@ -6,8 +6,10 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
 for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
-One immutable function table declares META, five aggregates and 34 SQL++ scalars, with parse-time
-arity checks, CD00008 for unknown calls, and static result types consumed by the Documents engine.
+One immutable standard-function table declares META, five aggregates and 34 SQL++ scalars, with
+native parse-time arity checks and static result types used by native registrations. The standalone
+parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
+the executing engine's function catalog.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.
@@ -68,3 +70,11 @@ standard .NET argument guards retain their own contracts.
 AST debugger views use stored properties without sorting diagnostics, indexing caller collections or initializing parser profiles.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+## Engine-registered function calls
+
+OqlQueryParser's optional allowUnregisteredFunctions mode admits named-call ASTs for engine
+binding while its default retains standalone CD00008 behavior. Document requests and wire execution
+select deferred binding automatically. OqlFunction.ArgumentKinds supplies immutable native
+signature metadata; custom scalar/aggregate registration and execution belong to the engine.
+There is no language-to-engine dependency, new scripting syntax or persisted function definition.

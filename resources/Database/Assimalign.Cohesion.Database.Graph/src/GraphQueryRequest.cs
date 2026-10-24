@@ -66,7 +66,7 @@ public sealed class GraphQueryRequest : GraphRequest
     public static GraphQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gql);
-        var statement = (GqlQueryStatement)new GqlQueryParser().Parse(gql);
+        var statement = (GqlQueryStatement)new GqlQueryParser(allowCustomFunctions: true).Parse(gql);
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null)
         {

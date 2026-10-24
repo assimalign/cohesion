@@ -109,14 +109,16 @@ internal sealed class KeyValueOperationExecutor
 
     private readonly DatabaseName _databaseName;
     private readonly KeyValueCatalog _catalog;
+    private readonly KeyValueFunctionCatalog _functions;
     private readonly KeyValueStorage _storage;
     private readonly BTreeIndex _primaryIndex;
     private readonly BTreeRecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(DatabaseName databaseName, KeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, KeyValueCatalog catalog, KeyValueStorage storage, BTreeIndex primaryIndex, KeyValueFunctionCatalog functions)
     {
         _databaseName = databaseName;
         _catalog = catalog;
+        _functions = functions;
         _storage = storage;
         _primaryIndex = primaryIndex;
         _primaryIndexVersions = BTreeRecordVersionIndex.Create(primaryIndex);
@@ -130,6 +132,7 @@ internal sealed class KeyValueOperationExecutor
         return request switch
         {
             KeyValueKeySpacesRequest => ExecuteKeySpaces(cancellationToken),
+            KeyValueFunctionRequest call => ExecuteFunction(call, cancellationToken),
             KeyValueGetRequest get => await ExecuteGetAsync(get, context, cancellationToken).ConfigureAwait(false),
             KeyValueExistsRequest exists => await ExecuteExistsAsync(exists, context, cancellationToken).ConfigureAwait(false),
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
@@ -137,6 +140,18 @@ internal sealed class KeyValueOperationExecutor
             KeyValueDeleteRequest delete => await ExecuteDeleteAsync(delete, context, cancellationToken).ConfigureAwait(false),
             _ => throw DatabaseException.CreateKeyValuePairFailure("CV05002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OperationExecutorExecuteAsyncDatabase, request.GetType().Name)),
         };
+    }
+
+    private DatabaseResult ExecuteFunction(KeyValueFunctionRequest request, CancellationToken cancellationToken)
+    {
+        KeyValueFunction function = _functions.Resolve(request.Name, request.ArgumentValues);
+        var arguments = new KeyValueArguments(request.ArgumentValues, new KeyValueFunctionContext(_databaseName, cancellationToken));
+        object? value = function.Invoke(in arguments);
+        IReadOnlyList<DatabaseColumn> columns =
+        [
+            new DatabaseColumn { Name = "value", Ordinal = 0, Type = function.ReturnType, IsNullable = true },
+        ];
+        return new KeyValueMaterializedResultSet(columns, [[value]]);
     }
 
     // ── Reads ──────────────────────────────────────────────────────────

@@ -23,4 +23,7 @@ public enum KeyValueOperation : byte
 
     /// <summary>Read-only discovery of the database's key spaces and catalog metadata.</summary>
     KeySpaces,
+
+    /// <summary>Invokes one registered scalar function.</summary>
+    Function,
 }

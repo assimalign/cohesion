@@ -142,7 +142,7 @@ public sealed class KeyValueDatabaseSession : DatabaseExecutionSession<KeyValueR
     /// <summary>
     /// Runs one command of the key-value command grammar (<c>docs/COMMANDS.md</c>:
     /// <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/<c>EXISTS</c>/<c>SCAN</c> with parameter operands, and
-    /// <c>KEYSPACES</c>), the wire encoding of the typed requests: the wire server's entry, which
+    /// <c>KEYSPACES</c>/<c>CALL</c>), the wire encoding of the typed requests: the wire server's entry, which
     /// lets it carry key-value commands in the protocol's existing Execute message.
     /// </summary>
     /// <param name="commandText">The command text.</param>
