@@ -2096,6 +2096,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // the complete pre-image and leaves its owner directory intact.
         var page = handle.Page;
         ulong pageOwner = page.OwnerId;
+        RecordPageReclaiming?.Invoke(pageId);
         ClearBody(page);
         page.Type = PageType.Reclaimed;
         page.OwnerId = 0;
@@ -3153,6 +3154,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     // Cold-path test rendezvous while the compacted page still has its D1 mutable scope.
     internal Action<PageId>? RecordPageCompacted;
     internal Action<PageId>? RecordPageSelectedForReuse;
+    internal Action<PageId>? RecordPageReclaiming;
 
     private void InvalidateRecordFreeBytes(StoragePageHandle handle)
     {

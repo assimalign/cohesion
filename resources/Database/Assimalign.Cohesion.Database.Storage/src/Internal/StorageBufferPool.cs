@@ -44,6 +44,8 @@ internal sealed unsafe class StorageBufferPool : IDisposable
     internal Action<long>? WriteAheadGate;
     internal Action? WriteGuard;
     internal Action<long, long>? WriteBackAudit;
+    internal Action? FlushCopyHalfway;
+    internal Action? IoCleanupStarting;
     internal string StorageName { get; set; } = string.Empty;
     internal long WriteBackWaits => Interlocked.Read(ref _writeBackWaits);
 
@@ -159,6 +161,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             catch (Exception failure)
             {
                 if (published) { throw; }
+                IoCleanupStarting?.Invoke();
                 lock (_syncRoot)
                 {
                     if (ownsLoadingFrame) { _loadingFrames--; RecycleLocked(frame!); }
@@ -325,6 +328,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
         }
         finally
         {
+            IoCleanupStarting?.Invoke();
             lock (_syncRoot)
             {
                 if (!removed) { entry.WriteInProgress = false; entry.AllowPins(); }
@@ -393,6 +397,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
             }
             finally
             {
+                IoCleanupStarting?.Invoke();
                 lock (_syncRoot)
                 {
                     foreach (var entry in victims)
@@ -487,7 +492,13 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                     !entry.IsDirty || (skipPinned && entry.PinCount != 0)) { return false; }
                 if (entry.WriteInProgress) { WaitForIoLocked(); continue; }
                 version = Volatile.Read(ref entry.Version);
-                entry.Buffer.AsSpan().CopyTo(image);
+                if (FlushCopyHalfway is null) { entry.Buffer.AsSpan().CopyTo(image); }
+                else
+                {
+                    entry.Buffer.AsSpan(0, Page.Size / 2).CopyTo(image);
+                    FlushCopyHalfway();
+                    entry.Buffer.AsSpan(Page.Size / 2).CopyTo(image.AsSpan(Page.Size / 2));
+                }
                 entry.WriteInProgress = true;
                 break;
             }

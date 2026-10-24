@@ -13,7 +13,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 [Collection(StorageRaceCollection.Name)]
-public sealed class StorageBufferPoolIoTests
+public sealed partial class StorageBufferPoolIoTests
 {
     [Theory(DisplayName = "Cohesion Test [Storage] - Buffer pool I/O: unrelated cached pins progress before blocked foreground I/O resumes (#1541)")]
     [InlineData("Read")]
