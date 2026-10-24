@@ -215,7 +215,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         TransactionCommitUnconfirmedException unconfirmed => _database.CreateUnconfirmedCommit(unconfirmed),
         _ when _database.TranslateFailure(error) is var offline && !ReferenceEquals(offline, error) => offline,
-        TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
+        TransactionDeadlockException deadlock => SqlExecutionException.Deadlock(deadlock),
         TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
         _ => error,
     };

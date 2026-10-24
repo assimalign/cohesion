@@ -666,6 +666,8 @@ internal sealed partial class SqlPlanExecutor
         var locks = statement.Coordinator.LockManager;
         var statementMark = locks.MarkStatement(statement.Transaction.Sequence);
         var retryMark = statementMark;
+        const int retainedWaitThreshold = 3;
+        int refusals = 0;
         bool applyStarted = false;
         try
         {
@@ -710,9 +712,9 @@ internal sealed partial class SqlPlanExecutor
                     var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
                     ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
                     await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
-                    applyStarted = true;
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
+                        applyStarted = true;
                         // Revalidate every target before applying anything. The bracket makes all
                         // tombstones, versions and index changes one rollback unit.
                         foreach (var update in updates.Values)
@@ -762,7 +764,11 @@ internal sealed partial class SqlPlanExecutor
                 }
                 catch (SqlCascadeLockRetry refused)
                 {
-                    locks.ReleaseSince(retryMark);
+                    // Bound release/restart starvation on a hot parent. From the third
+                    // refusal onward, retain the closure and queue normally; hard cycles
+                    // still fail through AcquireAsync's deadlock detector.
+                    if (refusals < retainedWaitThreshold) { refusals++; }
+                    if (refusals < retainedWaitThreshold) { locks.ReleaseSince(retryMark); }
                     await locks.AcquireAsync(statement.Transaction.Sequence, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
                     // Keep every waited grant across future back-offs. Releasing it permits
                     // contenders to hand the same row back and forth forever (#1668).

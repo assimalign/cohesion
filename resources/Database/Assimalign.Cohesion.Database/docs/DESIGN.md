@@ -34,6 +34,10 @@ The stateless shared `DatabaseFailure` walker avoids allocation for unwrapped fa
 as `DatabaseException`. Models can retain a retryable abort's exception kind and its plain
 message while attaching the model code; only the wire writer adds that code to the message.
 The abort remains a base because the shipped deadlock exception derives from it.
+`DatabaseTransactionDeadlockException` accepts the same diagnostic carrier. SQL supplies
+`CS04065`, mapped to SQLSTATE `40P01`, through embedded and negotiated wire failures.
+Under statement atomicity a hard deadlock refuses the statement; the explicit victim
+transaction stays active with earlier work and locks until its caller rolls it back.
 
 
 ## Storage corruption (#1160)

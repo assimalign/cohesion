@@ -582,10 +582,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     {
                         throw transaction.RecordStorageFailure(_database.TranslateFailure(exception));
                     }
-                    // The requester-closes-cycle victim: the statement failed and is
-                    // retryable by construction — roll the transaction back and
-                    // re-attempt. The session stays usable.
-                    throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+                    // Statement atomicity retains earlier work and locks. The caller
+                    // must roll the victim transaction back before retrying it.
+                    throw SqlExecutionException.Deadlock((TransactionDeadlockException)exception);
                 }
                 catch (Exception exception) when (exception is TransactionLockTimeoutException
                     || (exception is OperationCanceledException && _statementTimer?.IsCancellationRequested == true
@@ -658,7 +657,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         catch (TransactionDeadlockException exception)
         {
             await RollbackAutoCommitAsync(context).ConfigureAwait(false);
-            throw new DatabaseTransactionDeadlockException(exception.Message, exception);
+            throw SqlExecutionException.Deadlock(exception);
         }
         catch (TransactionAbortedException exception)
         {

@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Cascade progress and deadlock diagnostics (w11 review)
+
+DIALECT.md records the per-statement bound of three cascade lock refusals: two releases,
+then normal queued waits retaining closure grants and deadlock detection. Hard deadlocks
+carry CS04065 mapped to 40P01; explicit victim rollback remains caller-managed under
+statement atomicity. Grammar, diagnostic transport and disk formats are unchanged.
+
 ## Bounded SELECT evaluation (#1523)
 
 DIALECT.md records early termination across stored/system, grouped, correlated,
