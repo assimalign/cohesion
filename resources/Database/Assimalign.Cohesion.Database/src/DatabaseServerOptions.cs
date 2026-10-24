@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.Database;
 /// <summary>Transport, authentication and session limits shared by the five model servers.</summary>
 /// <remarks>Model leaves snapshot these settings at server creation. Listener ownership transfers
 /// to the server, whose stop terminally disposes it. Transport integrations configure the listener.</remarks>
+// Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class DatabaseServerOptions
 {
     /// <summary>Initializes the common server defaults.</summary>

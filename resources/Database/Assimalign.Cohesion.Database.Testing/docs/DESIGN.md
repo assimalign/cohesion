@@ -219,3 +219,23 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Views return the stored resource context without starting a host or reading synchronized lifecycle state; bootstrap credential state remains hidden.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+## Packaged TCP composition acceptance (#1391)
+
+The separate `fixtures/Assimalign.Cohesion.Database.TcpSdkHost` executable uses only
+`Sdk.Database` and its App/App.Database framework references. Its ordinary Program composes
+KeyValuePair, Graph and Blob through `AddServer(server => server.Listen(uri))`, with no direct
+project/package references. The compiler-reference artifact must contain Database.Tcp from the
+App.Database reference pack and omit Connections.Tcp; the self-contained output must carry the
+driver at runtime.
+
+The test launches that process, awaits READY after application startup, completes authentication
+and Ping/Pong with each model family, then sends STOP and requires a clean exit. This uses the
+existing generic DatabaseClient exchange seam without adding a public Ping member. The 90-second
+operation and independent 30-second cleanup budgets are hang guards, not timing assertions.
+The fixture disables ApplicationModel/schema generation; the existing SampleHost retains SQL
+schema, manifest, LocalGateway, admin and restart coverage. Both use the fresh local feed from
+`scripts/Install-Local.ps1` before the explicit Database.Testing test project is built.
+
+All three fixture engines retain their default in-memory storage: no RootPath or storage
+strategy is configured, so the process creates no persistent data directory to clean up.

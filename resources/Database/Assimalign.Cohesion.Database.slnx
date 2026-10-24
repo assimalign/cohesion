@@ -475,4 +475,12 @@
   <Folder Name="/Database/Kernel/Assimalign.Cohesion.Database.Tcp/samples/">
     <Project Path="Assimalign.Cohesion.Database.Tcp/samples/Assimalign.Cohesion.Database.Tcp.AotSample/Assimalign.Cohesion.Database.Tcp.AotSample.csproj" />
   </Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/">
+		<Project Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/Assimalign.Cohesion.Database.TcpSdkHost.csproj" />
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/README.md" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/">
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.TcpSdkHost/docs/OVERVIEW.md" />
+	</Folder>
 </Solution>

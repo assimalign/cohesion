@@ -65,12 +65,13 @@ dotnet test resources/Database/Assimalign.Cohesion.Database.Testing/tests/Assima
 ```
 
 **2. Pack the local feed first.** The acceptance tests build
-`fixtures/Assimalign.Cohesion.Database.SampleHost` through the real `Sdk.Database`, which resolves
+`fixtures/Assimalign.Cohesion.Database.SampleHost` and the TCP composition consumer
+`fixtures/Assimalign.Cohesion.Database.TcpSdkHost` through the real `Sdk.Database`, which resolves
 its SDK and framework packages from `_out/packages`. Without them the fixture cannot build and the
 tests fail on missing generated output rather than on anything they are actually asserting:
 
 ```bash
-pwsh scripts/Install-Local.ps1
+pwsh scripts/Install-Local.ps1 -Configuration Release -SkipLibraries
 ```
 
 This is the same command the `database-testing-pack` job runs in
@@ -82,3 +83,11 @@ versions change.
 framework closure into `_out/packages` and is the documented dev loop in the repo's `CLAUDE.md`.
 
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).
+
+## Shared TCP SDK acceptance
+
+The separate TCP SDK fixture has no project/package references. Its compiler-reference artifact
+proves Database.Tcp is public in App.Database while Connections.Tcp stays runtime-private. Its
+process starts KeyValuePair, Graph and Blob servers through the ordinary `AddServer`/`Listen`
+builder calls. The test awaits explicit READY, authenticates and requires Pong for every model,
+then sends STOP and requires clean shutdown. Operation and cleanup budgets are hang guards.

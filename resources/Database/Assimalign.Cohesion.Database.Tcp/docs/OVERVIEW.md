@@ -13,3 +13,15 @@ Listener extension containers are partial and compiler/AOT defaults are inherite
 
 
 Framework validation combines the public and runtime-private membership groups before checking dependencies and compiler visibility. Database.Tcp remains framework-public, while Connections.Tcp remains runtime-private. Separate item groups do not change that contract.
+
+
+## Delivery and acceptance (#1391)
+
+The standalone release package, Database CI matrix and repository solutions use Database.Tcp;
+the deleted Database.Sql.Tcp is no longer a delivery entry. SDK smoke watches this package. The
+Linux NativeAOT job publishes and runs the five-model guard and requires its completed handshake/
+Ping result without compiler or trimming warnings. Database.Testing also builds an SDK-only
+consumer against installed framework packs: KeyValuePair, Graph and Blob compose Listen(Uri),
+authenticate and answer Ping. Its evaluated compiler references include Database.Tcp and exclude
+Connections.Tcp, while the latter remains present in the runtime closure. No SQL grammar, wire
+message, storage format, public API or error-code change is needed for this delivery completion.

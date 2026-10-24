@@ -1457,3 +1457,14 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Only stored fields and reviewed pure getters are projected; inspection does not execute queries, enumerate results, invoke clocks or mutate lifecycle state.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+
+## TCP delivery completion (#1391)
+
+The shared abstract DatabaseServerOptions carries the concrete-first deviation marker because it
+represents the five sealed model options. The release inventory, Database CI project matrix and
+solution entries name Database.Tcp. SDK smoke watches its source, and the Linux NativeAOT job
+publishes and runs its five-model handshake/Ping guard with compiler and trimming warnings refused.
+The installed-SDK acceptance fixture compiles without explicit model or transport references and
+serves KeyValuePair, Graph and Blob through the framework-public Listen(Uri) extension. Public
+signatures, option defaults, coded refusals, protocol layouts and storage formats remain unchanged.

@@ -43,3 +43,15 @@ Listener extension containers are partial and compiler/AOT defaults are inherite
 The framework-closure guard reads the Runtime producer's public, runtime-private and analyzer item groups as one logical membership list. Splitting public and private items into separate unconditioned groups follows the repository's one-item-kind-per-group rule; it does not change which assemblies ship or become compiler references. The loader retains document order and validates supported kinds, unconditional membership, nonempty unique identities and the public umbrella first. Existing project/package closure and transitive visibility checks still run across every area.
 
 The guard accepts existing single-group area lists without rewriting other areas. New multi-group lists must keep each group homogeneous. Malformed-list and visibility fixtures plus omission, duplicate and private-edge mutants protect this aggregation from hiding missing or exposed implementation dependencies.
+
+
+## Delivery and acceptance (#1391)
+
+The standalone release package, Database CI matrix and repository solutions use Database.Tcp;
+the deleted Database.Sql.Tcp is no longer a delivery entry. SDK smoke watches this package. The
+Linux NativeAOT job publishes and runs the five-model guard and requires its completed handshake/
+Ping result without compiler or trimming warnings. Database.Testing also builds an SDK-only
+consumer against installed framework packs: KeyValuePair, Graph and Blob compose Listen(Uri),
+authenticate and answer Ping. Its evaluated compiler references include Database.Tcp and exclude
+Connections.Tcp, while the latter remains present in the runtime closure. No SQL grammar, wire
+message, storage format, public API or error-code change is needed for this delivery completion.
