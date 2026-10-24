@@ -522,3 +522,31 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+## Lease cancellation completion
+
+A return that wins before exchange cleanup publishes an operation-local cancellation-completion
+marker under the lease lock, then starts and joins `CancelAsync` outside that lock. Exchange
+cleanup claims the source under the same lock and awaits any published marker before disposing
+it. If cleanup claims the source first, return only joins exchange completion and never starts a
+later cancellation. The active-exchange guard remains set until source disposal completes.
+
+This prevents source disposal from removing callbacks whose cancellation dispatch is already
+queued. Linked-source disposal can also join a caller's cancellation callback; it remains outside
+the lease lock so callbacks may inspect the lease. Cancellation callback failures are reported by
+disposal or abort after exchange completion and pool-slot release; they do not replace the
+exchange's original result or cancellation exception. Repeated return still joins one task.
+
+The dispatch-gated regression stops the cancellation work item at captured-context entry and
+releases the exchange through an inline continuation chain. Cleanup must remain pending until
+the dispatch gate opens, the inspection callback must run once, and a later rental must remain
+usable. The existing admission/disposal race keeps its exact callback-count assertions. A
+Release-only warmed-rental ping probe records precise process allocations and duration medians
+and sample shares without thresholds. No public API, wire message, error code or persistent
+format changes.
+
+Runtime reference consulted: [.NET 10 `dotnet/runtime` v10.0.0](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Threading/CancellationTokenSource.cs#L284),
+`src/libraries/System.Private.CoreLib/src/System/Threading/CancellationTokenSource.cs:284–329`
+(queued cancellation), `:483–514` (source disposal), and `:680–689` (callback registration
+ownership), and `:829–846` (linked parent-registration cleanup). No code was copied. This corrects
+the exchange-join guarantee of #1313.

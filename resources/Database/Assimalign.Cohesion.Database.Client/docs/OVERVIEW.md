@@ -119,3 +119,13 @@ state; existing inherited display/proxy pairs are reused. See the shared
 [debugger convention](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md#debugger-inspection).
 Lease getters that take locks or enforce disposal, delegated stream state and transport callbacks are omitted. Stored connection metadata is exposed without I/O or exchange activity.
 Runtime APIs, methods, allocation budgets, persistent formats and wire behavior are unchanged.
+
+## Lease cancellation completion
+
+Disposing or aborting an active rental joins its queued cancellation callbacks before exchange
+cleanup disposes their source. Cancellation and cleanup claim ownership under the lease lock;
+callbacks, source disposal and pool return run outside it. Callback failures still reach the
+returning caller after the exchange and pool slot are released, while the exchange retains its
+original result or cancellation exception. Repeated disposal joins the same return task. This
+repairs the #1313 exchange-join guarantee without changing public APIs or wire behavior; see
+[DESIGN.md](DESIGN.md#lease-cancellation-completion).
