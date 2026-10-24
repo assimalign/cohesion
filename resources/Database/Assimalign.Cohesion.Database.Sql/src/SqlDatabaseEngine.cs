@@ -360,7 +360,11 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(options);
         string engine = DatabaseEngineOptionChecks.Describe(ModelName, name);
-        ArgumentOutOfRangeException.ThrowIfLessThan(options.StatementMemoryBudget, 1, nameof(options.StatementMemoryBudget));
+        if (options.StatementMemoryBudget <= 0)
+        {
+            throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementMemoryBudget),
+                options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
+        }
 
         if (options.ExpressionNestingLimit is < SqlQueryParserOptions.MinimumExpressionNestingLimit
             or > SqlQueryParserOptions.MaximumExpressionNestingLimit)

@@ -453,7 +453,7 @@ Malformed suffixes produce `CS00003` instead of silently treating `ROLLBACK TO`
 as a complete rollback. END without a transaction retains the canonical
 `CS04002` message, "COMMIT requires an open transaction."
 
-The uniform `CS00100` policy applies to transaction statements too: omitting `;`
+The uniform `CS00009` language/syntax note (formerly the retired `CS00100`) applies to transaction statements too: omitting `;`
 produces an informational diagnostic, with no error or warning for a valid spelling.
 A valid spelling terminated with `;` produces no diagnostics. The transaction corpus
 asserts both forms rather than exempting transaction control from the common policy.

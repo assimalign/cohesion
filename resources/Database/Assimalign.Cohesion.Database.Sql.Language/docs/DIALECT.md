@@ -332,7 +332,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00100, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `CS00002` |
 
 ## Unique-build failure order (#1444)
@@ -3149,7 +3149,7 @@ pin in the same change.
 | `CS00006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
 | `CS00007` | Error | The statement is within the nesting limit, but the thread parsing it has too little stack left to recurse that deep; the same text parses on a thread with more stack. An engine parsing statement text reports this as `CS05004` (#1151) |
 | `CS00008` | Error | Invalid DATE, TIME, TIMESTAMP, TIMESTAMPTZ, day-time INTERVAL or X binary literal content; the span covers the complete literal. Recognized unsupported forms use CK00001 |
-| `CS00100` | Information | Statement does not end with `;` |
+| `CS00009` | Information | Statement does not end with `;` |
 | `CS02001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `CS02002` | Error | Numeric value out of range during evaluation, store assignment, DEFAULT conversion or built-in NUMERIC CAST, including an inexact Decimal representation after any declared-scale rounding (ISO SQLSTATE 22003) |
 | `CS02003` | Error | Datatype mismatch, including non-numeric signs, non-Boolean search conditions (WHERE, JOIN ON, HAVING, ON CONFLICT DO UPDATE WHERE, searched CASE WHEN and AND/OR/NOT operands), non-Boolean IS TRUE/FALSE/UNKNOWN operands, and incompatible set-operation column types; set errors name both types and the one-based position (ISO SQLSTATE 42804) |
@@ -3453,7 +3453,9 @@ before the statement fallback, even when their numeric offsets happen to fit ins
 the root location (parser span completion remains separate work). Failures during database open have no statement text. DEFAULT wrappers retain
 the original diagnostic carrier and cause. The live execution conformance corpus covers these
 families in process and over the wire, including transaction and connection reuse. Previously uncoded
-execution failures now visibly begin with `COHSQLE0xx:` in wire error text. Framing is unchanged;
+execution failures carry categorized `CS` identities in diagnostics and begin with `CSxxxxx:` in
+wire error text (`CS033xx` for registered definitions), as assigned by the
+[Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md). Framing is unchanged;
 the diagnostic fixes introduce no persisted-format change beyond #1422's format-26/v8 fence.
 
 | Code | Meaning | PostgreSQL SQLSTATE |
@@ -3573,8 +3575,14 @@ introduced. Results are returned only after the complete statement succeeds.
 No persisted statistics or standalone ANALYZE maintenance exists. Candidate index ranges are
 counted under the statement snapshot with limits of 512 physical entries and 32 page visits;
 invisible entries and the stopping key consume physical work. An unfinished count is a lower
-bound, explicitly labelled in EXPLAIN. Eligible broad equijoins can use HashJoin; full ON/WHERE
-residuals, duplicate keys, NULL and LEFT semantics remain. No hash spill exists.
+bound, explicitly labelled in EXPLAIN. A selected index range of at most 16 candidates needs
+no base-table count. Join estimates are collected only for hash or competing index choices;
+complete unique probes need none. Counting uses the tree read latch and validates catalog
+identities without taking transaction object locks. Unindexed equijoins can use HashJoin
+regardless of actual size: an unknown input estimate is 4096, including an empty or tiny input
+without a countable index. Full ON/WHERE residuals, duplicate keys, NULL and LEFT semantics remain.
+An ON condition referencing any derived String/Json/Character column retains nested loops to
+preserve deferred collation errors. No hash spill exists.
 
 `SqlDatabaseEngineOptions.StatementMemoryBudget` defaults to 67108864 bytes and must be positive.
 It limits accounted concurrently live hash-build storage per statement. Budget exhaustion reports
@@ -3583,9 +3591,12 @@ SELECT-only `EXPLAIN ANALYZE` runs normal query expressions, including applicati
 returns the existing eight-column plan description. `actual_rows` counts candidates before
 residuals on instrumented nodes, rather than final output cardinality. `estimated_rows` and
 probe/heuristic qualifications appear in access and JoinStep nodes. Plain EXPLAIN never runs its
-wrapped statement and has NULL actual counts. Unmeasured counts remain NULL in either form.
+wrapped statement and has NULL actual counts. Its index probes can still fail with `CS04006`
+when committed concurrent DDL changes a bound table definition. Unmeasured counts remain NULL in either form.
 Repeated correlated invocations accumulate on the child nodes. A parent's candidate count
 excludes descendant work, while statement-wide physical-work totals include every invocation.
+Single-source derived SELECTs count the candidates read from that source. Repeated view
+references keep separate analysis counters even when their immutable body plan is cached.
 
 ## Sql diagnostic conventions (#1470)
 

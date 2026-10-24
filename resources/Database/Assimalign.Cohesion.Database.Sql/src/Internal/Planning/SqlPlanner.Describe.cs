@@ -172,6 +172,7 @@ internal sealed partial class SqlPlanner
                     {
                         int materialization = nodes.Count;
                         Add("Materialize", id, relation.Name);
+                        using var analysis = metrics?.EnterRelationAnalysis(relation);
                         Visit(relation.Query, materialization);
                     }
                     Visit(with.Input, id);
@@ -203,6 +204,7 @@ internal sealed partial class SqlPlanner
             {
                 int id = nodes.Count;
                 Add(derived.CatalogView is null ? "DerivedTable" : "View", parent, Target(source));
+                using var analysis = metrics?.EnterRelationAnalysis(derived);
                 Visit(derived.Query, id);
             }
             else { Add(source.View is not null ? "SystemView" : "TableScan", parent, Target(source)); }

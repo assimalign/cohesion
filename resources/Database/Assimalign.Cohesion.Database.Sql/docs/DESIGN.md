@@ -6336,7 +6336,7 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the bounded Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including CS00100, is never sent. Error and result payloads are unchanged.
+Information, including CS00009, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 
@@ -7430,11 +7430,20 @@ No catalog statistic, maintenance command, storage format change or legacy reade
 Binding still proves sargability and keeps the entire WHERE/ON residual. Competing seek paths
 are ranked by snapshot-visible B+Tree range counts. Each probe visits at most 32 pages and
 examines at most 512 physical entries, including invisible entries and the stopping key.
-Exact exhaustion and incomplete lower bounds are distinct. A refused table IS intent gives an
-unknown estimate without waiting; a granted intent protects the probed definition/tree from DROP
-only during the probe. MarkStatement/ReleaseSince removes that temporary grant in finally while
-preserving older grants. Costing never adds a transaction-long table lock to an MVCC reader.
+Exact exhaustion and incomplete lower bounds are distinct. Probes use CountRange's tree read
+latch, with table/index identity validation around the count. DROP detaches indexes without
+reclaiming their pages (BTreeIndexManager.DropIndexAsync); table reclamation waits for active
+statement/snapshot fences. A retained tree and immutable key shape need no transaction object
+lock. A changed table definition reports CS04006; a detached
+or replaced index yields an unknown estimate. Costing does not enter the database-wide lock
+manager or add grants to an MVCC reader.
 Counts are neither cached across statements nor persisted. Unique complete equalities need no probe.
+A selected range of at most 16 candidates skips the base-table probe. Join estimates are lazy,
+reuse input access-path counts, and run only for hash keys or competing indexed directions;
+a complete unique first-step probe skips pair costing, and later unique/indexed steps need none.
+Deterministic 100k-row common-query measurements confirm fewer costing page reads, four fewer
+lock-manager acquisitions per statement and lower allocations; the stored-query allocation
+guard retains its 4293.296 bytes/query ceiling.
 Equal estimated costs retain binding's equality-prefix/range/uniqueness/name tie-break.
 Incomplete counts cost at least 1024 candidates or twice their observed visible count; unknown
 inputs cost 4096. These are planning heuristics, not reported exact cardinalities. A seek with
@@ -7489,6 +7498,13 @@ even when they have no reported count. Correlated invocations accumulate on the 
 inflating the outer node. Frame unwinding runs in finally on success, cancellation and failure.
 Statement-wide record/pair totals still include all invocations. The extra state and frames exist
 only during analysis, using the existing join-telemetry reference slot.
+Zero-step derived SELECTs count ReadInput candidates without incrementing join-pair totals.
+Analysis counters are scoped by relation path and plan identity: two references to a cached
+view body, including nested view bodies, report independent counts, while repeated correlated
+invocations of the same reference accumulate. Execution and description enter the same scopes.
+
+Nonpositive StatementMemoryBudget refusals use DatabaseEngineOptionChecks.Refuse, preserving
+ArgumentOutOfRangeException, parameter name and actual value while identifying the SQL engine.
 PostgreSQL postgres/postgres/src/backend/executor/instrument.c:196-217 likewise counts tuples
 on a node's own instrumentation and accumulates repeated cycles. Cohesion reports cumulative
 candidate work rather than PostgreSQL's output-row average; no code was copied.

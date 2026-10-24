@@ -23,6 +23,7 @@ internal sealed partial class SqlPlanExecutor
         var rows = new List<object?[]>();
         try
         {
+            using var analysis = statement.Metrics.EnterRelationAnalysis(relation);
             await using var result = (DatabaseResultSet)await ExecuteAsync(relation.Query, statement, cancellationToken).ConfigureAwait(false);
             await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
             {

@@ -95,7 +95,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 metrics.Analysis(plan)!.Candidates += metrics.RecordsExamined - frame.StartRecords - frame.ChildRecords;
             }
-            else if (plan is SqlJoinPlan)
+            else if (plan is SqlJoinPlan { Steps.Count: > 0 })
             {
                 metrics.Analysis(plan)!.Candidates += metrics.JoinCandidatePairs - frame.StartPairs - frame.ChildPairs;
             }
@@ -1606,11 +1606,6 @@ internal sealed partial class SqlPlanExecutor
 
                 var values = DecodeRow(record, pageId, slotIndex, table, defaults, out var writer, out var deleter);
 
-                if (values is null)
-                {
-                    continue; // reclaimed before the read that confirmed a failed decode
-                }
-
                 if (!snapshot.IsVisible(writer))
                 {
                     continue;
@@ -1786,16 +1781,12 @@ internal sealed partial class SqlPlanExecutor
             var unit = iterator.Current;
             var values = DecodeRow(unit.Data, unit.PageId, unit.SlotIndex, table, defaults, out var writer, out var deleter);
 
-            // Null only when the slot was reclaimed before the read that confirmed a failed decode.
-            if (values is not null)
+            if (metrics is not null)
             {
-                if (metrics is not null)
-                {
-                    metrics.RecordsExamined++;
-                }
-
-                yield return ((unit.PageId, unit.SlotIndex), values, writer, deleter);
+                metrics.RecordsExamined++;
             }
+
+            yield return ((unit.PageId, unit.SlotIndex), values, writer, deleter);
         }
     }
 

@@ -53,6 +53,6 @@ public class SqlQueryParserTests
         var statement = (SqlQueryStatement)parser.Parse("SELECT Id FROM dbo.Users");
 
         statement.SqlExpression.CommandType.ShouldBe(SqlQueryCommandType.Select);
-        statement.Diagnostics.ShouldContain(x => x.Code == "CS00100");
+        statement.Diagnostics.ShouldContain(x => x.Code == "CS00009");
     }
 }

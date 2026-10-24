@@ -63,10 +63,10 @@ public sealed class SqlTransactionAndConstraintParserTests
                 statement.SqlExpression.ShouldBeOfType<SqlTransactionExpression>().CommandType.ShouldBe(command);
                 if (terminator.Length == 0)
                 {
-                    // CS00100 uniformly reports an omitted terminator for every SQL statement.
+                    // CS00009 uniformly reports an omitted terminator for every SQL statement.
                     statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error || diagnostic.Severity == DiagnosticSeverity.Warning);
                     var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-                    diagnostic.Code.ShouldBe("CS00100");
+                    diagnostic.Code.ShouldBe("CS00009");
                     diagnostic.Severity.ShouldBe(DiagnosticSeverity.Information);
                 }
                 else

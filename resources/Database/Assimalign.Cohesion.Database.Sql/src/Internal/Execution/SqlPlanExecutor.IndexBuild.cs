@@ -90,7 +90,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         var values = DecodeRow(record, pageId, slotIndex, table,
                             _definitions.Get(table, cancellationToken).MissingValues, out _, out _);
-                        if (values is not null) { value = SafeValue(valueOrdinals.Select(ordinal => values[ordinal]).ToArray()); }
+                        value = SafeValue(valueOrdinals.Select(ordinal => values[ordinal]).ToArray());
                     }
                 }
                 throw new SqlConstraintViolationException(index.Name, $"{table.Schema}.{table.Name}", "UNIQUE", value);

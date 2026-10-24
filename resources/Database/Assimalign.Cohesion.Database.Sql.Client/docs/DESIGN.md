@@ -453,8 +453,9 @@ literals (CS00008), year-month forms (CK00001) and interval overflow retain thei
 diagnostics and permit a subsequent query on the same connection.
 
 Function/domain DDL and calls use the existing statement transport and server environment without
-client ABI or wire-format changes. Dependency/admission refusals retain leading COHSQLD codes in
-execution-failure messages and leave connections usable. SqlDomainWireTests exercises SQL-defined
+client ABI or wire-format changes. Dependency/admission refusals carry categorized `CS` identities
+(`CS033xx` for registered definitions) in diagnostics and wire execution-failure text, as assigned
+by the [Database error-code registry](../../Assimalign.Cohesion.Database/docs/ERROR-CODES.md), and leave connections usable. SqlDomainWireTests exercises SQL-defined
 functions in SELECT, WHERE, CHECK and DEFAULT alongside SQL domain enforcement.
 
 ## Duplex transport composition
@@ -504,7 +505,7 @@ lowercase endpoint family followed by a dot. The core owns `diagnostics` and fra
 SQL and Graph register `ProtocolCapability.Diagnostics`. When agreed, one Diagnostics
 frame carries the complete Warning/Error list immediately before Error on failure,
 or immediately before ResultComplete (PathsComplete for graph paths) on success.
-Information, including CS00100, is never sent. Error and result payloads are unchanged.
+Information, including CS00009, is never sent. Error and result payloads are unchanged.
 Statement failures leave the server session ready. Model clients validate diagnostic
 ordering and preserve every code, severity, message, nullable offset and source line.
 

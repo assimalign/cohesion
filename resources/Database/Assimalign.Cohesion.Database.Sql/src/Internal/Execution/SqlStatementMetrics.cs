@@ -127,14 +127,26 @@ internal sealed class SqlStatementMetrics
 
     internal SqlOperatorWork? Analysis(object operation)
     {
-        if ((_accessPath as JoinWork)?.Operators?.Work is not { } operators) { return null; }
+        if ((_accessPath as JoinWork)?.Operators?.Scope.Work is not { } operators) { return null; }
         if (!operators.TryGetValue(operation, out var work)) { work = new(); operators.Add(operation, work); }
         return work;
     }
 
     internal long? ActualCandidates(object operation)
-        => (_accessPath as JoinWork)?.Operators?.Work is { } operators && operators.TryGetValue(operation, out var work)
+        => (_accessPath as JoinWork)?.Operators?.Scope.Work is { } operators && operators.TryGetValue(operation, out var work)
             ? work.Candidates : null;
+
+    // Cached view bodies can appear at several relation paths. Each path owns its own
+    // plan counters, while repeated correlated invocations at that path accumulate.
+    internal IDisposable? EnterRelationAnalysis(SqlDerivedRelation relation)
+    {
+        if ((_accessPath as JoinWork)?.Operators is not { } state) { return null; }
+        var parent = state.Scope;
+        if (!parent.Relations.TryGetValue(relation, out var scope))
+        { scope = new(); parent.Relations.Add(relation, scope); }
+        state.Scope = scope;
+        return new AnalysisLease(state, parent);
+    }
 
     internal SqlAnalysisFrame BeginAnalysisFrame()
     {
@@ -202,7 +214,7 @@ internal sealed class SqlStatementMetrics
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementMetrics.AnalysisState.DebugView))]
     private sealed class AnalysisState
     {
-        internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
+        internal AnalysisScope Scope = new();
         internal SqlAnalysisFrame? Active;
 
         private sealed class DebugView
@@ -211,6 +223,37 @@ internal sealed class SqlStatementMetrics
             {
                 _ = value;
             }
+        }
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("AnalysisScope")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(AnalysisScope.DebugView))]
+    private sealed class AnalysisScope
+    {
+        internal readonly Dictionary<object, SqlOperatorWork> Work = new(ReferenceEqualityComparer.Instance);
+        internal readonly Dictionary<SqlDerivedRelation, AnalysisScope> Relations = new(ReferenceEqualityComparer.Instance);
+
+        private sealed class DebugView
+        {
+            public DebugView(AnalysisScope value) { _ = value; }
+        }
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("AnalysisLease")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(AnalysisLease.DebugView))]
+    private sealed class AnalysisLease : IDisposable
+    {
+        private readonly AnalysisState _state;
+        private readonly AnalysisScope _parent;
+
+        internal AnalysisLease(AnalysisState state, AnalysisScope parent)
+        { _state = state; _parent = parent; }
+
+        public void Dispose() => _state.Scope = _parent;
+
+        private sealed class DebugView
+        {
+            public DebugView(AnalysisLease value) { _ = value; }
         }
     }
 
