@@ -159,10 +159,10 @@ internal sealed partial class SqlPlanExecutor
     // unwritten arbitration's new grants, waits through the lock manager, then restarts
     // the whole arbitration (#1668). Plain INSERT takes parent rows before unique keys.
 
-    // Prepare adjacent IS before own IX. Never wait while retaining grants from this
-    // unwritten preparation attempt: FK DDL takes own X then referenced-parent X.
-    // A failed try releases only new grants, waits, and rebuilds the live graph. Prior
-    // transaction/row grants remain protected and use ordinary deadlock detection.
+    // Prepare adjacent IS before own IX. Non-cascade preparation releases new grants
+    // before waiting: FK DDL takes own X then referenced-parent X. Cascades report a
+    // refusal to the statement's bounded release/retry policy; from its third refusal
+    // it retains closure grants and queues with ordinary deadlock detection.
     private async ValueTask AcquireReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement,
         CancellationToken cancellationToken, bool incoming = true, bool outgoing = true, bool cascade = false)
     {
